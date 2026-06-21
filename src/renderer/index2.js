@@ -14142,7 +14142,7 @@ document.getElementById('var-apply')?.addEventListener('click', async () => {
     const label = count > 1 ? `Variant ${i + 1}/${count}: ${p.name}` : `Variant: ${p.name}`;
     gatedRun('img2img', label, async () => {
       const job = pushJob(`Variant: ${p.name}`, null,
-        texMode ? { Seed: seed, Texture: rawTexPrompt || '(libre)', Mode: 'forme verrouillée' }
+        texMode ? { Seed: seed, Texture: rawTexPrompt || '(free)', Mode: 'shape locked' }
                 : { Seed: seed, Variation: Math.round(strength * 100) + '%' },
         texMode ? 60000 : 30000,
         { sourceImageUrl: target, projectName: p.name });
@@ -14310,7 +14310,7 @@ async function _rcUpdateMaskPreview() {
   if (!API.segmentMask) return;
   const spinner = document.getElementById('rc-detect-spinner');
   const label = document.getElementById('rc-detect-label');
-  if (label) label.textContent = _rcFirstDetectDone ? 'Détection…' : "Préparation de l'IA… 1ʳᵉ détection ~15s, ensuite instantané.";
+  if (label) label.textContent = _rcFirstDetectDone ? 'Detecting…' : 'Warming up the AI… first detection ~15s, then instant.';
   if (spinner) spinner.style.display = 'flex';
   srcImg.style.opacity = '0.6';
   try {
@@ -14347,6 +14347,27 @@ if (rcPrecision) rcPrecision.addEventListener('input', () => {
   document.getElementById('rc-precision-val').textContent = rcPrecision.value + '%';
   _rcSchedulePreview();
 });
+// Colour swatches — click one to set the colour word in the "what to recolor" field.
+(function _buildRcSwatches() {
+  const box = document.getElementById('rc-swatches');
+  if (!box) return;
+  const COLS = [['red', '#e23b3b'], ['orange', '#f08a23'], ['yellow', '#f2c10e'], ['green', '#2eb84d'], ['blue', '#2f7ce0'], ['purple', '#9b51e0'], ['pink', '#f06ab0'], ['brown', '#8a5a2b'], ['gold', '#d4af37'], ['silver', '#c8ccd4'], ['black', '#2a2a2a'], ['white', '#eeeeee']];
+  COLS.forEach(([word, css]) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.title = word; b.dataset.color = word;
+    b.style.cssText = 'width:26px;height:26px;border-radius:6px;border:2px solid var(--border);cursor:pointer;flex:none;background:' + css + ';';
+    b.addEventListener('click', () => {
+      const input = document.getElementById('rc-prompt');
+      if (!input) return;
+      const part = _stripColorWords(input.value).trim();
+      input.value = (part ? part + ' ' : '') + word;
+      box.querySelectorAll('button').forEach((x) => { x.style.boxShadow = ''; });
+      b.style.boxShadow = '0 0 0 2px var(--accent)';
+      _rcSchedulePreview();
+    });
+    box.appendChild(b);
+  });
+})();
 document.getElementById('rc-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-recolor').classList.add('hidden');
 });
@@ -14356,7 +14377,7 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
   if (!imagePath) return;
   const rawPrompt = document.getElementById('rc-prompt').value.trim();
   if (!rawPrompt) {
-    showToast('Décrivez la couleur (ex: « cape rouge »)', 'error');
+    showToast('Type what to recolor + pick a colour (e.g. "cape" + red)', 'error');
     document.getElementById('rc-prompt')?.focus();
     return;
   }
@@ -14367,7 +14388,7 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
   gatedRun('img2img', `Recolor: ${p.name}`, async () => {
     const job = pushJob(`Recolor: ${p.name}`, null, {
       Prompt: rawPrompt,
-      'Intensité': Math.round(strength * 100) + '%',
+      Strength: Math.round(strength * 100) + '%',
       Padding: dilate + 'px',
     }, 20000, { sourceImageUrl: imagePath, projectName: p.name });
     try {
