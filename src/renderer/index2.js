@@ -2862,6 +2862,22 @@ function _updateImageNav() {
   if (prevBtn) { prevBtn.classList.remove('hidden'); prevBtn.disabled = false; }
   if (nextBtn) { nextBtn.classList.remove('hidden'); nextBtn.disabled = false; }
   if (counter) { counter.classList.remove('hidden'); counter.textContent = `${curIdx + 1} / ${images.length}`; }
+  // TEMP DIAG (right-arrow invisibility): log the next arrow's geometry + what is
+  // actually painted at its centre point. If elementAtCenter !== the button, something
+  // covers it (and we learn WHAT). Remove once the cause is found.
+  try {
+    if (nextBtn) {
+      const r = nextBtn.getBoundingClientRect();
+      const cs = getComputedStyle(nextBtn);
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const hit = document.elementFromPoint(cx, cy);
+      console.log('[arrow-diag] next rect=' + JSON.stringify({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }) +
+        ' disp=' + cs.display + ' vis=' + cs.visibility + ' op=' + cs.opacity + ' z=' + cs.zIndex +
+        ' winW=' + window.innerWidth +
+        ' atCenter=' + (hit ? (hit.id || hit.className || hit.tagName) : 'null') +
+        ' isNext=' + (hit === nextBtn));
+    }
+  } catch (e) { console.log('[arrow-diag] err ' + e.message); }
 }
 function _navigateImage(delta) {
   const p = state.currentProject;
