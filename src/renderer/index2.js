@@ -4261,6 +4261,11 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     recolor:     'ws-recolor-btn',
     age:         'ws-age-btn',
     variant:     'ws-variant-btn',
+    multiview:   'ws-multiview-btn',
+    brightness:  'ws-brightness-btn',
+    picker:      'ws-picker-btn',
+    blur:        'ws-blur-btn',
+    symmetrize:  'ws-symmetrize-btn',
   };
   const box = document.getElementById('lb-toolbox');
   if (!box) return;
@@ -4276,7 +4281,8 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     // open their own modal. The lightbox stays open in the background;
     // close it so the modal gets focus and isn't layered under.
     const OPENS_MODAL = ['modify', 'autoinpaint', 'mask', 'clone',
-                         'paint', 'crop', 'resolution', 'recolor', 'age', 'variant'];
+                         'paint', 'crop', 'resolution', 'recolor', 'age', 'variant',
+                         'multiview', 'brightness', 'picker', 'blur', 'symmetrize'];
     if (OPENS_MODAL.includes(toolKey)) {
       closeLightbox();
     }
