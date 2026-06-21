@@ -2857,8 +2857,10 @@ function _updateImageNav() {
   }
   const images = p.images;
   const curIdx = images.findIndex(i => (i.path || i) === p.previewImagePath);
-  if (prevBtn) { prevBtn.classList.remove('hidden'); prevBtn.disabled = curIdx <= 0; }
-  if (nextBtn) { nextBtn.classList.remove('hidden'); nextBtn.disabled = curIdx >= images.length - 1; }
+  // Cyclic: both arrows always enabled/visible (next at the newest wraps to the
+  // oldest) — otherwise 'next' was always disabled since we sit on the newest version.
+  if (prevBtn) { prevBtn.classList.remove('hidden'); prevBtn.disabled = false; }
+  if (nextBtn) { nextBtn.classList.remove('hidden'); nextBtn.disabled = false; }
   if (counter) { counter.classList.remove('hidden'); counter.textContent = `${curIdx + 1} / ${images.length}`; }
 }
 function _navigateImage(delta) {
@@ -2866,7 +2868,7 @@ function _navigateImage(delta) {
   if (!p || !p.images || p.images.length <= 1) return;
   const images = p.images;
   const curIdx = images.findIndex(i => (i.path || i) === p.previewImagePath);
-  const newIdx = Math.max(0, Math.min(images.length - 1, curIdx + delta));
+  const newIdx = ((curIdx + delta) % images.length + images.length) % images.length;  // wrap-around
   if (newIdx === curIdx) return;
   const newImg = images[newIdx];
   p.previewImagePath = newImg.path || newImg;

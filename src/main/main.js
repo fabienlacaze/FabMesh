@@ -4289,18 +4289,16 @@ out.save(r"${outPath}")
 print("OK")`,
 
       facefix: `
-from PIL import Image, ImageFilter
-img = Image.open(r"${imagePath}")
+from PIL import Image, ImageFilter, ImageEnhance
+img = Image.open(r"${imagePath}").convert('RGB')
 w, h = img.size
-# Simple face region: top 40% center 60%
-fl = int(w * 0.2)
-ft = 0
-fr = int(w * 0.8)
-fb = int(h * 0.4)
+# Upper region (top 40%, center 60%) where the face usually sits.
+fl, ft, fr, fb = int(w * 0.2), 0, int(w * 0.8), int(h * 0.4)
 face = img.crop((fl, ft, fr, fb))
-face = face.filter(ImageFilter.SMOOTH_MORE)
-from PIL import ImageEnhance
-face = ImageEnhance.Sharpness(face).enhance(1.5)
+# SHARPEN + bring out detail. The old pass used SMOOTH_MORE which just BLURRED it.
+face = face.filter(ImageFilter.UnsharpMask(radius=2, percent=140, threshold=2))
+face = ImageEnhance.Sharpness(face).enhance(1.25)
+face = ImageEnhance.Contrast(face).enhance(1.05)
 img.paste(face, (fl, ft))
 img.save(r"${outPath}")
 print("OK")`,
