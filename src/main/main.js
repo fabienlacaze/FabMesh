@@ -1191,6 +1191,23 @@ async function handleImageTo3D(params) {
         resolve({ success: false, error: 'GLB not created' });
         return;
       }
+      // Guard against a 0-byte / truncated GLB passing as success: require a
+      // plausible size and the glTF binary magic header (a real mesh is 10s of KB+).
+      try {
+        const _sz = fs.statSync(meshPath).size;
+        let _magicOk = true;
+        if (/\.glb$/i.test(meshPath)) {
+          const _fd = fs.openSync(meshPath, 'r');
+          const _mg = Buffer.alloc(4);
+          fs.readSync(_fd, _mg, 0, 4, 0); fs.closeSync(_fd);
+          _magicOk = _mg.toString('ascii') === 'glTF';
+        }
+        if (_sz < 2048 || !_magicOk) {
+          safeSend('mcp-job-end', { type: 'mesh', success: false, error: `invalid GLB (size=${_sz})` });
+          resolve({ success: false, error: `GLB invalid or truncated (${_sz} bytes)` });
+          return;
+        }
+      } catch (_e) { /* validation error → don't block (existsSync already passed) */ }
       try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
       const stats = fs.statSync(meshPath);
       let meshVerts = null, meshFaces = null;
@@ -4334,9 +4351,12 @@ ipcMain.handle('hidream-available', async () => {
 // Translate a user's prompt to English (Argos Translate, offline, MIT) using
 // their interface language as the source. en / unknown / failure → passthrough
 // (fail open), so generation never breaks. SDXL/RealVisXL/HiDream need English.
+const _translateCache = new Map();  // `${from}|${text}` -> translated; avoids re-spawning Python on the Generate critical path
 ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   const src = (from || 'en').toLowerCase();
   if (src === 'en' || !text || !text.trim()) return { text: text || '' };
+  const _ck = src + '|' + text;
+  if (_translateCache.has(_ck)) return { text: _translateCache.get(_ck) };
   const script = path.join(__dirname, '..', '..', 'scripts', 'translate_prompt.py');
   // End-users have no python on PATH → prefer the bundled embedded interpreter.
   // If it lacks argostranslate (--strict → exit 3), fall back to system python
@@ -4356,9 +4376,13 @@ ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   });
   for (const [py, strict] of attempts) {
     const out = await tryRun(py, strict);
-    if (out) return { text: out };
+    if (out) {
+      if (_translateCache.size > 500) _translateCache.clear();  // simple cap
+      _translateCache.set(_ck, out);
+      return { text: out };
+    }
   }
-  return { text };  // fail open → original
+  return { text };  // fail open → original (don't cache failures)
 });
 
 // Set system RAM limit (called from renderer when user drags the RAM slider)
