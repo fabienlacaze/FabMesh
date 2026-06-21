@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (i18n exhaustif : +2568 traductions, 5 langues, 2 plateformes)
+
+- Workflow `i18n-exhaustive` (44 agents, audit popup-par-popup de ~40 modals +
+  menus + toasts JS) : **666 chaînes non traduites** trouvées → **534 statiques**
+  + 132 dynamiques. Généré `src/renderer/lang/_additions.js` (register fr/es/zh/hi/ar :
+  499/507/521/520/521) via `c:/tmp/gen_i18n_additions.js`. **Décodage des entités HTML**
+  des clés (&amp;→&, &hellip;→… etc.) car l'i18n matche le texte DÉCODÉ du DOM, pas le
+  HTML source. Chargé après lang/*.js dans index2.html + cloud index.html, copié au
+  cloud (dicts identiques). Les 132 dynamiques (« Generate 3D: {x} » etc.) → c:/tmp/
+  i18n_dynamic.json, à câbler avec t(). Cloud : besoin `npm run build && wrangler deploy`.
+
 ## 2026-06-21 (Auto-traduction sur TOUS les champs de prompt)
 
 - `translateUserPrompt()` (UI lang → EN, via le worker persistant) n'était appelé
