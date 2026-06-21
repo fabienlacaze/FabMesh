@@ -1924,6 +1924,97 @@ function bindStepCardCollapse() {
 }
 bindStepCardCollapse();
 
+// ---- AI region re-texture: paint a region on the mesh front render and
+// re-texture only that area with a prompt (mesh:render-front + region-retex).
+// Geometry + UVs stay intact (SDXL inpaint on the atlas). ----
+(function _initRegionRetex() {
+  const $ = (id) => document.getElementById(id);
+  const modal = $('modal-region-retex');
+  const canvas = $('rrx-canvas');
+  const ctx = canvas && canvas.getContext('2d');
+  if (!modal || !ctx) return;
+  let painting = false, hasPaint = false;
+
+  function _curMeshPath() {
+    const p = state.currentProject;
+    return (p && (p.selectedMeshPath || (p.meshes && p.meshes[0] && p.meshes[0].path))) || null;
+  }
+  function _pos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * canvas.width,
+             y: (e.clientY - r.top) / r.height * canvas.height };
+  }
+  function _dab(p) {
+    const br = parseInt($('rrx-brush').value) || 32;
+    ctx.fillStyle = 'rgba(255,60,60,0.55)';
+    ctx.beginPath(); ctx.arc(p.x, p.y, br / 2, 0, Math.PI * 2); ctx.fill();
+    hasPaint = true;
+  }
+  canvas.addEventListener('pointerdown', (e) => { painting = true; canvas.setPointerCapture?.(e.pointerId); _dab(_pos(e)); });
+  canvas.addEventListener('pointermove', (e) => { if (painting) _dab(_pos(e)); });
+  window.addEventListener('pointerup', () => { painting = false; });
+  $('rrx-clear')?.addEventListener('click', () => { ctx.clearRect(0, 0, canvas.width, canvas.height); hasPaint = false; });
+
+  function close() { modal.classList.add('hidden'); }
+  $('rrx-cancel')?.addEventListener('click', close);
+
+  async function open() {
+    const meshPath = _curMeshPath();
+    if (!meshPath) { showToast('Pick a mesh first.', 'error'); return; }
+    ctx.clearRect(0, 0, canvas.width, canvas.height); hasPaint = false;
+    $('rrx-prompt').value = ''; $('rrx-img').src = '';
+    $('rrx-loading').textContent = 'Rendering mesh…';
+    $('rrx-loading').style.display = 'flex';
+    modal.classList.remove('hidden');
+    try {
+      const r = await window.meshyAPI.renderMeshFront?.({ meshPath });
+      if (r && r.ok && r.dataUrl) { $('rrx-img').src = r.dataUrl; }
+      else { showToast('Could not render the mesh front.', 'error'); close(); return; }
+    } catch (_) { showToast('Render failed.', 'error'); close(); return; }
+    finally { $('rrx-loading').style.display = 'none'; }
+  }
+  $('ws-mesh-region-retex-btn')?.addEventListener('click', open);
+
+  $('rrx-apply')?.addEventListener('click', async () => {
+    const meshPath = _curMeshPath();
+    const prompt = ($('rrx-prompt').value || '').trim();
+    if (!meshPath) { showToast('No mesh.', 'error'); return; }
+    if (!hasPaint) { showToast('Paint the area to change first.', 'error'); return; }
+    if (!prompt) { showToast('Type what the area should look like.', 'error'); return; }
+    // Mask: white where painted, black elsewhere (the script projects it to UV).
+    const mc = document.createElement('canvas'); mc.width = canvas.width; mc.height = canvas.height;
+    const mctx = mc.getContext('2d');
+    mctx.fillStyle = 'black'; mctx.fillRect(0, 0, mc.width, mc.height);
+    const src = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const out = mctx.getImageData(0, 0, mc.width, mc.height);
+    for (let i = 0; i < src.length; i += 4) {
+      if (src[i + 3] > 20) { out.data[i] = 255; out.data[i + 1] = 255; out.data[i + 2] = 255; out.data[i + 3] = 255; }
+    }
+    mctx.putImageData(out, 0, 0);
+    const maskDataUrl = mc.toDataURL('image/png');
+    const strength = parseFloat($('rrx-strength').value) || 0.8;
+    $('rrx-loading').textContent = 'Re-texturing… (~30-60s)';
+    $('rrx-loading').style.display = 'flex';
+    const job = (typeof pushJob === 'function')
+      ? pushJob('AI region re-texture', null, { 'Source mesh': meshPath.split(/[/\\]/).pop() }, 60000) : null;
+    try {
+      const r = await window.meshyAPI.regionRetex?.({ meshPath, maskDataUrl, prompt, strength });
+      if (r && r.ok && r.path) {
+        if (job) completeJob(job.id, true);
+        showToast('Region re-textured.', 'success');
+        close();
+        try { await reloadCurrentProject(); } catch (_) {}
+      } else {
+        if (job) completeJob(job.id, false);
+        showToast('Re-texture failed: ' + ((r && r.error) || 'unknown'), 'error');
+      }
+    } catch (_) {
+      if (job) completeJob(job.id, false);
+      showToast('Re-texture error.', 'error');
+    } finally { $('rrx-loading').style.display = 'none'; }
+  });
+})();
+
 // Mutual exclusion between Create new / Edit selected stages: opening one
 // automatically collapses the other within the same step card.
 function bindStageMutualExclusion() {

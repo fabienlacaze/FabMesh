@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (MVP modif-mesh UI + batch WF2 : boutons morts, back-view, align-tex, export, anim)
+
+- **UI re-texture régionale IA** (complète le backend du 2026-06-20) : bouton
+  « Re-texture zone (IA) » dans la barre mesh + modal `#modal-region-retex` qui rend
+  le front (`mesh:render-front`), laisse peindre la zone au pinceau, capture le masque
+  (blanc/noir), appelle `mesh:region-retex` (inpaint SDXL sur l'atlas) puis recharge.
+  Géométrie/UV intacts. **Restart Electron requis.**
+- **Boutons morts** : show-in-folder anim (`showInExplorer`) + re-generate rig with
+  landmarks (`ws-generate-rig-ai` + forward des landmarks en aval).
+- **Back-view sheet** : lisait une vue de PROFIL comme « back » → lit `views.json`.
+- **Align Texture cloud** : no-op payant + `API.alignTexture` TypeError → stub gracieux
+  + retiré du allowed worker + bouton masqué.
+- **Export** : `scripts/convert_glb.py` créé (FBX/USD/ABC/OBJ/glTF via Blender headless).
+- **Anim cloud** : mode toujours en échec → URL lue per-invocation + option désactivée.
+
 ## 2026-06-21 (Fixes WF2 — sécurité NSFW : fail-closed + scan routes ControlNet)
 
 Workflow #2 (fonctions cassées/incomplètes), volet sécurité :

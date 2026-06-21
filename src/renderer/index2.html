@@ -691,6 +691,7 @@
                         <button id="ws-mesh-retexture-btn" class="ghost-btn tool-btn" title="Re-bake the mesh texture at a higher (or lower) resolution by reprojecting the source photo onto the UVs">&#128300; Resolution</button>
                         <button id="ws-mesh-texvar-btn" class="ghost-btn tool-btn" title="Regenerate ONLY the texture (geometry untouched) for visual variants — change the seed for a different look">&#127912; Texture variations</button>
                         <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint with MyFabmesh.AI 3D Native PBR engine — qualité SOTA, ~90s">&#11088; Re-Texture</button>
+                        <button id="ws-mesh-region-retex-btn" class="ghost-btn tool-btn" title="Paint a region on the mesh and re-texture only that area with a prompt (AI) — geometry stays intact">&#127912; Re-texture zone (IA)</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -1524,6 +1525,36 @@
           <button class="ghost-btn" id="at-reset">Reset defaults</button>
           <button class="ghost-btn" id="at-cancel">Cancel</button>
           <button class="primary-btn" id="at-reproject">&#127919; Re-project</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         REGION RE-TEXTURE MODAL (AI) — paint a region on the mesh
+         front render, type a prompt, re-texture ONLY that area (SDXL
+         inpaint on the UV atlas). Geometry + UVs stay intact.
+         ============================================================ -->
+    <div id="modal-region-retex" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width:620px;">
+        <h2>&#127912; Re-texture a region (AI)</h2>
+        <p class="modal-subtitle" style="margin-bottom:8px;">Paint the area to change, type what it should look like, then Apply. Geometry stays intact.</p>
+        <div id="rrx-stage" style="position:relative; width:480px; height:480px; margin:0 auto; background:#111; border-radius:8px; overflow:hidden;">
+          <img id="rrx-img" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:contain; pointer-events:none;" />
+          <canvas id="rrx-canvas" width="480" height="480" style="position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; touch-action:none;"></canvas>
+          <div id="rrx-loading" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.62); color:#ddd; font-size:13px;"></div>
+        </div>
+        <div class="form-row" style="margin-top:10px;">
+          <label>What should this area look like?</label>
+          <input id="rrx-prompt" type="text" placeholder="e.g. golden polished metal armor" style="width:100%;" />
+        </div>
+        <div style="display:flex; gap:16px; align-items:center; margin-top:8px; font-size:12px; color:var(--text-2);">
+          <label>Brush <input id="rrx-brush" type="range" min="8" max="90" value="32" style="vertical-align:middle;"></label>
+          <label>Strength <input id="rrx-strength" type="range" min="0.3" max="0.95" step="0.05" value="0.8" style="vertical-align:middle;"></label>
+          <button id="rrx-clear" class="ghost-btn" style="font-size:11px; padding:2px 8px;">Clear</button>
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
+          <button id="rrx-cancel" class="ghost-btn">Cancel</button>
+          <button id="rrx-apply" class="primary-btn">Apply</button>
         </div>
       </div>
     </div>
