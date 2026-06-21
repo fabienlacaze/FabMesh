@@ -969,7 +969,7 @@
   // (EN -> current language) and cached persistently, so the UI is never left in
   // English even for strings we didn't pre-translate. No-ops gracefully when the
   // IPC bridge is absent (e.g. the web/cloud build has no local worker).
-  const _AUTO_KEY = 'fabmesh.i18n.auto.';
+  const _AUTO_KEY = 'fabmesh.i18n.auto.v2.';   // v2: invalidate caches that mistranslated durations ("18s" -> "18 ans")
   const _autoCache = {};
   const _pendingAuto = new Set();
   const _triedAuto = new Set();
@@ -987,6 +987,10 @@
     if (!/[A-Za-z]/.test(key)) return false;                 // needs letters
     if (/^https?:\/\//i.test(key)) return false;             // url
     if (!/\s/.test(key) && /[._/\\()]|[a-z][A-Z]/.test(key)) return false;  // code-ish token
+    // Value-like strings (durations/sizes/measures: "18s", "~19s", "10m 48s",
+    // "2.5 GB", "47°C") — NEVER translate (argos turned "18s" into "18 ans").
+    // Heuristic: short, starts with a digit (after optional ~/</>), no real 4+ letter word.
+    if (key.length <= 24 && !/[A-Za-z]{4,}/.test(key) && /^[~≈<>]?\s*\d/.test(key)) return false;
     return true;
   }
   function _queueAuto(key) {
