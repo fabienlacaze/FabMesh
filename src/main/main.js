@@ -395,7 +395,8 @@ function _applySpellcheckLang(win, uiLang) {
   try {
     const avail = (win && win.webContents.session.availableSpellCheckerLanguages) || [];
     const langs = _spellcheckCodesFor(uiLang);
-    log.info('main', `spellcheck uiLang=${uiLang} -> set ${JSON.stringify(langs)} | avail(${avail.length}) fr=${avail.includes('fr')} sample=${JSON.stringify(avail.slice(0, 10))}`);
+    const _appLangs = ['fr', 'es', 'zh', 'hi', 'ar'].map(l => l + '=' + (avail.find(c => c.toLowerCase().slice(0, 2) === l) || 'NONE')).join(' ');
+    log.info('main', `spellcheck uiLang=${uiLang} -> set ${JSON.stringify(langs)} | appLangs: ${_appLangs}`);
     if (langs.length && win && win.webContents) win.webContents.session.setSpellCheckerLanguages(langs);
   } catch (e) { try { log.warn('main', `spellcheck set failed: ${e && e.message}`); } catch (_) {} }
 }
@@ -4416,6 +4417,16 @@ let _translateWorkingPy = null;     // remember which interpreter has argostrans
 let translateProc = null;
 let translateReady = false;
 const TRANSLATE_PORT = 5557;
+let translateIdleTimer = null;
+const TRANSLATE_IDLE_MS = 5 * 60 * 1000;  // unload the argos translator after 5 min idle to free ~1 GB RAM
+function _bumpTranslateIdle() {
+  if (translateIdleTimer) clearTimeout(translateIdleTimer);
+  translateIdleTimer = setTimeout(() => {
+    translateIdleTimer = null;
+    try { stopTranslateServer(); } catch (_) {}
+    try { log.info('main', 'translate worker unloaded (idle)'); } catch (_) {}
+  }, TRANSLATE_IDLE_MS);
+}
 function startTranslateServer() {
   if (translateProc) return;
   const scriptT = path.join(__dirname, '..', '..', 'scripts', 'translate_server.py');
@@ -4431,6 +4442,7 @@ function startTranslateServer() {
   } catch (_) { translateProc = null; }
 }
 function stopTranslateServer() {
+  if (translateIdleTimer) { clearTimeout(translateIdleTimer); translateIdleTimer = null; }
   if (!translateProc) return;
   const pid = translateProc.pid;
   try {
@@ -4452,6 +4464,7 @@ async function ensureTranslateServer() {
 function translateServerCall(text, from, to) {
   return new Promise((resolve) => {
     if (!translateReady) { resolve(null); return; }
+    _bumpTranslateIdle();
     const body = JSON.stringify({ text, from, to: to || 'en' });
     const req = require('http').request({ host: '127.0.0.1', port: TRANSLATE_PORT, path: '/translate', method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 30000 },
