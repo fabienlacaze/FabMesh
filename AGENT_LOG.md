@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Anti-doublement : retrait des tokens « ONE/single/no duplicate » du POSITIF de TOUS les types d'asset)
+
+- User : « il y a deux animaux dans l'image » → diagnostic confirmé : l'anti-pattern SDXL
+  documenté (_realvis.py) — mettre « ONE X only / single X / one instance / no duplicate /
+  no second X » dans le POSITIF fait remplir l'espace vide par un 2e sujet. C'était présent
+  dans **TOUS** les `ASSET_TYPE_PROMPTS` (character, building, vehicle, weapon, prop,
+  creature, environment, icon, avion, bateau, animal, insect, other_*), pas seulement animal.
+  Retiré ces tokens de comptage de sujet + négations « no duplicate/second/twin » du positif
+  (gardé cadrage/pose/fond/lumière/anatomie comme le compte de pattes insecte + stance
+  quadrupède NEVER bipedal). L'anti-doublement reste dans le NÉGATIF du bridge (« two animals,
+  animal pair, duplicate, twin » + poids l.357). Desktop + cloud. À TESTER (génération).
+
 ## 2026-06-21 (Fallback i18n runtime + Enhance relançable)
 
 - **Fallback auto runtime** (fin du whack-a-mole) : toute chaîne anglaise absente des
