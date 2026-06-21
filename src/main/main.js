@@ -4008,7 +4008,11 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine, s
     const ext = path.extname(imagePath);
     const base = safeBase(path.basename(imagePath, ext));
     const ts = Date.now();
-    const newImagePath = path.join(dir, `${base}_refined_${ts}${ext}`);
+    // Include the seed (or a random suffix) so PARALLEL variant calls — which
+    // hit Date.now() in the same millisecond — don't collide on the same output
+    // path and overwrite each other (the "N variants -> fewer thumbnails" bug).
+    const _uniq = (seed != null && seed !== '') ? seed : Math.floor(Math.random() * 1e9);
+    const newImagePath = path.join(dir, `${base}_refined_${ts}_${_uniq}${ext}`);
 
     const useCloud = (engine === 'pollinations');
 
@@ -4352,6 +4356,7 @@ ipcMain.handle('hidream-available', async () => {
 // their interface language as the source. en / unknown / failure → passthrough
 // (fail open), so generation never breaks. SDXL/RealVisXL/HiDream need English.
 const _translateCache = new Map();  // `${from}|${text}` -> translated; avoids re-spawning Python on the Generate critical path
+let _translateWorkingPy = null;     // remember which interpreter has argostranslate (skip the failing embedded attempt next time)
 ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   const src = (from || 'en').toLowerCase();
   if (src === 'en' || !text || !text.trim()) return { text: text || '' };
@@ -4362,13 +4367,22 @@ ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   // If it lacks argostranslate (--strict → exit 3), fall back to system python
   // (the dev box has argos there). Last resort: fail open with the original text.
   const embedded = _embeddedPython();
-  const attempts = embedded === 'python'
+  const baseAttempts = embedded === 'python'
     ? [['python', false]]
     : [[embedded, true], ['python', false]];
+  // Try the known-good interpreter first (non-strict) so we don't re-pay a
+  // failing embedded-python spawn on every call.
+  const attempts = _translateWorkingPy
+    ? [[_translateWorkingPy, false], ...baseAttempts.filter(([p]) => p !== _translateWorkingPy)]
+    : baseAttempts;
   const tryRun = (py, strict) => new Promise((resolve) => {
     const argv = [script, '--text', text, '--from', src];
     if (strict) argv.push('--strict');
-    execFile(py, argv, { timeout: 20000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' },
+    // Force CPU-only: the FR/etc. Argos packages pull stanza -> torch, and
+    // torch's CUDA init (pynvml probe) adds several seconds per call. Hiding
+    // the GPU makes the import fast. CT2_FORCE_CPU keeps ctranslate2 off-GPU too.
+    execFile(py, argv, { timeout: 20000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8',
+        env: { ...process.env, CUDA_VISIBLE_DEVICES: '', CT2_FORCE_CPU: '1' } },
       (error, stdout) => {
         if (error || !stdout || !String(stdout).trim()) { resolve(null); return; }
         resolve(String(stdout).trim());

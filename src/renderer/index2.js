@@ -4395,7 +4395,7 @@ if (qualityEl && qualityLabel) {
 //  2. Pile up "ONE X only" / "single instance" tokens.
 //  3. Negative prompt (local_juggernaut_bridge.py) blocks grid layouts.
 const ASSET_TYPE_PROMPTS = {
-  character: 'single isolated 3D character, one character only, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
+  character: 'single isolated 3D character, one character only, full body, fully clothed, wearing a complete outfit, dressed in appropriate clothing, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
   building: 'ONE building only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second building, not a village, not a town',
   vehicle: 'ONE car only, single vehicle, only one instance, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second car, no twin, no rear view inset',
   weapon: 'ONE weapon only, single instance, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI, no duplicate',
@@ -4781,7 +4781,7 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', async ()
   const _stopCycle = _promptStartCycle(textarea, ENHANCE_STEPS);
   const englishRaw = await translateUserPrompt(raw);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
-  await new Promise((r) => setTimeout(r, 500));
+  await new Promise((r) => setTimeout(r, 150));
   _stopCycle();
   textarea.value = enhanced;
   _promptShowEnhanced(textarea, enhanced, englishRaw);
@@ -4812,7 +4812,7 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', async ()
   const _stopCycle = _promptStartCycle(textarea, ENHANCE_STEPS);
   const englishRaw = await translateUserPrompt(raw);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
-  await new Promise((r) => setTimeout(r, 500));
+  await new Promise((r) => setTimeout(r, 150));
   _stopCycle();
   textarea.value = enhanced;
   _promptShowEnhanced(textarea, enhanced, englishRaw);

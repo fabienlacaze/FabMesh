@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Fixes test desktop : trad rapide + nudité + variantes)
+
+- **Traduction Argos 23 s → 4 s** : le package FR tire stanza→torch et l'init CUDA
+  coûtait ~20 s/appel (et faisait TIMEOUT >20 s → prompt non traduit). Fix : spawn la
+  trad en **CPU-only** (`CUDA_VISIBLE_DEVICES='' CT2_FORCE_CPU=1`). + délai cosmétique
+  500→150 ms. + mémo du python qui a argos (skip l'embedded qui échoue).
+- **Nudité depuis un prompt bénin** (« agriculteur » → femme nue) : le template
+  `character` n'imposait pas de vêtements + les négatifs n'avaient pas `nude`. Fix :
+  « fully clothed, wearing a complete outfit » dans le template (desktop + cloud) +
+  `nude, naked, nsfw…` dans les négatifs (bridge T-pose + défaut, et Modal `_realvis.py`).
+- **N variantes → moins de vignettes** : `img2img` nommait la sortie `_refined_${Date.now()}`
+  → N variantes en parallèle = même ms = même fichier = écrasement. Fix : suffixe `_${seed}` unique.
+- **Slider variantes** : max 4 → **8** (desktop + cloud).
+- Restart Electron + (cloud) build/deploy + Modal redeploy pour effet complet.
+
 ## 2026-06-21 (Batch WF3 — quick wins + sécu/argent/fiabilité)
 
 Du workflow #3 (améliorations) :

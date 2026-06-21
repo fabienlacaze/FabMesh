@@ -112,6 +112,8 @@ def build_prompts(prompt: str, asset_type: str | None = None) -> tuple[str, str]
     if anatomy:
         anatomy = anatomy + ", "
     negative = (
+        # Safety: never produce nudity from a benign character prompt.
+        "nude, naked, nsfw, undressed, "
         # Anti-doubling FIRST — most important for batch generation.
         f"{anatomy}"
         "two animals, animal pair, duplicate, twin, "

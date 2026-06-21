@@ -257,6 +257,7 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             f"no text, no watermark, full body visible, feet on the ground"
         )
         negative_prompt = (
+            "nude, naked, topless, undressed, bare skin, exposed, nsfw, "
             "dynamic pose, action pose, combat stance, fighting, running, "
             "jumping, crouching, bent arms, bent legs, tilted head, "
             "twisted torso, asymmetric, side view, three-quarter view, "
@@ -343,6 +344,7 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             )
         else:
             negative_prompt = (
+                "nude, naked, topless, undressed, bare skin, exposed, nsfw, "
                 "blurry, low quality, text, watermark, signature, deformed, "
                 "extra limbs, bad anatomy, distorted, cropped, worst quality, "
                 "flat profile, "
