@@ -3370,6 +3370,9 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 }
 .lightbox-nav.prev { left: 24px; }
 .lightbox-nav.next { right: 24px; }
+/* In lightbox-2 the AI tools panel (.lb-toolbox, right:20px width:200px) sits over the
+   vertical centre on the right and was hiding the Next arrow — push it left of the panel. */
+#lightbox-2 .lightbox-nav.next { right: 236px; }
 .lightbox-nav:hover {
   background: var(--accent);
   border-color: var(--accent);
