@@ -2198,12 +2198,13 @@
             <label style="margin-top:12px;">Number of variants <span id="var-count-val" class="slider-val">1</span></label>
             <input type="range" id="var-count" min="1" max="8" value="1" />
             <small class="modal-subtitle" style="display:block; margin-top:5px; font-size:11px; line-height:1.3;">Each variant uses a different random seed, so you get distinct results.</small>
-            <label class="inline-check" style="display:flex; align-items:center; gap:8px; margin-top:14px; cursor:pointer;">
+            <label style="margin-top:14px;">Guide de variation (optionnel)</label>
+            <input type="text" id="var-tex-prompt" placeholder="ex: cheval marron, armure dorée, cuir au lieu de métal… (vide = libre)" />
+            <label class="inline-check" style="display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer;">
               <input type="checkbox" id="var-tex-mode" />
-              <span>&#128274; Varier seulement la texture (garder la forme)</span>
+              <span>&#128274; Garder la forme (varier seulement la texture)</span>
             </label>
-            <input type="text" id="var-tex-prompt" placeholder="ex: épée bleue, armure dorée… (vide = variation libre)" style="margin-top:8px; display:none;" />
-            <small id="var-tex-hint" class="modal-subtitle" style="display:none; margin-top:5px; font-size:11px; line-height:1.3;">Mode texture : décris la variation (« cheval marron », « armure dorée », « cuir au lieu de métal »…). La forme/pose reste, la texture/couleur/matière change. Monte l'<b>Intensité</b> pour un changement plus fort. ~30-60 s/variante.</small>
+            <small id="var-tex-hint" class="modal-subtitle" style="display:block; margin-top:5px; font-size:11px; line-height:1.3;">Coché = forme verrouillée, seule la texture/matière/couleur change. Décoché = la forme <b>ET</b> la texture varient (l'Intensité règle l'ampleur). Le guide oriente la variation dans les deux cas.</small>
           </div>
         </div>
         <div class="modal-actions">

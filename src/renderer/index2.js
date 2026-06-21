@@ -14106,14 +14106,9 @@ document.getElementById('var-count')?.addEventListener('input', (e) => {
   document.getElementById('var-count-val').textContent = e.target.value;
 });
 document.getElementById('var-tex-mode')?.addEventListener('change', (e) => {
-  const on = !!e.target.checked;
-  const pr = document.getElementById('var-tex-prompt');
-  const hint = document.getElementById('var-tex-hint');
-  if (pr) pr.style.display = on ? '' : 'none';
-  if (hint) hint.style.display = on ? '' : 'none';
   // Texture/material changes need more denoise than a subtle img2img re-roll —
   // nudge the Intensité up so the user sees a real change out of the box.
-  if (on) {
+  if (e.target.checked) {
     const s = document.getElementById('var-strength');
     if (s && parseInt(s.value) < 60) {
       s.value = 70;
@@ -14137,8 +14132,8 @@ document.getElementById('var-apply')?.addEventListener('click', async () => {
   const rawTexPrompt = (document.getElementById('var-tex-prompt')?.value || '').trim();
   if (modal) modal.classList.add('hidden');
   const prompt = (p && (p.prompt || p.initialPrompt)) || 'high quality, detailed';
-  // Texture mode: ControlNet-Tile keeps the shape; only the surface/texture varies.
-  const texPrompt = (texMode && rawTexPrompt) ? await translateUserPrompt(rawTexPrompt) : '';
+  // The "guide" steers BOTH modes: texture-only (ControlNet) and full img2img.
+  const guidePrompt = rawTexPrompt ? await translateUserPrompt(rawTexPrompt) : '';
   showToast(`Generating ${count} variant${count > 1 ? 's' : ''}…`, 'info', 2000);
   for (let i = 0; i < count; i++) {
     const seed = Math.floor(Math.random() * 1000000);
@@ -14151,8 +14146,8 @@ document.getElementById('var-apply')?.addEventListener('click', async () => {
         { sourceImageUrl: target, projectName: p.name });
       try {
         const r = texMode
-          ? await API.texVariant({ imagePath: target, prompt: texPrompt, strength, seed })
-          : await API.img2img({ imagePath: target, prompt, strength, engine: 'local-sdxl', seed });
+          ? await API.texVariant({ imagePath: target, prompt: guidePrompt, strength, seed })
+          : await API.img2img({ imagePath: target, prompt: (guidePrompt || prompt), strength, engine: 'local-sdxl', seed });
         if (r?.success) { completeJob(job.id, true); await reloadCurrentProject(); }
         else { completeJob(job.id, false, r?.error); showToast('Variant failed: ' + (r?.error || 'unknown'), 'error'); }
       } catch (e) {
