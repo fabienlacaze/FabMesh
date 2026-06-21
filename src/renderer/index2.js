@@ -13645,6 +13645,29 @@ function renderJobs() {
     bubble.classList.remove('hidden');
   }
   const list = document.getElementById('jobs-list-2');
+  // Targeted update: if the card SET is unchanged (same ids/statuses + same
+  // queued set) and only progress moved, patch the bars/text IN PLACE instead
+  // of rebuilding innerHTML every tick. The rebuild tore down + recreated every
+  // card (thumbnail reload + bar reset), which made them flicker / jump.
+  const _sig = state.jobs.map(j => j.id + ':' + j.status).join(',')
+    + '|' + queuedJobs.map(q => q.displayName || '').join('~');
+  if (list.dataset.sig === _sig) {
+    state.jobs.forEach(j => {
+      const el = list.querySelector(`.job-item-2[data-job-id="${j.id}"]`);
+      if (!el) return;
+      const pct = Math.round(j.progress);
+      const fill = el.querySelector('.job-item-2-bar-fill');
+      if (fill) fill.style.width = pct + '%';
+      const pctEl = el.querySelector('.job-item-2-pct');
+      if (pctEl) {
+        const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
+        pctEl.innerHTML = (elapsed ? `<span style="color:var(--text-2); margin-right:8px; font-weight:normal;">${elapsed}</span>` : '') + pct + '%';
+      }
+    });
+    if (state._jobDetailsOpenId) refreshJobDetailsModal(state._jobDetailsOpenId);
+    return;
+  }
+  list.dataset.sig = _sig;
   // Active jobs
   let html = state.jobs.map(j => {
     const pct = Math.round(j.progress);
