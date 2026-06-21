@@ -683,6 +683,15 @@
         return { ok: false, success: false, error: String(e) };
       }
     },
+    // ── NSFW gallery/thumbnail visual scan: DEFERRED on cloud (intentional
+    // no-op, NOT a silent failure). There is no automated image-classification
+    // endpoint here — the Modal NSFW classifiers run at GENERATION time only,
+    // and the worker exposes only ADMIN moderation routes. Generation is already
+    // protected server-side (checkPromptSafety prompt filter + the Modal
+    // post-image NSFW scan), so these client helpers return "safe" so the gallery
+    // UI degrades gracefully. To enable a real gallery scan, add a batch
+    // image-moderation worker endpoint that runs URLs through the Modal
+    // classifiers, then wire these to it. ──
     checkProjectNsfw: async () => ({ ok: true, safe: true }),
     checkImagesNsfwTags: async () => ({ ok: true, safe: true }),
     // Renderer does `keywords.find(...)` directly on the return value,
