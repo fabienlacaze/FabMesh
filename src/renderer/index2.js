@@ -14453,14 +14453,14 @@ function _ageLabel(v) {
 function _ageBuildPrompt(v) {
   if (v === 0) return null;
   const m = Math.abs(v);
-  if (v < 0) {  // younger
-    if (m > 66) return 'as a young child, age 6, smooth youthful skin, soft rounded features, large eyes, no wrinkles';
-    if (m > 33) return 'younger, teenager, age 16, smooth youthful skin, soft fresh features';
-    return 'a bit younger, age 25, smoother fresher skin';
+  if (v < 0) {  // younger — at the extreme, push PROPORTIONS (baby/cub: bigger head, smaller body)
+    if (m > 66) return 'a baby / juvenile version, much younger, smaller body with a noticeably larger head proportion, short stubby limbs, soft rounded features, big eyes, smooth youthful skin or downy fur';
+    if (m > 33) return 'a younger, adolescent version, slimmer, smoother skin, softer rounder features';
+    return 'slightly younger, fresher smoother skin';
   }
-  if (m > 66) return 'very elderly, age 80, deep wrinkles, sagging aged skin, grey white thinning hair, weathered face, age spots';
-  if (m > 33) return 'older, age 60, wrinkles, greying hair, mature aged skin';
-  return 'a bit older, age 45, some wrinkles, slightly greying hair, mature';
+  if (m > 66) return 'a very old, elderly version, aged, deep wrinkles, sagging skin, grey or white hair or fur, gaunt weathered look';
+  if (m > 33) return 'an older, mature version, some wrinkles, greying hair or fur, aged skin';
+  return 'slightly older, a few wrinkles, mature look';
 }
 function _ageStrength(v) {
   const m = Math.abs(v) / 100;
@@ -14495,6 +14495,14 @@ document.getElementById('age-go')?.addEventListener('click', async () => {
   let prompt = _ageBuildPrompt(v);
   if (guide) prompt = prompt + ', ' + (await translateUserPrompt(guide));
   const strength = _ageStrength(v);
+  // Variable structure lock: a small age change keeps the silhouette (high cn), a strong
+  // one (slider near the extremes) frees the PROPORTIONS so a cub/baby actually gets a
+  // bigger head + smaller body — not just a re-textured adult.
+  const m = Math.abs(v) / 100;
+  const cnScale = 0.52 - m * 0.32;  // 0.52 (mild) -> 0.20 (extreme)
+  const negPrompt = m > 0.55
+    ? 'deformed, mutated, extra limbs, missing limbs, fused limbs, blurry, low quality, bad anatomy'  // strong: allow proportion change
+    : null;  // mild: default shape-locked negative prompt
   document.getElementById('modal-age').classList.add('hidden');
   gatedRun('img2img', `Age: ${p.name}`, async () => {
     const job = pushJob(`Age: ${p.name}`, null, {
@@ -14502,7 +14510,7 @@ document.getElementById('age-go')?.addEventListener('click', async () => {
       Amount: Math.abs(v) + '%',
     }, 20000, { sourceImageUrl: imagePath, projectName: p.name });
     try {
-      const r = await API.texVariant({ imagePath, prompt, strength, seed: 0 });
+      const r = await API.texVariant({ imagePath, prompt, strength, seed: 0, cnScale, negPrompt });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();

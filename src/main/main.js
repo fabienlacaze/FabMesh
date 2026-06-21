@@ -4003,7 +4003,7 @@ ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate, re
 
 // Texture variant: ControlNet-Tile re-texture (shape/geometry locked) — used by the
 // Variante tool's "vary texture only" mode. Each seed = a different surface/texture.
-ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed }) => {
+ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed, cnScale, negPrompt }) => {
   try {
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
@@ -4015,6 +4015,7 @@ ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed 
     const r = await sdxlServerCall('/tex_variant', {
       input: imagePath, prompt: prompt || '', output: newImagePath,
       strength: (strength != null ? strength : 0.45), seed: parseInt(_uniq),
+      cn_scale: (cnScale != null ? cnScale : 0.45), neg_prompt: negPrompt || null,
     });
     if (r.ok) {
       _handleMultiviewInheritance(newImagePath).catch(() => {});

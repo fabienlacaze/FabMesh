@@ -892,7 +892,7 @@ def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0
             return {"ok": False, "error": str(e)}
 
 
-def do_tex_variant(input_path, prompt, output_path, strength=0.45, seed=0):
+def do_tex_variant(input_path, prompt, output_path, strength=0.45, seed=0, cn_scale=0.45, neg_prompt=None):
     """Structure-locked TEXTURE variant: ControlNet-Tile keeps the shape/geometry
     (the original image is the control) while regenerating the surface/texture.
     The generated element does NOT move — only the texture/colours vary per seed."""
@@ -912,16 +912,16 @@ def do_tex_variant(input_path, prompt, output_path, strength=0.45, seed=0):
             with torch.inference_mode():
                 result = pipe(
                     prompt=p,
-                    negative_prompt="deformed, distorted, changed shape, different pose, extra parts, missing parts, blurry, low quality",
+                    negative_prompt=neg_prompt or "deformed, distorted, changed shape, different pose, extra parts, missing parts, blurry, low quality",
                     image=img_work,
                     control_image=img_work,
                     strength=float(max(0.35, min(0.9, strength))),
                     num_inference_steps=28,
                     guidance_scale=7.5,
-                    # LOW conditioning so the silhouette/pose is held but the
-                    # texture/material/colour can change A LOT (metal->gold, grey
-                    # horse->brown). High scale (0.9) kept the colours = no real change.
-                    controlnet_conditioning_scale=0.45,
+                    # Variable conditioning: HIGH (variant / mild age: hold the
+                    # silhouette) -> LOW (strong age: let PROPORTIONS shift, e.g. an
+                    # adult lion -> a cub with a bigger head / shorter limbs). 0.45 default.
+                    controlnet_conditioning_scale=float(max(0.1, min(0.95, cn_scale))),
                     generator=torch.Generator("cuda").manual_seed(int(seed)),
                 ).images[0]
             if result.size != orig_size:
@@ -1396,6 +1396,8 @@ class Handler(BaseHTTPRequestHandler):
                     data['output'],
                     data.get('strength', 0.45),
                     data.get('seed', 0),
+                    data.get('cn_scale', 0.45),
+                    data.get('neg_prompt'),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

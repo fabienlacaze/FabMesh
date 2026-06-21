@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Outil Age : contrainte ControlNet variable pour atteindre bébé/lionceau)
+
+- User : « le aging marche pas trop mal mais on peut pas aller jusqu'aux enfants ; un
+  lionceau ne ressemble pas à un jeune lion ». Cause : `do_tex_variant` (ControlNet-Tile)
+  verrouille les proportions (cn_scale 0.45 fixe) → un fort rajeunissement garde le corps
+  adulte, juste re-texturé. Fix : `do_tex_variant` prend maintenant `cn_scale` + `neg_prompt`
+  en paramètres. L'outil Age les pilote selon l'intensité du slider : cn_scale 0.52 (léger,
+  garde la silhouette) → 0.20 (extrême, laisse les PROPORTIONS bouger : grosse tête, petit
+  corps) + neg_prompt sans « changed shape » au-delà de 55 %. Prompt rendu sous-agnostique
+  (humain + animal). Backward-compat : variant garde cn_scale 0.45 par défaut. Restart
+  serveur SDXL requis.
+
 ## 2026-06-22 (Fix CUDA OOM : un seul pipeline SDXL lourd résident à la fois)
 
 - User : « CUDA out of memory … 0 bytes free » sur une édition (auto-inpaint « enlever
