@@ -4275,6 +4275,7 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     crop:        'ws-crop-btn',
     extend:      'ws-extend-btn',
     recolor:     'ws-recolor-btn',
+    age:         'ws-age-btn',
   };
   const box = document.getElementById('lb-toolbox');
   if (!box) return;
@@ -4290,7 +4291,7 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     // open their own modal. The lightbox stays open in the background;
     // close it so the modal gets focus and isn't layered under.
     const OPENS_MODAL = ['modify', 'autoinpaint', 'mask', 'clone',
-                         'paint', 'crop', 'resolution', 'recolor'];
+                         'paint', 'crop', 'resolution', 'recolor', 'age'];
     if (OPENS_MODAL.includes(toolKey)) {
       closeLightbox();
     }
@@ -14440,6 +14441,86 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
     } catch (e) {
       completeJob(job.id, false);
       if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Recolor error');
+    }
+  });
+});
+
+// ============================================================
+// AGE TOOL — younger / older. Reuses the structure-preserving ControlNet-Tile
+// pipeline (texVariant) with an age-mapped prompt + strength, so the silhouette/pose
+// holds while skin/hair/wrinkles shift toward the chosen age. No backend change.
+// ============================================================
+let _ageSrcPath = null;
+function _ageLabel(v) {
+  if (v === 0) return 'Neutral';
+  const dir = v < 0 ? 'Younger' : 'Older';
+  const m = Math.abs(v);
+  const lvl = m > 66 ? 'strong' : m > 33 ? 'medium' : 'slight';
+  return `${dir} (${lvl})`;
+}
+function _ageBuildPrompt(v) {
+  if (v === 0) return null;
+  const m = Math.abs(v);
+  if (v < 0) {  // younger
+    if (m > 66) return 'as a young child, age 6, smooth youthful skin, soft rounded features, large eyes, no wrinkles';
+    if (m > 33) return 'younger, teenager, age 16, smooth youthful skin, soft fresh features';
+    return 'a bit younger, age 25, smoother fresher skin';
+  }
+  if (m > 66) return 'very elderly, age 80, deep wrinkles, sagging aged skin, grey white thinning hair, weathered face, age spots';
+  if (m > 33) return 'older, age 60, wrinkles, greying hair, mature aged skin';
+  return 'a bit older, age 45, some wrinkles, slightly greying hair, mature';
+}
+function _ageStrength(v) {
+  const m = Math.abs(v) / 100;
+  return Math.max(0.4, Math.min(0.78, 0.4 + m * 0.38));
+}
+document.getElementById('ws-age-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  const sl = document.getElementById('age-slider'); if (sl) sl.value = 0;
+  const vl = document.getElementById('age-val'); if (vl) vl.textContent = 'Neutral';
+  const g = document.getElementById('age-guide'); if (g) g.value = '';
+  const srcImg = document.getElementById('age-source-img');
+  if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
+  _ageSrcPath = target;
+  document.getElementById('modal-age').classList.remove('hidden');
+});
+document.getElementById('age-slider')?.addEventListener('input', (e) => {
+  const el = document.getElementById('age-val');
+  if (el) el.textContent = _ageLabel(parseInt(e.target.value) || 0);
+});
+document.getElementById('age-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-age').classList.add('hidden');
+});
+document.getElementById('age-go')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  const imagePath = editTarget(p);
+  if (!imagePath) return;
+  const v = parseInt(document.getElementById('age-slider').value) || 0;
+  if (v === 0) { showToast('Move the slider toward younger or older first', 'error'); return; }
+  const guide = (document.getElementById('age-guide').value || '').trim();
+  let prompt = _ageBuildPrompt(v);
+  if (guide) prompt = prompt + ', ' + (await translateUserPrompt(guide));
+  const strength = _ageStrength(v);
+  document.getElementById('modal-age').classList.add('hidden');
+  gatedRun('img2img', `Age: ${p.name}`, async () => {
+    const job = pushJob(`Age: ${p.name}`, null, {
+      Direction: v < 0 ? 'Younger' : 'Older',
+      Amount: Math.abs(v) + '%',
+    }, 20000, { sourceImageUrl: imagePath, projectName: p.name });
+    try {
+      const r = await API.texVariant({ imagePath, prompt, strength, seed: 0 });
+      if (r?.success) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+      } else {
+        completeJob(job.id, false);
+        if (!job.cancelled) customError(r?.error || 'unknown', 'Age change failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Age change error');
     }
   });
 });
