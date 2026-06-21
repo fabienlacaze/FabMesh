@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Fallback i18n runtime + Enhance relançable)
+
+- **Fallback auto runtime** (fin du whack-a-mole) : toute chaîne anglaise absente des
+  dicts est traduite à la volée par le worker argos (EN→langue) + cache localStorage
+  permanent. `translate_server.py` accepte un param `to` (EN→langue) ; main.js expose
+  l'IPC `i18n-auto-translate` (batch + cache) ; preload `i18nAutoTranslate` ; i18n.js
+  `_queueAuto`/`_flushAuto` collectent les clés manquantes (filtre anti code/url/nombre),
+  flush debouncé, ré-applique. No-op si pas de worker (cloud). Paquets argos en→fr/es/zh/
+  hi/ar installés. Testé : « Settings »→« Paramètres », « Image generation failed »→« La
+  génération d'images a échoué ». i18n.js copié au cloud (no-op là-bas, à doter d'un
+  endpoint serveur plus tard).
+- **Enhance relançable** : retiré le guard « Prompt already enhanced » ; Enhance
+  re-traite toujours (strip des suffixes connus d'abord → pas de double-wrap), même si
+  le texte n'a pas changé.
+
 ## 2026-06-21 (Fix : la génération 3D créait une image « _rectified » non voulue)
 
 - User : « quand je génère une 3d ça me génère une nouvelle image non souhaitée. »

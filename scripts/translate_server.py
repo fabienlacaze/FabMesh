@@ -30,26 +30,29 @@ PORT = int(os.environ.get("FABMESH_TRANSLATE_PORT", "5557"))
 _lock = threading.Lock()
 
 
-def _translate(text, src):
+def _translate(text, src, dst="en"):
     src = (src or "en").lower()
-    if src == "en" or not text.strip():
+    dst = (dst or "en").lower()
+    if src == dst or not text.strip():
         return text
     # Serialize argos access (ctranslate2 model is not re-entrant) — the cost we
     # avoid is the IMPORT/LOAD, which happens once on the first call.
     with _lock:
         from argostranslate import translate as _t
         try:
-            out = _t.translate(text, src, "en")
+            out = _t.translate(text, src, dst)
             if out:
                 return out
         except Exception:
             pass
         langs = _t.get_installed_languages()
         from_lang = next((l for l in langs if l.code == src), None)
-        to_lang = next((l for l in langs if l.code == "en"), None)
+        to_lang = next((l for l in langs if l.code == dst), None)
         if from_lang and to_lang:
-            return from_lang.get_translation(to_lang).translate(text) or text
-    return text
+            tr = from_lang.get_translation(to_lang)
+            if tr:
+                return tr.translate(text) or text
+    return text  # no package for this pair -> fail open (return source)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -85,7 +88,8 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/translate":
             text = req.get("text") or ""
             try:
-                self._send({"text": _translate(text, req.get("from") or "en")})
+                self._send({"text": _translate(text, req.get("from") or "en",
+                                               req.get("to") or "en")})
             except Exception as e:
                 sys.stderr.write(f"[translate-server] error: {e}\n")
                 self._send({"text": text, "error": str(e)})  # fail open

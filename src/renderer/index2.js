@@ -4774,13 +4774,12 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', async ()
   if (!raw) { showToast('Type a description first.', 'error'); return; }
   const assetType = document.getElementById('np-asset-type')?.value || 'character';
   const assetStyle = document.getElementById('np-asset-style')?.value || 'realistic';
-  const alreadyEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(raw);
-  if (alreadyEnhanced) {
-    showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
-    return;
-  }
+  // Re-enhance even if the text is unchanged: strip any prior enrichment first
+  // (recovers the user's base text) so re-running never double-wraps the prompt.
+  const wasEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(raw);
+  const baseRaw = (typeof stripKnownPromptSuffixes === 'function') ? stripKnownPromptSuffixes(raw) : raw;
   const _stopCycle = _promptStartCycle(textarea, ENHANCE_STEPS);
-  const englishRaw = await translateUserPrompt(raw);
+  const englishRaw = wasEnhanced ? baseRaw : await translateUserPrompt(baseRaw);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
   await new Promise((r) => setTimeout(r, 150));
   _stopCycle();
@@ -4801,17 +4800,15 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', async ()
   if (!raw) { showToast('Type a description first.', 'error'); return; }
   const assetType = document.getElementById('ws-asset-type')?.value || 'character';
   const assetStyle = document.getElementById('ws-asset-style')?.value || 'realistic';
-  // Check if the prompt already looks enhanced (contains known suffix keywords)
-  const alreadyEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(raw);
-  if (alreadyEnhanced) {
-    showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
-    return;
-  }
+  // Re-enhance even if the text is unchanged: strip any prior enrichment first
+  // (recovers the user's base text) so re-running never double-wraps the prompt.
+  const wasEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(raw);
+  const baseRaw = (typeof stripKnownPromptSuffixes === 'function') ? stripKnownPromptSuffixes(raw) : raw;
   // Stash the original raw prompt so the back-view generator can use it
   // (clean subject description, no asset-style pollution).
-  textarea.dataset.rawPrompt = raw;
+  textarea.dataset.rawPrompt = baseRaw;
   const _stopCycle = _promptStartCycle(textarea, ENHANCE_STEPS);
-  const englishRaw = await translateUserPrompt(raw);
+  const englishRaw = wasEnhanced ? baseRaw : await translateUserPrompt(baseRaw);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
   await new Promise((r) => setTimeout(r, 150));
   _stopCycle();

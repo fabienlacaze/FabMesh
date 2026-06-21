@@ -851,6 +851,7 @@
       } else {
         const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
         if (m && dict[m[2]]) translated = orig.replace(key, m[1] + dict[m[2]]);
+        else _queueAuto(key);   // no dict entry -> runtime auto-translate fallback
       }
     }
     if (node.nodeValue !== translated) node.nodeValue = translated;
@@ -862,7 +863,9 @@
         const ck = '__i18n_' + attr;
         if (el[ck] === undefined) el[ck] = el.getAttribute(attr);
         const orig = el[ck];
-        const translated = (dict && dict[orig]) ? dict[orig] : orig;
+        let translated = orig;
+        if (dict && dict[orig]) translated = dict[orig];
+        else if (orig && orig.trim()) _queueAuto(orig.trim());
         if (el.getAttribute(attr) !== translated) el.setAttribute(attr, translated);
       });
     });
@@ -961,9 +964,71 @@
     _langDD.blab.textContent = o ? o.textContent.trim() : sel.value;
   }
 
+  // --- Runtime auto-translate fallback -------------------------------------
+  // Any English UI string with no dict entry is sent to the local Argos worker
+  // (EN -> current language) and cached persistently, so the UI is never left in
+  // English even for strings we didn't pre-translate. No-ops gracefully when the
+  // IPC bridge is absent (e.g. the web/cloud build has no local worker).
+  const _AUTO_KEY = 'fabmesh.i18n.auto.';
+  const _autoCache = {};
+  const _pendingAuto = new Set();
+  const _triedAuto = new Set();
+  let _autoTimer = null;
+  function _loadAutoCache(lang) {
+    if (_autoCache[lang]) return _autoCache[lang];
+    let m = {};
+    try { m = JSON.parse(localStorage.getItem(_AUTO_KEY + lang) || '{}') || {}; } catch (_) { m = {}; }
+    _autoCache[lang] = m;
+    I18N[lang] = Object.assign(I18N[lang] || {}, m);   // merge -> instant, no flicker
+    return m;
+  }
+  function _shouldAutoTranslate(key) {
+    if (!key || key.length > 200) return false;
+    if (!/[A-Za-z]/.test(key)) return false;                 // needs letters
+    if (/^https?:\/\//i.test(key)) return false;             // url
+    if (!/\s/.test(key) && /[._/\\()]|[a-z][A-Z]/.test(key)) return false;  // code-ish token
+    return true;
+  }
+  function _queueAuto(key) {
+    if (_lang === 'en' || !key) return;
+    if (typeof window === 'undefined' || !window.meshyAPI || !window.meshyAPI.i18nAutoTranslate) return;
+    const tk = _lang + '|' + key;
+    if (_triedAuto.has(tk) || _pendingAuto.has(key)) return;
+    const d = _dict();
+    if (d && d[key]) return;
+    if (!_shouldAutoTranslate(key)) return;
+    _pendingAuto.add(key);
+    if (!_autoTimer) _autoTimer = setTimeout(_flushAuto, 450);
+  }
+  async function _flushAuto() {
+    _autoTimer = null;
+    if (_lang === 'en' || !_pendingAuto.size) return;
+    if (typeof window === 'undefined' || !window.meshyAPI || !window.meshyAPI.i18nAutoTranslate) { _pendingAuto.clear(); return; }
+    const lang = _lang;
+    const texts = Array.from(_pendingAuto).slice(0, 60);
+    texts.forEach((t) => { _pendingAuto.delete(t); _triedAuto.add(lang + '|' + t); });
+    let res = null;
+    try { res = await window.meshyAPI.i18nAutoTranslate({ texts, to: lang }); } catch (_) { res = null; }
+    if (res && typeof res === 'object') {
+      const cache = _loadAutoCache(lang);
+      let added = 0;
+      for (const en of Object.keys(res)) {
+        const tr = res[en];
+        if (tr && typeof tr === 'string' && tr !== en) { cache[en] = tr; I18N[lang][en] = tr; added++; }
+      }
+      if (added) {
+        try { localStorage.setItem(_AUTO_KEY + lang, JSON.stringify(cache)); } catch (_) {}
+        if (lang === _lang) { try { applyLang(lang); } catch (_) {} }
+      }
+    }
+    if (_pendingAuto.size && !_autoTimer) _autoTimer = setTimeout(_flushAuto, 450);
+  }
+  // -------------------------------------------------------------------------
+
   function applyLang(lang) {
     _lang = lang || 'en';
     try { localStorage.setItem('fabmesh.lang', _lang); } catch (_) {}
+    if (_lang !== 'en') _loadAutoCache(_lang);
     const dict = _dict();
     try {
       _translateText(document.body, dict);

@@ -4399,10 +4399,10 @@ async function ensureTranslateServer() {
   for (let i = 0; i < 60 && !translateReady; i++) await new Promise(r => setTimeout(r, 200));
   return translateReady;
 }
-function translateServerCall(text, from) {
+function translateServerCall(text, from, to) {
   return new Promise((resolve) => {
     if (!translateReady) { resolve(null); return; }
-    const body = JSON.stringify({ text, from });
+    const body = JSON.stringify({ text, from, to: to || 'en' });
     const req = require('http').request({ host: '127.0.0.1', port: TRANSLATE_PORT, path: '/translate', method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 30000 },
       (res) => { let buf = ''; res.on('data', c => buf += c); res.on('end', () => { try { const j = JSON.parse(buf); resolve(typeof j.text === 'string' ? j.text : null); } catch (_) { resolve(null); } }); });
@@ -4411,6 +4411,28 @@ function translateServerCall(text, from) {
     req.write(body); req.end();
   });
 }
+// Runtime UI auto-translate: EN -> target language for any string the dicts miss.
+// Used by i18n.js to fill gaps live (cached so each string is translated once).
+ipcMain.handle('i18n-auto-translate', async (event, { texts, to } = {}) => {
+  const out = {};
+  if (!Array.isArray(texts) || !texts.length || !to || to === 'en') return out;
+  try {
+    await ensureTranslateServer();
+    for (const tx of texts) {
+      if (!tx || typeof tx !== 'string') continue;
+      const _ck = 'en>' + to + '|' + tx;
+      if (_translateCache.has(_ck)) { out[tx] = _translateCache.get(_ck); continue; }
+      const tr = await translateServerCall(tx, 'en', to);
+      if (tr != null && tr !== '') {
+        if (_translateCache.size > 1000) _translateCache.clear();
+        _translateCache.set(_ck, tr);
+        out[tx] = tr;
+      }
+    }
+  } catch (_) { /* fail open */ }
+  return out;
+});
+
 ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   const src = (from || 'en').toLowerCase();
   if (src === 'en' || !text || !text.trim()) return { text: text || '' };
