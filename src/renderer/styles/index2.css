@@ -3377,6 +3377,8 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 /* In lightbox-2 the AI tools panel (.lb-toolbox, right:20px width:200px) sits over the
    vertical centre on the right and was hiding the Next arrow — push it left of the panel. */
 #lightbox-2 .lightbox-nav.next { right: 236px; }
+/* Same for the 3D viewer, which now also has a right-side tool panel (#lb3d-toolbox). */
+#lightbox-3d .lightbox-nav.next { right: 236px; }
 .lightbox-nav:hover {
   background: var(--accent);
   border-color: var(--accent);

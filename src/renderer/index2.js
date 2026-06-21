@@ -4099,6 +4099,44 @@ document.getElementById('lightbox-3d-use')?.addEventListener('click', (e) => {
   }
 });
 
+// 3D lightbox tool column: route each button to the workspace mesh handler so it
+// operates on the current mesh. These tools open a modal / canvas editor in the
+// workspace, so close the 3D lightbox first (the editor would otherwise be behind it).
+(function _wireLb3dToolbox() {
+  const LB3D_TOOL_MAP = {
+    smooth: 'ws-mesh-smooth-btn',
+    decimate: 'ws-mesh-decimate-btn',
+    subdivide: 'ws-mesh-subdivide-btn',
+    fixnormals: 'ws-mesh-fixnormals-btn',
+    fillholes: 'ws-mesh-fillholes-btn',
+    watertight: 'ws-mesh-watertight-btn',
+    center: 'ws-mesh-center-btn',
+    retexture: 'ws-mesh-retexture-btn',
+    texvar: 'ws-mesh-texvar-btn',
+    regionretex: 'ws-mesh-region-retex-btn',
+    aligntex: 'ws-mesh-aligntex-btn',
+    material: 'ws-mesh-material-btn',
+    sculpt: 'ws-mesh-sculpt-btn',
+    paintvert: 'ws-mesh-paintvert-btn',
+    selectface: 'ws-mesh-selectface-btn',
+    export: 'ws-mesh-export-btn',
+    blender: 'ws-mesh-blender-btn',
+    folder: 'ws-mesh-folder-btn',
+  };
+  const box = document.getElementById('lb3d-toolbox');
+  if (!box) return;
+  box.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-lb3d-tool]');
+    if (!btn) return;
+    const wsBtnId = LB3D_TOOL_MAP[btn.getAttribute('data-lb3d-tool')];
+    if (!wsBtnId) return;
+    const wsBtn = document.getElementById(wsBtnId);
+    if (!wsBtn) { console.warn('lb3d-tool: missing ws button', wsBtnId); return; }
+    closeMeshLightbox();
+    setTimeout(() => wsBtn.click(), 30);
+  });
+})();
+
 function closeMeshLightbox() {
   document.getElementById('lightbox-3d').classList.add('hidden');
   stopLb3dLoop();
