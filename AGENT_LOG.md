@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Classifieur NSFW de prompt DÉSACTIVÉ — trop de faux positifs)
+
+- User : « plus gros et habillé en noir » bloqué à 92 %, « Golden crab » 79 % → le
+  classifieur de texte michellejieli/NSFW_text_classifier est **fondamentalement
+  peu fiable** (faux positifs massifs sur des prompts bénins). `checkPromptSafetyAI`
+  ne bloque plus (retourne safe après le hard-floor). La sécurité reste : (1)
+  `checkPromptSafety` (NSFW_KEYWORDS + NSFW_COMBOS, regex fiable — bloque nude/naked/
+  CSAM sans faux positif) + le hard-floor, (2) le check NSFW de l'IMAGE générée
+  (galerie / 3D). L'infra du serveur NSFW reste dormante pour un futur modèle fiable.
+
 ## 2026-06-21 (Serveur NSFW persistant + noms de moteurs par capacité)
 
 - **Check NSFW instantané** : `checkPromptSafetyAI` rechargeait le modèle de 250 Mo

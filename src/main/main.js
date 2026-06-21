@@ -364,40 +364,13 @@ function checkPromptSafety(prompt) {
 async function checkPromptSafetyAI(prompt) {
   const floor = checkHardFloor(prompt);
   if (!floor.safe) return floor;            // illegal floor — never bypassable
-  if (isUnrestrictedMode()) return { safe: true };
-  // Fast path: persistent classifier server (model stays warm vs ~20s reload).
-  try {
-    await ensureNsfwServer();
-    const r = await nsfwServerCall(prompt);
-    if (r && typeof r.score === 'number' && !r.error) {
-      if (r.label === 'NSFW' && r.score > 0.9) {
-        return { safe: false, blocked: 'AI classifier', reason: `Content filter: AI detected this prompt as inappropriate (${Math.round(r.score * 100)}% confidence). Disable parental control in Settings for unrestricted mode.` };
-      }
-      return { safe: true };
-    }
-  } catch (_) { /* fall through to the per-call spawn */ }
-  return new Promise((resolve) => {
-    execFile('python', ['-c', `
-import sys
-from transformers import pipeline
-clf = pipeline('text-classification', model='michellejieli/NSFW_text_classifier', device='cpu')
-r = clf(sys.argv[1])[0]
-print(r['label'], r['score'])
-`, prompt], { timeout: 30000 }, (error, stdout) => {
-      if (error) { resolve({ safe: true }); return; }
-      const parts = (stdout || '').trim().split(' ');
-      const label = parts[0];
-      const score = parseFloat(parts[1]) || 0;
-      // 0.9 (was 0.7): the classifier false-positives on benign game assets
-      // ("Golden crab" scored 0.79). The output IMAGE is still NSFW-checked, so
-      // a borderline prompt that slips through is caught at the image stage.
-      if (label === 'NSFW' && score > 0.9) {
-        resolve({ safe: false, blocked: 'AI classifier', reason: `Content filter: AI detected this prompt as inappropriate (${Math.round(score*100)}% confidence). Disable parental control in Settings for unrestricted mode.` });
-      } else {
-        resolve({ safe: true });
-      }
-    });
-  });
+  // AI text classifier DISABLED for blocking. michellejieli/NSFW_text_classifier
+  // false-positives heavily on benign game-asset prompts ("bigger and dressed in
+  // black" -> 0.92, "Golden crab" -> 0.79), blocking legitimate edits. Safety is
+  // still enforced by: (1) checkHardFloor above + the keyword checkPromptSafety
+  // (illegal / explicit terms), and (2) the OUTPUT image NSFW check at the gallery
+  // / 3D stage. The nsfw_server infra is kept dormant for a future reliable model.
+  return { safe: true };
 }
 
 function safeBase(base, maxLen = 80) {
