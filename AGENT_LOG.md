@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Fix CUDA OOM : un seul pipeline SDXL lourd résident à la fois)
+
+- User : « CUDA out of memory … 0 bytes free » sur une édition (auto-inpaint « enlever
+  les pièces jointes »), VRAM 15.4/14 GB. Cause : `img2img_pipe` + `inpaint_pipe` +
+  `controlnet_tile_pipe` (RealVisXL ~6-9 GB chacun) restaient TOUS résidents en VRAM en
+  même temps → saturation de la carte 16 GB. Fix : helper `_free_heavy_except(keep)`
+  appelé au début de chaque `load_*` (sous `load_lock`) qui libère les autres pipelines
+  lourds (`del` + `free_vram`), en gardant CLIPSeg (~400 MB, partagé). Aucun op ne
+  nécessite 2 pipelines lourds à la fois (recolor = clipseg + controlnet OU hsv ;
+  inpaint = clipseg + inpaint ; variant = controlnet ; img2img = img2img) donc libérer
+  les autres est sûr. Coût : un reload (~10-20 s) au changement de type d'op, plus
+  d'OOM. Desktop only. NB : nécessite un restart du serveur SDXL (Arrêter le moteur AI)
+  pour prendre effet.
+
 ## 2026-06-21 (Variante étendue : mode « texture » — forme verrouillée, ControlNet-Tile)
 
 - User : « différentes versions des textures du personnage (épée devient bleu) sans

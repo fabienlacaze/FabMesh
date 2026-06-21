@@ -152,6 +152,30 @@ def _set_memory_fraction():
     pass
 
 
+def _free_heavy_except(keep):
+    """Keep only ONE heavy SDXL pipe resident at a time to bound VRAM (16 GB card).
+    img2img / inpaint / controlnet_tile each cost ~6-9 GB; resident together they OOM
+    (the user's 'CUDA out of memory ... 0 bytes free'). CLIPSeg (~400 MB) is shared
+    and left alone. No single op needs two heavy pipes, so freeing the others is safe.
+    Caller must already hold state.load_lock."""
+    freed = []
+    if keep != 'img2img' and state.img2img_pipe is not None:
+        del state.img2img_pipe
+        state.img2img_pipe = None
+        freed.append('img2img')
+    if keep != 'inpaint' and state.inpaint_pipe is not None:
+        del state.inpaint_pipe
+        state.inpaint_pipe = None
+        freed.append('inpaint')
+    if keep != 'controlnet_tile' and state.controlnet_tile_pipe is not None:
+        del state.controlnet_tile_pipe
+        state.controlnet_tile_pipe = None
+        freed.append('controlnet_tile')
+    if freed:
+        free_vram()
+        log(f"Freed {freed} to fit '{keep}' ({vram_used_gb():.1f} GB VRAM)")
+
+
 def load_img2img():
     """Lazy-load SDXL Turbo img2img pipeline."""
     if state.img2img_pipe is not None:
@@ -161,6 +185,7 @@ def load_img2img():
     with state.load_lock:
         if state.img2img_pipe is not None:
             return state.img2img_pipe
+        _free_heavy_except('img2img')
         log(f"Loading {IMG2IMG_MODEL}...")
         _set_memory_fraction()
         from diffusers import StableDiffusionXLImg2ImgPipeline
@@ -248,6 +273,7 @@ def load_inpaint():
     with state.load_lock:
         # SDXL Inpainting (large model, ~6 GB)
         if state.inpaint_pipe is None:
+            _free_heavy_except('inpaint')
             log(f"Loading {SDXL_INPAINT_MODEL}...")
             _set_memory_fraction()
             from diffusers import StableDiffusionXLInpaintPipeline
@@ -297,6 +323,7 @@ def load_controlnet_tile():
     with state.load_lock:
         if state.controlnet_tile_pipe is not None:
             return state.controlnet_tile_pipe
+        _free_heavy_except('controlnet_tile')
         log(f"Loading {CONTROLNET_TILE_MODEL} + {IMG2IMG_MODEL}...")
         _set_memory_fraction()
         from diffusers import (
