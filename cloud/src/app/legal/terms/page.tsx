@@ -10,7 +10,7 @@ export default function TermsPage() {
   return (
     <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px', lineHeight: 1.65 }}>
       <h1>Terms of Service</h1>
-      <p style={{ color: 'var(--text-2)' }}>Last updated: 2026-05-27</p>
+      <p style={{ color: 'var(--text-2)' }}>Last updated: 2026-06-20</p>
 
       <p>
         By creating an account on MyFabmesh.AI (operated by{' '}
@@ -212,11 +212,11 @@ export default function TermsPage() {
           law requires it.
         </li>
       </ul>
-      <p style={{ fontSize: 12, color: 'var(--text-2)' }}>
-        The formal designation of a copyright agent and the published DSA contact
-        details will be finalised with our registered business identity at
-        commercial launch.
-      </p>
+      <h3>13.1 Designated agents</h3>
+      <ul style={{ fontSize: 14 }}>
+        <li><strong>DSA single point of contact &amp; copyright / DMCA agent:</strong> [À CONFIRMER — designated agent name], reachable at <a href="mailto:contact@myfabmesh.ai">contact@myfabmesh.ai</a>. Before distributing to U.S. users, this agent must also be registered with the U.S. Copyright Office DMCA Designated Agent Directory.</li>
+        <li><strong>Registered business identity</strong> (operator, SIRET, registered office, host): see the <a href="/legal/mentions">Legal Notice (Mentions légales)</a>.</li>
+      </ul>
 
       <p style={{ marginTop: 32, fontSize: 13 }}>
         <a href="/legal/privacy">Privacy Policy</a> &middot;{' '}

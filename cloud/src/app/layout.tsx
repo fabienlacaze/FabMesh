@@ -27,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div style={{ display: 'flex', gap: 16 }}>
             <a href="/legal/terms">Terms</a>
             <a href="/legal/privacy">Privacy</a>
+            <a href="/legal/mentions">Legal Notice</a>
             <a href="https://fabienlacaze.github.io/MyFabmesh" target="_blank">Desktop app</a>
           </div>
         </footer>
