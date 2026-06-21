@@ -888,10 +888,13 @@ def do_tex_variant(input_path, prompt, output_path, strength=0.45, seed=0):
                     negative_prompt="deformed, distorted, changed shape, different pose, extra parts, missing parts, blurry, low quality",
                     image=img_work,
                     control_image=img_work,
-                    strength=float(max(0.2, min(0.7, strength))),
-                    num_inference_steps=26,
-                    guidance_scale=6.0,
-                    controlnet_conditioning_scale=0.9,    # strong structure lock
+                    strength=float(max(0.35, min(0.9, strength))),
+                    num_inference_steps=28,
+                    guidance_scale=7.5,
+                    # LOW conditioning so the silhouette/pose is held but the
+                    # texture/material/colour can change A LOT (metal->gold, grey
+                    # horse->brown). High scale (0.9) kept the colours = no real change.
+                    controlnet_conditioning_scale=0.45,
                     generator=torch.Generator("cuda").manual_seed(int(seed)),
                 ).images[0]
             if result.size != orig_size:

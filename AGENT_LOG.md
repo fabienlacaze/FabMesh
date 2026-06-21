@@ -10,6 +10,10 @@
   Modal Variante : toggle « 🔒 Varier seulement la texture (garder la forme) » + champ
   prompt optionnel (« épée bleue… » — vide = libre). Quand ON, la boucle (sliders
   Intensité + Nombre 1-8 réutilisés) appelle texVariant au lieu d'img2img. Desktop only.
+  RETUNE : cn_scale 0.9 verrouillait trop (gardait les couleurs = aucun vrai changement).
+  Baissé à 0.45 + strength 0.35-0.9 + guidance 7.5 → la silhouette tient mais la
+  texture/matière/couleur change vraiment (gris→marron, métal→or). Intensité auto à 70 %
+  quand on active le mode. Le prompt guide la variation.
 
 ## 2026-06-21 (Précision de détection CLIPSeg : seuil relatif au pic + slider Précision)
 

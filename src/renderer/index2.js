@@ -14111,6 +14111,17 @@ document.getElementById('var-tex-mode')?.addEventListener('change', (e) => {
   const hint = document.getElementById('var-tex-hint');
   if (pr) pr.style.display = on ? '' : 'none';
   if (hint) hint.style.display = on ? '' : 'none';
+  // Texture/material changes need more denoise than a subtle img2img re-roll —
+  // nudge the Intensité up so the user sees a real change out of the box.
+  if (on) {
+    const s = document.getElementById('var-strength');
+    if (s && parseInt(s.value) < 60) {
+      s.value = 70;
+      const sv = document.getElementById('var-strength-val');
+      if (sv) sv.textContent = '70%';
+      try { _updateVarStrengthHint(); } catch (_) {}
+    }
+  }
 });
 document.getElementById('var-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-variant')?.classList.add('hidden');
