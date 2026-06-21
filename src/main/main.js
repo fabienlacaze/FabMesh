@@ -5604,7 +5604,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const argsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
-      'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
+      'trellis2_native': [bridgeScript, imagePath, meshPath, String(trellis2TexSize || textureSize || 2048)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
     };
     const args = argsMap[engine] || argsMap['trellis2_native'];
@@ -5626,7 +5626,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const fixedArgsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
-      'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
+      'trellis2_native': [bridgeScript, imagePath, meshPath, String(trellis2TexSize || textureSize || 2048)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
     };
     const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['trellis2_native'];

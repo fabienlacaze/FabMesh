@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Fix mesh low-def : Ultra 8K passait 2048 au lieu de 4096 à TRELLIS-2)
+
+- User : « mesh généré avec params au max → low def ». Log : trellis2_native appelé avec
+  texsize=`2048`. Cause : le renderer envoie DEUX tailles — `textureSize` (= `preset.tex`
+  générique, 2048) ET `trellis2TexSize` (= `t2cfg.texSize` du preset Ultra 8K, **4096**).
+  main.js construisait l'arg trellis2 avec `textureSize` (2048) au lieu de `trellis2TexSize`.
+  Donc la texture base sortait à 2048, puis Real-ESRGAN ×2 → 4096 final au lieu de 8192 =
+  résolution divisée par 2 partout. Fix : `String(trellis2TexSize || textureSize || 2048)`.
+  Maintenant Ultra 8K = base 4096 → ×2 → 8192. (NB : la géométrie 1536_cascade reste gated
+  à 32 GB RAM ; sur 27 GB le max géo est 1024_cascade — séparé du fix texture.) Restart
+  Electron requis.
+
 ## 2026-06-22 (Outil Age : contrainte ControlNet variable pour atteindre bébé/lionceau)
 
 - User : « le aging marche pas trop mal mais on peut pas aller jusqu'aux enfants ; un
