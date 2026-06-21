@@ -14264,6 +14264,12 @@ document.getElementById('ws-recolor-btn')?.addEventListener('click', () => {
 let _rcSrcPath = null;
 let _rcPreviewTimer = null;
 let _rcFirstDetectDone = false;
+// Précision slider -> CLIPSeg relative threshold (rel*peak). 0%->0.2 (large),
+// 50%->0.5, 100%->0.8 (très serré, ne garde que la zone fortement détectée).
+function _rcRel() {
+  const pr = parseInt(document.getElementById('rc-precision')?.value);
+  return 0.2 + ((isNaN(pr) ? 50 : pr) / 100) * 0.6;
+}
 async function _rcUpdateMaskPreview() {
   const srcImg = document.getElementById('rc-source-img');
   if (!srcImg || !_rcSrcPath) return;
@@ -14280,7 +14286,7 @@ async function _rcUpdateMaskPreview() {
   srcImg.style.opacity = '0.6';
   try {
     const target = await translateUserPrompt(noun);
-    const r = await API.segmentMask({ imagePath: _rcSrcPath, targetText: target, dilate });
+    const r = await API.segmentMask({ imagePath: _rcSrcPath, targetText: target, dilate, rel: _rcRel() });
     if (((document.getElementById('rc-prompt').value || '').trim()) !== rawPrompt) return;
     _rcFirstDetectDone = true;
     srcImg.style.opacity = '';
@@ -14307,6 +14313,11 @@ const rcStrength = document.getElementById('rc-strength');
 if (rcStrength) rcStrength.addEventListener('input', () => {
   document.getElementById('rc-strength-val').textContent = rcStrength.value + '%';
 });
+const rcPrecision = document.getElementById('rc-precision');
+if (rcPrecision) rcPrecision.addEventListener('input', () => {
+  document.getElementById('rc-precision-val').textContent = rcPrecision.value + '%';
+  _rcSchedulePreview();
+});
 document.getElementById('rc-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-recolor').classList.add('hidden');
 });
@@ -14331,7 +14342,7 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
       Padding: dilate + 'px',
     }, 20000, { sourceImageUrl: imagePath, projectName: p.name });
     try {
-      const r = await API.recolor({ imagePath, prompt, strength, dilate, jobId: job.id });
+      const r = await API.recolor({ imagePath, prompt, strength, dilate, rel: _rcRel(), jobId: job.id });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();

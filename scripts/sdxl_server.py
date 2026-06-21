@@ -609,7 +609,7 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
 
             mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.LANCZOS)
             mask_arr = np.array(mask_img)
-            binary = (mask_arr > 60).astype(np.uint8) * 255   # assouplir (was 100)
+            binary = (mask_arr > max(60.0, float(mask_arr.max()) * 0.5)).astype(np.uint8) * 255  # relative-to-peak (tighter)
             mask_binary = Image.fromarray(binary, mode="L")
 
             # Dilate mask for context blending
@@ -755,24 +755,26 @@ def recolor_hsv_masked(img_rgb, mask_soft, color_spec, strength=1.0):
     return Image.fromarray(blended.clip(0, 255).astype(np.uint8), 'RGB')
 
 
-def _clipseg_mask(img_work, work_w, work_h, target_text, dilate):
-    """CLIPSeg text->mask, identical pipeline to do_inpaint. Returns a soft PIL 'L'."""
+def _clipseg_mask(img_work, work_w, work_h, target_text, dilate, rel=0.5):
+    """CLIPSeg text->mask. The threshold is RELATIVE to the per-image peak response
+    (rel*peak, floored at 60) so it keys on the strongly-detected region instead of
+    everything matching weakly -> much tighter/precise. Higher rel = tighter."""
     inputs = state.clipseg_processor(text=[target_text.strip()], images=[img_work], padding=True, return_tensors="pt")
     inputs = {k: v.to("cuda") for k, v in inputs.items()}
     with torch.inference_mode():
         seg_out = state.clipseg_model(**inputs)
     mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
     mask_prob = 1 / (1 + np.exp(-mask_logits))
-    mask_img = Image.fromarray((mask_prob * 255).astype(np.uint8)).resize((work_w, work_h), Image.LANCZOS)
-    binary = (np.array(mask_img) > 60).astype(np.uint8) * 255
-    mask_binary = Image.fromarray(binary, mode="L")
+    arr = np.array(Image.fromarray((mask_prob * 255).astype(np.uint8)).resize((work_w, work_h), Image.LANCZOS)).astype(np.float32)
+    thr = max(60.0, float(arr.max()) * float(rel))
+    mask_binary = Image.fromarray((arr > thr).astype(np.uint8) * 255, mode="L")
     d = max(0, int(dilate))
     if d > 0:
         mask_binary = mask_binary.filter(ImageFilter.MaxFilter(d * 2 + 1))
     return mask_binary.filter(ImageFilter.GaussianBlur(3))
 
 
-def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15):
+def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5):
     """Auto-recolour: detect the named part (CLIPSeg) and recolour ONLY it via a
     luminance-preserving HSV shift (shape/folds intact). Falls back to
     ControlNet-Tile when the prompt names a material rather than a colour."""
@@ -782,7 +784,7 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15):
         return {"ok": False, "error": "prompt required (e.g. 'cape rouge')"}
     noun, color_spec = parse_recolor_prompt(prompt)
     if color_spec is None:
-        return do_recolor_tile(input_path, noun, prompt, output_path, dilate)
+        return do_recolor_tile(input_path, noun, prompt, output_path, dilate, rel)
     load_clipseg()
     with state.inference_lock:
         try:
@@ -790,7 +792,7 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15):
             orig_size = img.size
             img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
             t0 = time.time()
-            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun, dilate)
+            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun, dilate, rel)
             coverage = (np.array(mask_soft) > 128).mean() * 100
             if coverage < 0.2:
                 return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
@@ -811,7 +813,7 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15):
             return {"ok": False, "error": str(e)}
 
 
-def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15):
+def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0.5):
     """ControlNet-Tile fallback for material/non-colour requests ('metal rouille',
     'cuir vieilli'): low-denoise structure-preserving re-paint, composited through
     the CLIPSeg mask so only the detected region changes."""
@@ -828,7 +830,7 @@ def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15):
             orig_size = img.size
             img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
             t0 = time.time()
-            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun or full_prompt, dilate)
+            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun or full_prompt, dilate, rel)
             coverage = (np.array(mask_soft) > 128).mean() * 100
             if coverage < 0.2:
                 return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
@@ -863,7 +865,7 @@ def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15):
             return {"ok": False, "error": str(e)}
 
 
-def do_segment(input_path, target_text, output_path, dilate=15):
+def do_segment(input_path, target_text, output_path, dilate=15, rel=0.5):
     """CLIPSeg detection ONLY (no inpaint): save a red overlay of the detected
     mask so the user can preview LIVE what Auto Inpaint will repaint. Loads only
     the small CLIPSeg model, never the heavy ~6 GB inpaint pipeline."""
@@ -898,8 +900,10 @@ def do_segment(input_path, target_text, output_path, dilate=15):
             mask_uint8 = (mask_prob * 255).astype(np.uint8)
             # Upscale the low-res CLIPSeg mask with LANCZOS (BILINEAR was blocky).
             mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.LANCZOS)
-            # Assouplir: > 60 (was 100) so fainter CLIPSeg responses still register.
-            binary = (np.array(mask_img) > 60).astype(np.uint8) * 255
+            # Threshold RELATIVE to the per-image peak (rel*peak, floor 60) so the
+            # preview keys on the strongly-detected region, not weak spillover.
+            _arr = np.array(mask_img).astype(np.float32)
+            binary = (_arr > max(60.0, float(_arr.max()) * float(rel))).astype(np.uint8) * 255
             mask_binary = Image.fromarray(binary, mode="L")
             d = max(0, int(dilate))
             if d > 0:
@@ -1290,6 +1294,7 @@ class Handler(BaseHTTPRequestHandler):
                     data['target'],
                     data['output'],
                     data.get('dilate', 15),
+                    data.get('rel', 0.5),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 
@@ -1303,6 +1308,7 @@ class Handler(BaseHTTPRequestHandler):
                     data['output'],
                     data.get('strength', 1.0),
                     data.get('dilate', 15),
+                    data.get('rel', 0.5),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

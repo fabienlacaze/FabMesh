@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Précision de détection CLIPSeg : seuil relatif au pic + slider Précision)
+
+- User : « arme » détectait toute la moitié gauche (cape+corps) — le seuil CLIPSeg fixe
+  >60 (sigmoid, ~23%) était trop permissif. Passé à un seuil RELATIF au pic par image :
+  `thr = max(60, peak * rel)` dans `_clipseg_mask` (recolor), `do_segment` (preview) et
+  `do_inpaint` → ne garde que la zone fortement détectée. Param `rel` propagé (routes
+  /segment + /recolor, main.js segment-mask + recolor). Nouveau slider **Précision
+  détection** (0-100% → rel 0.2-0.8) dans le modal Recolorier, appliqué au preview ET à
+  l'apply. Plus haut = plus serré.
+
 ## 2026-06-21 (Nouvel outil « Recolorier » — recolorisation auto par prompt, forme préservée)
 
 - User : « outil auto pour regénérer seulement les couleurs des habits via prompt

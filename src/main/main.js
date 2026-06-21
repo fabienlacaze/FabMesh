@@ -3982,7 +3982,7 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
 // Live mask preview for Auto Inpaint: run CLIPSeg detection ONLY (no inpaint)
 // and return a red-overlay image so the user sees what will be repainted before
 // committing. Reuses one temp file (cache-busted by the renderer).
-ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate }) => {
+ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate, rel }) => {
   try {
     if (!imagePath || !targetText || !String(targetText).trim()) return { success: false, error: 'missing target' };
     await ensureSdxlServer();
@@ -3990,6 +3990,7 @@ ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate }) 
     const outPath = path.join(require('os').tmpdir(), 'fabmesh_mask_preview.png');
     const r = await sdxlServerCall('/segment', {
       input: imagePath, target: targetText, output: outPath, dilate: dilate || 15,
+      rel: (rel != null ? rel : 0.5),
     });
     if (r && r.ok && fs.existsSync(outPath)) {
       return { success: true, overlayPath: outPath, coverage: r.coverage };
@@ -4001,7 +4002,7 @@ ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate }) 
 });
 
 // Recolor: auto-detect a part (CLIPSeg) and recolor ONLY it, shape preserved.
-ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate }) => {
+ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate, rel }) => {
   try {
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
@@ -4012,6 +4013,7 @@ ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate })
     const r = await sdxlServerCall('/recolor', {
       input: imagePath, prompt: prompt || '', output: newImagePath,
       strength: (strength != null ? strength : 1.0), dilate: dilate || 15,
+      rel: (rel != null ? rel : 0.5),
     });
     if (r.ok) {
       _handleMultiviewInheritance(newImagePath).catch(() => {});
