@@ -4410,14 +4410,10 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     try {
       const status = await callModalMeshStatus(env, id);
       if (status.error) {
-        await sbm.from('jobs')
-          .update({ status: 'failed', error: status.error.slice(0, 500),
-                    finished_at: new Date().toISOString() })
-          .eq('id', id);
-        // Refund credits on failure (same policy as Replicate).
-        if (typeof job.user_id === 'string' && typeof job.credit_cost === 'number') {
-          await addCredits(env, job.user_id, job.credit_cost);
-        }
+        // Idempotent fail+refund: only the request that flips the row out of a
+        // non-terminal status refunds, so a client poll and the cron reaper
+        // can't both refund the same job.
+        await _failAndRefundJob(env, job, status.error);
         return json({ status: 'failed', error: status.error });
       }
       if (!status.ready || !status.glb_base64) {
@@ -11201,10 +11197,58 @@ async function purgeTransientUploads(env: Env): Promise<void> {
   console.log(`[retention] scanned ${listed.objects.length}, deleted ${deleted} transient masks/canvas >30d, cursor=${nextCursor ? 'more' : 'reset'}`);
 }
 
+// Idempotent: mark a Modal mesh job failed + refund its credits EXACTLY ONCE,
+// even if the client poll and the cron reaper race. Only the request that flips
+// the row out of a non-terminal status refunds (conditional UPDATE + select).
+async function _failAndRefundJob(env: Env, job: { id: unknown; user_id?: unknown; credit_cost?: unknown }, errMsg: string): Promise<void> {
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('jobs')
+    .update({ status: 'failed', error: String(errMsg).slice(0, 500), finished_at: new Date().toISOString() })
+    .eq('id', job.id as string)
+    .in('status', ['processing', 'pending'])
+    .select('id');
+  if (error || !data || data.length === 0) return;  // already finalized by someone else
+  if (typeof job.user_id === 'string' && typeof job.credit_cost === 'number') {
+    await addCredits(env, job.user_id, job.credit_cost);
+  }
+}
+
+// Reaper: a mesh job whose client stopped polling (tab closed / container died)
+// would sit in 'processing' forever and the spent credits would be lost. Sweep
+// old processing jobs, re-poll Modal, and fail+refund the dead ones (idempotent).
+async function reapStuckJobs(env: Env): Promise<void> {
+  if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return;
+  const sb = supabaseAdmin(env);
+  const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const { data: stuck } = await sb.from('jobs')
+    .select('id, user_id, credit_cost, created_at, status')
+    .eq('status', 'processing')
+    .lt('created_at', cutoff)
+    .limit(50);
+  if (!stuck || !stuck.length) return;
+  let reaped = 0;
+  for (const job of stuck) {
+    const id = String(job.id);
+    if (!id.startsWith('modal_')) continue;  // only Modal jobs are re-pollable here
+    const age = job.created_at ? Date.now() - new Date(String(job.created_at)).getTime() : 0;
+    try {
+      const status = await callModalMeshStatus(env, id);
+      if (status.error) { await _failAndRefundJob(env, job, status.error); reaped++; }
+      else if (status.ready && status.glb_base64) { /* finished; a client/admin poll persists it */ }
+      else if (age > 30 * 60 * 1000) { await _failAndRefundJob(env, job, 'reaped: no result after 30 min'); reaped++; }
+    } catch (e) {
+      if (age > 30 * 60 * 1000) { await _failAndRefundJob(env, job, 'reaped: unreachable after 30 min'); reaped++; }
+      else console.log(`[reaper] ${id} poll failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  console.log(`[reaper] scanned ${stuck.length} processing jobs >20min, failed+refunded ${reaped}`);
+}
+
 export default {
   async scheduled(_event: unknown, env: Env, ctx: { waitUntil: (p: Promise<unknown>) => void }): Promise<void> {
     ctx.waitUntil(preWarmCog(env));
     ctx.waitUntil(purgeTransientUploads(env));
+    ctx.waitUntil(reapStuckJobs(env));
   },
 
   async fetch(req: Request, env: Env, _ctx: unknown): Promise<Response> {
