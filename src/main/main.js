@@ -382,20 +382,22 @@ function _loadUiLang() {
 function _spellcheckCodesFor(uiLang) {
   try {
     const avail = (mainWindow && mainWindow.webContents.session.availableSpellCheckerLanguages) || [];
-    const out = [];
     const want = (uiLang || 'en').toLowerCase().slice(0, 2);
     const match = avail.find(c => c.toLowerCase().slice(0, 2) === want);  // e.g. 'fr' -> 'fr', 'es' -> 'es-ES'
-    if (match) out.push(match);
+    // ONLY the UI language, so the suggestions come from it (not English). If the
+    // UI language has no dictionary (e.g. Chinese), fall back to English.
+    if (match) return [match];
     const en = avail.find(c => c.toLowerCase().startsWith('en'));
-    if (en && !out.includes(en)) out.push(en);
-    return out;
+    return en ? [en] : [];
   } catch (_) { return []; }
 }
 function _applySpellcheckLang(win, uiLang) {
   try {
+    const avail = (win && win.webContents.session.availableSpellCheckerLanguages) || [];
     const langs = _spellcheckCodesFor(uiLang);
+    log.info('main', `spellcheck uiLang=${uiLang} -> set ${JSON.stringify(langs)} | avail(${avail.length}) fr=${avail.includes('fr')} sample=${JSON.stringify(avail.slice(0, 10))}`);
     if (langs.length && win && win.webContents) win.webContents.session.setSpellCheckerLanguages(langs);
-  } catch (_) {}
+  } catch (e) { try { log.warn('main', `spellcheck set failed: ${e && e.message}`); } catch (_) {} }
 }
 ipcMain.handle('set-spellcheck-lang', (event, lang) => {
   try { const cfg = loadConfig(); cfg.uiLang = lang; saveConfig(cfg); } catch (_) {}
@@ -959,6 +961,12 @@ function createWindow() {
   // Spell checker: apply the stored UI language + a right-click menu offering
   // spelling suggestions, "add to dictionary", and the standard edit actions.
   try { _applySpellcheckLang(mainWindow, _loadUiLang()); } catch (_) {}
+  try {
+    const _ses = mainWindow.webContents.session;
+    _ses.on('spellcheck-dictionary-download-success', (e, lang) => log.info('main', `spellcheck dict downloaded: ${lang}`));
+    _ses.on('spellcheck-dictionary-download-failure', (e, lang) => log.warn('main', `spellcheck dict download FAILED: ${lang} (CDN blocked?)`));
+    _ses.on('spellcheck-dictionary-initialized', (e, lang) => log.info('main', `spellcheck dict ready: ${lang}`));
+  } catch (_) {}
   mainWindow.webContents.on('context-menu', (event, params) => {
     if (!params.isEditable && !params.misspelledWord) return;
     const { Menu, MenuItem } = require('electron');
