@@ -53,7 +53,8 @@ _HF_MINOR = (
 _HF_SEXUAL = (
     "without clothes", "no clothes", "unclothed", "undressed", "disrobed",
     "bare", "exposed", "revealing", "intimate", "sensual", "seductive",
-    "provocative", "suggestive", "sexy", "lingerie", "underwear", "panties",
+    "provocative", "suggestive", "sexy", "hot", "bath", "shower", "bedroom",
+    "bed", "diaper only", "lingerie", "underwear", "panties",
     "bra", "bikini", "swimsuit", "naked", "nude", "nsfw", "sexual",
     "erotic", "porn", "deshabill", "sans vetement", "sans habit",
     "nu ", "nue ", "nus ", "nues",

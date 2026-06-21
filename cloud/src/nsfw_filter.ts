@@ -71,7 +71,7 @@ interface Combo { a: string[]; b: string[] }
 const NSFW_COMBOS: Combo[] = [
   // Children + nudity/sexual
   { a: ['child', 'children', 'kid', 'kids', 'boy', 'girl', 'teen', 'teenager', 'young', 'infant', 'baby', 'toddler', 'minor', 'preteen', 'schoolgirl', 'schoolboy', 'enfant', 'fille', 'garcon', 'jeune', 'ado', 'adolescent', 'gamin', 'gamine', 'bebe'],
-    b: ['without clothes', 'no clothes', 'unclothed', 'undressed', 'disrobed', 'bare', 'exposed', 'revealing', 'intimate', 'sensual', 'seductive', 'provocative', 'suggestive', 'sexy', 'hot', 'bath', 'shower', 'bedroom', 'bed', 'lingerie', 'underwear', 'panties', 'bra', 'bikini', 'swimsuit', 'diaper only', 'sans vetement', 'sans habit', 'deshabill', 'nu ', 'nue ', 'nus ', 'nues'] },
+    b: ['without clothes', 'no clothes', 'unclothed', 'undressed', 'disrobed', 'bare', 'exposed', 'revealing', 'intimate', 'sensual', 'seductive', 'provocative', 'suggestive', 'sexy', 'hot', 'bath', 'shower', 'bedroom', 'bed', 'lingerie', 'underwear', 'panties', 'bra', 'bikini', 'swimsuit', 'diaper only', 'naked', 'nude', 'nsfw', 'sexual', 'erotic', 'porn', 'sans vetement', 'sans habit', 'deshabill', 'nu ', 'nue ', 'nus ', 'nues'] },
   // Anyone + extreme sexual
   { a: ['woman', 'man', 'person', 'girl', 'boy', 'female', 'male', 'lady', 'femme', 'homme'],
     b: ['without clothes', 'no clothes', 'unclothed', 'fully exposed', 'spread legs', 'bent over', 'on knees', 'tied up', 'chained', 'whipped', 'spanked'] },

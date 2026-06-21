@@ -1,5 +1,26 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Batch WF3 — quick wins + sécu/argent/fiabilité)
+
+Du workflow #3 (améliorations) :
+- Supprimé `cloud/src/worker_master_test.ts` (10 648 lignes mortes, exclu du build).
+- `handleImageTo3D` valide le GLB (taille > 2 Ko + magic `glTF`) avant de reporter
+  un succès (un GLB 0-byte/tronqué passait).
+- Cache mémoire (from|text) pour la traduction Argos (évite le respawn Python à
+  chaque prompt non-anglais sur le chemin critique du Generate).
+- **Compteurs spend/credits atomiques** (CAS R2 `_casIncrementCounter`) — les caps
+  GPU $ + 10 calls/user étaient contournables en concurrence (read→put non atomique).
+- **Reaper de jobs bloqués** (`reapStuckJobs` dans `scheduled()`) + **fail/refund
+  idempotent** (`_failAndRefundJob`, conditional UPDATE + select) — un job dont le
+  client arrête de poller est désormais failed+remboursé UNE fois (>20-30 min).
+- **Hard-floor CSAM aligné** : le combo minor×sexual divergeait — le JS bloquait
+  `child+bath/bedroom` mais PAS `child+naked/nude/sexual/porn` (trou sous unrestricted),
+  le Python l'inverse. **Union** des 3 copies (main.js + nsfw_filter.ts + app.py).
+  Combo violence laissé tel quel (les 25 termes sur-bloqueraient les « girl warrior »).
+  NON centralisé en JSON (risque de casser le floor sans test) — sync manuelle.
+- Déploiements : **Modal redeploy + cloud build/deploy + restart Electron**.
+- SKIP : « skip refine multi-view » (la MV EST consommée en aval, trop risqué).
+
 ## 2026-06-21 (MVP modif-mesh UI + batch WF2 : boutons morts, back-view, align-tex, export, anim)
 
 - **UI re-texture régionale IA** (complète le backend du 2026-06-20) : bouton
