@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (MVP modif-mesh — re-texture régionale IA : backend + plomberie)
+
+Suite au workflow #4 (modifier un mesh par IA). MVP = re-texture régionale par
+masque + prompt, en généralisant `face_inpaint_atlas.py` au-delà du visage
+(géométrie inchangée, texture seule).
+- `face_inpaint_atlas.py` : `make_atlas_mask_from_screenmask` (projette un masque
+  écran utilisateur → masque atlas UV, même projection ortho xmag=0.6 que le bbox
+  visage). Args `--mask <png>` (mode région : skip détection visage) + `--render-only
+  <png>` (rend le front aligné pour que l'UI peigne dessus). py_compile OK.
+- IPC `mesh:render-front` (→ dataURL du rendu) + `mesh:region-retex` (masque dataURL
+  + prompt + strength → nouveau GLB) + exposition preload (`renderMeshFront`,
+  `regionRetex`). Pipeline : render-front → Draw-Mask → inpaint SDXL atlas → re-pack GLB.
+- **RESTE (prochain incrément)** : l'UI renderer (afficher le render, Draw-Mask
+  dessus, capturer le masque, bouton « Re-texturer une zone » près de Re-Texture) +
+  parité cloud/Modal (`_region_retex.py`). **Restart Electron requis** (main.js).
+- Incrément 2 (post-MVP, cf. workflow) : **Nano3D** sur Modal pour la GÉOMÉTRIE
+  (add/remove/replace « rallonge l'épée »).
+
 ## 2026-06-20 (SDXL-Lightning turbo — parité cloud/Modal)
 
 Portage du turbo Lightning côté cloud (le desktop l'avait déjà). Modal : la LoRA

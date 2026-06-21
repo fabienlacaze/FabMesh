@@ -130,6 +130,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   meshTool: (opts) => ipcRenderer.invoke('mesh-tool', opts),
   materialAdjust: (opts) => ipcRenderer.invoke('material-adjust', opts),
   alignTexture: (opts) => ipcRenderer.invoke('mesh:align-texture', opts),
+  renderMeshFront: (opts) => ipcRenderer.invoke('mesh:render-front', opts),
+  regionRetex: (opts) => ipcRenderer.invoke('mesh:region-retex', opts),
   generateBackView: (opts) => ipcRenderer.invoke('generate-back-view', opts),
   captionImage: (opts) => ipcRenderer.invoke('caption-image', opts),
   saveBuffer: (opts) => ipcRenderer.invoke('save-buffer', opts),

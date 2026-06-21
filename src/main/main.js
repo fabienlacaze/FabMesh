@@ -5884,6 +5884,46 @@ ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer, base64 })
 });
 
 // --- Mesh Tools IPC ---
+// AI region re-texture (MVP modif-mesh): render the mesh front so the user can
+// draw a mask aligned to face_inpaint_atlas.py's projection, then re-texture the
+// painted region with a prompt (generalises face inpaint beyond the face).
+ipcMain.handle('mesh:render-front', async (_e, { meshPath } = {}) => {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
+  const out = path.join(os.tmpdir(), `fabmesh_front_${Date.now()}.png`);
+  return new Promise((resolve) => {
+    // Distinct dummy output so the script's in==out guard passes; --render-only
+    // exits before any GLB is written.
+    execFile('python', [script, meshPath, meshPath + '.ignore', '--render-only', out],
+      { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error) => {
+        if (error || !fs.existsSync(out)) { resolve({ ok: false, error: (error && error.message) || 'render failed' }); return; }
+        try {
+          const dataUrl = 'data:image/png;base64,' + fs.readFileSync(out).toString('base64');
+          try { fs.unlinkSync(out); } catch (_) {}
+          resolve({ ok: true, dataUrl });
+        } catch (e) { resolve({ ok: false, error: String(e) }); }
+      });
+  });
+});
+ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, strength } = {}) => {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
+  const maskPath = path.join(os.tmpdir(), `fabmesh_mask_${Date.now()}.png`);
+  try {
+    fs.writeFileSync(maskPath, Buffer.from(String(maskDataUrl || '').replace(/^data:image\/\w+;base64,/, ''), 'base64'));
+  } catch (e) { return { ok: false, error: 'mask write failed: ' + String(e) }; }
+  const base = path.basename(meshPath, path.extname(meshPath));
+  const out = path.join(path.dirname(meshPath), `${base}_retex_${Date.now()}.glb`);
+  return new Promise((resolve) => {
+    execFile('python', [script, meshPath, out,
+      '--mask', maskPath, '--prompt', String(prompt || 'detailed texture'),
+      '--strength', String(strength || 0.8)],
+      { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout) => {
+        try { fs.unlinkSync(maskPath); } catch (_) {}
+        if (error || !fs.existsSync(out)) { resolve({ ok: false, error: (error && error.message) || 'retex failed', stdout }); return; }
+        resolve({ ok: true, path: out });
+      });
+  });
+});
+
 ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_tools.py');
   const timestamp = Date.now();

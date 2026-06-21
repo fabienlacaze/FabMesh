@@ -171,6 +171,50 @@ def make_atlas_mask_from_bbox(scene, bbox, render_size, atlas_size):
     return mask
 
 
+def make_atlas_mask_from_screenmask(scene, screen_mask, render_size, atlas_size):
+    """Project a user-drawn 2D screen-space mask (white = edit this region) onto
+    the UV atlas. Same vertex->screen ortho projection as the bbox version, but a
+    triangle is selected when any of its verts lands on a white mask pixel. This
+    generalises face inpaint to ANY region the user paints on the front render.
+    `screen_mask` is a (render_size, render_size) uint8 numpy array (0/255)."""
+    geoms = (list(scene.geometry.values())
+             if hasattr(scene, 'geometry') else [scene])
+    if not geoms:
+        return None
+    mesh = geoms[0]
+    if not hasattr(mesh, 'vertices') or not hasattr(mesh, 'faces'):
+        return None
+    verts = np.asarray(mesh.vertices, dtype=np.float32)
+    bb_min = verts.min(axis=0)
+    bb_max = verts.max(axis=0)
+    center = (bb_min + bb_max) * 0.5
+    scale = max(bb_max - bb_min) or 1.0
+    verts = (verts - center) / scale
+    sx = ((verts[:, 0] + 0.6) / 1.2 * render_size).astype(int)
+    sy = (((-verts[:, 1]) + 0.6) / 1.2 * render_size).astype(int)
+    sx = np.clip(sx, 0, render_size - 1)
+    sy = np.clip(sy, 0, render_size - 1)
+    in_region = screen_mask[sy, sx] > 127
+    log(f'{int(in_region.sum())} / {len(verts)} vertices under the drawn mask')
+    if not hasattr(mesh, 'visual') or not hasattr(mesh.visual, 'uv'):
+        log('mesh has no UVs — cannot build atlas mask')
+        return None
+    uvs = mesh.visual.uv
+    faces = mesh.faces
+    face_in = in_region[faces].any(axis=1)
+    log(f'{int(face_in.sum())} / {len(faces)} faces under the drawn mask')
+    mask = Image.new('L', (atlas_size, atlas_size), 0)
+    draw = ImageDraw.Draw(mask)
+    for fi in np.where(face_in)[0]:
+        tri = faces[fi]
+        uv_tri = uvs[tri]
+        pts = [(int(u * atlas_size), int((1 - v) * atlas_size))
+               for u, v in uv_tri]
+        draw.polygon(pts, fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(6))
+    return mask
+
+
 def inpaint_atlas(atlas_img, mask, prompt, strength=0.4,
                    sdxl_size=1024):
     """SDXL inpaint on the atlas where the mask is white.
@@ -242,6 +286,13 @@ def main():
         'photorealistic skin, symmetrical features, soft lighting, '
         'ultra detailed, 8k, masterpiece'))
     ap.add_argument('--render_size', type=int, default=1024)
+    ap.add_argument('--mask', default=None,
+                    help='user-drawn screen-space mask PNG (white = region to '
+                         're-texture). When set, skips face detection and '
+                         're-textures the painted region with --prompt.')
+    ap.add_argument('--render-only', dest='render_only', default=None,
+                    help='just render the mesh front to this PNG and exit, so '
+                         'the UI can draw a mask aligned to the projection.')
     args = ap.parse_args()
 
     # Guard against in-place overwrite: trimesh.export() would corrupt
@@ -267,8 +318,15 @@ def main():
         sys.exit(0)
     log(f'  rendered in {time.time()-t0:.1f}s')
 
-    bbox = detect_face_bbox(rendered) or fallback_top_bbox(rendered.size)
-    log(f'face bbox = {bbox}')
+    if args.render_only:
+        rendered.save(args.render_only)
+        log(f'render-only -> {args.render_only}')
+        sys.exit(0)
+
+    bbox = None
+    if not args.mask:
+        bbox = detect_face_bbox(rendered) or fallback_top_bbox(rendered.size)
+        log(f'face bbox = {bbox}')
 
     geoms = (list(scene.geometry.values())
              if hasattr(scene, 'geometry') else [scene])
@@ -288,9 +346,17 @@ def main():
         sys.exit(0)
     log(f'atlas size: {tex.size}')
 
-    log('projecting face bbox to UV atlas...')
-    mask = make_atlas_mask_from_bbox(scene, bbox, args.render_size,
-                                       tex.size[0])
+    if args.mask:
+        log(f'projecting user-drawn mask {args.mask} to UV atlas...')
+        _sm = Image.open(args.mask).convert('L').resize(
+            (args.render_size, args.render_size), Image.LANCZOS)
+        screen_mask = np.array(_sm, dtype=np.uint8)
+        mask = make_atlas_mask_from_screenmask(scene, screen_mask,
+                                               args.render_size, tex.size[0])
+    else:
+        log('projecting face bbox to UV atlas...')
+        mask = make_atlas_mask_from_bbox(scene, bbox, args.render_size,
+                                           tex.size[0])
     if mask is None:
         log('could not build atlas mask — abort')
         import shutil
