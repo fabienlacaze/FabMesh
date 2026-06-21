@@ -12584,10 +12584,29 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
       // global onAI3DProgress listener bumps job.progress). The cloud
       // path keeps its own onProgress because it stays in-process (no
       // IPC crossing).
+      // Forward placed landmarks (normalized 0..1 in the mesh bbox) so the
+      // "Re-generate rig with these landmarks" promise is kept when the engine
+      // supports landmark guidance. Added only when present (no regression),
+      // and strictly DOWNSTREAM — the Puppeteer generator itself is untouched.
+      let landmarks = null;
+      try {
+        if (Object.keys(lmMarkers).length === 0) { try { autoDetectLandmarks(); } catch (_) {} }
+        const refModel = (rigSrcModel || lmFsModel || wsModel);
+        let bMin = null, bMax = null;
+        if (refModel) { const bb = new THREE.Box3().setFromObject(refModel); bMin = bb.min; bMax = bb.max; }
+        const norm = (pp) => (!bMin || !bMax) ? [pp.x, pp.y, pp.z] : [
+          (pp.x - bMin.x) / ((bMax.x - bMin.x) || 1),
+          (pp.y - bMin.y) / ((bMax.y - bMin.y) || 1),
+          (pp.z - bMin.z) / ((bMax.z - bMin.z) || 1)];
+        const lmData = {};
+        for (const id in lmMarkers) lmData[id] = norm(lmMarkers[id].position);
+        if (Object.keys(lmData).length) { lmData.__normalized__ = true; landmarks = lmData; }
+      } catch (_) {}
       const r = await API.autoRigAI({
         meshPath: meshPathToUse,
         engine: rigEngine,
         skeleton,
+        ...(landmarks ? { landmarks } : {}),
       });
       if (r?.success) {
         completeJob(job.id, true);
@@ -12826,7 +12845,7 @@ document.getElementById('ws-anim-loop-btn')?.addEventListener('click', () => {
 });
 document.getElementById('ws-anim-folder-btn')?.addEventListener('click', async () => {
   if (!_selectedAnim?.path) return;
-  try { await window.meshyAPI.showInFolder?.(_selectedAnim.path); } catch (_) {}
+  try { await window.meshyAPI.showInExplorer?.(_selectedAnim.path); } catch (_) {}
 });
 document.getElementById('ws-anim-export-btn')?.addEventListener('click', async () => {
   if (!_selectedAnim?.path) return;
@@ -17599,7 +17618,7 @@ document.getElementById('lm-fs-redo')?.addEventListener('click', () => lmRedo())
 document.getElementById('lm-fs-regen-rig')?.addEventListener('click', () => {
   closeLandmarksFullscreen();
   setTimeout(() => {
-    document.getElementById('ws-generate-rig')?.click();
+    document.getElementById('ws-generate-rig-ai')?.click();
   }, 80);
 });
 
