@@ -14356,7 +14356,13 @@ if (rcPrecision) rcPrecision.addEventListener('input', () => {
   document.getElementById('rc-precision-val').textContent = rcPrecision.value + '%';
   _rcSchedulePreview();
 });
-// Colour swatches — click one to set the colour word in the "what to recolor" field.
+// Colour swatches — selecting one sets the target colour, kept SEPARATE from the
+// "what to recolor" field (the field is the part, the swatch is the colour).
+let _rcSelectedColor = '';
+function _rcClearColor() {
+  _rcSelectedColor = '';
+  document.querySelectorAll('#rc-swatches button').forEach((x) => { x.style.boxShadow = ''; });
+}
 (function _buildRcSwatches() {
   const box = document.getElementById('rc-swatches');
   if (!box) return;
@@ -14366,13 +14372,11 @@ if (rcPrecision) rcPrecision.addEventListener('input', () => {
     b.type = 'button'; b.title = word; b.dataset.color = word;
     b.style.cssText = 'width:26px;height:26px;border-radius:6px;border:2px solid var(--border);cursor:pointer;flex:none;background:' + css + ';';
     b.addEventListener('click', () => {
-      const input = document.getElementById('rc-prompt');
-      if (!input) return;
-      const part = _stripColorWords(input.value).trim();
-      input.value = (part ? part + ' ' : '') + word;
+      // toggle: click the active swatch again to clear
+      const next = (_rcSelectedColor === word) ? '' : word;
       box.querySelectorAll('button').forEach((x) => { x.style.boxShadow = ''; });
-      b.style.boxShadow = '0 0 0 2px var(--accent)';
-      _rcSchedulePreview();
+      _rcSelectedColor = next;
+      if (next) b.style.boxShadow = '0 0 0 2px var(--accent)';
     });
     box.appendChild(b);
   });
@@ -14384,12 +14388,20 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const imagePath = editTarget(p);
   if (!imagePath) return;
-  const rawPrompt = document.getElementById('rc-prompt').value.trim();
-  if (!rawPrompt) {
-    showToast('Type what to recolor + pick a colour (e.g. "cape" + red)', 'error');
+  const fieldRaw = (document.getElementById('rc-prompt').value || '').trim();
+  const part = _stripColorWords(fieldRaw).trim();
+  const fieldHasColor = fieldRaw !== part;
+  if (!part) {
+    showToast('Type what to recolor (e.g. cape, mane, saddle)', 'error');
     document.getElementById('rc-prompt')?.focus();
     return;
   }
+  if (!_rcSelectedColor && !fieldHasColor) {
+    showToast('Pick a colour below (or type one)', 'error');
+    return;
+  }
+  // Part comes from the field; colour comes from the selected swatch (or typed in the field).
+  const rawPrompt = _rcSelectedColor ? (part + ' ' + _rcSelectedColor) : fieldRaw;
   const strength = (parseInt(document.getElementById('rc-strength').value) || 100) / 100;
   const dilate = parseInt(document.getElementById('rc-dilate').value) || 15;
   document.getElementById('modal-recolor').classList.add('hidden');
