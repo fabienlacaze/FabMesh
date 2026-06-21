@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Serveur NSFW persistant + noms de moteurs par capacité)
+
+- **Check NSFW instantané** : `checkPromptSafetyAI` rechargeait le modèle de 250 Mo
+  (~20 s) à CHAQUE génération sous contrôle parental → le user voyait la génération
+  « tourner » puis échouer. Nouveau `scripts/nsfw_server.py` = serveur HTTP localhost
+  qui charge le classifieur UNE fois. main.js : lifecycle (start/ensure/call/stop, port
+  5558, kill au quit) + `checkPromptSafetyAI` route vers lui avec fallback per-call.
+  Testé : froid 5,1 s, chaud **0,043 s**. Seuil monté 0.7→0.9 (« Golden crab » = SFW).
+  Desktop-only (cloud NSFW = côté Modal).
+- **Noms de moteurs par capacité** (choix user « avec le compromis ») : Équilibré
+  (qualité/vitesse) / Qualité max (HD · plus lent) / Rapide (Turbo ⚡ · ~4 étapes),
+  desktop + cloud, traduits 5 langues (`_additions3.js`).
+
 ## 2026-06-21 (Anti-doublement : retrait des tokens « ONE/single/no duplicate » du POSITIF de TOUS les types d'asset)
 
 - User : « il y a deux animaux dans l'image » → diagnostic confirmé : l'anti-pattern SDXL

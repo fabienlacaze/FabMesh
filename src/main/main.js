@@ -365,6 +365,17 @@ async function checkPromptSafetyAI(prompt) {
   const floor = checkHardFloor(prompt);
   if (!floor.safe) return floor;            // illegal floor — never bypassable
   if (isUnrestrictedMode()) return { safe: true };
+  // Fast path: persistent classifier server (model stays warm vs ~20s reload).
+  try {
+    await ensureNsfwServer();
+    const r = await nsfwServerCall(prompt);
+    if (r && typeof r.score === 'number' && !r.error) {
+      if (r.label === 'NSFW' && r.score > 0.9) {
+        return { safe: false, blocked: 'AI classifier', reason: `Content filter: AI detected this prompt as inappropriate (${Math.round(r.score * 100)}% confidence). Disable parental control in Settings for unrestricted mode.` };
+      }
+      return { safe: true };
+    }
+  } catch (_) { /* fall through to the per-call spawn */ }
   return new Promise((resolve) => {
     execFile('python', ['-c', `
 import sys
@@ -1805,6 +1816,7 @@ function fullCleanup() {
     killAllActiveProcs();
     stopSdxlServer();
     try { stopTranslateServer(); } catch (_) {}
+    try { stopNsfwServer(); } catch (_) {}
     // WSL shutdown also kills any WSL-side work — skip when keeping jobs.
     try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
   } else {
@@ -4409,6 +4421,55 @@ function translateServerCall(text, from, to) {
     const req = require('http').request({ host: '127.0.0.1', port: TRANSLATE_PORT, path: '/translate', method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 30000 },
       (res) => { let buf = ''; res.on('data', c => buf += c); res.on('end', () => { try { const j = JSON.parse(buf); resolve(typeof j.text === 'string' ? j.text : null); } catch (_) { resolve(null); } }); });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { try { req.destroy(); } catch (_) {} resolve(null); });
+    req.write(body); req.end();
+  });
+}
+
+// Persistent NSFW prompt classifier — loads the ~250 MB text classifier ONCE
+// (it was reloaded ~20s on EVERY generation under parental control). Lazy-started,
+// killed on quit. checkPromptSafetyAI falls back to a per-call spawn if it's down.
+let nsfwProc = null;
+let nsfwReady = false;
+const NSFW_PORT = 5558;
+function startNsfwServer() {
+  if (nsfwProc) return;
+  const scriptN = path.join(__dirname, '..', '..', 'scripts', 'nsfw_server.py');
+  if (!fs.existsSync(scriptN)) return;
+  try {
+    nsfwProc = require('child_process').spawn('python', [scriptN], {
+      stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      env: { ...process.env, CUDA_VISIBLE_DEVICES: '', FABMESH_NSFW_PORT: String(NSFW_PORT) },
+    });
+    nsfwProc.stdout.on('data', d => { if (String(d).includes('NSFW READY')) nsfwReady = true; });
+    nsfwProc.stderr.on('data', () => {});
+    nsfwProc.on('exit', () => { nsfwProc = null; nsfwReady = false; });
+  } catch (_) { nsfwProc = null; }
+}
+function stopNsfwServer() {
+  if (!nsfwProc) return;
+  const pid = nsfwProc.pid;
+  try { const req = require('http').request({ host: '127.0.0.1', port: NSFW_PORT, path: '/shutdown', method: 'POST', timeout: 400 }, () => {}); req.on('error', () => {}); req.end(); } catch (_) {}
+  try {
+    if (process.platform === 'win32' && pid) require('child_process').execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    else nsfwProc.kill('SIGKILL');
+  } catch (_) {}
+  nsfwProc = null; nsfwReady = false;
+}
+async function ensureNsfwServer() {
+  if (nsfwReady) return true;
+  if (!nsfwProc) startNsfwServer();
+  for (let i = 0; i < 90 && !nsfwReady; i++) await new Promise(r => setTimeout(r, 200));
+  return nsfwReady;
+}
+function nsfwServerCall(text) {
+  return new Promise((resolve) => {
+    if (!nsfwReady) { resolve(null); return; }
+    const body = JSON.stringify({ text });
+    const req = require('http').request({ host: '127.0.0.1', port: NSFW_PORT, path: '/classify', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 30000 },
+      (res) => { let buf = ''; res.on('data', c => buf += c); res.on('end', () => { try { resolve(JSON.parse(buf)); } catch (_) { resolve(null); } }); });
     req.on('error', () => resolve(null));
     req.on('timeout', () => { try { req.destroy(); } catch (_) {} resolve(null); });
     req.write(body); req.end();
