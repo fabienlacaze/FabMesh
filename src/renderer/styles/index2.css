@@ -1558,6 +1558,10 @@ button.tool-active {
   backdrop-filter: blur(4px);
 }
 .modal-overlay.hidden { display: none; }
+/* Generation/job popups must sit ABOVE the fullscreen viewers (#lightbox-2 / #lightbox-3d
+   at z-index 9500, lb-toolbox 9510) so they stay visible when a generation runs while a
+   viewer is open in fullscreen. */
+#modal-job-details { z-index: 10000; }
 .modal-card {
   background: var(--bg-1);
   border: 1px solid var(--border-strong);

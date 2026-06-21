@@ -13490,7 +13490,7 @@ function _jobStepIndex(j) {
   // image keyword, so the anchored test above missed them and they never
   // showed in the Image step's GENERATING widget (only in the global
   // running-jobs panel). Match them anywhere in the name.
-  if (/(mask inpaint|auto[- ]?inpaint|manual (mask|inpaint|paint|crop)|clone stamp|draw mask|brightness|symmetri[sz]e|color pick|blur brush|\bcrop\b|\bpaint\b)/i.test(n)) return 1;
+  if (/(mask inpaint|auto[- ]?inpaint|manual (mask|inpaint|paint|crop)|clone stamp|draw mask|brightness|symmetri[sz]e|color pick|blur brush|\bcrop\b|\bpaint\b|recolor|\bage\b|variant)/i.test(n)) return 1;
   if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;
