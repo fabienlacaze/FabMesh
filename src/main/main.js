@@ -4050,7 +4050,7 @@ ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate, r
   }
 });
 
-ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, dilate }) => {
+ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, dilate, rel }) => {
   try {
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
@@ -4063,7 +4063,8 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
     if (sdxlReady) {
       console.log('[inpaint] Using persistent SDXL server');
       const r = await sdxlServerCall('/inpaint', {
-        input: imagePath, target: targetText, prompt: prompt || '', output: newImagePath, dilate: dilate || 15
+        input: imagePath, target: targetText, prompt: prompt || '', output: newImagePath, dilate: dilate || 15,
+        rel: (rel != null ? rel : 0.5)
       });
       if (r.ok) {
         _handleMultiviewInheritance(newImagePath).catch(() => {});

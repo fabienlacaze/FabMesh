@@ -14188,7 +14188,7 @@ async function _aiUpdateMaskPreview() {
   srcImg.style.opacity = '0.6';
   try {
     const target = await translateUserPrompt(rawTarget);  // detect in EN even if typed in another language
-    const r = await API.segmentMask({ imagePath: _aiSrcPath, targetText: target, dilate });
+    const r = await API.segmentMask({ imagePath: _aiSrcPath, targetText: target, dilate, rel: _precisionRel('ai-precision') });
     // Ignore a stale response if the target changed while we were detecting —
     // the newer in-flight call owns the UI (and will hide the spinner).
     if (((document.getElementById('ai-target').value || '').trim()) !== rawTarget) return;
@@ -14213,6 +14213,11 @@ document.getElementById('ai-target')?.addEventListener('input', _aiSchedulePrevi
 const aiDilate = document.getElementById('ai-dilate');
 if (aiDilate) aiDilate.addEventListener('input', () => {
   document.getElementById('ai-dilate-val').textContent = aiDilate.value + 'px';
+  _aiSchedulePreview();
+});
+const aiPrecision = document.getElementById('ai-precision');
+if (aiPrecision) aiPrecision.addEventListener('input', () => {
+  document.getElementById('ai-precision-val').textContent = aiPrecision.value + '%';
   _aiSchedulePreview();
 });
 document.getElementById('ai-cancel')?.addEventListener('click', () => {
@@ -14242,7 +14247,7 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
       Padding: dilate + 'px',
     }, 180000, { sourceImageUrl: imagePath, projectName: p.name });
     try {
-      const r = await API.autoInpaint({ imagePath, targetText: target, prompt: replace, dilate, jobId: job.id });
+      const r = await API.autoInpaint({ imagePath, targetText: target, prompt: replace, dilate, rel: _precisionRel('ai-precision'), jobId: job.id });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
@@ -14279,12 +14284,13 @@ document.getElementById('ws-recolor-btn')?.addEventListener('click', () => {
 let _rcSrcPath = null;
 let _rcPreviewTimer = null;
 let _rcFirstDetectDone = false;
-// Précision slider -> CLIPSeg relative threshold (rel*peak). 0%->0.2 (large),
-// 50%->0.5, 100%->0.8 (très serré, ne garde que la zone fortement détectée).
-function _rcRel() {
-  const pr = parseInt(document.getElementById('rc-precision')?.value);
-  return 0.2 + ((isNaN(pr) ? 50 : pr) / 100) * 0.6;
+// Précision slider (id) -> CLIPSeg relative threshold (rel*peak). 0%->0.2 (large),
+// 50%->0.55, 100%->0.9 (très serré, ne garde que le cœur de la zone détectée).
+function _precisionRel(id) {
+  const pr = parseInt(document.getElementById(id)?.value);
+  return 0.2 + ((isNaN(pr) ? 55 : pr) / 100) * 0.7;
 }
+function _rcRel() { return _precisionRel('rc-precision'); }
 async function _rcUpdateMaskPreview() {
   const srcImg = document.getElementById('rc-source-img');
   if (!srcImg || !_rcSrcPath) return;

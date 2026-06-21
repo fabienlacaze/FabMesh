@@ -571,7 +571,7 @@ def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
             return {"ok": False, "error": str(e)}
 
 
-def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
+def do_inpaint(input_path, target_text, prompt, output_path, dilate=15, rel=0.5):
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
     if not target_text or not target_text.strip():
@@ -609,7 +609,7 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
 
             mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.LANCZOS)
             mask_arr = np.array(mask_img)
-            binary = (mask_arr > max(60.0, float(mask_arr.max()) * 0.5)).astype(np.uint8) * 255  # relative-to-peak (tighter)
+            binary = (mask_arr > max(60.0, float(mask_arr.max()) * float(rel))).astype(np.uint8) * 255  # relative-to-peak (tighter)
             mask_binary = Image.fromarray(binary, mode="L")
 
             # Dilate mask for context blending
@@ -1325,6 +1325,7 @@ class Handler(BaseHTTPRequestHandler):
                     data.get('prompt', ''),
                     data['output'],
                     data.get('dilate', 15),
+                    data.get('rel', 0.5),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

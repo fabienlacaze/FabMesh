@@ -1299,6 +1299,8 @@
             <input type="text" id="ai-target" placeholder="hat, shirt, background, sword..." />
             <label>Replace with (leave empty = remove)</label>
             <input type="text" id="ai-replace" placeholder="leather helmet, plain background..." />
+            <label>Detection precision <span id="ai-precision-val" class="slider-val">65%</span></label>
+            <input type="range" id="ai-precision" min="0" max="100" value="65" />
             <label>Detection padding <span id="ai-dilate-val" class="slider-val">15px</span></label>
             <input type="range" id="ai-dilate" min="0" max="40" value="15" />
             <small id="ai-dilate-hint" class="modal-subtitle" style="display:block; margin-top:5px; font-size:11px; line-height:1.3;">How far to expand the detected mask around the target. 0px = tight to the object; higher widens it to cover edges, shadows or halos. ~15px recommended.</small>

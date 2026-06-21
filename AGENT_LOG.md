@@ -20,6 +20,10 @@
   /segment + /recolor, main.js segment-mask + recolor). Nouveau slider **Précision
   détection** (0-100% → rel 0.2-0.8) dans le modal Recolorier, appliqué au preview ET à
   l'apply. Plus haut = plus serré.
+- Suite : la **Retouche auto** (auto-inpaint) n'avait que le padding (qui agrandit) — « head »
+  débordait sur le cou. Ajouté le slider **Précision** aussi (défaut 65 %), `rel` paramétré
+  dans do_inpaint + route /inpaint + IPC auto-inpaint, appliqué au preview ET à l'apply.
+  Range élargi à rel 0.2-0.9 (100 % = ne garde que le cœur).
 
 ## 2026-06-21 (Nouvel outil « Recolorier » — recolorisation auto par prompt, forme préservée)
 
