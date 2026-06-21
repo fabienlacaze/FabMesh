@@ -4003,6 +4003,34 @@ ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate, re
 
 // Texture variant: ControlNet-Tile re-texture (shape/geometry locked) — used by the
 // Variante tool's "vary texture only" mode. Each seed = a different surface/texture.
+// Enhance the FINAL mesh texture: Real-ESRGAN x2 on the baked baseColor atlas
+// (texture_upscale.py extracts -> upscales -> re-packs the GLB). Sharper texture
+// WITHOUT inventing content (unlike SDXL refine) and without re-generating geometry.
+ipcMain.handle('enhance-mesh-texture', async (event, { meshPath, jobId }) => {
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
+    const dir = path.dirname(meshPath);
+    const ext = path.extname(meshPath) || '.glb';
+    const base = safeBase(path.basename(meshPath, ext));
+    const newMeshPath = path.join(dir, `${base}_enhanced_${Date.now()}${ext}`);
+    const venvPy = path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe');
+    const py = fs.existsSync(venvPy) ? venvPy : 'python';
+    const UPSCALE_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
+    return await new Promise((resolve) => {
+      const proc = execFile(py, [UPSCALE_SCRIPT, meshPath, newMeshPath, '--scale', '2', '--tile', '512'],
+        { timeout: 600000, maxBuffer: 50 * 1024 * 1024 }, (error) => {
+          if (!error && fs.existsSync(newMeshPath)) resolve({ success: true, newPath: newMeshPath });
+          else resolve({ success: false, error: (error?.message || 'texture enhance failed').slice(-300) });
+        });
+      proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
+      proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+      if (jobId) activeProcs.set(jobId, proc);
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed, cnScale, negPrompt }) => {
   try {
     const dir = path.dirname(imagePath);

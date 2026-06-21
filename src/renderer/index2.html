@@ -693,6 +693,7 @@
                         <button id="ws-mesh-center-btn" class="ghost-btn tool-btn">&#9678; Set Pivot</button>
                         <button id="ws-mesh-retexture-btn" class="ghost-btn tool-btn" title="Re-bake the mesh texture at a higher (or lower) resolution by reprojecting the source photo onto the UVs">&#128300; Resolution</button>
                         <button id="ws-mesh-texvar-btn" class="ghost-btn tool-btn" title="Regenerate ONLY the texture (geometry untouched) for visual variants — change the seed for a different look">&#127912; Texture variations</button>
+                        <button id="ws-mesh-enhance-tex-btn" class="ghost-btn tool-btn" title="Sharpen the final baked texture (Real-ESRGAN x2, no hallucination) — improves the existing mesh without re-generating">&#10024; Enhance texture</button>
                         <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint with MyFabmesh.AI 3D Native PBR engine — qualité SOTA, ~90s">&#11088; Re-Texture</button>
                         <button id="ws-mesh-region-retex-btn" class="ghost-btn tool-btn" title="Paint a region on the mesh and re-texture only that area with a prompt (AI) — geometry stays intact">&#127912; Re-texture zone (IA)</button>
                       </div>
@@ -1221,6 +1222,7 @@
         <button class="lb-tool-btn" data-lb3d-tool="regionretex" title="Re-texture a region with AI">&#127912; Re-texture zone (AI)</button>
         <button class="lb-tool-btn" data-lb3d-tool="aligntex" title="Align texture">&#127919; Align Texture</button>
         <button class="lb-tool-btn" data-lb3d-tool="material" title="Material adjust">&#10024; Material adjust</button>
+        <button class="lb-tool-btn" data-lb3d-tool="enhancetex" title="Sharpen the final texture (Real-ESRGAN x2)">&#10024; Enhance texture</button>
         <div class="lb-toolbox-group-label">EDIT</div>
         <button class="lb-tool-btn" data-lb3d-tool="sculpt" title="Sculpt">&#9997; Sculpt</button>
         <button class="lb-tool-btn" data-lb3d-tool="paintvert" title="Paint">&#127912; Paint</button>

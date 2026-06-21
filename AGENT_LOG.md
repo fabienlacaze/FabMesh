@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Outil « Enhance texture » : Real-ESRGAN x2 sur l'atlas du mesh final)
+
+- User : « on peut pas améliorer la texture finale ? » (texture mesh molle/bavée vs source
+  nette — TRELLIS *génère* la texture, ce n'est pas une copie). Nouveau bouton « Enhance
+  texture » (workspace mesh tools + panneau lightbox 3D) : appelle `texture_upscale.py`
+  (Real-ESRGAN x2, Apache-2.0, n'invente RIEN contrairement au SDXL refine) sur l'atlas
+  baseColor du GLB existant → re-pack → nouvelle version mesh, SANS re-générer la géométrie.
+  Handler IPC `enhance-mesh-texture` (python venv trellis2) + preload `enhanceMeshTexture` +
+  job mappé step 2 (Mesh) dans `_jobStepIndex` (bouton « → Aller au Mesh »). Restart Electron.
+
 ## 2026-06-22 (Fix mesh low-def : Ultra 8K passait 2048 au lieu de 4096 à TRELLIS-2)
 
 - User : « mesh généré avec params au max → low def ». Log : trellis2_native appelé avec

@@ -4116,6 +4116,7 @@ document.getElementById('lightbox-3d-use')?.addEventListener('click', (e) => {
     regionretex: 'ws-mesh-region-retex-btn',
     aligntex: 'ws-mesh-aligntex-btn',
     material: 'ws-mesh-material-btn',
+    enhancetex: 'ws-mesh-enhance-tex-btn',
     sculpt: 'ws-mesh-sculpt-btn',
     paintvert: 'ws-mesh-paintvert-btn',
     selectface: 'ws-mesh-selectface-btn',
@@ -8131,6 +8132,33 @@ document.getElementById('ws-mesh-folder-btn')?.addEventListener('click', async (
   const m = getCurrentMeshObj();
   if (!m) { showToast('Pick a mesh first.', 'error'); return; }
   try { await API.showInExplorer(m.path); } catch (e) { alert(e.message); }
+});
+
+// Enhance the FINAL mesh texture — Real-ESRGAN x2 on the baked atlas (no hallucination),
+// no geometry re-gen. Direct action (no options modal).
+document.getElementById('ws-mesh-enhance-tex-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const m = getCurrentMeshObj();
+  if (!p || !m) { showToast('Pick a mesh first.', 'error'); return; }
+  gatedRun('rig', `Enhance texture: ${p.name}`, async () => {
+    const job = pushJob(`Enhance texture: ${p.name}`, null, {
+      Method: 'Real-ESRGAN x2 (sharpen, no hallucination)',
+      'Source mesh': m.filename,
+    }, 240000, { sourceImageUrl: m.path, projectName: p.name });
+    try {
+      const r = await API.enhanceMeshTexture({ meshPath: m.path, jobId: job.id });
+      if (r?.success || r?.newPath) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+      } else {
+        completeJob(job.id, false);
+        if (!job.cancelled) customError(r?.error || 'unknown', 'Enhance texture failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Enhance texture error');
+    }
+  });
 });
 
 document.getElementById('ws-mesh-refine-btn')?.addEventListener('click', () => {
@@ -13533,7 +13561,7 @@ function _jobStepIndex(j) {
   // showed in the Image step's GENERATING widget (only in the global
   // running-jobs panel). Match them anywhere in the name.
   if (/(mask inpaint|auto[- ]?inpaint|manual (mask|inpaint|paint|crop)|clone stamp|draw mask|brightness|symmetri[sz]e|color pick|blur brush|\bcrop\b|\bpaint\b|recolor|\bage\b|variant)/i.test(n)) return 1;
-  if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr)/i.test(n)) return 2;
+  if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr|enhance texture)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;
   return 0;
