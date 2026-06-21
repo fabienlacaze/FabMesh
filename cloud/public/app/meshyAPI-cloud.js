@@ -1969,7 +1969,7 @@
       const realOp = opMap[operation] || operation;
       const CLOUD_OPS = new Set([
         'smooth', 'decimate', 'center', 'fix_normals', 'fill_holes',
-        'subdivide', 'align_texture', 'material', 'retex_swap', 'watertight',
+        'subdivide', 'material', 'retex_swap', 'watertight',
       ]);
       // 'trellis2_retex' = full TRELLIS-2 retexture. On cloud we don't
       // have a texture-only pipeline; the closest equivalent is to
@@ -2133,9 +2133,11 @@
     'getControlApiToken',
     // Blender pipeline (no Blender in cloud)
     'setBlenderPath', 'runBlenderScript', 'openInBlender',
-    // materialAdjust + alignTexture have REAL implementations below
-    // (Modal mesh-op trimesh+PIL). NOT stubs anymore.
-    // 'materialAdjust', 'alignTexture',
+    // materialAdjust has a REAL implementation below (Modal mesh-op trimesh+PIL).
+    // alignTexture does NOT — calling it threw "API.alignTexture is not a
+    // function", and the Modal align_texture op just re-exports the GLB unchanged
+    // while still charging a credit. Stub it gracefully (NOT_AVAIL) on cloud.
+    'alignTexture',
     // Calibration (Desktop diagnostics tool)
     'calibRun', 'calibLastReport', 'calibOpenReport', 'calibListReports',
     'calibDiagnose', 'calibTiered', 'calibV3', 'calibCancel',

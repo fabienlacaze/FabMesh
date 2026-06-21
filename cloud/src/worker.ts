@@ -6929,8 +6929,8 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled');
   const allowed = new Set([
     'smooth', 'decimate', 'center', 'fix_normals', 'fill_holes',
-    'subdivide', 'align_texture', 'material', 'material_adjust', 'retex_swap',
-    'watertight',
+    'subdivide', 'material', 'material_adjust', 'retex_swap',
+    'watertight',  // 'align_texture' removed: it was a paid no-op on cloud (no real reprojection)
   ]);
   const op = (opType ?? '').toLowerCase();
   if (!allowed.has(op)) {
