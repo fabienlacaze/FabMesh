@@ -4062,6 +4062,7 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     clone:       'ws-clone-btn',
     paint:       'ws-paint-btn',
     crop:        'ws-crop-btn',
+    extend:      'ws-extend-btn',
   };
   const box = document.getElementById('lb-toolbox');
   if (!box) return;
