@@ -295,8 +295,8 @@ async function uploadClientMeshResult(bytes, opType, extra = {}) {
 // saved projects but the wording reflects the actual fallback.
 const ENGINE_LABELS = {
   // Image engines
-  'local-flux':     'MyFabmesh.AI Image Engine (local)',
-  'local-lightning':'MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)',
+  'local-flux':     'Balanced (quality/speed)',
+  'local-lightning':'Fast (Turbo ⚡ · ~4 steps)',
   // 3D engines — sf3d / local legacy IDs are silently rerouted to
   // the native engine at dispatch.
   'sf3d':           'MyFabmesh.AI 3D Native (rerouted)',
