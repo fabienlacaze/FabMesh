@@ -5354,7 +5354,11 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   if (trellis2RectifySource && imagePath && fs.existsSync(imagePath)
       && engine === 'trellis2_native') {
     const rectifyScript = path.join(__dirname, '..', '..', 'scripts', 'generate_front_strict.py');
-    const rectifiedPath = imagePath.replace(/\.(png|jpg|jpeg|webp)$/i, '_rectified.png');
+    // Write the rectified image to a TRANSIENT temp path (NOT the project image
+    // folder) so it's used for the mesh but never shows up as a new gallery
+    // version — users were getting an unwanted '_rectified' image on every 3D gen.
+    const _rectBase = path.basename(imagePath).replace(/\.(png|jpg|jpeg|webp)$/i, '');
+    const rectifiedPath = path.join(require('os').tmpdir(), `fabmesh_rectified_${Date.now()}_${_rectBase}.png`);
     // assetType drives the canonical source view we want for mesh
     // generation. Icons want a slight 3/4 ISO so the depth axis is
     // visible in the final mesh — same as vehicles and props.
@@ -7244,8 +7248,10 @@ ipcMain.handle('list-image-folders', () => {
       const dir = path.join(IMAGES_DIR, d);
       const imgs = fs.readdirSync(dir)
         .filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f))
-        // Exclude debug/auxiliary files (masks, temp files)
-        .filter(f => !f.includes('_mask') && !f.startsWith('.') && !f.startsWith('_'))
+        // Exclude debug/auxiliary files (masks, temp files, internal artifacts).
+        // '_rectified' = the auto-rectified source used internally for 3D gen —
+        // it must NOT appear as a user-facing image version (was showing as v2).
+        .filter(f => !f.includes('_mask') && !f.includes('_rectified') && !f.startsWith('.') && !f.startsWith('_'))
         .map(f => {
           const fp = path.join(dir, f);
           const st = fs.statSync(fp);

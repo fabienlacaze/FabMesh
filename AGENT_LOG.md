@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Fix : la génération 3D créait une image « _rectified » non voulue)
+
+- User : « quand je génère une 3d ça me génère une nouvelle image non souhaitée. »
+  Cause : l'option « Auto-rectification de la vue source » (3D TRELLIS-2) écrivait
+  `<image>_rectified.png` **dans le dossier image du projet** → la galerie le scannait
+  et l'affichait comme nouvelle version (v2). Fix main.js : (1) le `_rectified` est
+  écrit dans `os.tmpdir()` (utilisé pour le mesh, hors dossier projet) ; (2)
+  `list-image-folders` exclut désormais `_rectified` (masque aussi ceux déjà créés).
+  Restart Electron requis (main.js).
+
 ## 2026-06-21 (Debranding : retrait des noms d'IA des menus déroulants)
 
 - User : « le nom des IA ne doit pas être mentionné dans les menus déroulants. »
