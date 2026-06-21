@@ -237,15 +237,32 @@ async function readListingDownloads(env: Env, listingId: string): Promise<number
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Atomic (compare-and-set) read-check-increment of a numeric R2 counter.
+ *  Returns the NEW total on success, or null if it would exceed `max` OR could
+ *  not commit atomically after retries — fail-safe (reject) so two concurrent
+ *  requests can't both pass a cap off the same stale read. Mirrors the
+ *  conditional-PUT pattern in bumpListingDownloads. */
+async function _casIncrementCounter(env: Env, key: string, delta: number, max: number): Promise<number | null> {
+  if (!env.MESHES) return null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const existing = await env.MESHES.get(key);
+    const cur = existing ? (parseFloat(await existing.text()) || 0) : 0;
+    if (cur + delta > max) return null;
+    const next = cur + delta;
+    const res = existing
+      ? await env.MESHES.put(key, String(next), { onlyIf: { etagMatches: existing.etag } })
+      : await env.MESHES.put(key, String(next), { onlyIf: { etagDoesNotMatch: '*' } });
+    if (res) return next;
+  }
+  return null;  // sustained contention — fail safe rather than risk a cap bypass
+}
+
 /** Check the daily Replicate spend cap. Returns the remaining budget
- *  in USD, or null if the request would push us over. */
+ *  in USD, or null if the request would push us over. CAS-atomic. */
 async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_DAILY_SPEND_USD;
-  const key = `_meta/spend/${todayUTC()}`;
-  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
-  if (cur + estimatedUsd > maxUsd) return null;
-  await env.MESHES.put(key, String(cur + estimatedUsd));
-  return maxUsd - cur - estimatedUsd;
+  const next = await _casIncrementCounter(env, `_meta/spend/${todayUTC()}`, estimatedUsd, maxUsd);
+  return next == null ? null : maxUsd - next;
 }
 
 /** Refund the spend if the call ended up failing — keeps the budget
@@ -264,10 +281,8 @@ async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
  *  $0.50) because Modal is ~5-10× cheaper per image. */
 async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
-  const key = `_meta/modal_spend/${todayUTC()}`;
-  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
-  if (cur + estimatedUsd > maxUsd) return null;
-  await env.MESHES.put(key, String(cur + estimatedUsd));
+  const next = await _casIncrementCounter(env, `_meta/modal_spend/${todayUTC()}`, estimatedUsd, maxUsd);
+  if (next == null) return null;
   // Running cumulative spend since the last budget top-up (for the admin budget
   // gauge + the low-budget alert). Best-effort — never blocks a paid call.
   try {
@@ -276,7 +291,7 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number): Prom
     await env.MESHES.put(tk, String(total));
     await _maybeAlertModalBudget(env);
   } catch (_) {}
-  return maxUsd - cur - estimatedUsd;
+  return maxUsd - next;
 }
 
 async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
@@ -351,11 +366,8 @@ async function _sendAdminAlertEmail(env: Env, subject: string, text: string): Pr
  *  Returns the remaining call budget, or null if over. */
 async function checkAndIncrementUserCalls(env: Env, userId: string): Promise<number | null> {
   const maxCalls = parseInt(env.MAX_USER_DAILY_CALLS ?? '', 10) || DEFAULT_MAX_USER_DAILY_CALLS;
-  const key = `_meta/userdaily/${userId}/${todayUTC()}`;
-  const cur = parseInt((await r2GetText(env, key)) || '0', 10) || 0;
-  if (cur >= maxCalls) return null;
-  await env.MESHES.put(key, String(cur + 1));
-  return maxCalls - cur - 1;
+  const next = await _casIncrementCounter(env, `_meta/userdaily/${userId}/${todayUTC()}`, 1, maxCalls);
+  return next == null ? null : maxCalls - next;
 }
 
 /* ─────────────────────────── tiny helpers ──────────────────────────── */
