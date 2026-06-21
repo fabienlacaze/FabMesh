@@ -377,7 +377,10 @@ print(r['label'], r['score'])
       const parts = (stdout || '').trim().split(' ');
       const label = parts[0];
       const score = parseFloat(parts[1]) || 0;
-      if (label === 'NSFW' && score > 0.7) {
+      // 0.9 (was 0.7): the classifier false-positives on benign game assets
+      // ("Golden crab" scored 0.79). The output IMAGE is still NSFW-checked, so
+      // a borderline prompt that slips through is caught at the image stage.
+      if (label === 'NSFW' && score > 0.9) {
         resolve({ safe: false, blocked: 'AI classifier', reason: `Content filter: AI detected this prompt as inappropriate (${Math.round(score*100)}% confidence). Disable parental control in Settings for unrestricted mode.` });
       } else {
         resolve({ safe: true });
