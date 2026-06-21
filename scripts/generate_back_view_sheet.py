@@ -19,6 +19,7 @@ import sys
 import time
 import shutil
 import subprocess
+import json
 
 
 def log(msg):
@@ -74,19 +75,43 @@ def main():
         sys.exit(3)
     log(f'sheet generation done in {time.time()-t0:.1f}s')
 
-    # Pick view_1.png (back) as the back-photo to expose via the IPC
-    # contract. Same naming as the other back generators.
-    back_view = os.path.join(mv_persist_dir, 'view_1.png')
+    # Map view_{i}.png -> real label from views.json (written by
+    # multiview_sheet_gen.py). The cell order is NOT always
+    # [front, back, right, left] — e.g. the 4-view layout is
+    # front/right/back/left, so the old hardcoded view_1 = "back" actually
+    # textured the back of the mesh from a SIDE (right-profile) image.
+    labels = None
+    views_json = os.path.join(mv_persist_dir, 'views.json')
+    if os.path.isfile(views_json):
+        try:
+            with open(views_json, 'r', encoding='utf-8') as _vf:
+                _meta = json.load(_vf)
+            labels = [str(v.get('label', '')).lower() for v in _meta.get('views', [])]
+        except Exception as _e:
+            log(f'could not read views.json ({_e}); falling back to index order')
+
+    back_idx = None
+    if labels:
+        for _i, _lbl in enumerate(labels):
+            if _lbl == 'back':
+                back_idx = _i
+                break
+    if back_idx is None:
+        log('no "back" label in views.json — falling back to view_1')
+        back_idx = 1
+
+    back_view = os.path.join(mv_persist_dir, f'view_{back_idx}.png')
     if not os.path.isfile(back_view):
-        log(f'ERROR: view_1.png missing in {mv_persist_dir}')
+        log(f'ERROR: view_{back_idx}.png (back) missing in {mv_persist_dir}')
         sys.exit(4)
     dest = os.path.join(output_dir, f'back_{name_suffix}_0.png')
     shutil.copy2(back_view, dest)
-    log(f'wrote back -> {dest}')
+    log(f'wrote back (view_{back_idx}, label=back) -> {dest}')
     print(f'BACK_VIEW_PATH: {dest}', flush=True)
 
-    # Emit MULTIVIEW_PATH markers so callers can pick up the side views.
-    for i, label in enumerate(['front', 'back', 'right', 'left']):
+    # Emit MULTIVIEW_PATH markers using the REAL labels from views.json.
+    _emit_labels = labels if labels else ['front', 'back', 'right', 'left']
+    for i, label in enumerate(_emit_labels):
         p = os.path.join(mv_persist_dir, f'view_{i}.png')
         if os.path.isfile(p):
             print(f'MULTIVIEW_PATH: {label}={p}', flush=True)
