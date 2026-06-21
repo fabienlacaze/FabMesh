@@ -12,7 +12,10 @@ RealVis, passe de ~30 steps à 4 (~0,5-2 s de sampling vs ~15-40 s).
   défaut (jamais sur le path ControlNet T-pose, qui garderait 4 steps sans LoRA = cassé).
 - `main.js` : engine `local-lightning` → même bridge + `FABMESH_TURBO=1` + steps=4.
 - Dropdown `ws-engine` + `ENGINE_LABELS` + les 2 estimateurs ETA.
-- 1er run télécharge la LoRA (~400 Mo). **Limite perf** : le bridge respawn → recharge
+- LoRA **pré-téléchargée par le wizard** (`wizard_download.py` MODELS standard+full +
+  manifest UI `main.js`), via `allow_patterns=['sdxl_lightning_4step_lora.safetensors']`
+  = juste le fichier 4-step (~400 Mo) au lieu du repo entier. Fallback : si absente du
+  cache, le bridge la `hf_hub_download` au 1er Generate. **Limite perf** : le bridge respawn → recharge
   RealVisXL (~7 Go) à CHAQUE appel ; le gain plein (<1 s) exige le serveur image
   persistant (cf. workflow améliorations). **Restart Electron requis** (main.js).
 - À FAIRE : porter le turbo côté cloud/Modal (text2image) pour la parité.

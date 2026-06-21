@@ -6312,6 +6312,7 @@ const WIZARD_MODELS = {
   standard: [
     { id: 'trellis2',  label: 'MyFabmesh.AI 3D Core',                          repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
     { id: 'realvis',   label: 'Texture engine',                           repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
+    { id: 'lightning', label: 'Turbo engine (Lightning)',                 repo: 'ByteDance/SDXL-Lightning',                       size_mb: 400  },
     { id: 'cn_pose',   label: 'Back-view module',                         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
     { id: 'ipadapter', label: 'Reference module',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
     { id: 'blip1',     label: 'Vision analyzer',                          repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990  },
@@ -6320,6 +6321,7 @@ const WIZARD_MODELS = {
   full:     [
     { id: 'trellis2',  label: 'MyFabmesh.AI 3D Core (Ultra)',                  repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
     { id: 'realvis',   label: 'Texture engine',                           repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
+    { id: 'lightning', label: 'Turbo engine (Lightning)',                 repo: 'ByteDance/SDXL-Lightning',                       size_mb: 400  },
     { id: 'sdxl_inp',  label: 'Face refiner',                             repo: 'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', size_mb: 6500 },
     { id: 'cn_pose',   label: 'Back-view module',                         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
     { id: 'ipadapter', label: 'Reference module',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },

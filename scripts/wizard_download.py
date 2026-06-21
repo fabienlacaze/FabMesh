@@ -30,6 +30,7 @@ MODELS = {
     'standard': [
         ('trellis2',  'microsoft/TRELLIS.2-4B', 4100),
         ('realvis',   'SG161222/RealVisXL_V4.0', 6500),
+        ('lightning', 'ByteDance/SDXL-Lightning', 400),
         ('cn_pose',   'xinsir/controlnet-openpose-sdxl-1.0', 2400),
         ('ipadapter', 'h94/IP-Adapter', 700),
         ('blip1',     'Salesforce/blip-image-captioning-large', 990),
@@ -38,6 +39,7 @@ MODELS = {
     'full': [
         ('trellis2',  'microsoft/TRELLIS.2-4B', 4100),
         ('realvis',   'SG161222/RealVisXL_V4.0', 6500),
+        ('lightning', 'ByteDance/SDXL-Lightning', 400),
         ('sdxl_inp',  'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', 6500),
         ('cn_pose',   'xinsir/controlnet-openpose-sdxl-1.0', 2400),
         ('ipadapter', 'h94/IP-Adapter', 700),
@@ -45,6 +47,14 @@ MODELS = {
         ('blip1',     'Salesforce/blip-image-captioning-large', 990),
         ('esrgan',    'RealESRGAN_x4plus', 70),
     ],
+}
+
+
+# Repos where we only need a subset of files (snapshot_download pulls the WHOLE
+# repo otherwise). The Lightning repo ships many step/format variants (~GBs);
+# we only use the 4-step SDXL LoRA (~400 MB).
+ALLOW_PATTERNS = {
+    'ByteDance/SDXL-Lightning': ['sdxl_lightning_4step_lora.safetensors'],
 }
 
 
@@ -220,7 +230,8 @@ def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
         token = _hf_token()
         try:
             snapshot_download(repo_id=repo, resume_download=True,
-                              max_workers=4, token=token)
+                              max_workers=4, token=token,
+                              allow_patterns=ALLOW_PATTERNS.get(repo))
         except HfHubHTTPError as e:
             # Rate-limit (429) or auth (401/403) — try once with the
             # embedded fallback token if we have one and weren't already
@@ -230,7 +241,8 @@ def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
                       'in_progress': True, 'msg': 'retrying with fallback token',
                       'total_done_mb': total_done_mb_ref[0]})
                 snapshot_download(repo_id=repo, resume_download=True,
-                                  max_workers=4, token=HF_FALLBACK_TOKEN)
+                                  max_workers=4, token=HF_FALLBACK_TOKEN,
+                                  allow_patterns=ALLOW_PATTERNS.get(repo))
             else:
                 raise
     finally:
