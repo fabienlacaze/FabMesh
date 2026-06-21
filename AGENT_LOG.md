@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Fix bruit arc-en-ciel img2img — VAE fp16 overflow)
+
+- User : « j'ai demandé la modif "il doit etre obèse", l'image est vraiment dégradée »
+  → bruit arc-en-ciel sur toute l'image. Cause : `pipe.vae.to(torch.float16)` dans
+  sdxl_server.py — la VAE native de RealVis XL **overflow en fp16** (bug SDXL connu).
+  Fix : swap pour `madebyollin/sdxl-vae-fp16-fix` (VAE stable en fp16, encode+decode),
+  avec fallback `vae.config.force_upcast = True`. Appliqué aux 3 pipelines qui décodent
+  des images : img2img, inpaint, et controlnet-tile (le « Tile refiner » = la 2e passe
+  « _refined » du user). VAE pré-téléchargée. Le serveur SDXL recharge au restart.
+
 ## 2026-06-21 (Correcteur d'orthographe selon la langue UI)
 
 - Le correcteur Chromium d'Electron vérifiait en anglais (« obèse », « être » soulignés

@@ -172,6 +172,21 @@ def load_img2img():
             torch_dtype=torch.float16,
             use_safetensors=True,
         )
+        # RealVis XL's native VAE OVERFLOWS in fp16 -> rainbow/colorful noise all
+        # over the img2img output (the user's "image vraiment dégradée"). Swap in
+        # the fp16-fixed VAE (madebyollin), built to stay numerically stable in
+        # fp16 for both encode + decode. Downloaded once, then cached. Falls back
+        # to force_upcast (fp32 VAE decode) if it can't be fetched.
+        try:
+            from diffusers import AutoencoderKL
+            pipe.vae = AutoencoderKL.from_pretrained(
+                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+        except Exception as _ve:
+            log(f"fp16-fix VAE unavailable ({_ve}); using force_upcast fallback")
+            try:
+                pipe.vae.config.force_upcast = True
+            except Exception:
+                pass
         pipe.to("cuda")
         # Force every sub-module to fp16 — diffusers 0.34 on torch
         # 2.7.1+cu128 leaves some buffers fp32 after from_pretrained,
@@ -242,6 +257,17 @@ def load_inpaint():
                 torch_dtype=torch.float16,
                 variant="fp16",
             )
+            # fp16-fixed VAE (same overflow/noise fix as img2img).
+            try:
+                from diffusers import AutoencoderKL
+                pipe.vae = AutoencoderKL.from_pretrained(
+                    "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+            except Exception as _ve:
+                log(f"inpaint fp16-fix VAE unavailable ({_ve})")
+                try:
+                    pipe.vae.config.force_upcast = True
+                except Exception:
+                    pass
             pipe.to("cuda")
             # Same fp16 force-cast as img2img (diffusers 0.34 / torch 2.7.1)
             try:
@@ -289,6 +315,17 @@ def load_controlnet_tile():
             torch_dtype=torch.float16,
             use_safetensors=True,
         )
+        # fp16-fixed VAE (RealVis XL's native VAE overflows in fp16 -> noise).
+        try:
+            from diffusers import AutoencoderKL
+            pipe.vae = AutoencoderKL.from_pretrained(
+                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+        except Exception as _ve:
+            log(f"tile fp16-fix VAE unavailable ({_ve})")
+            try:
+                pipe.vae.config.force_upcast = True
+            except Exception:
+                pass
         pipe.to("cuda")
         # Same fp16 force-cast (diffusers 0.34 / torch 2.7.1)
         try:
