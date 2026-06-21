@@ -13562,6 +13562,20 @@ window._navigateToJobStep = async function(jobId) {
 // belonging to the currently-open project show up — the widget lives
 // inside that project's workspace, so cross-project bleed would be
 // confusing. Empty widgets get the hidden state (no .has-jobs class).
+// Translate a job title for DISPLAY only — the stored job.name stays English so
+// the step-matching regex (_jobStepIndex) keeps working. Handles "Prefix: value"
+// templates ("Generate 3D: dropped") via tf(), else a plain t() lookup.
+function _displayJobName(name) {
+  const I = window.FabI18n;
+  if (!I || I.lang === 'en' || !name) return name || '';
+  const m = String(name).match(/^(.*?): (.+)$/);
+  if (m && I.tf) {
+    const out = I.tf(m[1] + ': {x}', m[2]);
+    if (out && out !== m[1] + ': ' + m[2]) return out;  // had a template translation
+  }
+  return (I.t && I.t(name)) || name;
+}
+
 function renderStepProgressWidgets() {
   const curName = state.currentProject && state.currentProject.name;
   for (let s = 1; s <= 4; s++) {
@@ -13630,7 +13644,7 @@ function renderStepProgressWidgets() {
         <div class="step-progress-item${statusClass}" data-job-id="${j.id}">
           <div class="step-progress-item-header">
             ${thumbHtml}
-            <div class="step-progress-item-name">${escapeHtml(j.name)}</div>
+            <div class="step-progress-item-name">${escapeHtml(_displayJobName(j.name))}</div>
             ${canCancel ? `<button class="step-progress-cancel-btn" onclick="event.stopPropagation(); window._cancelJob(${j.id})" title="Cancel job">&#10005;</button>` : ''}
           </div>
           <div class="step-progress-item-bar">
@@ -13714,7 +13728,7 @@ function renderJobs() {
       <div class="job-item-2 ${j.status}" data-job-id="${j.id}">
         <div class="job-item-2-header">
           ${sbThumbHtml}
-          <div class="job-item-2-name">${escapeHtml(j.name)}</div>
+          <div class="job-item-2-name">${escapeHtml(_displayJobName(j.name))}</div>
           ${hasStep ? `<button class="job-goto-btn" onclick="event.stopPropagation(); window._navigateToJobStep(${j.id})" title="Jump to this step">Go to</button>` : ''}
           ${canCancel ? `<button class="job-cancel-btn" onclick="event.stopPropagation(); window._cancelJob(${j.id})" title="Cancel job">&#10005;</button>` : ''}
         </div>
@@ -13848,7 +13862,7 @@ async function refreshJobDetailsModal(id) {
   const j = state.jobs.find(x => x.id === id);
   if (!j) { closeJobDetails(); return; }
   document.getElementById('job-details-title').textContent = j.status === 'done' ? 'Task complete' : (j.status === 'error' ? 'Task failed' : 'Running task');
-  document.getElementById('job-details-subtitle').textContent = j.name;
+  document.getElementById('job-details-subtitle').textContent = _displayJobName(j.name);
   document.getElementById('jd-status').textContent = j.status === 'running' ? 'Running' : (j.status === 'done' ? 'Done' : 'Error');
   document.getElementById('jd-started').textContent = new Date(j.startedAt).toLocaleTimeString();
   document.getElementById('jd-elapsed').textContent = fmtDuration(Date.now() - j.startedAt);

@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (i18n : tf() + titres de jobs dynamiques + 132 templates)
+
+- Régénéré `_additions.js` en repliant les 132 « dynamiques » : 4 étaient mal classés
+  (sans placeholder, dont le hint VRAM) → statiques ; 128 vrais templates ({x}) sont
+  enregistrés pour `tf()`. Total fr/es/zh/hi/ar : 629/635/652/651/653 entrées.
+- `tf(template, ...args)` ajouté à i18n.js (cherche le template avec {x} dans le dict +
+  interpole). `_displayJobName(name)` dans index2.js traduit les titres de jobs À
+  L'AFFICHAGE seulement (« Generate 3D: dropped » → « Génération 3D : dropped ») via tf,
+  en gardant `job.name` anglais pour que le regex `_jobStepIndex` continue de matcher.
+  Câblé aux 3 points (step widget, job card, sous-titre du modal). Porté desktop + cloud.
+
 ## 2026-06-21 (i18n exhaustif : +2568 traductions, 5 langues, 2 plateformes)
 
 - Workflow `i18n-exhaustive` (44 agents, audit popup-par-popup de ~40 modals +

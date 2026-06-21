@@ -983,6 +983,16 @@
     return (dict && dict[s]) || s;
   }
 
+  // tf(): translate a TEMPLATE that contains {x}/{y} placeholders, then fill them
+  // with args in order. The dict key is the template WITH the placeholders (e.g.
+  // 'Generate 3D: {x}'). Falls back to the English template filled in.
+  function tf(template, ...args) {
+    const dict = _dict();
+    const s = (dict && dict[template]) || template;
+    let i = 0;
+    return s.replace(/\{[xy]\}/g, () => (i < args.length ? String(args[i++]) : ''));
+  }
+
   // Re-translate dynamically-added content SYNCHRONOUSLY (inside the observer
   // callback, before the browser paints) so freshly-rendered English never
   // flashes on screen — fixes the EN<->FR flicker when panels re-render every
@@ -1009,6 +1019,7 @@
   window.FabI18n = {
     applyLang,
     t,
+    tf,
     get lang() { return _lang; },
     register(lang, map) { I18N[lang] = Object.assign(I18N[lang] || {}, map); },
     languages() { return ['en'].concat(Object.keys(I18N)); },
