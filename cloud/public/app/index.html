@@ -173,7 +173,7 @@
                   <label>Engine</label>
                   <select id="ws-engine">
                     <option value="local-flux" selected>MyFabmesh.AI Image Engine (local)</option>
-                    <option value="local-lightning">SDXL-Lightning &#9889; (turbo, ~4 steps)</option>
+                    <option value="local-lightning">MyFabmesh.AI Image &#9889; Turbo (~4 steps, local)</option>
                   </select>
                 </div>
                 <div class="form-row">
@@ -886,8 +886,8 @@
                   <div class="form-row" style="display:none;">
                     <label>Engine</label>
                     <select id="ws-anim-engine">
-                      <option value="anytop" selected>AnyTop (skeleton-adaptive, BVH)</option>
-                      <option value="seed3d_puppeteer" disabled>Seed3D Puppeteer (deferred — outputs frames not BVH)</option>
+                      <option value="anytop" selected>Generative motion AI</option>
+                      <option value="seed3d_puppeteer" disabled>Procedural animation (coming soon)</option>
                       <option value="procedural" disabled>Procedural (deferred — humanoid only)</option>
                     </select>
                   </div>
@@ -931,10 +931,10 @@
                     <input id="ws-anim-prompt" type="text" placeholder="e.g. dragon breathes fire" style="width:100%; padding:6px;">
                   </div>
                   <div class="form-row" id="ws-anim-video-row" style="display:none;">
-                    <label for="ws-anim-video">Reference video (Seed3D)</label>
+                    <label for="ws-anim-video">Reference video</label>
                     <input id="ws-anim-video" type="file" accept="video/mp4,video/webm,video/quicktime" style="width:100%;">
                   </div>
-                  <button id="ws-generate-anim" class="primary-btn" disabled title="Backend not wired yet — Seed3D Puppeteer animation endpoint TBD">Generate Animation</button>
+                  <button id="ws-generate-anim" class="primary-btn" disabled title="Backend not wired yet — coming soon">Generate Animation</button>
                   <!-- ===== FBX REFERENCE ANIMATION (2026-06-02) =====
                        User uploads an .fbx (UE5 Mannequin or Apovivor
                        ORC_M1 export). We retarget it onto the current
@@ -1045,7 +1045,7 @@
                     <div class="step-tools-group">
                       <div class="step-tools-label">AI tools</div>
                       <div class="step-tools-grid">
-                        <button id="ws-anim-gen-more-btn" class="ghost-btn tool-btn rig-tool-btn" title="Generate an AnyTop AI animation batch (= new version)">&#10024; Add Animation</button>
+                        <button id="ws-anim-gen-more-btn" class="ghost-btn tool-btn rig-tool-btn" title="Generate an AI animation batch (= new version)">&#10024; Add Animation</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -1943,7 +1943,7 @@
          ============================================================ -->
     <div id="modal-anim-gen" class="modal-overlay hidden">
       <div class="modal-card" style="width:440px; max-width:92vw;">
-        <h2>Generate AnyTop AI</h2>
+        <h2>Generate AI Animation</h2>
         <p class="modal-subtitle">Each click creates ONE new version. Check the types you want in this batch.</p>
         <div id="modal-anim-types" style="display:grid; grid-template-columns: repeat(2, 1fr); gap:6px; padding:10px; background:var(--bg-2); border:1px solid var(--border); border-radius:6px; margin:12px 0;">
           <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
@@ -2532,6 +2532,7 @@
   <script src="lang/hi.js"></script>
   <script src="lang/ar.js"></script>
   <script src="lang/_additions.js"></script>
+  <script src="lang/_additions2.js"></script>
   <script src="canvas-utils.js"></script>
   <script src="index2-edit-tools.js"></script>
   <script type="module" src="index2.js"></script>

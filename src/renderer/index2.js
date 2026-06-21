@@ -128,9 +128,9 @@ try {
 // saved projects but the wording reflects the actual fallback.
 const ENGINE_LABELS = {
   // Image engines
-  'local-flux':     'MyFabmesh.AI Image Engine (RealVisXL, local)',
-  'local-lightning':'SDXL-Lightning ⚡ turbo (RealVisXL, 4-step, local)',
-  'hidream':        'HiDream-O1 (local)',
+  'local-flux':     'MyFabmesh.AI Image Engine (local)',
+  'local-lightning':'MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)',
+  'hidream':        'MyFabmesh.AI Image Engine HD (local)',
   // 3D engines — sf3d / local legacy IDs are silently rerouted to
   // the native engine at dispatch.
   'sf3d':           'MyFabmesh.AI 3D Native (rerouted)',
@@ -13005,7 +13005,7 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   const meshNameDisplay = (rigPath || '').split(/[\\/]/).pop();
   _activeAnimJob = (typeof pushJob === 'function')
     ? pushJob(`Animate: ${animType}`, null, {
-        Engine: 'MyFabmesh.AI Anim (local, Rokoko)',
+        Engine: 'MyFabmesh.AI Anim (local)',
         'Source mesh': meshNameDisplay,
         Class: detectedClass,
         Animation: animType,

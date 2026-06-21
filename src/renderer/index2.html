@@ -147,9 +147,9 @@
                 <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
-                    <option value="local-flux" selected>MyFabmesh.AI Image Engine (RealVisXL, local)</option>
-                    <option value="hidream">HiDream-O1 (local)</option>
-                    <option value="local-lightning">SDXL-Lightning ⚡ (turbo, ~4 steps)</option>
+                    <option value="local-flux" selected>MyFabmesh.AI Image Engine (local)</option>
+                    <option value="hidream">MyFabmesh.AI Image Engine HD (local)</option>
+                    <option value="local-lightning">MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)</option>
                   </select>
                 </div>
                 <div class="form-row">
@@ -890,17 +890,17 @@
                   <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-anim-engine">
-                      <option value="rokoko_library" selected>Motion Library (1099 Apovivor motions, Rokoko retarget)</option>
-                      <option value="anytop" disabled>AnyTop (deferred — generative motion model)</option>
-                      <option value="seed3d_puppeteer" disabled>Seed3D Puppeteer (deferred)</option>
-                      <option value="procedural" disabled>Procedural (deferred — humanoid only)</option>
+                      <option value="rokoko_library" selected>Motion Library (1099 motions)</option>
+                      <option value="anytop" disabled>Generative motion AI (coming soon)</option>
+                      <option value="seed3d_puppeteer" disabled>Procedural animation (coming soon)</option>
+                      <option value="procedural" disabled>Procedural (coming soon, humanoid only)</option>
                     </select>
                   </div>
                   <div class="form-row">
                     <label>Mode</label>
                     <select id="ws-anim-mode" style="width:100%;">
-                      <option value="local" selected>Local (uses Blender + Rokoko)</option>
-                      <option value="cloud" disabled>Cloud (Modal — coming soon)</option>
+                      <option value="local" selected>Local</option>
+                      <option value="cloud" disabled>Cloud (coming soon)</option>
                     </select>
                   </div>
                   <div class="form-row">
@@ -920,7 +920,7 @@
                     <input id="ws-anim-prompt" type="text" placeholder="e.g. dragon breathes fire" style="width:100%; padding:6px;">
                   </div>
                   <div class="form-row" id="ws-anim-video-row" style="display:none;">
-                    <label for="ws-anim-video">Reference video (Seed3D)</label>
+                    <label for="ws-anim-video">Reference video</label>
                     <input id="ws-anim-video" type="file" accept="video/mp4,video/webm,video/quicktime" style="width:100%;">
                   </div>
                   <button id="ws-generate-anim" class="primary-btn">Generate Animation</button>
@@ -2307,6 +2307,7 @@
   <script src="lang/hi.js"></script>
   <script src="lang/ar.js"></script>
   <script src="lang/_additions.js"></script>
+  <script src="lang/_additions2.js"></script>
   <script src="canvas-utils.js"></script>
   <script src="index2-edit-tools.js"></script>
   <script type="module" src="index2.js"></script>

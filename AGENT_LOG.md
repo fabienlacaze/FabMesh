@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Debranding : retrait des noms d'IA des menus déroulants)
+
+- User : « le nom des IA ne doit pas être mentionné dans les menus déroulants. »
+  Renommé les labels exposant des noms de modèles/outils IA en noms MyFabmesh.AI :
+  RealVisXL/HiDream-O1/SDXL-Lightning → « MyFabmesh.AI Image Engine (local) / HD /
+  ⚡ Turbo » ; Rokoko/AnyTop/Seed3D Puppeteer/Blender/Modal retirés des dropdowns
+  anim (Motion Library, Generative motion AI, Procedural animation, Local, Cloud).
+  Touché : ENGINE_LABELS + <option> du <select> ws-engine/ws-anim-*, label anim,
+  desktop + cloud. Traduit les nouveaux labels (5 langues) → `lang/_additions2.js`
+  (workflow i18n-branded-labels), chargé après _additions.js dans les 2 index.html.
+
 ## 2026-06-21 (i18n : tf() + titres de jobs dynamiques + 132 templates)
 
 - Régénéré `_additions.js` en repliant les 132 « dynamiques » : 4 étaient mal classés
