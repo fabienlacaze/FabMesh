@@ -8142,7 +8142,7 @@ document.getElementById('ws-mesh-enhance-tex-btn')?.addEventListener('click', ()
   if (!p || !m) { showToast('Pick a mesh first.', 'error'); return; }
   gatedRun('rig', `Enhance texture: ${p.name}`, async () => {
     const job = pushJob(`Enhance texture: ${p.name}`, null, {
-      Method: 'Real-ESRGAN x2 (sharpen, no hallucination)',
+      Method: 'Real-ESRGAN x2',
       'Source mesh': m.filename,
     }, 240000, { sourceImageUrl: m.path, projectName: p.name });
     try {
