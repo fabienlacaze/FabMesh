@@ -373,6 +373,36 @@ async function checkPromptSafetyAI(prompt) {
   return { safe: true };
 }
 
+// --- Spell checker (Chromium built-in; Hunspell on Windows) -----------------
+// Uses the user's UI language so French/Spanish/etc. words aren't flagged as
+// English typos. The renderer pushes its language via 'set-spellcheck-lang'.
+function _loadUiLang() {
+  try { return (loadConfig().uiLang) || 'fr'; } catch (_) { return 'fr'; }
+}
+function _spellcheckCodesFor(uiLang) {
+  try {
+    const avail = (mainWindow && mainWindow.webContents.session.availableSpellCheckerLanguages) || [];
+    const out = [];
+    const want = (uiLang || 'en').toLowerCase().slice(0, 2);
+    const match = avail.find(c => c.toLowerCase().slice(0, 2) === want);  // e.g. 'fr' -> 'fr', 'es' -> 'es-ES'
+    if (match) out.push(match);
+    const en = avail.find(c => c.toLowerCase().startsWith('en'));
+    if (en && !out.includes(en)) out.push(en);
+    return out;
+  } catch (_) { return []; }
+}
+function _applySpellcheckLang(win, uiLang) {
+  try {
+    const langs = _spellcheckCodesFor(uiLang);
+    if (langs.length && win && win.webContents) win.webContents.session.setSpellCheckerLanguages(langs);
+  } catch (_) {}
+}
+ipcMain.handle('set-spellcheck-lang', (event, lang) => {
+  try { const cfg = loadConfig(); cfg.uiLang = lang; saveConfig(cfg); } catch (_) {}
+  try { _applySpellcheckLang(mainWindow, lang); } catch (_) {}
+  return { ok: true };
+});
+
 function safeBase(base, maxLen = 80) {
   if (base.length <= maxLen) return base;
   return base.slice(0, maxLen);
@@ -925,6 +955,30 @@ function createWindow() {
     mainWindow.show();
   });
   mainWindow.setMenuBarVisibility(false);
+
+  // Spell checker: apply the stored UI language + a right-click menu offering
+  // spelling suggestions, "add to dictionary", and the standard edit actions.
+  try { _applySpellcheckLang(mainWindow, _loadUiLang()); } catch (_) {}
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    if (!params.isEditable && !params.misspelledWord) return;
+    const { Menu, MenuItem } = require('electron');
+    const menu = new Menu();
+    for (const s of (params.dictionarySuggestions || [])) {
+      menu.append(new MenuItem({ label: s, click: () => mainWindow.webContents.replaceMisspelling(s) }));
+    }
+    if (params.misspelledWord) {
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({ label: 'Add to dictionary', click: () => mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) }));
+    }
+    if (params.isEditable) {
+      if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({ role: 'cut' }));
+      menu.append(new MenuItem({ role: 'copy' }));
+      menu.append(new MenuItem({ role: 'paste' }));
+      menu.append(new MenuItem({ role: 'selectAll' }));
+    }
+    if (menu.items.length) menu.popup();
+  });
 
   // Intercept close: ask the renderer if there are running jobs.
   // The renderer shows its own styled modal and replies via IPC.

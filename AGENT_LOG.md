@@ -1,5 +1,13 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Correcteur d'orthographe selon la langue UI)
+
+- Le correcteur Chromium d'Electron vérifiait en anglais (« obèse », « être » soulignés
+  à tort). main.js : `setSpellCheckerLanguages` selon la langue UI (mappée depuis les
+  `availableSpellCheckerLanguages`, + en fallback), IPC `set-spellcheck-lang`, et un
+  menu clic-droit (suggestions + add to dictionary + cut/copy/paste). preload
+  `setSpellcheckLang`. i18n.js l'appelle dans `applyLang` (synchro au changement de langue).
+
 ## 2026-06-21 (Classifieur NSFW de prompt DÉSACTIVÉ — trop de faux positifs)
 
 - User : « plus gros et habillé en noir » bloqué à 92 %, « Golden crab » 79 % → le

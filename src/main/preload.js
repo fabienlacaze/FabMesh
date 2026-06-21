@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   hidreamAvailable: () => ipcRenderer.invoke('hidream-available'),
   translatePrompt: (opts) => ipcRenderer.invoke('translate-prompt', opts),
   i18nAutoTranslate: (opts) => ipcRenderer.invoke('i18n-auto-translate', opts),
+  setSpellcheckLang: (lang) => ipcRenderer.invoke('set-spellcheck-lang', lang),
   generateBuildStages: (opts) => ipcRenderer.invoke('generate-build-stages', opts),
   imageToTrellis: (opts) => ipcRenderer.invoke('image-to-3d-trellis', opts),
   imageTo3D: (opts) => ipcRenderer.invoke('image-to-3d', opts),

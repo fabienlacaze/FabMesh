@@ -1032,6 +1032,7 @@
   function applyLang(lang) {
     _lang = lang || 'en';
     try { localStorage.setItem('fabmesh.lang', _lang); } catch (_) {}
+    try { window.meshyAPI && window.meshyAPI.setSpellcheckLang && window.meshyAPI.setSpellcheckLang(_lang); } catch (_) {}
     if (_lang !== 'en') _loadAutoCache(_lang);
     const dict = _dict();
     try {
