@@ -465,7 +465,27 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             except Exception as _se:
                 print(f"LOCAL_REALVIS: safety check error ({_se}), allowing image", flush=True)
 
-        gen_img.save(img_path)
+        # EU AI Act Art. 50(2): mark the output as AI-generated (IPTC
+        # DigitalSourceType + XMP) — machine-readable, invisible to pixels.
+        try:
+            from PIL.PngImagePlugin import PngInfo
+            _info = PngInfo()
+            _info.add_itxt("XML:com.adobe.xmp",
+                '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+                '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+                'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                '<rdf:Description rdf:about="" '
+                'xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/">'
+                '<Iptc4xmpExt:DigitalSourceType>'
+                'http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia'
+                '</Iptc4xmpExt:DigitalSourceType></rdf:Description></rdf:RDF>'
+                '</x:xmpmeta><?xpacket end="w"?>')
+            _info.add_text("Software", "FabMesh")
+            _info.add_text("DigitalSourceType", "trainedAlgorithmicMedia")
+            _info.add_text("Comment", "AI-generated image. Created with FabMesh. EU AI Act Art. 50 / IPTC disclosure.")
+            gen_img.save(img_path, pnginfo=_info)
+        except Exception:
+            gen_img.save(img_path)
         images.append(img_path)
         _sz = os.path.getsize(img_path)
         _evt('image_saved', index=i, path=img_path, bytes=_sz,

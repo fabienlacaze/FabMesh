@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (Marquage IA Act Art. 50 — provenance machine-readable sur images générées)
+
+P0 de l'audit : aucune marque « IA » sur les images générées. Ajout d'un marquage
+**machine-readable invisible** (ne touche PAS les pixels → zéro impact sur l'asset
+vendu) sur TOUTE image générée : métadonnées PNG IPTC
+`DigitalSourceType=trainedAlgorithmicMedia` + paquet XMP + tEXt (`Software=FabMesh`).
+Reconnu par Google/Adobe/etc. Conforme EU AI Act Art. 50(2).
+- **Modal** : helper `_ai_pnginfo()` + `pnginfo=` sur les 7 `img.save(...PNG...)` →
+  couvre text2image, back_view, tpose, rectify, sheet, image_op (toute la gen cloud).
+- **Desktop** : `scripts/local_juggernaut_bridge.py` (RealVis) + `run_fp8.py` (HiDream,
+  d:/ai_eval, hors repo) — marquage inline fail-safe.
+- **ToS** : clause « AI-generated content & transparency » (Art. 50 + responsabilité
+  likeness d'une personne réelle) ajoutée à la section Propriété intellectuelle.
+- Vérifié : round-trip PIL (les tEXt + XMP se relisent, `trainedAlgorithmicMedia` présent).
+- Effet en prod : redeploy Modal + rebuild/redeploy cloud + restart Electron.
+- Follow-ups NON faits : label VISIBLE deepfake (Art. 50(4)) sur le path likeness +
+  signature C2PA complète (certificat). À voir si besoin.
+
 ## 2026-06-20 (P1 restants traités — rétention R2 + Sentry hardening + embedded python)
 
 - **Rétention R2** (GDPR Art. 5(1)(e)) : `purgeTransientUploads()` ajouté au cron

@@ -140,6 +140,38 @@ async def _read_json(request) -> dict:
         raise HTTPException(status_code=400, detail="invalid json body")
 
 
+def _ai_pnginfo():
+    """PNG metadata marking the image as AI-generated — EU AI Act Art. 50(2)
+    transparency + IPTC DigitalSourceType=trainedAlgorithmicMedia (machine-
+    readable, recognised by Google/Adobe/etc.) + an XMP packet. Invisible: it
+    does NOT alter pixels, so it never degrades the user's asset."""
+    from PIL.PngImagePlugin import PngInfo
+    info = PngInfo()
+    xmp = (
+        '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        '<rdf:Description rdf:about="" '
+        'xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/" '
+        'xmlns:xmp="http://ns.adobe.com/xap/1.0/">'
+        '<Iptc4xmpExt:DigitalSourceType>'
+        'http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia'
+        '</Iptc4xmpExt:DigitalSourceType>'
+        '<xmp:CreatorTool>FabMesh</xmp:CreatorTool>'
+        '</rdf:Description></rdf:RDF></x:xmpmeta>'
+        '<?xpacket end="w"?>'
+    )
+    try:
+        info.add_itxt("XML:com.adobe.xmp", xmp)
+    except Exception:
+        pass
+    info.add_text("Software", "FabMesh")
+    info.add_text("DigitalSourceType", "trainedAlgorithmicMedia")
+    info.add_text("Comment",
+        "AI-generated image. Created with FabMesh. EU AI Act Art. 50 / IPTC disclosure.")
+    return info
+
+
 def _png_response(img):
     """Encode a PIL.Image → PNG → fastapi.Response with image/png type.
 
@@ -148,7 +180,7 @@ def _png_response(img):
     """
     from fastapi.responses import Response
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=False)
+    img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
     return Response(content=buf.getvalue(), media_type="image/png")
 
 
@@ -601,7 +633,7 @@ class MyFabmeshPredictor:
                 img = make_blocked_placeholder(img.size)
 
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=False)
+        img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
         png = buf.getvalue()
         print(
             f"[predict] DONE text2image dt={time.time() - t0:.1f}s "
@@ -833,7 +865,7 @@ class MyFabmeshBackview:
             n_candidates=int(payload.get("n_candidates") or 4),
         )
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=False)
+        img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
         png = buf.getvalue()
         print(f"[backview] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
@@ -897,7 +929,7 @@ class MyFabmeshBackview:
             pass
 
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=False)
+        img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
         png = buf.getvalue()
         print(f"[tpose] DONE mode={'img2img' if ref_img else 'text2image'} "
               f"dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
@@ -954,7 +986,7 @@ class MyFabmeshBackview:
         )
 
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=False)
+        img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
         png = buf.getvalue()
         print(f"[rectify] DONE mode={mode} dt={time.time() - t0:.1f}s "
               f"bytes={len(png)}", flush=True)
@@ -1140,7 +1172,7 @@ class MyFabmeshBackview:
             tag = "upscale"
 
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=False)
+        img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
         png = buf.getvalue()
         print(f"[{tag}] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
@@ -1192,7 +1224,7 @@ class MyFabmeshBackview:
             raise HTTPException(status_code=500, detail="sheet split missing back cell")
 
         buf = io.BytesIO()
-        back_img.save(buf, format="PNG", optimize=False)
+        back_img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
         png = buf.getvalue()
         print(f"[sheet] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
