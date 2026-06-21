@@ -38,8 +38,13 @@ def is_safe(image, clf1, clf2, threshold: float = 0.5,
         s1 = next((x['score'] for x in r1 if x['label'] == 'nsfw'), 0.0)
         s2 = next((x['score'] for x in r2 if x['label'] == 'nsfw'), 0.0)
         nsfw_score = float(max(s1, s2))
-    except Exception:
-        nsfw_score = 0.0
+    except Exception as e:
+        # Fail CLOSED: a broken/missing classifier must NEVER silently pass
+        # content. The old code set score 0.0 -> SAFE for non-character types
+        # (creature/vehicle/animal/prop/building), i.e. one classifier crash
+        # bypassed the soft NSFW filter for the majority of asset types.
+        print(f"[nsfw] classifier failed -> blocking (fail-closed): {e}", flush=True)
+        return False, 1.0
     if nsfw_score > threshold:
         return False, nsfw_score
     # Skin-ratio fallback — ONLY for asset_type='character'. Animals,

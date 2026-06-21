@@ -824,6 +824,17 @@ class MyFabmeshBackview:
         # disable cache so prepare_inputs_for_generation doesn't crash.
         self.florence_model.config.use_cache = False
 
+        # NSFW classifiers (Falconsai + AdamCodd, Apache 2.0, CPU, ~350MB) so the
+        # ControlNet routes (tpose/back_view/rectify/sheet) get the same
+        # post-image scan as text2image instead of relying only on the Worker
+        # prompt pre-filter.
+        from transformers import pipeline as _hfpipeline
+        print("[backview/snap] loading NSFW classifiers…", flush=True)
+        self.nsfw_clf1 = _hfpipeline("image-classification",
+                                     model="Falconsai/nsfw_image_detection", device="cpu")
+        self.nsfw_clf2 = _hfpipeline("image-classification",
+                                     model="AdamCodd/vit-base-nsfw-detector", device="cpu")
+
         # Pre-load the back skeleton (shipped via image.add_local_file).
         self.skel_img = Image.open("/opt/back_tpose_skeleton.png").convert("RGB")
         # FRONT T-pose skeleton — used by the `tpose` endpoint. Same
@@ -893,6 +904,12 @@ class MyFabmeshBackview:
             seed=int(payload.get("seed") or 424242),
             n_candidates=int(payload.get("n_candidates") or 4),
         )
+        if os.environ.get("FABMESH_UNRESTRICTED") != "1" and getattr(self, "nsfw_clf1", None):
+            from modal_app._nsfw import is_safe, make_blocked_placeholder
+            _safe, _ns = is_safe(img, self.nsfw_clf1, self.nsfw_clf2, asset_type="character")
+            if not _safe:
+                print(f"[backview] BLOCKED nsfw={_ns:.2f}", flush=True)
+                img = make_blocked_placeholder(img.size)
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())
         png = buf.getvalue()
@@ -951,11 +968,11 @@ class MyFabmeshBackview:
         )
 
         # Parental control — image NSFW scan, same as text2image path.
-        if os.environ.get("FABMESH_UNRESTRICTED") != "1":
-            # Reuse Falconsai+AdamCodd if available; otherwise skip (the
-            # backview class doesn't carry them — would be redundant since
-            # the Worker pre-filters the prompt already via nsfw_filter.ts).
-            pass
+        if os.environ.get("FABMESH_UNRESTRICTED") != "1" and getattr(self, "nsfw_clf1", None):
+            safe, _ns = is_safe(img, self.nsfw_clf1, self.nsfw_clf2, asset_type="character")
+            if not safe:
+                print(f"[tpose] BLOCKED nsfw={_ns:.2f}", flush=True)
+                img = make_blocked_placeholder(img.size)
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False, pnginfo=_ai_pnginfo())

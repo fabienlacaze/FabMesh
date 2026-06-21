@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Fixes WF2 — sécurité NSFW : fail-closed + scan routes ControlNet)
+
+Workflow #2 (fonctions cassées/incomplètes), volet sécurité :
+- `_nsfw.py` `is_safe` : passait en **fail-OPEN** (sur crash classifieur → score 0 →
+  `return True` SAFE pour tous les types non-character). Désormais **fail-CLOSED**
+  (block + log) — un classifieur cassé ne laisse plus passer le contenu.
+- `app.py` : la classe `MyFabmeshBackview` (routes tpose/back_view/sheet/rectify) ne
+  chargeait PAS les classifieurs NSFW → AUCUN scan image (`pass` mort + docstring
+  mensongère « same as text2image »). Chargé Falconsai+AdamCodd sur la classe + scan
+  réel ajouté sur **tpose** (bloc mort remplacé) et **back_view**. rectify/sheet
+  dérivent du front déjà scanné ; même pattern réutilisable via `self.nsfw_clf1`.
+- **Redeploy Modal requis.**
+
 ## 2026-06-20 (MVP modif-mesh — re-texture régionale IA : backend + plomberie)
 
 Suite au workflow #4 (modifier un mesh par IA). MVP = re-texture régionale par
