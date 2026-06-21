@@ -3956,6 +3956,7 @@ async function _lb3dLoadAt(meshPath) {
   }
   // Clear previous model
   if (lb3dModel) { lb3dScene.remove(lb3dModel); lb3dModel = null; }
+  document.getElementById('lb3d-loading')?.classList.remove('hidden');  // spinner while the mesh (re)loads into the fullscreen scene
   const ext = (meshPath.split('.').pop() || '').toLowerCase();
   function fitAndApply(obj) {
     console.log('[lb3d] fitAndApply, model:', obj);
@@ -4033,6 +4034,7 @@ async function _lb3dLoadAt(meshPath) {
       if (animCount > 0) extras2.push({ label: 'Animations', value: animCount });
       renderViewerInfo(infoEl2, _lb3dPaths[_lb3dIndex] || '', extras2);
     }
+    document.getElementById('lb3d-loading')?.classList.add('hidden');
   }
   try {
     if (ext === 'fbx') {
@@ -4040,18 +4042,20 @@ async function _lb3dLoadAt(meshPath) {
       const url = 'file:///' + meshPath.replace(/\\/g, '/');
       const loader = new FBXLoader();
       loader.load(url, fitAndApply, undefined, (err) => {
+        document.getElementById('lb3d-loading')?.classList.add('hidden');
         console.error('FBX load error in lightbox', err);
         customError('Could not load FBX: ' + (err?.message || err), 'Lightbox error');
       });
     } else {
       // GLB / GLTF binary path
       const buffer = await API.readMeshFile(meshPath);
-      if (!buffer) { customError('Could not read mesh file', 'Lightbox error'); return; }
+      if (!buffer) { document.getElementById('lb3d-loading')?.classList.add('hidden'); customError('Could not read mesh file', 'Lightbox error'); return; }
       const loader = new GLTFLoader();
       loader.parse(buffer, '', (gltf) => { _applyMeshTextureFilter(gltf.scene); fitAndApply(gltf.scene); },
-        (err) => console.error('GLTF parse error in lightbox', err));
+        (err) => { document.getElementById('lb3d-loading')?.classList.add('hidden'); console.error('GLTF parse error in lightbox', err); });
     }
   } catch (e) {
+    document.getElementById('lb3d-loading')?.classList.add('hidden');
     console.error('openMeshLightbox failed', e);
   }
   startLb3dLoop();
