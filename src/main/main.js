@@ -4001,6 +4001,31 @@ ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate, re
   }
 });
 
+// Texture variant: ControlNet-Tile re-texture (shape/geometry locked) — used by the
+// Variante tool's "vary texture only" mode. Each seed = a different surface/texture.
+ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed }) => {
+  try {
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = safeBase(path.basename(imagePath, ext));
+    const _uniq = (seed != null && seed !== '') ? seed : Math.floor(Math.random() * 1e9);
+    const newImagePath = path.join(dir, `${base}_texvar_${Date.now()}_${_uniq}${ext}`);
+    await ensureSdxlServer();
+    if (!sdxlReady) return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
+    const r = await sdxlServerCall('/tex_variant', {
+      input: imagePath, prompt: prompt || '', output: newImagePath,
+      strength: (strength != null ? strength : 0.45), seed: parseInt(_uniq),
+    });
+    if (r.ok) {
+      _handleMultiviewInheritance(newImagePath).catch(() => {});
+      return { success: true, newPath: newImagePath };
+    }
+    return { success: false, error: r.error || 'texture variant failed' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Recolor: auto-detect a part (CLIPSeg) and recolor ONLY it, shape preserved.
 ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate, rel }) => {
   try {

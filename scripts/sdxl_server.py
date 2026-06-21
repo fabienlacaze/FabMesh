@@ -865,6 +865,49 @@ def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0
             return {"ok": False, "error": str(e)}
 
 
+def do_tex_variant(input_path, prompt, output_path, strength=0.45, seed=0):
+    """Structure-locked TEXTURE variant: ControlNet-Tile keeps the shape/geometry
+    (the original image is the control) while regenerating the surface/texture.
+    The generated element does NOT move — only the texture/colours vary per seed."""
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+    if state.img2img_pipe is not None:
+        unload_model('img2img')
+    pipe = load_controlnet_tile()
+    state.last_use['controlnet_tile'] = time.time()
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            orig_size = img.size
+            img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
+            t0 = time.time()
+            p = (prompt or "").strip() or "high quality, detailed, sharp focus, intricate textures, game asset"
+            with torch.inference_mode():
+                result = pipe(
+                    prompt=p,
+                    negative_prompt="deformed, distorted, changed shape, different pose, extra parts, missing parts, blurry, low quality",
+                    image=img_work,
+                    control_image=img_work,
+                    strength=float(max(0.2, min(0.7, strength))),
+                    num_inference_steps=26,
+                    guidance_scale=6.0,
+                    controlnet_conditioning_scale=0.9,    # strong structure lock
+                    generator=torch.Generator("cuda").manual_seed(int(seed)),
+                ).images[0]
+            if result.size != orig_size:
+                result = result.resize(orig_size, Image.LANCZOS)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            result.save(output_path)
+            elapsed = time.time() - t0
+            log(f"tex_variant seed={seed} strength={strength} in {elapsed:.1f}s -> {output_path}")
+            return {"ok": True, "output": output_path, "time": elapsed}
+        except Exception as e:
+            log(f"tex_variant error: {e}", 'err')
+            traceback.print_exc()
+            free_vram()
+            return {"ok": False, "error": str(e)}
+
+
 def do_segment(input_path, target_text, output_path, dilate=15, rel=0.5):
     """CLIPSeg detection ONLY (no inpaint): save a red overlay of the detected
     mask so the user can preview LIVE what Auto Inpaint will repaint. Loads only
@@ -1309,6 +1352,19 @@ class Handler(BaseHTTPRequestHandler):
                     data.get('strength', 1.0),
                     data.get('dilate', 15),
                     data.get('rel', 0.5),
+                )
+                self._json_response(200 if result.get('ok') else 500, result)
+
+            elif self.path == '/tex_variant':
+                if 'input' not in data or 'output' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output"})
+                    return
+                result = do_tex_variant(
+                    data['input'],
+                    data.get('prompt', ''),
+                    data['output'],
+                    data.get('strength', 0.45),
+                    data.get('seed', 0),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

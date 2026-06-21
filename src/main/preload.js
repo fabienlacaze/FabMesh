@@ -206,6 +206,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
   segmentMask: (opts) => ipcRenderer.invoke('segment-mask', opts),
   recolor: (opts) => ipcRenderer.invoke('recolor', opts),
+  texVariant: (opts) => ipcRenderer.invoke('tex-variant', opts),
   saveEmissiveFile: (opts) => ipcRenderer.invoke('save-emissive-file', opts),
   maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),

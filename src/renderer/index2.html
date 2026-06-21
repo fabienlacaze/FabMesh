@@ -2196,6 +2196,12 @@
             <label style="margin-top:12px;">Number of variants <span id="var-count-val" class="slider-val">1</span></label>
             <input type="range" id="var-count" min="1" max="8" value="1" />
             <small class="modal-subtitle" style="display:block; margin-top:5px; font-size:11px; line-height:1.3;">Each variant uses a different random seed, so you get distinct results.</small>
+            <label class="inline-check" style="display:flex; align-items:center; gap:8px; margin-top:14px; cursor:pointer;">
+              <input type="checkbox" id="var-tex-mode" />
+              <span>&#128274; Varier seulement la texture (garder la forme)</span>
+            </label>
+            <input type="text" id="var-tex-prompt" placeholder="ex: épée bleue, armure dorée… (vide = variation libre)" style="margin-top:8px; display:none;" />
+            <small id="var-tex-hint" class="modal-subtitle" style="display:none; margin-top:5px; font-size:11px; line-height:1.3;">Mode texture : ControlNet verrouille la forme/géométrie, seule la surface/couleur change. ~30-60 s par variante.</small>
           </div>
         </div>
         <div class="modal-actions">

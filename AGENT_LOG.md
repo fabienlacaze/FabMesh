@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Variante étendue : mode « texture » — forme verrouillée, ControlNet-Tile)
+
+- User : « différentes versions des textures du personnage (épée devient bleu) sans
+  changer l'élément généré, seulement la texture », slider 1-8 comme Variante. Étendu
+  l'outil Variante : nouveau `do_tex_variant` (ControlNet-Tile, cn_scale 0.9 = forte
+  contrainte de structure, strength ~0.45, seed/variante) qui régénère la surface en
+  gardant la géométrie. Endpoint /tex_variant + IPC tex-variant + preload texVariant.
+  Modal Variante : toggle « 🔒 Varier seulement la texture (garder la forme) » + champ
+  prompt optionnel (« épée bleue… » — vide = libre). Quand ON, la boucle (sliders
+  Intensité + Nombre 1-8 réutilisés) appelle texVariant au lieu d'img2img. Desktop only.
+
 ## 2026-06-21 (Précision de détection CLIPSeg : seuil relatif au pic + slider Précision)
 
 - User : « arme » détectait toute la moitié gauche (cape+corps) — le seuil CLIPSeg fixe

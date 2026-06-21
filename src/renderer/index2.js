@@ -14105,28 +14105,43 @@ document.getElementById('var-strength')?.addEventListener('input', (e) => {
 document.getElementById('var-count')?.addEventListener('input', (e) => {
   document.getElementById('var-count-val').textContent = e.target.value;
 });
+document.getElementById('var-tex-mode')?.addEventListener('change', (e) => {
+  const on = !!e.target.checked;
+  const pr = document.getElementById('var-tex-prompt');
+  const hint = document.getElementById('var-tex-hint');
+  if (pr) pr.style.display = on ? '' : 'none';
+  if (hint) hint.style.display = on ? '' : 'none';
+});
 document.getElementById('var-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-variant')?.classList.add('hidden');
 });
-document.getElementById('var-apply')?.addEventListener('click', () => {
+document.getElementById('var-apply')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const modal = document.getElementById('modal-variant');
   const target = (modal && modal.dataset.targetPath) || editTarget(p);
   if (!target) return;
   const strength = (parseInt(document.getElementById('var-strength').value) || 50) / 100;
   const count = parseInt(document.getElementById('var-count').value) || 1;
+  const texMode = !!document.getElementById('var-tex-mode')?.checked;
+  const rawTexPrompt = (document.getElementById('var-tex-prompt')?.value || '').trim();
   if (modal) modal.classList.add('hidden');
   const prompt = (p && (p.prompt || p.initialPrompt)) || 'high quality, detailed';
+  // Texture mode: ControlNet-Tile keeps the shape; only the surface/texture varies.
+  const texPrompt = (texMode && rawTexPrompt) ? await translateUserPrompt(rawTexPrompt) : '';
   showToast(`Generating ${count} variant${count > 1 ? 's' : ''}…`, 'info', 2000);
   for (let i = 0; i < count; i++) {
     const seed = Math.floor(Math.random() * 1000000);
     const label = count > 1 ? `Variant ${i + 1}/${count}: ${p.name}` : `Variant: ${p.name}`;
     gatedRun('img2img', label, async () => {
       const job = pushJob(`Variant: ${p.name}`, null,
-        { Seed: seed, Variation: Math.round(strength * 100) + '%' }, 30000,
+        texMode ? { Seed: seed, Texture: rawTexPrompt || '(libre)', Mode: 'forme verrouillée' }
+                : { Seed: seed, Variation: Math.round(strength * 100) + '%' },
+        texMode ? 60000 : 30000,
         { sourceImageUrl: target, projectName: p.name });
       try {
-        const r = await API.img2img({ imagePath: target, prompt, strength, engine: 'local-sdxl', seed });
+        const r = texMode
+          ? await API.texVariant({ imagePath: target, prompt: texPrompt, strength, seed })
+          : await API.img2img({ imagePath: target, prompt, strength, engine: 'local-sdxl', seed });
         if (r?.success) { completeJob(job.id, true); await reloadCurrentProject(); }
         else { completeJob(job.id, false, r?.error); showToast('Variant failed: ' + (r?.error || 'unknown'), 'error'); }
       } catch (e) {
