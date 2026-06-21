@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Auto-traduction sur TOUS les champs de prompt)
+
+- `translateUserPrompt()` (UI lang → EN, via le worker persistant) n'était appelé
+  que dans Generate/Enhance. Câblé sur tous les autres champs de prompt user →
+  modèle (anglais) : **Modify image** (mod-prompt → img2img), **Region re-texture**
+  (rrx-prompt → regionRetex), **Auto-inpaint** cible+remplacement (ai-target/ai-replace
+  → autoInpaint) + le **preview de détection** SAM (segmentMask), et **Refine mesh**
+  (rfn-prompt → refineMesh). Variant réutilise `p.prompt` (déjà EN), np-prompt passe
+  par ws-prompt (traduit). Rapide car le worker reste chaud (~0,06 s). Renderer-only.
+
 ## 2026-06-21 (Worker de traduction persistant + fix flashing #2)
 
 - **Traduction instantanée** : le fix CPU-only laissait quand même ~5-6 s/appel

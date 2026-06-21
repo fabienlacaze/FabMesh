@@ -1977,10 +1977,11 @@ bindStepCardCollapse();
 
   $('rrx-apply')?.addEventListener('click', async () => {
     const meshPath = _curMeshPath();
-    const prompt = ($('rrx-prompt').value || '').trim();
+    const rawPrompt = ($('rrx-prompt').value || '').trim();
     if (!meshPath) { showToast('No mesh.', 'error'); return; }
     if (!hasPaint) { showToast('Paint the area to change first.', 'error'); return; }
-    if (!prompt) { showToast('Type what the area should look like.', 'error'); return; }
+    if (!rawPrompt) { showToast('Type what the area should look like.', 'error'); return; }
+    const prompt = await translateUserPrompt(rawPrompt);  // user's language → EN for SDXL
     // Mask: white where painted, black elsewhere (the script projects it to UV).
     const mc = document.createElement('canvas'); mc.width = canvas.width; mc.height = canvas.height;
     const mctx = mc.getContext('2d');
@@ -5217,8 +5218,9 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
   const p = state.currentProject;
   const target = modifyModal.dataset.targetPath || editTarget(p);
   if (!target) return;
-  const prompt = document.getElementById('mod-prompt').value.trim();
-  if (!prompt) { showToast('Type a modification first.', 'error'); return; }
+  const rawPrompt = document.getElementById('mod-prompt').value.trim();
+  if (!rawPrompt) { showToast('Type a modification first.', 'error'); return; }
+  const prompt = await translateUserPrompt(rawPrompt);  // user types in their language → EN for the model
   const engine = document.getElementById('mod-engine').value;
   const strength = parseInt(modStrength.value) / 100;
   modifyModal.classList.add('hidden');
@@ -8085,8 +8087,9 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const m = getCurrentMeshObj();
   if (!p || !m) return;
-  const modification = document.getElementById('rfn-prompt').value.trim();
-  if (!modification) { showToast('Type a modification first.', 'error'); return; }
+  const rawModification = document.getElementById('rfn-prompt').value.trim();
+  if (!rawModification) { showToast('Type a modification first.', 'error'); return; }
+  const modification = await translateUserPrompt(rawModification);  // user's language → EN
   const format = document.getElementById('rfn-format').value;
   const model = document.getElementById('rfn-model').value;
   document.getElementById('modal-refine-mesh').classList.add('hidden');
@@ -14144,10 +14147,10 @@ let _aiFirstDetectDone = false;  // the FIRST detection loads the model (~15s) �
 async function _aiUpdateMaskPreview() {
   const srcImg = document.getElementById('ai-source-img');
   if (!srcImg || !_aiSrcPath) return;
-  const target = (document.getElementById('ai-target').value || '').trim();
+  const rawTarget = (document.getElementById('ai-target').value || '').trim();
   const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
   const origUrl = 'file:///' + _aiSrcPath.replace(/\\/g, '/') + '?t=0';
-  if (!target) { srcImg.src = origUrl; srcImg.style.opacity = ''; return; }
+  if (!rawTarget) { srcImg.src = origUrl; srcImg.style.opacity = ''; return; }
   if (!API.segmentMask) return;
   const spinner = document.getElementById('ai-detect-spinner');
   const label = document.getElementById('ai-detect-label');
@@ -14157,10 +14160,11 @@ async function _aiUpdateMaskPreview() {
   if (spinner) spinner.style.display = 'flex';   // loading circle on the image
   srcImg.style.opacity = '0.6';
   try {
+    const target = await translateUserPrompt(rawTarget);  // detect in EN even if typed in another language
     const r = await API.segmentMask({ imagePath: _aiSrcPath, targetText: target, dilate });
     // Ignore a stale response if the target changed while we were detecting —
     // the newer in-flight call owns the UI (and will hide the spinner).
-    if (((document.getElementById('ai-target').value || '').trim()) !== target) return;
+    if (((document.getElementById('ai-target').value || '').trim()) !== rawTarget) return;
     _aiFirstDetectDone = true;   // engine warm now → next detections are fast
     srcImg.style.opacity = '';
     if (spinner) spinner.style.display = 'none';
@@ -14191,15 +14195,18 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const imagePath = editTarget(p);
   if (!imagePath) return;
-  const target = document.getElementById('ai-target').value.trim();
-  if (!target) {
+  const rawTarget = document.getElementById('ai-target').value.trim();
+  if (!rawTarget) {
     showToast('Type what to find first (e.g. "hat", "background")', 'error');
     document.getElementById('ai-target')?.focus();
     return;
   }
-  const replace = document.getElementById('ai-replace').value.trim();
+  const rawReplace = document.getElementById('ai-replace').value.trim();
   const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
   document.getElementById('modal-auto-inpaint').classList.add('hidden');
+  // User types target/replacement in their language → translate to EN (CLIPSeg + SDXL are English).
+  const target = await translateUserPrompt(rawTarget);
+  const replace = rawReplace ? await translateUserPrompt(rawReplace) : '';
   // Auto-inpaint: CLIPSeg detection + SDXL inpaint, ~3 min on RTX 5080
   gatedRun('inpaint', `Auto inpaint: ${p.name}`, async () => {
     const job = pushJob(`Auto inpaint: ${p.name}`, null, {
