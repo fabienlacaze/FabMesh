@@ -1957,6 +1957,7 @@ bindStepCardCollapse();
 
   function close() { modal.classList.add('hidden'); }
   $('rrx-cancel')?.addEventListener('click', close);
+  $('rrx-close-x')?.addEventListener('click', close);
 
   async function open() {
     const meshPath = _curMeshPath();
