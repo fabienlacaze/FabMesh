@@ -569,6 +569,9 @@ _TRELLIS2_PRESETS = {
     'fast':     ['--steps', '12', '--texture-size', '2048', '--image-resolution', '1024'],
     'balanced': ['--steps', '24', '--texture-size', '2048', '--image-resolution', '1024'],
     'quality':  ['--steps', '32', '--texture-size', '4096', '--image-resolution', '2048'],
+    # Ultra 8K = same 4096 bake (an 8K bake OOMs on 16 GB); the renderer chains
+    # Real-ESRGAN x2 on the result -> 8192 final.
+    'ultra_8k': ['--steps', '32', '--texture-size', '4096', '--image-resolution', '2048'],
 }
 
 

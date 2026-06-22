@@ -8289,13 +8289,21 @@ async function runMeshTool(operation, params = []) {
   try {
     const result = await API.meshTool({ operation, meshPath, params });
     if (result && result.success) {
+      let newPath = result.newPath || result.path;
+      // Ultra 8K preset: chain Real-ESRGAN x2 on the 4096 re-texture -> 8192 (an 8K bake
+      // would OOM the GPU). The job stays "running" through the upscale.
+      if (newPath && operation === 'trellis2_retex' && params[1] === 'ultra_8k') {
+        try {
+          const er = await API.enhanceMeshTexture({ meshPath: newPath, jobId: job ? job.id : undefined });
+          if (er && er.success && er.newPath) newPath = er.newPath;
+        } catch (_) {}
+      }
       showToast(`${operation} done!`, 'success');
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
       // Register the new mesh version. populateWorkspace only RENDERS
       // p.meshes — it does not re-scan disk — so without this the decimated/
       // filled/… output never appears as a new version and the user keeps
       // seeing the old triangle count.
-      const newPath = result.newPath || result.path;
       if (newPath) {
         p.meshes = p.meshes || [];
         const filename = result.filename || newPath.replace(/\\/g, '/').split('/').pop();
@@ -8813,7 +8821,8 @@ const MESH_TOOL_SCHEMAS = {
       { id: 'preset', label: 'Quality preset', type: 'select', default: 'fast',
         options: [['fast','Fast (12 steps · 2048px · ~90s)'],
                   ['balanced','Balanced (24 steps · 2048px · ~130s)'],
-                  ['quality','Quality (32 steps · 4096px · ~3min)']] },
+                  ['quality','Quality (32 steps · 4096px · ~3min)'],
+                  ['ultra_8k','Ultra 8K (32 steps · 4096→8192px · ~5min)']] },
       { id: 'seed', label: 'Variation (seed)', type: 'number', min: 0, max: 999999, step: 1, default: 42, randomize: true },
     ],
     // preset + seed flow as real CLI params: runMeshTool → mesh-tool IPC →

@@ -1,5 +1,12 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Preset Ultra 8K pour la re-texture mesh : 4096 bake + Real-ESRGAN ×2)
+
+- User : « on fait pas 8K aussi ? » sur le dropdown re-texture (trellis2_retex). Ajouté un
+  preset « Ultra 8K (4096→8192) » : `mesh_tools.py` bake à 4096 (un bake 8K direct OOM sur
+  16 GB), puis `runMeshTool` enchaîne `enhanceMeshTexture` (Real-ESRGAN ×2) sur le résultat
+  → 8192 final. Le job reste « en cours » pendant l'upscale. Restart non requis.
+
 ## 2026-06-22 (Re-texture zone : mode IA-auto — détection CLIPSeg, plus de peinture obligatoire)
 
 - User : « c'est un outil IA → textures recréées sans sélection manuelle ». Ajouté la
