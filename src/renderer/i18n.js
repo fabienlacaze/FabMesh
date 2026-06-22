@@ -846,12 +846,19 @@
     if (!key) return;
     let translated = orig;  // dict null = English (source) -> restore the cached original
     if (dict) {
-      if (dict[key]) {
+      // Strip a leading icon/emoji run ("🔬 Export" -> "🔬 " + "Export") and match the
+      // icon-STRIPPED core FIRST. Curated dict entries are keyed without the icon, so this
+      // must beat any stale full-string auto-translate cache entry (keyed WITH the icon),
+      // which used to shadow curated translations (e.g. "Sharpen texture"->"épingle").
+      const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
+      const core = m ? m[2] : key;
+      const prefix = m ? m[1] : '';
+      if (dict[core]) {
+        translated = orig.replace(key, prefix + dict[core]);
+      } else if (dict[key]) {
         translated = orig.replace(key, dict[key]);
       } else {
-        const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
-        if (m && dict[m[2]]) translated = orig.replace(key, m[1] + dict[m[2]]);
-        else _queueAuto(key);   // no dict entry -> runtime auto-translate fallback
+        _queueAuto(core);   // cache by the icon-stripped core so it shares the dict key space
       }
     }
     if (node.nodeValue !== translated) node.nodeValue = translated;
@@ -969,7 +976,7 @@
   // (EN -> current language) and cached persistently, so the UI is never left in
   // English even for strings we didn't pre-translate. No-ops gracefully when the
   // IPC bridge is absent (e.g. the web/cloud build has no local worker).
-  const _AUTO_KEY = 'fabmesh.i18n.auto.v2.';   // v2: invalidate caches that mistranslated durations ("18s" -> "18 ans")
+  const _AUTO_KEY = 'fabmesh.i18n.auto.v3.';   // v3: cache now keyed by icon-stripped core; drop stale full-string ("🔬 Sharpen" -> "épingle") caches that shadowed curated dict entries
   const _autoCache = {};
   const _pendingAuto = new Set();
   const _triedAuto = new Set();
