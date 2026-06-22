@@ -8805,11 +8805,11 @@ const MESH_TOOL_SCHEMAS = {
   },
   retexture: {
     title: 'Resolution',
-    subtitle: 'Re-bake the mesh texture at a different resolution by reprojecting the source photo onto the UVs. Higher resolution (4096+) coming soon — currently capped at 2048 because the upstream UV unwrap is baked at 2K and stretching produces corruption (black patches / bleached areas).',
+    subtitle: 'Re-bake the texture by reprojecting the source photo onto a fresh xatlas UV unwrap — sharper than the generated bake. 4096 needs the mesh\'s 6-view set (view_0..5) so the back/sides have a source; without it they go black at 4K (front-only is fine at 2048).',
     needsImage: true,
     params: [
-      { id: 'tex_res', label: 'Texture resolution (4K coming soon)', type: 'select', default: '2048',
-        options: [['1024','1024 px'],['2048','2048 px (max)']] },
+      { id: 'tex_res', label: 'Texture resolution', type: 'select', default: '2048',
+        options: [['1024','1024 px'],['2048','2048 px'],['4096','4096 px (HD · needs 6-view set)']] },
     ],
     build: (vals, ctx) => [ctx.imagePath, String(vals.tex_res)],
   },

@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Re-texture HD 4K : multi-vues branchées + 4096 débloqué)
+
+- User : texture moyenne même à fond → la recherche (project_texture_quality_research) valide
+  la re-projection source. Diagnostic : le cap 2K venait du fait que `retexture` n'envoyait
+  QUE la photo FRONT → à 4K le dos/côtés n'ont aucune source = taches noires. `texture_project.py`
+  a DÉJÀ xatlas re-unwrap + mode `--multiview` (view_0..5.png) + seam-blend/edge-pad. Fix :
+  `retexture` cherche le set 6-vues (`<mesh>.glb.multiview/` ou `<source>_multiview/`) et passe
+  `--multiview` (fallback gracieux front-only si absent), timeout 120→300s. Dropdown débloqué
+  à 4096. À TESTER sur GPU (sur un mesh qui a le set 6-vues).
+
 ## 2026-06-22 (Re-texture zone 3D — fondation backend : masque UV direct)
 
 - User : veut un viewer 3D rotatable façon « Peinture de sommets » pour « Re-texturer une

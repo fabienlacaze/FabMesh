@@ -676,9 +676,22 @@ def retexture(input_path, output_path, source_image, tex_res=2048):
         env['FABMESH_UV_REPACK'] = '0'
         log('Hi3DGen mesh detected - applying axis fix '
             '(FABMESH_TEXPROJ_HI3DGEN_UNDO=1)')
+    # Multi-view back-projection: at 4K a single FRONT photo leaves the back/sides with
+    # NO source -> black patches / bleaching. If a 6-view set (view_0..5.png) was generated
+    # for this mesh or its source, pass it so the whole surface gets the crisp source detail
+    # (texture_project.py already handles the angles + seam-blend + hole-inpaint).
+    mv_extra = []
+    for _cand in (input_path + '.multiview',
+                  os.path.splitext(source_image)[0] + '_multiview'):
+        if os.path.isdir(_cand) and os.path.exists(os.path.join(_cand, 'view_0.png')):
+            mv_extra = ['--multiview', _cand]
+            log(f'retexture: multi-view coverage from {_cand}')
+            break
+    if not mv_extra:
+        log('retexture: no view_0..5 multi-view set found — front-only (back may go black at 4K)')
     r = subprocess.run(
-        [sys.executable, script, output_path, source_image, output_path, str(tex_res)],
-        capture_output=True, text=True, timeout=120, env=env)
+        [sys.executable, script, output_path, source_image, output_path, str(tex_res)] + mv_extra,
+        capture_output=True, text=True, timeout=300, env=env)
     if r.stdout:
         print(r.stdout, end='', flush=True)
     if r.returncode != 0:
