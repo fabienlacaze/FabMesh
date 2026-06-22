@@ -17,6 +17,14 @@
   GPU (cible ~30-60s). Suites possibles : nvdiffrast GPU (sub-15s, VÉRIFIÉ live sm_120 — contre
   Pixal3D — mais licence NVIDIA à vendre pour le packaging) ; Telea inpaint = nouveau goulot
   (~5-15s) ; bar live (main.js spawn-stream des events rasterize_progress).
+- SUITE (même session) : le retexture 4K crashait QUAND MÊME (rc=4294967295 natif, après
+  mesh_loaded). Diagnostic A/B : ce n'était NI numba (512×7vues+boundscheck = 4s clean, 0 OOB)
+  NI le 4K en soi (4096 sans xatlas = 24s rc=0) mais **xatlas.parametrize** qui s'étrangle
+  (>220s à 512) + crashe en NATIF (uncatchable) sur 487k faces. Fix : skip xatlas re-unwrap
+  au-dessus de `FABMESH_UV_REPACK_MAX_FACES` (défaut 150000) — les meshes high-poly (trellis2
+  enhanced) ont déjà des UV propres (99.96% couverture sans re-unwrap), xatlas n'aide que les
+  petits SF3D fragmentés. VALIDÉ end-to-end : 4096 + multiview + env défaut = **22s** (xatlas
+  skip + numba raster 2.0s + Telea inpaint 10.5s), full coverage. Bilan : 10min+crash → 22s.
 
 ## 2026-06-22 (Re-texture HD 4K : multi-vues branchées + 4096 débloqué)
 

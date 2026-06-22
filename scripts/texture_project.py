@@ -476,7 +476,22 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # data actually spans contiguous UV regions. Default flipped to ON.
     # Set FABMESH_UV_REPACK=0 to disable.
     _repack_enabled = os.environ.get('FABMESH_UV_REPACK', '1') == '1'
+    _repack_max_faces = int(os.environ.get('FABMESH_UV_REPACK_MAX_FACES', '150000'))
     _repacked = False
+    if _repack_enabled and len(faces) > _repack_max_faces:
+        # xatlas.parametrize (single-threaded C++) gets pathologically slow
+        # (>220s at 487k faces) AND crashes NATIVELY (rc=-1, uncatchable by
+        # try/except) on very high-poly meshes — e.g. the 487k-face trellis2
+        # 'enhanced' meshes. Those already carry clean contiguous UVs (verified
+        # 2026-06-22: 99.96% face coverage WITHOUT re-unwrap, full 4K bake in
+        # ~24s), so the micro-island mosaic fix xatlas gives low-poly SF3D
+        # meshes is unnecessary here. Skip above the threshold so the bake stays
+        # fast instead of timing out / crashing the whole retexture.
+        log(f'xatlas re-unwrap SKIPPED: {len(faces)} faces > '
+            f'{_repack_max_faces} (too slow/crash-prone; keeping original UVs)')
+        _evt('xatlas_skipped', reason='too_many_faces',
+             faces=int(len(faces)), threshold=_repack_max_faces)
+        _repack_enabled = False
     if _repack_enabled and len(faces) > 100:
         try:
             import xatlas
