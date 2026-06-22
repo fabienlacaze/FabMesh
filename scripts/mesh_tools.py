@@ -697,14 +697,13 @@ def retexture(input_path, output_path, source_image, tex_res=2048):
             break
     if not mv_extra:
         log('retexture: no view_0..5 multi-view set found — front-only (back may go black at 4K)')
+    # Stream texture_project's output (NO capture) so the 4K x 6-view progress + any error
+    # reach the [mesh-tool] log. Timeout 900s: a 4K bake over 6 views is heavy and the old
+    # 300s + capture_output timed out SILENTLY (nothing logged).
     r = subprocess.run(
         [sys.executable, script, output_path, source_image, output_path, str(tex_res)] + mv_extra,
-        capture_output=True, text=True, timeout=300, env=env)
-    if r.stdout:
-        print(r.stdout, end='', flush=True)
+        text=True, timeout=900, env=env)
     if r.returncode != 0:
-        if r.stderr:
-            print(r.stderr, end='', flush=True)  # surface the real error
         # Only delete the freshly-made copy - never the user's in-place source.
         if made_copy and os.path.exists(output_path):
             try:
