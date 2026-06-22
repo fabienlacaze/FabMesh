@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Re-texture zone 3D — fondation backend : masque UV direct)
+
+- User : veut un viewer 3D rotatable façon « Peinture de sommets » pour « Re-texturer une
+  zone » (option A) au lieu du rendu front fixe. Fondation backend : `face_inpaint_atlas.py`
+  prend `--uv-mask` (masque DÉJÀ en espace UV → `inpaint_atlas` direct, saute la projection
+  écran→UV ET le rendu front lent). `mesh:region-retex` prend un flag `uvMask` → `--uv-mask`.
+  À SUIVRE (frontend) : modal viewer 3D live qui réutilise l'infra raycast `hit.uv` de
+  Peinture émissive pour peindre le masque UV directement sur le mesh (rotation libre).
+
 ## 2026-06-22 (Preset Ultra 8K pour la re-texture mesh : 4096 bake + Real-ESRGAN ×2)
 
 - User : « on fait pas 8K aussi ? » sur le dropdown re-texture (trellis2_retex). Ajouté un

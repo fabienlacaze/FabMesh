@@ -6239,7 +6239,7 @@ ipcMain.handle('mesh:render-front', async (_e, { meshPath } = {}) => {
       });
   });
 });
-ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, strength } = {}) => {
+ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, strength, uvMask } = {}) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
   const maskPath = path.join(os.tmpdir(), `fabmesh_mask_${Date.now()}.png`);
   try {
@@ -6249,7 +6249,7 @@ ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, 
   const out = path.join(path.dirname(meshPath), `${base}_retex_${Date.now()}.glb`);
   return new Promise((resolve) => {
     execFile('python', [script, meshPath, out,
-      '--mask', maskPath, '--prompt', String(prompt || 'detailed texture'),
+      (uvMask ? '--uv-mask' : '--mask'), maskPath, '--prompt', String(prompt || 'detailed texture'),
       '--strength', String(strength || 0.8)],
       { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout) => {
         try { fs.unlinkSync(maskPath); } catch (_) {}

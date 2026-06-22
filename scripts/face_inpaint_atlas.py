@@ -293,6 +293,11 @@ def main():
     ap.add_argument('--render-only', dest='render_only', default=None,
                     help='just render the mesh front to this PNG and exit, so '
                          'the UI can draw a mask aligned to the projection.')
+    ap.add_argument('--uv-mask', dest='uv_mask', default=None,
+                    help='a mask ALREADY in UV/atlas space (white = region to '
+                         're-texture). Used directly on the atlas — no screen->UV '
+                         'projection and no front render (for the paint-in-3D tool '
+                         'which produces the UV mask itself via raycast hit.uv).')
     args = ap.parse_args()
 
     # Guard against in-place overwrite: trimesh.export() would corrupt
@@ -308,25 +313,27 @@ def main():
     log(f'load {args.input}')
     scene = trimesh.load(args.input, force='scene')
 
-    log('rendering mesh front for face detection...')
-    t0 = time.time()
-    rendered = render_mesh_front(scene, args.render_size)
-    if rendered is None:
-        log('cannot render mesh — aborting (geometry unchanged, copy input)')
-        import shutil
-        shutil.copy(args.input, args.output)
-        sys.exit(0)
-    log(f'  rendered in {time.time()-t0:.1f}s')
-
-    if args.render_only:
-        rendered.save(args.render_only)
-        log(f'render-only -> {args.render_only}')
-        sys.exit(0)
-
+    rendered = None
     bbox = None
-    if not args.mask:
-        bbox = detect_face_bbox(rendered) or fallback_top_bbox(rendered.size)
-        log(f'face bbox = {bbox}')
+    if not args.uv_mask:
+        log('rendering mesh front for face detection...')
+        t0 = time.time()
+        rendered = render_mesh_front(scene, args.render_size)
+        if rendered is None:
+            log('cannot render mesh — aborting (geometry unchanged, copy input)')
+            import shutil
+            shutil.copy(args.input, args.output)
+            sys.exit(0)
+        log(f'  rendered in {time.time()-t0:.1f}s')
+
+        if args.render_only:
+            rendered.save(args.render_only)
+            log(f'render-only -> {args.render_only}')
+            sys.exit(0)
+
+        if not args.mask:
+            bbox = detect_face_bbox(rendered) or fallback_top_bbox(rendered.size)
+            log(f'face bbox = {bbox}')
 
     geoms = (list(scene.geometry.values())
              if hasattr(scene, 'geometry') else [scene])
@@ -346,7 +353,11 @@ def main():
         sys.exit(0)
     log(f'atlas size: {tex.size}')
 
-    if args.mask:
+    if args.uv_mask:
+        log(f'using UV-space mask {args.uv_mask} directly on the atlas (no projection)...')
+        _um = Image.open(args.uv_mask).convert('L').resize(tex.size, Image.LANCZOS)
+        mask = Image.fromarray((np.array(_um) > 40).astype('uint8') * 255, mode='L')
+    elif args.mask:
         log(f'projecting user-drawn mask {args.mask} to UV atlas...')
         _sm = Image.open(args.mask).convert('L').resize(
             (args.render_size, args.render_size), Image.LANCZOS)
