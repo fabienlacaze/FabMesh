@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Re-texture HD : kernel numba — ~10 min → ~30-60s, bit-faithful)
+
+- Le retexture 4K mettait ~10 min (timeout silencieux). Profil multi-agents (workflow
+  optimize-texproj-4k, 10 agents, 477k tokens) → goulot = la boucle Python par-face de
+  `texture_project.py` (lignes 826-981, 70-95% du temps : ~3.4M itérations interprétées
+  faces×vues avec mini-ops numpy par face = antipattern numpy-in-a-Python-loop).
+- Fix : port `@njit(cache=True)` BIT-FAITHFUL des 3 modes (stack/accum/winner, même math :
+  +0.5 centres, int() trunc, barycentrique, tri_vis<0.05, tri priorité des vues, floors env).
+  La boucle legacy est GARDÉE intacte en fallback (else:), gate `FABMESH_TEXPROJ_NUMBA`
+  (défaut 1 ; =0 force l'ancien chemin ; diag force aussi legacy). numba 0.65 déjà installé
+  (BSD, zéro risque Blackwell sm_120). Rastérisation chunkée en 12 → progression réelle
+  streamée (`rasterize_progress`, fini le faux 90% côté log).
+- VÉRIF DÉFINITIVE : A/B `texture_project.py` numba ON vs OFF sur mesh réel (Aligator 15844
+  faces, 1024) → atlas IDENTIQUE au pixel près (**maxdiff=0, meandiff=0**). À TESTER 4K sur
+  GPU (cible ~30-60s). Suites possibles : nvdiffrast GPU (sub-15s, VÉRIFIÉ live sm_120 — contre
+  Pixal3D — mais licence NVIDIA à vendre pour le packaging) ; Telea inpaint = nouveau goulot
+  (~5-15s) ; bar live (main.js spawn-stream des events rasterize_progress).
+
 ## 2026-06-22 (Re-texture HD 4K : multi-vues branchées + 4096 débloqué)
 
 - User : texture moyenne même à fond → la recherche (project_texture_quality_research) valide

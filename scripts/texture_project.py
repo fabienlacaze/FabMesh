@@ -36,9 +36,385 @@ try:
 except Exception:
     Logger = None  # Allow the module to keep working even if the helper is missing
 
+# Optional numba acceleration for the per-face rasterization double-loop.
+# When unavailable, _HAVE_NUMBA stays False and the legacy interpreted loop
+# runs instead (see the dispatch around the rasterization stage). The njit
+# fallback below is a no-op decorator so module import never fails on a box
+# without numba — it just means the kernel function object exists but is
+# never invoked (the dispatch gate checks _HAVE_NUMBA).
+try:
+    import numba  # noqa: F401
+    from numba import njit, prange
+    _HAVE_NUMBA = True
+except Exception:
+    _HAVE_NUMBA = False
+    prange = range
+
+    def njit(*a, **k):
+        # Support both @njit and @njit(...) call forms.
+        if a and callable(a[0]):
+            return a[0]
+
+        def _w(f):
+            return f
+        return _w
+
 
 def log(msg):
     print(f'[tex_project] {msg}', flush=True)
+
+
+# ----------------------------------------------------------------------------
+# Numba rasterization kernels (bit-faithful port of the legacy per-face
+# double-loop, lines ~826-981 in project_texture). SAME MATH:
+#   - +0.5 pixel centers
+#   - int() truncation toward zero on bbox + source-pixel sampling
+#   - identical barycentric formula + `>= 0` inside-test
+#   - identical `max(tri_vis) < 0.05` per-view early-out
+#   - per-face VIEW ITERATION ORDER preserved (view arrays are passed in the
+#     already-priority-sorted order the legacy loop used)
+# stack & accum write shared edge texels across faces, so they run SERIAL
+# (chunked by face index, which is race-free because chunks are disjoint
+# face ranges and any given atlas pixel is only ever touched by faces whose
+# UV triangle covers it — but adjacent faces CAN share boundary texels, so we
+# never parallelize within a chunk). winner is order-independent per pixel
+# (best-weight-wins) so it MAY use prange.
+#
+# NOTE on int() truncation: numba's int(x) truncates toward zero exactly like
+# CPython for the value ranges here, matching np.astype(int) used in the
+# legacy loop for non-negative source coords. bbox min/max use Python int()
+# on raw floats (can be negative) -> truncation toward zero, replicated below
+# with a manual trunc() that mirrors int().
+# ----------------------------------------------------------------------------
+
+def _trunc_toward_zero(x):
+    """Mirror Python int(float) / np.astype(int): truncate toward zero."""
+    if x < 0.0:
+        return -int(-x)
+    return int(x)
+
+
+def _raster_core(start, end, faces, face_uvs, face_ok, tex_res,
+                 p_u_v, p_v_v, vis_v, prio_v, vw, vh,
+                 pixels_flat, offs, proj_arr, weight_arr,
+                 stack_floor, stack_full, blend_code):
+    """Serial kernel for stack (blend_code==0) and accum (blend_code==1).
+
+    Replicates the legacy interpreted loop face-by-face, view-by-view, with
+    identical math. `face_ok` folds the (uv_areas>=0.1 & aspect_ok &
+    edge_size_ok) filter. Views are iterated in array order (== the
+    priority-sorted view_data order)."""
+    V = p_u_v.shape[0]
+    feather_denom = stack_full - stack_floor
+    if feather_denom < 1e-6:
+        feather_denom = 1e-6
+    for fi in range(start, end):
+        if not face_ok[fi]:
+            continue
+
+        i0 = faces[fi, 0]
+        i1 = faces[fi, 1]
+        i2 = faces[fi, 2]
+
+        x0 = face_uvs[fi, 0, 0] * tex_res
+        y0 = (1.0 - face_uvs[fi, 0, 1]) * tex_res
+        x1 = face_uvs[fi, 1, 0] * tex_res
+        y1 = (1.0 - face_uvs[fi, 1, 1]) * tex_res
+        x2 = face_uvs[fi, 2, 0] * tex_res
+        y2 = (1.0 - face_uvs[fi, 2, 1]) * tex_res
+
+        tmin = x0
+        if x1 < tmin:
+            tmin = x1
+        if x2 < tmin:
+            tmin = x2
+        tmax = x0
+        if x1 > tmax:
+            tmax = x1
+        if x2 > tmax:
+            tmax = x2
+        min_x = _trunc_toward_zero(tmin)
+        if min_x < 0:
+            min_x = 0
+        max_x = _trunc_toward_zero(tmax) + 1
+        if max_x > tex_res - 1:
+            max_x = tex_res - 1
+
+        tmin = y0
+        if y1 < tmin:
+            tmin = y1
+        if y2 < tmin:
+            tmin = y2
+        tmax = y0
+        if y1 > tmax:
+            tmax = y1
+        if y2 > tmax:
+            tmax = y2
+        min_y = _trunc_toward_zero(tmin)
+        if min_y < 0:
+            min_y = 0
+        max_y = _trunc_toward_zero(tmax) + 1
+        if max_y > tex_res - 1:
+            max_y = tex_res - 1
+
+        if max_x <= min_x or max_y <= min_y:
+            continue
+
+        denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        if denom < 0.0:
+            adenom = -denom
+        else:
+            adenom = denom
+        if adenom < 1e-10:
+            continue
+        inv_denom = 1.0 / denom
+
+        for vi in range(V):
+            su0 = p_u_v[vi, i0]
+            su1 = p_u_v[vi, i1]
+            su2 = p_u_v[vi, i2]
+            sv0 = p_v_v[vi, i0]
+            sv1 = p_v_v[vi, i1]
+            sv2 = p_v_v[vi, i2]
+            tv0 = vis_v[vi, i0]
+            tv1 = vis_v[vi, i1]
+            tv2 = vis_v[vi, i2]
+
+            tvmax = tv0
+            if tv1 > tvmax:
+                tvmax = tv1
+            if tv2 > tvmax:
+                tvmax = tv2
+            if tvmax < 0.05:
+                continue
+
+            prio = prio_v[vi]
+            w_i = vw[vi]
+            h_i = vh[vi]
+            base = offs[vi]
+
+            for iy in range(min_y, max_y + 1):
+                ysf = iy + 0.5
+                for ix in range(min_x, max_x + 1):
+                    xsf = ix + 0.5
+                    w0 = ((y1 - y2) * (xsf - x2)
+                          + (x2 - x1) * (ysf - y2)) * inv_denom
+                    w1 = ((y2 - y0) * (xsf - x2)
+                          + (x0 - x2) * (ysf - y2)) * inv_denom
+                    w2 = 1.0 - w0 - w1
+                    if w0 < 0.0 or w1 < 0.0 or w2 < 0.0:
+                        continue
+
+                    src_u = w0 * su0 + w1 * su1 + w2 * su2
+                    src_v = w0 * sv0 + w1 * sv1 + w2 * sv2
+                    pt_vis = w0 * tv0 + w1 * tv1 + w2 * tv2
+
+                    in_b = (src_u >= 0.0 and src_u <= 1.0
+                            and src_v >= 0.0 and src_v <= 1.0)
+
+                    six = _trunc_toward_zero(src_u * w_i)
+                    if six < 0:
+                        six = 0
+                    elif six > w_i - 1:
+                        six = w_i - 1
+                    siy = _trunc_toward_zero(src_v * h_i)
+                    if siy < 0:
+                        siy = 0
+                    elif siy > h_i - 1:
+                        siy = h_i - 1
+
+                    pidx = base + siy * w_i + six
+                    sr = pixels_flat[pidx, 0]
+                    sg = pixels_flat[pidx, 1]
+                    sb = pixels_flat[pidx, 2]
+                    src_alpha = pixels_flat[pidx, 3] / 255.0
+
+                    in_b_f = 1.0 if in_b else 0.0
+                    # mask is implicitly 1.0 here (inside-triangle test above).
+                    w_pixel = pt_vis * src_alpha * prio * in_b_f
+
+                    if blend_code == 0:
+                        # --- stack ---
+                        cover = (pt_vis > stack_floor) and in_b and (src_alpha > 0.5)
+                        if not cover:
+                            continue
+                        alpha = (pt_vis - stack_floor) / feather_denom
+                        if alpha < 0.0:
+                            alpha = 0.0
+                        elif alpha > 1.0:
+                            alpha = 1.0
+                        proj_arr[iy, ix, 0] = alpha * sr + (1.0 - alpha) * proj_arr[iy, ix, 0]
+                        proj_arr[iy, ix, 1] = alpha * sg + (1.0 - alpha) * proj_arr[iy, ix, 1]
+                        proj_arr[iy, ix, 2] = alpha * sb + (1.0 - alpha) * proj_arr[iy, ix, 2]
+                        if alpha > weight_arr[iy, ix]:
+                            weight_arr[iy, ix] = alpha
+                    else:
+                        # --- accum ---
+                        contributing = w_pixel > 0.0
+                        if not contributing:
+                            continue
+                        proj_arr[iy, ix, 0] = proj_arr[iy, ix, 0] + w_pixel * sr
+                        proj_arr[iy, ix, 1] = proj_arr[iy, ix, 1] + w_pixel * sg
+                        proj_arr[iy, ix, 2] = proj_arr[iy, ix, 2] + w_pixel * sb
+                        weight_arr[iy, ix] = weight_arr[iy, ix] + w_pixel
+
+
+def _raster_winner(start, end, faces, face_uvs, face_ok, tex_res,
+                   p_u_v, p_v_v, vis_v, prio_v, vw, vh,
+                   pixels_flat, offs, proj_arr, weight_arr):
+    """winner-takes-all kernel. Per-pixel best-weight-wins => order
+    independent across faces, so the outer face loop may use prange."""
+    V = p_u_v.shape[0]
+    for fi in prange(start, end):
+        if not face_ok[fi]:
+            continue
+
+        i0 = faces[fi, 0]
+        i1 = faces[fi, 1]
+        i2 = faces[fi, 2]
+
+        x0 = face_uvs[fi, 0, 0] * tex_res
+        y0 = (1.0 - face_uvs[fi, 0, 1]) * tex_res
+        x1 = face_uvs[fi, 1, 0] * tex_res
+        y1 = (1.0 - face_uvs[fi, 1, 1]) * tex_res
+        x2 = face_uvs[fi, 2, 0] * tex_res
+        y2 = (1.0 - face_uvs[fi, 2, 1]) * tex_res
+
+        tmin = x0
+        if x1 < tmin:
+            tmin = x1
+        if x2 < tmin:
+            tmin = x2
+        tmax = x0
+        if x1 > tmax:
+            tmax = x1
+        if x2 > tmax:
+            tmax = x2
+        min_x = _trunc_toward_zero(tmin)
+        if min_x < 0:
+            min_x = 0
+        max_x = _trunc_toward_zero(tmax) + 1
+        if max_x > tex_res - 1:
+            max_x = tex_res - 1
+
+        tmin = y0
+        if y1 < tmin:
+            tmin = y1
+        if y2 < tmin:
+            tmin = y2
+        tmax = y0
+        if y1 > tmax:
+            tmax = y1
+        if y2 > tmax:
+            tmax = y2
+        min_y = _trunc_toward_zero(tmin)
+        if min_y < 0:
+            min_y = 0
+        max_y = _trunc_toward_zero(tmax) + 1
+        if max_y > tex_res - 1:
+            max_y = tex_res - 1
+
+        if max_x <= min_x or max_y <= min_y:
+            continue
+
+        denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        if denom < 0.0:
+            adenom = -denom
+        else:
+            adenom = denom
+        if adenom < 1e-10:
+            continue
+        inv_denom = 1.0 / denom
+
+        for vi in range(V):
+            su0 = p_u_v[vi, i0]
+            su1 = p_u_v[vi, i1]
+            su2 = p_u_v[vi, i2]
+            sv0 = p_v_v[vi, i0]
+            sv1 = p_v_v[vi, i1]
+            sv2 = p_v_v[vi, i2]
+            tv0 = vis_v[vi, i0]
+            tv1 = vis_v[vi, i1]
+            tv2 = vis_v[vi, i2]
+
+            tvmax = tv0
+            if tv1 > tvmax:
+                tvmax = tv1
+            if tv2 > tvmax:
+                tvmax = tv2
+            if tvmax < 0.05:
+                continue
+
+            prio = prio_v[vi]
+            w_i = vw[vi]
+            h_i = vh[vi]
+            base = offs[vi]
+
+            for iy in range(min_y, max_y + 1):
+                ysf = iy + 0.5
+                for ix in range(min_x, max_x + 1):
+                    xsf = ix + 0.5
+                    w0 = ((y1 - y2) * (xsf - x2)
+                          + (x2 - x1) * (ysf - y2)) * inv_denom
+                    w1 = ((y2 - y0) * (xsf - x2)
+                          + (x0 - x2) * (ysf - y2)) * inv_denom
+                    w2 = 1.0 - w0 - w1
+                    if w0 < 0.0 or w1 < 0.0 or w2 < 0.0:
+                        continue
+
+                    src_u = w0 * su0 + w1 * su1 + w2 * su2
+                    src_v = w0 * sv0 + w1 * sv1 + w2 * sv2
+                    pt_vis = w0 * tv0 + w1 * tv1 + w2 * tv2
+
+                    in_b = (src_u >= 0.0 and src_u <= 1.0
+                            and src_v >= 0.0 and src_v <= 1.0)
+
+                    six = _trunc_toward_zero(src_u * w_i)
+                    if six < 0:
+                        six = 0
+                    elif six > w_i - 1:
+                        six = w_i - 1
+                    siy = _trunc_toward_zero(src_v * h_i)
+                    if siy < 0:
+                        siy = 0
+                    elif siy > h_i - 1:
+                        siy = h_i - 1
+
+                    pidx = base + siy * w_i + six
+                    sr = pixels_flat[pidx, 0]
+                    sg = pixels_flat[pidx, 1]
+                    sb = pixels_flat[pidx, 2]
+                    src_alpha = pixels_flat[pidx, 3] / 255.0
+
+                    in_b_f = 1.0 if in_b else 0.0
+                    w_pixel = pt_vis * src_alpha * prio * in_b_f
+
+                    if w_pixel > weight_arr[iy, ix]:
+                        proj_arr[iy, ix, 0] = sr
+                        proj_arr[iy, ix, 1] = sg
+                        proj_arr[iy, ix, 2] = sb
+                        weight_arr[iy, ix] = w_pixel
+
+
+# JIT-compiled handles (only meaningful when numba is present). cache=True so
+# the first run after install pays the compile cost once, then it's cached.
+#
+# winner is compiled SERIAL by default (parallel=False) so its prange loop
+# degrades to a plain serial range — bit-faithful with the legacy loop and
+# free of the cross-face edge-texel read-modify-write race that a parallel
+# best-weight-wins would introduce. Set FABMESH_TEXPROJ_NUMBA_PARALLEL=1 to
+# opt into the parallel winner (accepts non-deterministic tie-breaks on
+# shared boundary texels in exchange for multi-core throughput). stack/accum
+# are ALWAYS serial (their writes are order-dependent accumulations).
+if _HAVE_NUMBA:
+    _trunc_toward_zero = njit(cache=True)(_trunc_toward_zero)
+    _raster_core_jit = njit(cache=True)(_raster_core)
+    _raster_winner_serial = njit(cache=True)(_raster_winner)
+    _raster_winner_parallel = njit(cache=True, parallel=True)(_raster_winner)
+else:
+    _raster_core_jit = _raster_core
+    _raster_winner_serial = _raster_winner
+    _raster_winner_parallel = _raster_winner
 
 
 def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
@@ -823,162 +1199,268 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     n_drawn = 0
     n_skipped = 0
-    for fi in range(len(faces)):
-        # Do NOT gate on avg_vis here — low visibility from front view doesn't
-        # mean invisible from multiview. Let the per-view loop below decide.
-        if uv_areas[fi] < 0.1 or not aspect_ok[fi] or not edge_size_ok[fi]:
-            n_skipped += 1
-            continue
 
-        tri_uv = []
-        for vi in range(3):
-            px = face_uvs[fi, vi, 0] * tex_res
-            py = (1.0 - face_uvs[fi, vi, 1]) * tex_res
-            tri_uv.append((px, py))
+    # ------------------------------------------------------------------
+    # Rasterization dispatch.
+    #   Numba path (fast): bit-faithful @njit port of the interpreted loop
+    #     below. Gated to the production case (numba present, NOT diag,
+    #     env opt-out not set). Force the legacy path with
+    #     FABMESH_TEXPROJ_NUMBA=0 if the kernel ever misbehaves.
+    #   Legacy path (else): the original interpreted double-loop, UNCHANGED.
+    #     Always used when diag is on (it populates source_view_arr /
+    #     coverage_arr the kernel does not write) or numba is unavailable.
+    # ------------------------------------------------------------------
+    _use_numba = (_HAVE_NUMBA and not _diag_on
+                  and os.environ.get('FABMESH_TEXPROJ_NUMBA', '1') == '1')
 
-        v_idx = faces[fi]
+    if _use_numba:
+        # --- Repack view_data into contiguous arrays for the kernel. ---
+        # Views are NOT uniform resolution (HD front photo + fixed AI
+        # renders), so source pixels go into a FLAT buffer with a per-view
+        # offset + (W, H); the kernel samples pixels_flat[offs[vi] + iy*vw +
+        # ix]. Per-vertex p_u/p_v/vis are uniform-length (one row per view).
+        V = len(view_data)
+        n_verts_proj = len(view_data[0]['p_u'])
+        p_u_v = np.empty((V, n_verts_proj), np.float64)
+        p_v_v = np.empty((V, n_verts_proj), np.float64)
+        vis_v = np.empty((V, n_verts_proj), np.float64)
+        prio_v = np.empty(V, np.float64)
+        vw = np.empty(V, np.int64)
+        vh = np.empty(V, np.int64)
+        _flat = []
+        offs = np.zeros(V + 1, np.int64)
+        for _i, vd in enumerate(view_data):
+            p_u_v[_i] = np.asarray(vd['p_u'], np.float64)
+            p_v_v[_i] = np.asarray(vd['p_v'], np.float64)
+            vis_v[_i] = np.asarray(vd['vis'], np.float64)
+            prio_v[_i] = float(vd['priority'])
+            vw[_i] = int(vd['w'])
+            vh[_i] = int(vd['h'])
+            px = vd['pixels']
+            if px.shape[-1] == 3:
+                # Legacy treats RGB (no alpha) as src_alpha=1.0 -> append a
+                # full-255 alpha so src_alpha = 255/255 = 1.0 in the kernel.
+                px = np.dstack([px, np.full(px.shape[:2], 255, px.dtype)])
+            _flat.append(px.reshape(-1, 4).astype(np.float64))
+            offs[_i + 1] = offs[_i] + px.shape[0] * px.shape[1]
+        pixels_flat = np.concatenate(_flat, axis=0)
 
-        min_x = max(0, int(min(tri_uv[0][0], tri_uv[1][0], tri_uv[2][0])))
-        max_x = min(tex_res - 1, int(max(tri_uv[0][0], tri_uv[1][0], tri_uv[2][0])) + 1)
-        min_y = max(0, int(min(tri_uv[0][1], tri_uv[1][1], tri_uv[2][1])))
-        max_y = min(tex_res - 1, int(max(tri_uv[0][1], tri_uv[1][1], tri_uv[2][1])) + 1)
-        if max_x <= min_x or max_y <= min_y:
-            continue
+        # face_ok folds the (uv_areas>=0.1 & aspect_ok & edge_size_ok)
+        # filter exactly as the legacy `if ... : n_skipped += 1; continue`.
+        face_ok = (uv_areas >= 0.1) & aspect_ok & edge_size_ok
+        n_skipped = int((~face_ok).sum())
+        # n_drawn is a cosmetic stat here; the legacy counter also required
+        # a non-empty bbox/triangle. Report faces that passed the filter as
+        # an upper bound (the exact per-pixel count is not tracked by the
+        # kernel — does not affect the atlas output).
+        n_drawn = int(face_ok.sum())
 
-        x0, y0 = tri_uv[0]
-        x1, y1 = tri_uv[1]
-        x2, y2 = tri_uv[2]
-        denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
-        if abs(denom) < 1e-10:
-            continue
-        inv_denom = 1.0 / denom
+        faces_i64 = np.ascontiguousarray(faces, dtype=np.int64)
+        face_uvs_c = np.ascontiguousarray(face_uvs, dtype=np.float64)
+        face_ok_c = np.ascontiguousarray(face_ok)
 
-        ys, xs = np.mgrid[min_y:max_y+1, min_x:max_x+1]
-        xsf = xs.astype(np.float64) + 0.5
-        ysf = ys.astype(np.float64) + 0.5
+        # Hoisted env floors (read once, passed as scalar kernel args).
+        STACK_VIS_FLOOR = float(
+            os.environ.get('FABMESH_TEXPROJ_STACK_FLOOR', '0.40'))
+        STACK_VIS_FULL = float(
+            os.environ.get('FABMESH_TEXPROJ_STACK_FULL', '0.65'))
+        if _blend_mode == 'stack':
+            _blend_code = 0
+        elif _blend_mode == 'accum':
+            _blend_code = 1
+        else:
+            _blend_code = 2
 
-        w0 = ((y1 - y2) * (xsf - x2) + (x2 - x1) * (ysf - y2)) * inv_denom
-        w1 = ((y2 - y0) * (xsf - x2) + (x0 - x2) * (ysf - y2)) * inv_denom
-        w2 = 1.0 - w0 - w1
+        _evt('rasterize_start', total_faces=len(faces), views=V,
+             backend='numba', blend=_blend_mode)
+        log(f'rasterization backend: numba ({_blend_mode}, {V} views)')
 
-        mask = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
-        if not mask.any():
-            continue
+        _winner_parallel = (
+            os.environ.get('FABMESH_TEXPROJ_NUMBA_PARALLEL') == '1')
+        n_chunks = 12
+        edges = np.linspace(0, len(faces), n_chunks + 1, dtype=np.int64)
+        _t_rk = time.time()
+        for ci in range(n_chunks):
+            c0 = int(edges[ci])
+            c1 = int(edges[ci + 1])
+            if c1 <= c0:
+                continue
+            if _blend_code == 2:
+                _kern = (_raster_winner_parallel if _winner_parallel
+                         else _raster_winner_serial)
+                _kern(c0, c1, faces_i64, face_uvs_c, face_ok_c, tex_res,
+                      p_u_v, p_v_v, vis_v, prio_v, vw, vh,
+                      pixels_flat, offs, proj_arr, weight_arr)
+            else:
+                _raster_core_jit(
+                    c0, c1, faces_i64, face_uvs_c, face_ok_c, tex_res,
+                    p_u_v, p_v_v, vis_v, prio_v, vw, vh,
+                    pixels_flat, offs, proj_arr, weight_arr,
+                    STACK_VIS_FLOOR, STACK_VIS_FULL, _blend_code)
+            _evt('rasterize_progress',
+                 pct=int(100 * (ci + 1) / n_chunks),
+                 faces_done=int(edges[ci + 1]), total=len(faces))
+        log(f'numba rasterization: {n_drawn}/{len(faces)} faces '
+            f'({n_skipped} skipped), {V} views, '
+            f'{time.time() - _t_rk:.1f}s')
 
-        # Sample each view and keep the best per-pixel weight.
-        for _vd_idx, vd in enumerate(view_data):
-            tri_src_u = [vd['p_u'][v_idx[vi]] for vi in range(3)]
-            tri_src_v = [vd['p_v'][v_idx[vi]] for vi in range(3)]
-            tri_vis   = [vd['vis'][v_idx[vi]] for vi in range(3)]
-
-            # Skip if face invisible from this view at all 3 verts
-            if max(tri_vis) < 0.05:
+    else:
+        for fi in range(len(faces)):
+            # Do NOT gate on avg_vis here — low visibility from front view doesn't
+            # mean invisible from multiview. Let the per-view loop below decide.
+            if uv_areas[fi] < 0.1 or not aspect_ok[fi] or not edge_size_ok[fi]:
+                n_skipped += 1
                 continue
 
-            src_u = w0 * tri_src_u[0] + w1 * tri_src_u[1] + w2 * tri_src_u[2]
-            src_v = w0 * tri_src_v[0] + w1 * tri_src_v[1] + w2 * tri_src_v[2]
-            pt_vis = w0 * tri_vis[0] + w1 * tri_vis[1] + w2 * tri_vis[2]
+            tri_uv = []
+            for vi in range(3):
+                px = face_uvs[fi, vi, 0] * tex_res
+                py = (1.0 - face_uvs[fi, vi, 1]) * tex_res
+                tri_uv.append((px, py))
 
-            in_b = (src_u >= 0) & (src_u <= 1) & (src_v >= 0) & (src_v <= 1)
-            src_ix = np.clip((src_u * vd['w']).astype(int), 0, vd['w'] - 1)
-            src_iy = np.clip((src_v * vd['h']).astype(int), 0, vd['h'] - 1)
+            v_idx = faces[fi]
 
-            sampled = vd['pixels'][src_iy, src_ix]
-            src_alpha = sampled[..., 3] / 255.0 if sampled.shape[-1] == 4 else 1.0
-            w_pixel = pt_vis * src_alpha * vd['priority'] * mask.astype(np.float64) * in_b.astype(np.float64)
+            min_x = max(0, int(min(tri_uv[0][0], tri_uv[1][0], tri_uv[2][0])))
+            max_x = min(tex_res - 1, int(max(tri_uv[0][0], tri_uv[1][0], tri_uv[2][0])) + 1)
+            min_y = max(0, int(min(tri_uv[0][1], tri_uv[1][1], tri_uv[2][1])))
+            max_y = min(tex_res - 1, int(max(tri_uv[0][1], tri_uv[1][1], tri_uv[2][1])) + 1)
+            if max_x <= min_x or max_y <= min_y:
+                continue
 
-            if _blend_mode == 'stack':
-                # Photoshop stack: processed in ascending priority order
-                # (sorted above). Each view overwrites where it sees
-                # the surface (vis > threshold). Alpha blend at the
-                # boundary (vis taper) gives a feathered transition.
-                # vis = cos(normal, view_dir)^bake_exp. With bake_exp=4
-                # default, vis stays ≥ 0.4 only for normals within ~63°
-                # of facing the camera. Below that, the front photo
-                # was bleeding onto the BACK of the head (low cosine
-                # but still > 0 → pixels near head/ear were getting
-                # the front face plastered as a tiny secondary face).
-                # Threshold env-tunable.
-                STACK_VIS_FLOOR = float(
-                    os.environ.get('FABMESH_TEXPROJ_STACK_FLOOR', '0.40'))
-                STACK_VIS_FULL = float(
-                    os.environ.get('FABMESH_TEXPROJ_STACK_FULL', '0.65'))
-                cover = ((pt_vis > STACK_VIS_FLOOR)
-                         & mask & in_b & (src_alpha > 0.5))
-                if not cover.any():
+            x0, y0 = tri_uv[0]
+            x1, y1 = tri_uv[1]
+            x2, y2 = tri_uv[2]
+            denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+            if abs(denom) < 1e-10:
+                continue
+            inv_denom = 1.0 / denom
+
+            ys, xs = np.mgrid[min_y:max_y+1, min_x:max_x+1]
+            xsf = xs.astype(np.float64) + 0.5
+            ysf = ys.astype(np.float64) + 0.5
+
+            w0 = ((y1 - y2) * (xsf - x2) + (x2 - x1) * (ysf - y2)) * inv_denom
+            w1 = ((y2 - y0) * (xsf - x2) + (x0 - x2) * (ysf - y2)) * inv_denom
+            w2 = 1.0 - w0 - w1
+
+            mask = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
+            if not mask.any():
+                continue
+
+            # Sample each view and keep the best per-pixel weight.
+            for _vd_idx, vd in enumerate(view_data):
+                tri_src_u = [vd['p_u'][v_idx[vi]] for vi in range(3)]
+                tri_src_v = [vd['p_v'][v_idx[vi]] for vi in range(3)]
+                tri_vis   = [vd['vis'][v_idx[vi]] for vi in range(3)]
+
+                # Skip if face invisible from this view at all 3 verts
+                if max(tri_vis) < 0.05:
                     continue
-                # Feather: alpha ramps from 0 at vis=FLOOR to 1 at FULL.
-                _denom = max(1e-6, STACK_VIS_FULL - STACK_VIS_FLOOR)
-                alpha = np.clip(
-                    (pt_vis - STACK_VIS_FLOOR) / _denom, 0.0, 1.0)
-                alpha = np.where(cover, alpha, 0.0)
-                for c in range(3):
-                    proj_arr[ys, xs, c] = (
-                        alpha * sampled[..., c].astype(np.float64)
-                        + (1.0 - alpha) * proj_arr[ys, xs, c])
-                # Mark weight as "covered" for downstream
-                # sharp_mask/push-pull logic.
-                weight_arr[ys, xs] = np.maximum(
-                    weight_arr[ys, xs], alpha)
-                if _diag_on:
-                    source_view_arr[ys, xs] = np.where(
-                        cover, np.uint8(_vd_idx),
-                        source_view_arr[ys, xs])
-                    coverage_arr[ys, xs] = np.where(
-                        cover,
-                        coverage_arr[ys, xs] + 1,
-                        coverage_arr[ys, xs])
-            elif _blend_mode == 'accum':
-                # Accumulate weighted contribution from every view that
-                # sees this pixel. Final normalization (rgb /= weight)
-                # happens once after the loop. Produces a smooth blend
-                # across seams instead of a hard cliff.
-                contributing = (w_pixel > 0.0) & mask
-                if not contributing.any():
-                    continue
-                w_masked = np.where(contributing, w_pixel, 0.0)
-                for c in range(3):
-                    proj_arr[ys, xs, c] = (
-                        proj_arr[ys, xs, c]
-                        + w_masked * sampled[..., c].astype(np.float64))
-                weight_arr[ys, xs] = weight_arr[ys, xs] + w_masked
-                if _diag_on:
-                    source_view_arr[ys, xs] = np.where(
-                        contributing,
-                        np.uint8(_vd_idx),
-                        source_view_arr[ys, xs])
-                    coverage_arr[ys, xs] = np.where(
-                        contributing,
-                        coverage_arr[ys, xs] + 1,
-                        coverage_arr[ys, xs])
-            else:
-                # winner-takes-all: best-view-wins per pixel. Sharpest
-                # but shows hard seams.
-                better = w_pixel > weight_arr[ys, xs]
-                if not better.any():
+
+                src_u = w0 * tri_src_u[0] + w1 * tri_src_u[1] + w2 * tri_src_u[2]
+                src_v = w0 * tri_src_v[0] + w1 * tri_src_v[1] + w2 * tri_src_v[2]
+                pt_vis = w0 * tri_vis[0] + w1 * tri_vis[1] + w2 * tri_vis[2]
+
+                in_b = (src_u >= 0) & (src_u <= 1) & (src_v >= 0) & (src_v <= 1)
+                src_ix = np.clip((src_u * vd['w']).astype(int), 0, vd['w'] - 1)
+                src_iy = np.clip((src_v * vd['h']).astype(int), 0, vd['h'] - 1)
+
+                sampled = vd['pixels'][src_iy, src_ix]
+                src_alpha = sampled[..., 3] / 255.0 if sampled.shape[-1] == 4 else 1.0
+                w_pixel = pt_vis * src_alpha * vd['priority'] * mask.astype(np.float64) * in_b.astype(np.float64)
+
+                if _blend_mode == 'stack':
+                    # Photoshop stack: processed in ascending priority order
+                    # (sorted above). Each view overwrites where it sees
+                    # the surface (vis > threshold). Alpha blend at the
+                    # boundary (vis taper) gives a feathered transition.
+                    # vis = cos(normal, view_dir)^bake_exp. With bake_exp=4
+                    # default, vis stays ≥ 0.4 only for normals within ~63°
+                    # of facing the camera. Below that, the front photo
+                    # was bleeding onto the BACK of the head (low cosine
+                    # but still > 0 → pixels near head/ear were getting
+                    # the front face plastered as a tiny secondary face).
+                    # Threshold env-tunable.
+                    STACK_VIS_FLOOR = float(
+                        os.environ.get('FABMESH_TEXPROJ_STACK_FLOOR', '0.40'))
+                    STACK_VIS_FULL = float(
+                        os.environ.get('FABMESH_TEXPROJ_STACK_FULL', '0.65'))
+                    cover = ((pt_vis > STACK_VIS_FLOOR)
+                             & mask & in_b & (src_alpha > 0.5))
+                    if not cover.any():
+                        continue
+                    # Feather: alpha ramps from 0 at vis=FLOOR to 1 at FULL.
+                    _denom = max(1e-6, STACK_VIS_FULL - STACK_VIS_FLOOR)
+                    alpha = np.clip(
+                        (pt_vis - STACK_VIS_FLOOR) / _denom, 0.0, 1.0)
+                    alpha = np.where(cover, alpha, 0.0)
+                    for c in range(3):
+                        proj_arr[ys, xs, c] = (
+                            alpha * sampled[..., c].astype(np.float64)
+                            + (1.0 - alpha) * proj_arr[ys, xs, c])
+                    # Mark weight as "covered" for downstream
+                    # sharp_mask/push-pull logic.
+                    weight_arr[ys, xs] = np.maximum(
+                        weight_arr[ys, xs], alpha)
                     if _diag_on:
+                        source_view_arr[ys, xs] = np.where(
+                            cover, np.uint8(_vd_idx),
+                            source_view_arr[ys, xs])
+                        coverage_arr[ys, xs] = np.where(
+                            cover,
+                            coverage_arr[ys, xs] + 1,
+                            coverage_arr[ys, xs])
+                elif _blend_mode == 'accum':
+                    # Accumulate weighted contribution from every view that
+                    # sees this pixel. Final normalization (rgb /= weight)
+                    # happens once after the loop. Produces a smooth blend
+                    # across seams instead of a hard cliff.
+                    contributing = (w_pixel > 0.0) & mask
+                    if not contributing.any():
+                        continue
+                    w_masked = np.where(contributing, w_pixel, 0.0)
+                    for c in range(3):
+                        proj_arr[ys, xs, c] = (
+                            proj_arr[ys, xs, c]
+                            + w_masked * sampled[..., c].astype(np.float64))
+                    weight_arr[ys, xs] = weight_arr[ys, xs] + w_masked
+                    if _diag_on:
+                        source_view_arr[ys, xs] = np.where(
+                            contributing,
+                            np.uint8(_vd_idx),
+                            source_view_arr[ys, xs])
+                        coverage_arr[ys, xs] = np.where(
+                            contributing,
+                            coverage_arr[ys, xs] + 1,
+                            coverage_arr[ys, xs])
+                else:
+                    # winner-takes-all: best-view-wins per pixel. Sharpest
+                    # but shows hard seams.
+                    better = w_pixel > weight_arr[ys, xs]
+                    if not better.any():
+                        if _diag_on:
+                            contributing = (w_pixel > 0.05) & mask
+                            if contributing.any():
+                                coverage_arr[ys, xs] = np.where(
+                                    contributing,
+                                    coverage_arr[ys, xs] + 1,
+                                    coverage_arr[ys, xs])
+                        continue
+                    for c in range(3):
+                        proj_arr[ys, xs, c] = np.where(
+                            better, sampled[..., c], proj_arr[ys, xs, c])
+                    weight_arr[ys, xs] = np.where(
+                        better, w_pixel, weight_arr[ys, xs])
+                    if _diag_on:
+                        source_view_arr[ys, xs] = np.where(
+                            better, np.uint8(_vd_idx), source_view_arr[ys, xs])
                         contributing = (w_pixel > 0.05) & mask
-                        if contributing.any():
-                            coverage_arr[ys, xs] = np.where(
-                                contributing,
-                                coverage_arr[ys, xs] + 1,
-                                coverage_arr[ys, xs])
-                    continue
-                for c in range(3):
-                    proj_arr[ys, xs, c] = np.where(
-                        better, sampled[..., c], proj_arr[ys, xs, c])
-                weight_arr[ys, xs] = np.where(
-                    better, w_pixel, weight_arr[ys, xs])
-                if _diag_on:
-                    source_view_arr[ys, xs] = np.where(
-                        better, np.uint8(_vd_idx), source_view_arr[ys, xs])
-                    contributing = (w_pixel > 0.05) & mask
-                    coverage_arr[ys, xs] = np.where(
-                        contributing,
-                        coverage_arr[ys, xs] + 1,
-                        coverage_arr[ys, xs])
+                        coverage_arr[ys, xs] = np.where(
+                            contributing,
+                            coverage_arr[ys, xs] + 1,
+                            coverage_arr[ys, xs])
 
-        n_drawn += 1
+            n_drawn += 1
 
     log(f'per-pixel multi-view rasterization: {n_drawn}/{len(faces)} faces, {n_skipped} skipped, {len(view_data)} views')
     _evt('rasterize_done', drawn=n_drawn, skipped=n_skipped,
