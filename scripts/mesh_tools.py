@@ -680,9 +680,17 @@ def retexture(input_path, output_path, source_image, tex_res=2048):
     # NO source -> black patches / bleaching. If a 6-view set (view_0..5.png) was generated
     # for this mesh or its source, pass it so the whole surface gets the crisp source detail
     # (texture_project.py already handles the angles + seam-blend + hole-inpaint).
+    import glob as _glob
+    _mv_candidates = [input_path + '.multiview',
+                      os.path.splitext(source_image)[0] + '_multiview']
+    # Fallback: any 6-view set generated in this project's image folder (most recent first),
+    # so a version mismatch between the retexture source and the gen image doesn't drop to
+    # front-only. The views are of the same character; visibility weighting handles minor offset.
+    _mv_candidates += sorted(
+        _glob.glob(os.path.join(os.path.dirname(source_image), '*_multiview')),
+        key=lambda d: (os.path.getmtime(d) if os.path.isdir(d) else 0), reverse=True)
     mv_extra = []
-    for _cand in (input_path + '.multiview',
-                  os.path.splitext(source_image)[0] + '_multiview'):
+    for _cand in _mv_candidates:
         if os.path.isdir(_cand) and os.path.exists(os.path.join(_cand, 'view_0.png')):
             mv_extra = ['--multiview', _cand]
             log(f'retexture: multi-view coverage from {_cand}')
