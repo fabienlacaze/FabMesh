@@ -1641,12 +1641,12 @@
          inpaint on the UV atlas). Geometry + UVs stay intact.
          ============================================================ -->
     <div id="modal-region-retex" class="modal-overlay hidden">
-      <div class="modal-card" style="max-width:620px;">
+      <div class="modal-card" style="max-width:760px;">
         <h2>&#127912; Re-texture a region (AI)</h2>
         <p class="modal-subtitle" style="margin-bottom:8px;">Name the part — the AI detects it — and type what it should look like, then Apply. (Optional: paint to refine the area.) Geometry stays intact.</p>
-        <div id="rrx-stage" style="position:relative; width:480px; height:480px; margin:0 auto; background:#111; border-radius:8px; overflow:hidden;">
+        <div id="rrx-stage" style="position:relative; width:min(680px,60vh); aspect-ratio:1; margin:0 auto; background:#1a1a2e; border-radius:8px; overflow:hidden;">
           <img id="rrx-img" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:contain; pointer-events:none;" />
-          <canvas id="rrx-canvas" width="480" height="480" style="position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; touch-action:none;"></canvas>
+          <canvas id="rrx-canvas" width="512" height="512" style="position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; touch-action:none;"></canvas>
           <div id="rrx-loading" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.62); color:#ddd; font-size:13px;"></div>
         </div>
         <div class="form-row" style="margin-top:10px;">
