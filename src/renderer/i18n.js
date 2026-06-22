@@ -977,6 +977,7 @@
   // English even for strings we didn't pre-translate. No-ops gracefully when the
   // IPC bridge is absent (e.g. the web/cloud build has no local worker).
   const _AUTO_KEY = 'fabmesh.i18n.auto.v3.';   // v3: cache now keyed by icon-stripped core; drop stale full-string ("🔬 Sharpen" -> "épingle") caches that shadowed curated dict entries
+  const _curated = {};   // per-lang Set of register()'d keys — the auto cache must never override these
   const _autoCache = {};
   const _pendingAuto = new Set();
   const _triedAuto = new Set();
@@ -986,7 +987,10 @@
     let m = {};
     try { m = JSON.parse(localStorage.getItem(_AUTO_KEY + lang) || '{}') || {}; } catch (_) { m = {}; }
     _autoCache[lang] = m;
-    I18N[lang] = Object.assign(I18N[lang] || {}, m);   // merge -> instant, no flicker
+    // Merge the auto cache, but NEVER over a curated register() entry — the cache may hold
+    // a stale/bad argos translation (e.g. 'Sharpen texture'->'aiguillage') that would shadow it.
+    const _base = I18N[lang] || (I18N[lang] = {});
+    for (const _k in m) { if (!(_curated[lang] && _curated[lang].has(_k))) _base[_k] = m[_k]; }
     return m;
   }
   function _shouldAutoTranslate(key) {
@@ -1025,6 +1029,7 @@
       let added = 0;
       for (const en of Object.keys(res)) {
         const tr = res[en];
+        if (_curated[lang] && _curated[lang].has(en)) continue;  // never override a curated entry
         if (tr && typeof tr === 'string' && tr !== en) { cache[en] = tr; I18N[lang][en] = tr; added++; }
       }
       if (added) {
@@ -1098,7 +1103,11 @@
     t,
     tf,
     get lang() { return _lang; },
-    register(lang, map) { I18N[lang] = Object.assign(I18N[lang] || {}, map); },
+    register(lang, map) {
+      I18N[lang] = Object.assign(I18N[lang] || {}, map);
+      (_curated[lang] = _curated[lang] || new Set());
+      for (const k in map) _curated[lang].add(k);
+    },
     languages() { return ['en'].concat(Object.keys(I18N)); },
   };
 
