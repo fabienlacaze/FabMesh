@@ -1643,11 +1643,18 @@
     <div id="modal-region-retex" class="modal-overlay hidden">
       <div class="modal-card" style="max-width:620px;">
         <h2>&#127912; Re-texture a region (AI)</h2>
-        <p class="modal-subtitle" style="margin-bottom:8px;">Paint the area to change, type what it should look like, then Apply. Geometry stays intact.</p>
+        <p class="modal-subtitle" style="margin-bottom:8px;">Name the part — the AI detects it — and type what it should look like, then Apply. (Optional: paint to refine the area.) Geometry stays intact.</p>
         <div id="rrx-stage" style="position:relative; width:480px; height:480px; margin:0 auto; background:#111; border-radius:8px; overflow:hidden;">
           <img id="rrx-img" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:contain; pointer-events:none;" />
           <canvas id="rrx-canvas" width="480" height="480" style="position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; touch-action:none;"></canvas>
           <div id="rrx-loading" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.62); color:#ddd; font-size:13px;"></div>
+        </div>
+        <div class="form-row" style="margin-top:10px;">
+          <label>Which part? (the AI detects it — no painting needed)</label>
+          <div style="display:flex; gap:8px;">
+            <input id="rrx-part" type="text" placeholder="e.g. helmet, cape, shoulder pads" style="flex:1;" />
+            <button id="rrx-detect" class="secondary-btn" style="white-space:nowrap;">&#129668; Detect (AI)</button>
+          </div>
         </div>
         <div class="form-row" style="margin-top:10px;">
           <label>What should this area look like?</label>

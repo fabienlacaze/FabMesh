@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Re-texture zone : mode IA-auto — détection CLIPSeg, plus de peinture obligatoire)
+
+- User : « c'est un outil IA → textures recréées sans sélection manuelle ». Ajouté la
+  détection auto au tool « Re-texturer une zone » : champ « Quelle pièce ? » + bouton
+  « Détecter (IA) ». `do_segment` prend un param `binary` → sauve le masque blanc/noir
+  (`mask_binary` existait déjà) au lieu de l'overlay rouge. `segment-mask` IPC passe `binary`
+  (fichier distinct `fabmesh_mask_bin.png`). `mesh:render-front` retourne `frontPath` (garde
+  le PNG) pour que CLIPSeg détecte dessus. Front : la détection peint le masque sur le canvas
+  (l'apply `regionRetex` existant marche inchangé) ; l'Apply auto-détecte s'il n'y a pas de
+  masque → taper pièce + résultat + Appliquer = zéro peinture. La peinture reste dispo pour
+  raffiner. Restart Electron + serveur SDXL.
+
 ## 2026-06-22 (Outil « Enhance texture » : Real-ESRGAN x2 sur l'atlas du mesh final)
 
 - User : « on peut pas améliorer la texture finale ? » (texture mesh molle/bavée vs source

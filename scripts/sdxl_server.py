@@ -938,7 +938,7 @@ def do_tex_variant(input_path, prompt, output_path, strength=0.45, seed=0, cn_sc
             return {"ok": False, "error": str(e)}
 
 
-def do_segment(input_path, target_text, output_path, dilate=15, rel=0.5):
+def do_segment(input_path, target_text, output_path, dilate=15, rel=0.5, binary=False):
     """CLIPSeg detection ONLY (no inpaint): save a red overlay of the detected
     mask so the user can preview LIVE what Auto Inpaint will repaint. Loads only
     the small CLIPSeg model, never the heavy ~6 GB inpaint pipeline."""
@@ -981,6 +981,14 @@ def do_segment(input_path, target_text, output_path, dilate=15, rel=0.5):
             d = max(0, int(dilate))
             if d > 0:
                 mask_binary = mask_binary.filter(ImageFilter.MaxFilter(d * 2 + 1))
+            if binary:
+                # AI region re-texture wants a WHITE/BLACK mask (projected onto the UV),
+                # not the red preview overlay.
+                mb = mask_binary if (work_w, work_h) == img.size else mask_binary.resize(img.size, Image.NEAREST)
+                _cov = float((np.array(mask_binary) > 128).mean() * 100)
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                mb.convert("RGB").save(output_path)
+                return {"ok": True, "output": output_path, "coverage": round(_cov, 1)}
             # Feathered soft mask for a SMOOTH preview overlay (not a blocky binary).
             _feather = max(3, int(min(work_w, work_h) * 0.012))
             mask_soft = mask_binary.filter(ImageFilter.GaussianBlur(_feather))
@@ -1369,6 +1377,7 @@ class Handler(BaseHTTPRequestHandler):
                     data['output'],
                     data.get('dilate', 15),
                     data.get('rel', 0.5),
+                    data.get('binary', False),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

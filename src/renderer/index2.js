@@ -1933,7 +1933,7 @@ bindStepCardCollapse();
   const canvas = $('rrx-canvas');
   const ctx = canvas && canvas.getContext('2d');
   if (!modal || !ctx) return;
-  let painting = false, hasPaint = false;
+  let painting = false, hasPaint = false, _rrxFrontPath = null;
 
   function _curMeshPath() {
     const p = state.currentProject;
@@ -1961,26 +1961,71 @@ bindStepCardCollapse();
   async function open() {
     const meshPath = _curMeshPath();
     if (!meshPath) { showToast('Pick a mesh first.', 'error'); return; }
-    ctx.clearRect(0, 0, canvas.width, canvas.height); hasPaint = false;
-    $('rrx-prompt').value = ''; $('rrx-img').src = '';
+    ctx.clearRect(0, 0, canvas.width, canvas.height); hasPaint = false; _rrxFrontPath = null;
+    $('rrx-prompt').value = ''; const _pf = $('rrx-part'); if (_pf) _pf.value = ''; $('rrx-img').src = '';
     $('rrx-loading').textContent = 'Rendering mesh…';
     $('rrx-loading').style.display = 'flex';
     modal.classList.remove('hidden');
     try {
       const r = await window.meshyAPI.renderMeshFront?.({ meshPath });
-      if (r && r.ok && r.dataUrl) { $('rrx-img').src = r.dataUrl; }
+      if (r && r.ok && r.dataUrl) { $('rrx-img').src = r.dataUrl; _rrxFrontPath = r.frontPath || null; }
       else { showToast('Could not render the mesh front.', 'error'); close(); return; }
     } catch (_) { showToast('Render failed.', 'error'); close(); return; }
     finally { $('rrx-loading').style.display = 'none'; }
   }
   $('ws-mesh-region-retex-btn')?.addEventListener('click', open);
 
+  // AI auto-detect: CLIPSeg finds the named part on the rendered front and fills the
+  // mask — no manual painting. Returns true if a mask was produced.
+  async function _rrxDetect() {
+    const part = ($('rrx-part')?.value || '').trim();
+    if (!part) { showToast('Type which part to detect (or paint it).', 'error'); return false; }
+    if (!_rrxFrontPath) { showToast('The mesh render is not ready yet.', 'error'); return false; }
+    $('rrx-loading').textContent = 'Detecting the part…';
+    $('rrx-loading').style.display = 'flex';
+    try {
+      const det = await translateUserPrompt(part);  // user's language → EN for CLIPSeg
+      const r = await window.meshyAPI.segmentMask?.({ imagePath: _rrxFrontPath, targetText: det, binary: true, dilate: 8 });
+      if (!(r && r.success && r.overlayPath)) {
+        $('rrx-loading').style.display = 'none';
+        showToast('Could not detect "' + part + '". Try another word, or paint it.', 'error');
+        return false;
+      }
+      await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const off = document.createElement('canvas'); off.width = canvas.width; off.height = canvas.height;
+          const octx = off.getContext('2d');
+          octx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const md = octx.getImageData(0, 0, canvas.width, canvas.height).data;
+          const cd = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          for (let i = 0; i < md.length; i += 4) {
+            if (md[i] > 128) { cd.data[i] = 255; cd.data[i + 1] = 60; cd.data[i + 2] = 60; cd.data[i + 3] = 140; }
+          }
+          ctx.putImageData(cd, 0, 0);
+          hasPaint = true;
+          resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = 'file:///' + r.overlayPath.replace(/\\/g, '/') + '?t=' + Date.now();
+      });
+      $('rrx-loading').style.display = 'none';
+      return hasPaint;
+    } catch (e) {
+      $('rrx-loading').style.display = 'none';
+      showToast('Detection error.', 'error');
+      return false;
+    }
+  }
+  $('rrx-detect')?.addEventListener('click', _rrxDetect);
+
   $('rrx-apply')?.addEventListener('click', async () => {
     const meshPath = _curMeshPath();
     const rawPrompt = ($('rrx-prompt').value || '').trim();
     if (!meshPath) { showToast('No mesh.', 'error'); return; }
-    if (!hasPaint) { showToast('Paint the area to change first.', 'error'); return; }
     if (!rawPrompt) { showToast('Type what the area should look like.', 'error'); return; }
+    // No mask yet? Auto-detect from the named part (AI tool — no manual painting required).
+    if (!hasPaint) { const ok = await _rrxDetect(); if (!ok) return; }
     const prompt = await translateUserPrompt(rawPrompt);  // user's language → EN for SDXL
     // Mask: white where painted, black elsewhere (the script projects it to UV).
     const mc = document.createElement('canvas'); mc.width = canvas.width; mc.height = canvas.height;

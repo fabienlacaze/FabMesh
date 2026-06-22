@@ -3982,15 +3982,17 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
 // Live mask preview for Auto Inpaint: run CLIPSeg detection ONLY (no inpaint)
 // and return a red-overlay image so the user sees what will be repainted before
 // committing. Reuses one temp file (cache-busted by the renderer).
-ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate, rel }) => {
+ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate, rel, binary }) => {
   try {
     if (!imagePath || !targetText || !String(targetText).trim()) return { success: false, error: 'missing target' };
     await ensureSdxlServer();
     if (!sdxlReady) return { success: false, error: 'engine not ready' };
-    const outPath = path.join(require('os').tmpdir(), 'fabmesh_mask_preview.png');
+    // binary mode (AI region re-texture) -> white/black mask in a distinct file so it
+    // doesn't clobber the red preview overlay used by Recolor/Auto-inpaint.
+    const outPath = path.join(require('os').tmpdir(), binary ? 'fabmesh_mask_bin.png' : 'fabmesh_mask_preview.png');
     const r = await sdxlServerCall('/segment', {
       input: imagePath, target: targetText, output: outPath, dilate: dilate || 15,
-      rel: (rel != null ? rel : 0.5),
+      rel: (rel != null ? rel : 0.5), binary: !!binary,
     });
     if (r && r.ok && fs.existsSync(outPath)) {
       return { success: true, overlayPath: outPath, coverage: r.coverage };
@@ -6231,8 +6233,8 @@ ipcMain.handle('mesh:render-front', async (_e, { meshPath } = {}) => {
         if (error || !fs.existsSync(out)) { resolve({ ok: false, error: (error && error.message) || 'render failed' }); return; }
         try {
           const dataUrl = 'data:image/png;base64,' + fs.readFileSync(out).toString('base64');
-          try { fs.unlinkSync(out); } catch (_) {}
-          resolve({ ok: true, dataUrl });
+          // Keep the rendered front on disk so CLIPSeg auto-detect can run on it.
+          resolve({ ok: true, dataUrl, frontPath: out });
         } catch (e) { resolve({ ok: false, error: String(e) }); }
       });
   });
