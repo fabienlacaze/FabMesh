@@ -104,12 +104,17 @@ def main():
         images.append(_prep_image(p, f'extra_{i}'))
     log(f'total references: {len(images)}')
 
-    # Build sampler params override from CLI flags.
-    sampler_params = {}
-    if args.steps is not None:
-        sampler_params['steps'] = args.steps
-    if args.guidance is not None:
-        sampler_params['guidance_strength'] = args.guidance
+    # Build sampler params, defaulting to the SHARPENED bake (steps 24,
+    # guidance 3.0) the native pipeline now uses — env-overridable. The
+    # pipeline.json defaults (steps 12, guidance 1.0 ~= near-unconditional) are
+    # too weak and produce a soft texture. CLI flags still win when given.
+    sampler_params = {
+        'steps': (args.steps if args.steps is not None
+                  else int(os.environ.get('FABMESH_TEX_STEPS', '24'))),
+        'guidance_strength': (args.guidance if args.guidance is not None
+                              else float(os.environ.get('FABMESH_TEX_GUIDANCE', '3.0'))),
+        'guidance_interval': [0.5, 1.0],
+    }
 
     # Build run() kwargs.
     run_kwargs = {'seed': args.seed}
