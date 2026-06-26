@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-22 (Texture nette : tex_slat steps 12→24 + guidance 1.0→3.0 — CAUSE RACINE du bake mou)
+
+- Investigation (workflow texture-detail-investigation, 6 agents) → CAUSE RACINE de la texture
+  molle : le pipeline natif échantillonnait tex_slat avec un dict VIDE `{}` → défauts pipeline.json
+  faibles (steps=12, guidance_strength=1.0 ≈ quasi SANS conditionnement, vs 7.5 pour la FORME). Le
+  détail de la réf était massivement sous-pondéré. Fix : steps→24 + guidance→3.0 (interval [0.5,1.0]),
+  env-gated `FABMESH_TEX_STEPS` / `FABMESH_TEX_GUIDANCE`, appliqué aux 2 chemins (multi-vues
+  sample_tex_slat + pipeline.run via `pipeline.tex_slat_sampler_params.update`). VALIDÉ A/B via le
+  bridge (même mesh chevalier, seed 42, 4096) : baseline 12/1.0 = or terne/brun + mou ; sharp 24/3.0
+  = or vif métallique + filigranes définis. +48s. Plafond honnête : voxel-texture 1024 (PAS de
+  checkpoint >1024 dans TRELLIS.2-4B) → gain « net mais pas studio 8K ». Prochain gros saut =
+  render-refine-reproject (refine des RENDUS du mesh puis re-bake, seam-safe). À PORTER au cloud
+  (env Modal). NB : le bridge oublie ATTN_BACKEND=sdpa/SPARSE_ATTN_BACKEND=sdpa (le natif les pose
+  pour contourner le SAC qui bloque flash_attn non-signé).
+
 ## 2026-06-22 (Re-texture HD : kernel numba — ~10 min → ~30-60s, bit-faithful)
 
 - Le retexture 4K mettait ~10 min (timeout silencieux). Profil multi-agents (workflow

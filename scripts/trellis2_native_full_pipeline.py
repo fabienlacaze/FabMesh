@@ -280,6 +280,28 @@ def main():
     # support multi-image cross-attention. Catch RuntimeError shape
     # mismatches and fall back to single-view rather than killing the
     # whole 3D generation.
+    # --- Sharpen the texture bake (validated A/B, 2026-06-22) ----------
+    # The native path left tex_slat sampling at the pipeline.json defaults
+    # (steps=12, guidance_strength=1.0 — near-UNCONDITIONAL, vs 7.5 for the
+    # shape sampler), producing a soft, under-reference-faithful texture.
+    # Raising steps + guidance recovers real latent detail the weak bake was
+    # smearing (A/B: dull brown -> vivid metallic gold, defined filigree) for
+    # ~+50s. Env-overridable so the cloud worker / a 'fast' preset can dial it.
+    _tex_params = {
+        'steps': int(os.environ.get('FABMESH_TEX_STEPS', '24')),
+        'guidance_strength': float(os.environ.get('FABMESH_TEX_GUIDANCE', '3.0')),
+        'guidance_interval': [0.5, 1.0],
+    }
+    # Update the pipeline default too, so the pipeline.run() single-view /
+    # cascade fallbacks (which sample tex_slat internally) get it as well.
+    try:
+        if isinstance(getattr(pipeline, 'tex_slat_sampler_params', None), dict):
+            pipeline.tex_slat_sampler_params.update(_tex_params)
+    except Exception:
+        pass
+    log(f"texture sampler: steps={_tex_params['steps']} "
+        f"guidance={_tex_params['guidance_strength']} (sharpened bake)")
+
     _mv_path_failed = False
     try:
         if len(mv_images) > 1:
@@ -303,7 +325,7 @@ def main():
                     tex_slat = pipeline.sample_tex_slat(
                         cond_512,
                         pipeline.models['tex_slat_flow_model_512'],
-                        shape_slat, {})
+                        shape_slat, _tex_params)
                     res = 512
                 elif mode == '1024':
                     shape_slat = pipeline.sample_shape_slat(
@@ -313,7 +335,7 @@ def main():
                     tex_slat = pipeline.sample_tex_slat(
                         cond_1024,
                         pipeline.models['tex_slat_flow_model_1024'],
-                        shape_slat, {})
+                        shape_slat, _tex_params)
                     res = 1024
                 else:
                     # Cascade modes: fall back to single-image run() for now
