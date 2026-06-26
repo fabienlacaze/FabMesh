@@ -84,6 +84,23 @@ def generate(
         mv_images.append(back_prepped)
         print(f'[mesh] multi-view conditioning: 2 images (front + back)', flush=True)
 
+    # Sharpen the texture bake — mirror of the desktop fix (2026-06-22): the
+    # native path sampled tex_slat with {} -> pipeline.json defaults (steps=12,
+    # guidance_strength=1.0, near-unconditional vs 7.5 for shape), giving a soft
+    # bake. Raise steps + guidance (env-overridable). Validated A/B on desktop.
+    _tex_params = {
+        'steps': int(os.environ.get('FABMESH_TEX_STEPS', '24')),
+        'guidance_strength': float(os.environ.get('FABMESH_TEX_GUIDANCE', '3.0')),
+        'guidance_interval': [0.5, 1.0],
+    }
+    try:
+        if isinstance(getattr(pipeline, 'tex_slat_sampler_params', None), dict):
+            pipeline.tex_slat_sampler_params.update(_tex_params)
+    except Exception:
+        pass
+    print(f"[mesh] texture sampler: steps={_tex_params['steps']} "
+          f"guidance={_tex_params['guidance_strength']} (sharpened)", flush=True)
+
     torch.manual_seed(seed)
     t_inf = time.time()
     if len(mv_images) > 1 and mode in ('512', '1024'):
@@ -104,7 +121,7 @@ def generate(
             tex_slat = pipeline.sample_tex_slat(
                 cond_512,
                 pipeline.models['tex_slat_flow_model_512'],
-                shape_slat, {})
+                shape_slat, _tex_params)
             res = 512
         else:  # '1024'
             shape_slat = pipeline.sample_shape_slat(
@@ -114,7 +131,7 @@ def generate(
             tex_slat = pipeline.sample_tex_slat(
                 cond_1024,
                 pipeline.models['tex_slat_flow_model_1024'],
-                shape_slat, {})
+                shape_slat, _tex_params)
             res = 1024
         torch.cuda.empty_cache()
         o_voxel_obj = pipeline.decode_latent(shape_slat, tex_slat, res)
