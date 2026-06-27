@@ -2683,8 +2683,8 @@ function _updateImageNav() {
   }
   const images = p.images;
   const curIdx = images.findIndex(i => (i.path || i) === p.previewImagePath);
-  if (prevBtn) { prevBtn.classList.remove('hidden'); prevBtn.disabled = curIdx <= 0; }
-  if (nextBtn) { nextBtn.classList.remove('hidden'); nextBtn.disabled = curIdx >= images.length - 1; }
+  if (prevBtn) { prevBtn.classList.remove('hidden'); prevBtn.disabled = false; }
+  if (nextBtn) { nextBtn.classList.remove('hidden'); nextBtn.disabled = false; }
   if (counter) { counter.classList.remove('hidden'); counter.textContent = `${curIdx + 1} / ${images.length}`; }
 }
 function _navigateImage(delta) {
@@ -2692,7 +2692,7 @@ function _navigateImage(delta) {
   if (!p || !p.images || p.images.length <= 1) return;
   const images = p.images;
   const curIdx = images.findIndex(i => (i.path || i) === p.previewImagePath);
-  const newIdx = Math.max(0, Math.min(images.length - 1, curIdx + delta));
+  const newIdx = ((curIdx + delta) % images.length + images.length) % images.length;  // wrap-around
   if (newIdx === curIdx) return;
   const newImg = images[newIdx];
   p.previewImagePath = newImg.path || newImg;
@@ -6362,7 +6362,17 @@ function _saveEmissiveCache() {
 }
 // Normalize path keys (backslash->slash + lowercase) so the 💡 badge matches
 // across renamed / case-differing / R2-URL paths (desktop 9797d93).
-function _emKey(p) { return String(p == null ? '' : p).replace(/\\/g, '/').toLowerCase(); }
+function _emKey(p) {
+  // Normalize so the 💡 badge matches across renamed / case-differing paths AND
+  // R2 SIGNED URLs: drop the volatile ?signature / #fragment so the same object
+  // keys identically regardless of the per-request signature (which changes on
+  // every /api/meshes call). Without this, m.sourceImage (a signed URL) never
+  // matched the painted image's cache key.
+  return String(p == null ? '' : p)
+    .replace(/\\/g, '/')
+    .replace(/[?#].*$/, '')
+    .toLowerCase();
+}
 function _emissiveLayerSet(imgPath, dataUrl) {
   _emissiveLayerCache.set(_emKey(imgPath), dataUrl);
   _saveEmissiveCache();
@@ -7453,13 +7463,13 @@ async function renderMeshVersions(p) {
     const meshHasEmissive =
       // Direct: the mesh was painted with emissive via Paint Mesh 3D.
       (typeof _meshEmissiveHas === 'function' && _meshEmissiveHas(m.path))
-      // Inherited: the source image (or any project image) has a
-      // saved image-side emissive layer.
-      || ((typeof _emissiveLayerHas === 'function') && (
-        (m.sourceImage && _emissiveLayerHas(m.sourceImage))
-        || (p.selectedImagePath && _emissiveLayerHas(p.selectedImagePath))
-        || (p.images || []).some((im) => _emissiveLayerHas(im.path))
-      ));
+      // Inherited: ONLY this mesh's own source image has a saved layer. (The
+      // two project-wide clauses removed here made the badge leak onto every
+      // mesh as soon as ANY project image had emissive — same bug as desktop.
+      // Now safe because _emKey strips the signed-URL query so m.sourceImage
+      // matches the painted image's key.)
+      || ((typeof _emissiveLayerHas === 'function')
+        && m.sourceImage && _emissiveLayerHas(m.sourceImage));
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
