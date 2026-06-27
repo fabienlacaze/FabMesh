@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-27 (Détail-synthèse : render-refine-reproject — scripts/detail_synth.py, VALIDÉ)
+
+- Le bake trellis2 est plafonné (voxel 1024). Pour dépasser : nouveau pipeline `detail_synth.py`
+  = (1) rendre le mesh sous 6 vues avec nvdiffrast en utilisant la caméra EXACTE de
+  texture_project (fov 40, dist 1.6, R_w2c_base, orbite az/elev, + le R_undo=rot_x(90)@rot_y(-90),
+  + flipud pour matcher p_v=1-p_v), (2) SDXL ControlNet-Tile (/img2img_tile, strength 0.35) ajoute
+  du détail sur chaque rendu, (3) re-bake via texture_project --multiview + un views.json
+  {azim,elev} par vue. Caméra cross-checkée numériquement (égalité flottante vs texture_project).
+  VRAM séquencée (nvdiffrast ~700MB libéré avant SDXL ~9.5GB ; reproject CPU). VALIDÉ end-to-end
+  sur le samouraï (humanoid_43, 489k faces, 4096) : l'armure lamellaire passe de BRUIT TV à
+  vraies plaques métal définies, alignement parfait, robe/peau plus fines. ~2 min total.
+  Gate `--render-only` pour vérifier l'orientation. À FAIRE : câbler comme outil UI + cloud,
+  tuning strength, option auto post-génération.
+
 ## 2026-06-22 (Texture nette : tex_slat steps 12→24 + guidance 1.0→3.0 — CAUSE RACINE du bake mou)
 
 - Investigation (workflow texture-detail-investigation, 6 agents) → CAUSE RACINE de la texture
