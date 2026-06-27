@@ -4239,21 +4239,72 @@ window.addEventListener('resize', () => {
 // ----- Lightbox -----
 let _lightboxImages = []; // array of paths for prev/next
 let _lightboxIndex = 0;
-// Jump from a mesh to the source image it was generated from: validate the
-// path still exists, close the 3D lightbox if it's open, then show the image
-// in the 2D lightbox. Wired from the 3D viewer's "Image source" link and from
-// the per-mesh-version source button.
+// Jump from a mesh to the source image it was generated from: bring the user
+// to the Image step, SELECT the matching image version (purple highlight),
+// scroll to it and flash it. Falls back to the 2D lightbox if the source isn't
+// among the current versions. Wired from the 3D viewer's "Image source" link
+// and the per-mesh source button. Non-destructive: it previews the image, it
+// does NOT change which version is marked "used for 3D".
 async function jumpToSourceImage(imgPath) {
   if (!imgPath) return;
-  try {
-    const info = await API.getFileInfo(imgPath);
-    if (!info || !info.ok) {
-      showToast("Image source introuvable (déplacée ou supprimée).", 'error');
-      return;
-    }
-  } catch (_) {}
+  const p = state.currentProject;
+  // Close the 3D lightbox first (the link can be clicked from inside it).
   try { closeMeshLightbox(); } catch (_) {}
-  openLightbox(imgPath);
+  // Locate the matching image version: exact path first, then basename.
+  let matched = null;
+  if (p && Array.isArray(p.images)) {
+    matched = p.images.find(im => (im.path || im) === imgPath);
+    if (!matched) {
+      const base = String(imgPath).split(/[\\/]/).pop();
+      matched = p.images.find(im => String(im.path || im).split(/[\\/]/).pop() === base);
+    }
+  }
+  if (!matched) {
+    // Source isn't one of the current versions (other project, or a derived /
+    // temp image). Show it in the lightbox if the file still exists.
+    try {
+      const info = await API.getFileInfo(imgPath);
+      if (info && info.ok) {
+        showToast("Source absente des versions actuelles — affichée en grand.", 'info');
+        openLightbox(imgPath);
+        return;
+      }
+    } catch (_) {}
+    showToast("Image source introuvable (déplacée ou supprimée).", 'error');
+    return;
+  }
+  const matchedPath = matched.path || matched;
+  // Preview the matched version (purple highlight) — leave selectedImagePath
+  // (the "used for 3D" green check) untouched.
+  p.previewImagePath = matchedPath;
+  p._activeMultiview = null;
+  // Expand + reveal the Image card (mirror of the post-generation reveal).
+  const imgCard = document.getElementById('step-card-image');
+  if (imgCard) {
+    imgCard.classList.remove('collapsed', 'disabled');
+    const createStage = imgCard.querySelector('.stage-create');
+    const editStage = imgCard.querySelector('.stage-edit');
+    if (createStage) createStage.open = false;
+    if (editStage) editStage.open = true;
+  }
+  try { await renderImageVersions(p); } catch (_) {}
+  try { showStep1Preview(matchedPath); } catch (_) {}
+  try { _restoreStyleDropdown(matchedPath); } catch (_) {}
+  setTimeout(() => {
+    try { imgCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+    const strip = document.getElementById('ws-image-versions');
+    const sel = strip && strip.querySelector('.version-thumb.selected');
+    if (sel) {
+      try { sel.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }); } catch (_) {}
+      // Flash a blue glow twice to draw the eye to the matched version.
+      try {
+        sel.animate(
+          [{ boxShadow: '0 0 0 0 rgba(138,180,255,0.95)' },
+           { boxShadow: '0 0 0 7px rgba(138,180,255,0)' }],
+          { duration: 850, iterations: 2 });
+      } catch (_) {}
+    }
+  }, 140);
 }
 
 async function openLightbox(imgPath) {
