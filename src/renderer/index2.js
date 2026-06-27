@@ -12793,7 +12793,7 @@ function renderRigVersions(p) {
     const rigSrcBtn = r.sourceImage
       ? '<button class="version-source-btn" title="Voir l\'image source">&#128247;</button>' : '';
     const rigMeshBtn = _rigMeshPath
-      ? '<button class="version-mesh-btn" title="Voir le maillage source">&#129513;</button>' : '';
+      ? '<button class="version-mesh-btn" title="Voir le maillage source">&#129482;</button>' : '';
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-label">v${p.rigs.length - 1 - i}</span>
@@ -13164,8 +13164,8 @@ function renderAnimVersions(p) {
     const rig = (p.rigs || []).find(r => r.path === a.rigPath);
     const animMeshPath = rig ? _resolveParentMeshPath(rig, p) : null;
     const imgBtn = a.sourceImage ? '<button class="version-source-btn anim-jump" data-jump="img" title="Voir l\'image source">&#128247;</button>' : '';
-    const meshBtn = animMeshPath ? '<button class="version-mesh-btn anim-jump" data-jump="mesh" title="Voir le maillage source">&#129513;</button>' : '';
-    const rigBtn = a.rigPath ? '<button class="version-rig-btn anim-jump" data-jump="rig" title="Voir le rig source">&#129466;</button>' : '';
+    const meshBtn = animMeshPath ? '<button class="version-mesh-btn anim-jump" data-jump="mesh" title="Voir le maillage source">&#129482;</button>' : '';
+    const rigBtn = a.rigPath ? '<button class="version-rig-btn anim-jump" data-jump="rig" title="Voir le rig source">&#129460;</button>' : '';
     return `
     <div class="version-thumb${i === activeIdx ? ' selected' : ''}" data-anim-idx="${i}" style="position:relative; width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === activeIdx ? 'var(--accent)' : 'transparent'};" title="${(a.motionLabel || a.filename || '').replace(/"/g, '&quot;')}">
       <span style="font-size:18px;">${iconFor(a.type)}</span>
