@@ -114,6 +114,10 @@ def main():
         'guidance_strength': (args.guidance if args.guidance is not None
                               else float(os.environ.get('FABMESH_TEX_GUIDANCE', '3.0'))),
         'guidance_interval': [0.5, 1.0],
+        # Audit fixes (see trellis2_native_full_pipeline.py): CFG-rescale 0->0.5 (anti
+        # color-wash) + rescale_t 3->1.5 (reallocate steps to the detail region).
+        'guidance_rescale': float(os.environ.get('FABMESH_TEX_RESCALE', '0.5')),
+        'rescale_t': float(os.environ.get('FABMESH_TEX_RESCALE_T', '1.5')),
     }
 
     # Build run() kwargs.

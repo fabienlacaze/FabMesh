@@ -121,6 +121,37 @@ def _patch_rmbg_in_hf_cache():
         log('patched HF cache: briaai/RMBG-2.0 -> ZhengPeng7/BiRefNet')
 
 
+def _crop_to_subject(image, pad_frac=None):
+    """Tight SQUARE crop around the alpha subject so it FILLS the frame.
+
+    Audit fix: FabMesh runs the pipeline with preprocess_image=False (TRELLIS's own
+    crop is skipped), so a small / off-centre rembg'd subject reached the model
+    full-frame and DINOv3 captured little fine detail. This re-introduces the crop:
+    bbox of the opaque pixels -> centred square + small margin, transparent-padded if
+    it overflows. Returns the cropped RGBA (the pipeline resizes to 1024 itself)."""
+    from PIL import Image
+    import numpy as np
+    if image.mode != 'RGBA':
+        return image
+    if pad_frac is None:
+        pad_frac = float(os.environ.get('FABMESH_TEX_CROP_PAD', '0.08'))
+    a = np.asarray(image)[:, :, 3]
+    ys, xs = np.where(a > 10)
+    if len(xs) == 0:
+        return image  # nothing detected -> leave as-is
+    x0, x1, y0, y1 = int(xs.min()), int(xs.max()), int(ys.min()), int(ys.max())
+    side = int(max(x1 - x0, y1 - y0) * (1.0 + 2.0 * pad_frac))
+    if side <= 0:
+        return image
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    L, T = cx - side // 2, cy - side // 2
+    canvas = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+    src = image.crop((max(L, 0), max(T, 0),
+                      min(L + side, image.width), min(T + side, image.height)))
+    canvas.paste(src, (max(-L, 0), max(-T, 0)))
+    return canvas
+
+
 def _prep_image(path):
     """Background removal via rembg u2net (Apache 2.0) — skip TRELLIS-2's
     internal rembg which uses the gated briaai/RMBG-2.0."""
@@ -138,6 +169,17 @@ def _prep_image(path):
         image = rembg.remove(
             image.convert('RGBA'),
             session=rembg.new_session('u2net'))
+    # Audit fix: tight-crop to the subject so it fills the frame (FabMesh skips
+    # TRELLIS's internal crop via preprocess_image=False). FABMESH_TEX_SKIP_CROP=1
+    # to disable.
+    if os.environ.get('FABMESH_TEX_SKIP_CROP') != '1':
+        try:
+            _before = image.size
+            image = _crop_to_subject(image)
+            if image.size != _before:
+                log(f'crop-to-subject: {_before} -> {image.size} (subject fills frame)')
+        except Exception as _ce:
+            log(f'crop-to-subject skipped: {type(_ce).__name__}: {_ce}')
     return image
 
 
@@ -159,13 +201,21 @@ def _brighten_baseColor(glb_obj):
             tex = getattr(material, 'baseColorTexture', None)
             if not tex:
                 continue
-            tex = ImageEnhance.Brightness(tex).enhance(1.5)
-            tex = ImageEnhance.Color(tex).enhance(1.3)
-            tex = ImageEnhance.Contrast(tex).enhance(1.1)
+            # Audit fix: x1.5/x1.3/x1.1 was TOO STRONG — brightness x1.5 crushed
+            # highlights, color x1.3 over-saturated, and it STACKS on the now-stronger
+            # CFG bake => muddied fine detail. Softened to a gentle lift + dropped the
+            # contrast bump. FABMESH_TRELLIS2_SKIP_BRIGHTEN=1 disables it entirely.
+            tex = ImageEnhance.Brightness(tex).enhance(
+                float(os.environ.get('FABMESH_TEX_BRIGHT', '1.2')))
+            tex = ImageEnhance.Color(tex).enhance(
+                float(os.environ.get('FABMESH_TEX_SAT', '1.1')))
             material.baseColorTexture = tex
             n += 1
         if n:
-            log(f'auto-brighten: x1.5/x1.3/x1.1 ({n} material(s))')
+            log(f'auto-brighten (softened): bright x'
+                f'{os.environ.get("FABMESH_TEX_BRIGHT", "1.2")} sat x'
+                f'{os.environ.get("FABMESH_TEX_SAT", "1.1")}, contrast dropped '
+                f'({n} material(s))')
     except Exception as e:
         log(f'brighten skipped: {type(e).__name__}: {e}')
 
@@ -291,6 +341,14 @@ def main():
         'steps': int(os.environ.get('FABMESH_TEX_STEPS', '24')),
         'guidance_strength': float(os.environ.get('FABMESH_TEX_GUIDANCE', '3.0')),
         'guidance_interval': [0.5, 1.0],
+        # Audit fixes (overlooked TRELLIS knobs left at SHAPE-oriented / weak defaults):
+        #  - guidance_rescale was 0.0 (CFG-rescale OFF). TRELLIS uses 0.5 for the SHAPE
+        #    sampler; with tex guidance now 3.0, rescale=0 washes/clips colors. 0.5
+        #    restores natural contrast AND lets guidance be pushed higher safely.
+        #  - rescale_t was 3.0 (a shape default that front-loads steps to high noise,
+        #    starving the low-t DETAIL region). 1.5 reallocates steps to detail -> sharper.
+        'guidance_rescale': float(os.environ.get('FABMESH_TEX_RESCALE', '0.5')),
+        'rescale_t': float(os.environ.get('FABMESH_TEX_RESCALE_T', '1.5')),
     }
     # Update the pipeline default too, so the pipeline.run() single-view /
     # cascade fallbacks (which sample tex_slat internally) get it as well.

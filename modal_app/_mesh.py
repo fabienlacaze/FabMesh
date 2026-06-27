@@ -92,6 +92,10 @@ def generate(
         'steps': int(os.environ.get('FABMESH_TEX_STEPS', '24')),
         'guidance_strength': float(os.environ.get('FABMESH_TEX_GUIDANCE', '3.0')),
         'guidance_interval': [0.5, 1.0],
+        # Audit fixes — see scripts/trellis2_native_full_pipeline.py for the rationale:
+        # guidance_rescale 0.0->0.5 (anti color-wash) + rescale_t 3.0->1.5 (steps to detail).
+        'guidance_rescale': float(os.environ.get('FABMESH_TEX_RESCALE', '0.5')),
+        'rescale_t': float(os.environ.get('FABMESH_TEX_RESCALE_T', '1.5')),
     }
     try:
         if isinstance(getattr(pipeline, 'tex_slat_sampler_params', None), dict):
