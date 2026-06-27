@@ -12,7 +12,14 @@
   sur le samouraï (humanoid_43, 489k faces, 4096) : l'armure lamellaire passe de BRUIT TV à
   vraies plaques métal définies, alignement parfait, robe/peau plus fines. ~2 min total.
   Gate `--render-only` pour vérifier l'orientation. À FAIRE : câbler comme outil UI + cloud,
-  tuning strength, option auto post-génération.
+  option auto post-génération.
+- FIX couture (2026-06-27) : sur géométrie fine (squelette humanoid_27) la repro 6-vues
+  sous-couvrait les côtés minces → trous inpaint sombres = couture verticale au centre. Fix :
+  detail_synth force `FABMESH_TEXPROJ_BASE_ATLAS=1` → la texture d'ORIGINE devient le plancher
+  (sharp_ratio 1.0, zéro trou), le détail n'est ajouté QUE là où les vues couvrent bien.
+  Bonus : détail-synth devient SÛR (jamais pire que l'original). Validé A/B éclairé. Strength
+  0.5 = bon curseur (testé 0.35 doux / 0.5 fort sur le samouraï). Cas durs (fin/ajouré) = gain
+  modeste ; meshes pleins (perso/armure) = net.
 
 ## 2026-06-22 (Texture nette : tex_slat steps 12→24 + guidance 1.0→3.0 — CAUSE RACINE du bake mou)
 

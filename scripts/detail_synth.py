@@ -522,7 +522,15 @@ def reproject(mesh_path, front_ref, out_glb, multiview_dir, texture_size):
     log('reproject: ' + ' '.join(f'"{c}"' if ' ' in c else c for c in cmd))
     # Pass the env through (texture_project honours FABMESH_TEXPROJ_* +
     # FABMESH_UV_REPACK_MAX_FACES for the xatlas-skip on high-poly meshes).
-    proc = subprocess.run(cmd, text=True, env=os.environ.copy())
+    _env = os.environ.copy()
+    # BASE_ATLAS: load the mesh's EXISTING texture as the floor so under-covered
+    # regions (thin/sparse geometry — e.g. a skeleton's spine) keep the original
+    # bake instead of a dark inpaint patch. This removes the centre seam AND makes
+    # detail-synth SAFE: the result is never worse than the input — detail is only
+    # ADDED where the 6 views cover well. Default on; set
+    # FABMESH_TEXPROJ_BASE_ATLAS=0 in the environment to disable.
+    _env.setdefault('FABMESH_TEXPROJ_BASE_ATLAS', '1')
+    proc = subprocess.run(cmd, text=True, env=_env)
     if proc.returncode != 0:
         log(f'ERROR: texture_project.py exited rc={proc.returncode}')
         sys.exit(5)
