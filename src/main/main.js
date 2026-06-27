@@ -7296,9 +7296,29 @@ ipcMain.handle('list-meshes', async () => {
       sourceImage: source
     };
   }));
-  return results
-    .filter(Boolean)
-    .sort((a, b) => new Date(b.created) - new Date(a.created));
+  const list = results.filter(Boolean);
+  // Future-inherit: a derived mesh (retex / rig / fill_holes / smooth / …) shares
+  // its parent's source image. For any mesh still missing a .source sidecar, find
+  // the closest ancestor (longest filename-stem prefix) that HAS one, adopt +
+  // persist it. Covers every derived op without patching each call site; the
+  // sidecar is written once, then read from disk on subsequent lists.
+  try {
+    const _stem = (f) => f.replace(/\.[^.]+$/, '');
+    const _withSrc = list.filter((r) => r.sourceImage)
+      .map((r) => ({ src: r.sourceImage, s: _stem(r.filename) }))
+      .sort((a, b) => b.s.length - a.s.length);
+    for (const m of list) {
+      if (m.sourceImage) continue;
+      const cs = _stem(m.filename);
+      const parent = _withSrc.find((p) => cs === p.s || cs.startsWith(p.s + '_'));
+      if (parent) {
+        m.sourceImage = parent.src;
+        fsp.writeFile(path.join(MESHES_DIR, m.filename + '.source'),
+                      parent.src, 'utf-8').catch(() => {});
+      }
+    }
+  } catch (e) { /* inherit is best-effort */ }
+  return list.sort((a, b) => new Date(b.created) - new Date(a.created));
 });
 
 ipcMain.handle('get-mesh-path', (event, filename) => {
