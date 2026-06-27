@@ -4250,13 +4250,31 @@ async function jumpToSourceImage(imgPath) {
   const p = state.currentProject;
   // Close the 3D lightbox first (the link can be clicked from inside it).
   try { closeMeshLightbox(); } catch (_) {}
-  // Locate the matching image version: exact path first, then basename.
+  // Locate the matching image version. The generator can feed a DERIVED image
+  // (e.g. auto-rectification writes fabmesh_rectified_<ts>_<original>.png), so
+  // the recorded source may not be a listed version verbatim — match by exact
+  // path, then exact basename, then by the underlying "core" name after
+  // stripping gen-time prefixes (tolerating a trailing _painted_<ts> suffix).
   let matched = null;
   if (p && Array.isArray(p.images)) {
-    matched = p.images.find(im => (im.path || im) === imgPath);
+    const _bn = (x) => String(x.path || x).split(/[\\/]/).pop();
+    const _stem = (s) => s.replace(/\.[^.]+$/, '');
+    const base = String(imgPath).split(/[\\/]/).pop();
+    matched = p.images.find(im => (im.path || im) === imgPath)
+           || p.images.find(im => _bn(im) === base);
     if (!matched) {
-      const base = String(imgPath).split(/[\\/]/).pop();
-      matched = p.images.find(im => String(im.path || im).split(/[\\/]/).pop() === base);
+      const core = _stem(base)
+        .replace(/^fabmesh_rectified_\d+_/, '')
+        .replace(/^fabmesh_[a-z]+_\d+_/, '');
+      if (core && core !== _stem(base)) {
+        const cands = p.images.filter(im => {
+          const vs = _stem(_bn(im));
+          return vs === core || vs.startsWith(core + '_') || core.startsWith(vs + '_');
+        });
+        matched = cands.find(im => (im.path || im) === p.selectedImagePath)
+               || cands.find(im => (im.path || im) === p.previewImagePath)
+               || cands[0] || null;
+      }
     }
   }
   if (!matched) {
