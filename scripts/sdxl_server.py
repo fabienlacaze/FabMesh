@@ -524,9 +524,19 @@ def do_img2img(input_path, prompt, output_path, strength=0.55,
             return {"ok": False, "error": str(e)}
 
 
+# Default tile-refine negative prompt. ControlNet-Tile LOVES to hallucinate
+# text/runes/glyphs onto ambiguous organic texture (it invented runes on a
+# wizard's beard at strength 0.5). This hard-suppresses that failure mode on
+# every tile call. Callers can override via the `negative_prompt` arg.
+DEFAULT_TILE_NEG = ("text, letters, words, writing, runes, glyphs, symbols, "
+                    "sigil, tattoo, calligraphy, inscription, hieroglyphs, "
+                    "ornamental pattern, watermark, logo, signature, "
+                    "deformed, blurry, lowres, worst quality, artifacts")
+
+
 def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
                      controlnet_scale=0.7, guidance_scale=6.0, steps=None,
-                     seed=42):
+                     seed=42, negative_prompt=None, control_guidance_end=0.6):
     """
     Tile-conditioned img2img: uses the source image as BOTH the init image
     AND the ControlNet Tile condition. This lets us push strength way higher
@@ -574,12 +584,18 @@ def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
             with torch.inference_mode():
                 result = pipe(
                     prompt=enhanced,
+                    negative_prompt=(negative_prompt or DEFAULT_TILE_NEG),
                     image=img,
                     control_image=img,  # same tile image drives the ControlNet
                     strength=s,
                     num_inference_steps=steps,
                     guidance_scale=guidance_scale,
                     controlnet_conditioning_scale=cns,
+                    # Stop the tile ControlNet before the LATE denoise steps: it
+                    # guides early structure but no longer drives late-step
+                    # micro-invention (the runes/glyphs failure). The late steps
+                    # become plain img2img anchored to the init by `strength`.
+                    control_guidance_end=float(control_guidance_end),
                     generator=gen,
                 ).images[0]
 

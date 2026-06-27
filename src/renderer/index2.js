@@ -8223,7 +8223,7 @@ document.getElementById('ws-mesh-detail-synth-btn')?.addEventListener('click', (
       'Source mesh': m.filename,
     }, 240000, { sourceImageUrl: m.path, projectName: p.name });
     try {
-      const r = await API.detailSynth({ meshPath: m.path, jobId: job.id, strength: 0.5, assetType, textureSize: 4096 });
+      const r = await API.detailSynth({ meshPath: m.path, jobId: job.id, strength: 0.35, assetType, textureSize: 4096 });
       if (r?.success || r?.newPath) {
         completeJob(job.id, true);
         await reloadCurrentProject();
