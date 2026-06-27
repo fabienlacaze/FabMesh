@@ -17,6 +17,10 @@ reproject" loop:
       IP-Adapter on the reference image keeps it faithful -> view_<i>.png.
       Legacy (--refiner tile): POST to /img2img_tile (ControlNet-Tile adds
       micro-detail while preserving structure).
+      HEAD FREEZE (--freeze-head on, default): a per-view head_mask_<i>.png is
+      rendered from a per-vertex "head" weight (top of the mesh's tallest axis);
+      after refine, the ORIGINAL render is composited back over the head so SDXL
+      never degrades the AI-generated face -> original face + refined body.
 
   STAGE 3 — REPROJECT (texture_project.py --multiview, CPU)
       Write views.json and re-bake the refined views back onto the mesh UV
@@ -153,6 +157,15 @@ def rot_y(deg):
     ], dtype=np.float64)
 
 
+def _smoothstep(lo, hi, t):
+    """Hermite smoothstep: 0 below lo, 1 above hi, smooth S-curve between.
+    Vectorised (t may be a numpy array). Robust if hi<=lo (-> hard step)."""
+    if hi <= lo:
+        return (np.asarray(t) >= hi).astype(np.float64)
+    x = np.clip((np.asarray(t, dtype=np.float64) - lo) / (hi - lo), 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
 def w2c_for_view(azim_deg, elev_deg):
     """Return (R_w2c, t_w2c) for an orbited view — EXACTLY as texture_project
     computes them (lines ~685-693)."""
@@ -177,6 +190,13 @@ def load_mesh_for_render(mesh_path):
                     live in the SAME verts_cam frame). Per-view we rotate these
                     again by R_w2c (rotation only) to get view-space normals for
                     the geometry-guided refine ControlNet.
+        head_weight : (V,) float64 in [0,1]  1 = head/face/beard region (FROZEN,
+                    keep original), 0 = body (refined). A smoothstep over the
+                    mesh's tallest axis (top ~26-38% of height -> ~1). Used to
+                    composite the ORIGINAL render back over the refined view so
+                    SDXL never touches the (fragile AI-generated) face. It's a
+                    per-vertex SCALAR, so R_undo doesn't rotate it — it's indexed
+                    by the same vertex order as verts_cam.
 
     NOTE on R_undo: texture_project applies it to recover SF3D's internal
     camera frame before projecting (verts_cam = R_undo @ vertices). The render
@@ -266,7 +286,40 @@ def load_mesh_for_render(mesh_path):
     _n = np.linalg.norm(norm_cam, axis=1, keepdims=True)
     norm_cam = norm_cam / np.clip(_n, 1e-8, None)
 
-    return verts_cam, faces, uv, tex_rgb, norm_cam
+    # --- HEAD / FACE FREEZE weight (per-vertex scalar) ---------------------
+    # SDXL ControlNet (tile AND geo/normal) destroys AI-generated faces no
+    # matter the params. The fix: never refine the head — composite the
+    # ORIGINAL render back over the head region. head_weight ~1 there.
+    #
+    # Pick the VERTICAL axis as the one with the LARGEST vertex extent (robust
+    # for a standing humanoid without assuming Y-up vs Z-up), normalise that
+    # coord to [0,1] across the mesh, then smoothstep so the top ~26-38% of the
+    # height (head + hat + most of the beard) -> ~1 with a feathered transition.
+    # Computed on the ORIGINAL mesh frame (vertices) — it's a scalar indexed by
+    # the same vertex order as verts_cam, so R_undo (a frame rotation) is
+    # irrelevant to it.
+    try:
+        lo = float(os.environ.get('FABMESH_FREEZE_HEAD_LO', '0.62'))
+        hi = float(os.environ.get('FABMESH_FREEZE_HEAD_HI', '0.74'))
+        extents = vertices.max(axis=0) - vertices.min(axis=0)  # (3,)
+        up_axis = int(np.argmax(extents))
+        span = float(extents[up_axis])
+        if span <= 1e-8:
+            log('WARNING: mesh has no measurable vertical extent — head freeze '
+                'weight all-zero (freeze will be a no-op).')
+            head_weight = np.zeros(len(vertices), dtype=np.float64)
+        else:
+            coord = vertices[:, up_axis]
+            t = (coord - coord.min()) / span        # 0 at bottom, 1 at top
+            head_weight = _smoothstep(lo, hi, t)     # (V,) in [0,1]
+            log(f'head freeze: up_axis={["X","Y","Z"][up_axis]} '
+                f'(extents={extents.round(3).tolist()}), smoothstep[{lo:.2f},{hi:.2f}], '
+                f'frozen verts={(head_weight > 0.5).sum()}/{len(vertices)}')
+    except Exception as e:
+        log(f'WARNING: head-freeze weight failed ({e}); freeze disabled.')
+        head_weight = np.zeros(len(vertices), dtype=np.float64)
+
+    return verts_cam, faces, uv, tex_rgb, norm_cam, head_weight
 
 
 # ---------------------------------------------------------------------------
@@ -348,11 +401,12 @@ def _project_to_clip(verts_cam_t, R_w2c_t, t_w2c_t, focal, near=0.05, far=10.0):
 
 
 def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
-                 norm_cam=None, write_normal=True, write_depth=False):
+                 norm_cam=None, write_normal=True, write_depth=False,
+                 head_weight=None, write_head_mask=False):
     """STAGE 1: rasterize each view with nvdiffrast, sample the baked texture,
     write render_<i>.png (RGB, white background). Returns
-        (render_paths, normal_paths, depth_paths)
-    where normal_paths / depth_paths are [] when not requested.
+        (render_paths, normal_paths, depth_paths, head_mask_paths)
+    where normal_paths / depth_paths / head_mask_paths are [] when not requested.
 
     When write_normal and norm_cam are given, ALSO writes a world-space (view-
     space) NORMAL map per view (normal_<i>.png): the geometry control image for
@@ -360,6 +414,11 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
     R_w2c (rotation only) so the normal map is in the SAME view frame as the
     colour render, then map [-1,1] -> [0,1] RGB with a neutral (0.5,0.5,1.0)
     background on un-hit pixels.
+
+    When write_head_mask and head_weight are given, ALSO writes a grayscale
+    head_mask_<i>.png per view (the per-vertex head_weight interpolated across
+    the raster, background 0). The refine stage composites the ORIGINAL render
+    back over white (head) pixels so SDXL never touches the face.
 
     write_depth (optional) writes depth_<i>.png from rast z/w — only needed if
     the refine falls back to a depth ControlNet instead of the union normal one.
@@ -384,6 +443,17 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
     normals_t = None
     if do_normal:
         normals_t = torch.tensor(norm_cam, dtype=torch.float32, device=device)  # (V,3)
+    # Per-vertex head-freeze weight (scalar in [0,1]) for the head_mask render.
+    do_head = bool(write_head_mask and head_weight is not None
+                   and float(np.max(head_weight)) > 1e-6)
+    head_w_t = None
+    if write_head_mask and head_weight is not None and not do_head:
+        log('  head freeze requested but head_weight all-zero — skipping mask.')
+    if do_head:
+        # (V,1) so dr.interpolate yields a (1,H,W,1) attribute. contiguous() —
+        # nvdiffrast requires contiguous attribute tensors (same fix as normals).
+        head_w_t = torch.tensor(np.asarray(head_weight, dtype=np.float32)[:, None],
+                                dtype=torch.float32, device=device).contiguous()  # (V,1)
     # UV: nvdiffrast.texture expects uv in [0,1] with origin bottom-left and
     # V increasing upward. trimesh/glTF UVs use origin top-left (V down), so
     # flip V to match nvdiffrast's texel sampling.
@@ -400,6 +470,7 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
     paths = []
     normal_paths = []
     depth_paths = []
+    head_mask_paths = []
     for i, (azim, elev) in enumerate(VIEWS):
         R_w2c, t_w2c = w2c_for_view(azim, elev)
         R_w2c_t = torch.tensor(R_w2c, dtype=torch.float32, device=device)
@@ -482,17 +553,40 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
             depth_paths.append(depth_p)
             log(f'    + depth map -> {depth_p}')
 
+        # --- HEAD MASK (frozen region; composited back over the refine) -------
+        hw_interp = None
+        if do_head:
+            # Interpolate the per-vertex head_weight across the raster. The
+            # attribute tensor is already contiguous (same requirement as the
+            # normal fix). Channel 0 is the scalar weight.
+            hw_interp, _ = dr.interpolate(
+                head_w_t[None, ...].contiguous(), rast, faces_t)       # (1,H,W,1)
+            hwm = hw_interp[0, ..., 0]                                 # (H,W)
+            # Background (no triangle hit) -> 0 so only ON-MESH head pixels freeze.
+            hwm = hwm * mask[0, ..., 0]
+            hw_np = hwm.clamp(0.0, 1.0).detach().cpu().numpy()
+            hw_np = (hw_np * 255.0 + 0.5).astype(np.uint8)
+            hw_np = np.flipud(hw_np)                                   # same flip as colour
+            head_p = os.path.join(out_dir, f'head_mask_{i}.png')
+            Image.fromarray(hw_np, mode='L').save(head_p)
+            head_mask_paths.append(head_p)
+            log(f'    + head mask -> {head_p}')
+
         del R_w2c_t, t_w2c_t, clip, rast, uv_interp, color, mask
         if nrm_interp is not None:
             del nrm_interp
+        if hw_interp is not None:
+            del hw_interp
 
     # --- free the GPU before SDXL stage ---
     del glctx, verts_t, faces_t, uv_t, tex_t
     if normals_t is not None:
         del normals_t
+    if head_w_t is not None:
+        del head_w_t
     torch.cuda.empty_cache()
     log('nvdiffrast context + tensors freed; GPU clear for SDXL stage.')
-    return paths, normal_paths, depth_paths
+    return paths, normal_paths, depth_paths, head_mask_paths
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +658,7 @@ def _post_json(url, payload, timeout=1200):
 def refine_views(render_paths, out_dir, prompt, strength, steps, seed=42,
                  refiner='geo', normal_paths=None, reference=None,
                  controlnet_scale=0.8, ip_scale=0.6,
-                 control_guidance_end=1.0):
+                 control_guidance_end=1.0, head_mask_paths=None):
     """STAGE 2: refine each render_<i>.png -> view_<i>.png via the SDXL server.
 
     refiner='geo'  (default): POST to /refine_geo — GEOMETRY-GUIDED. Passes the
@@ -573,6 +667,13 @@ def refine_views(render_paths, out_dir, prompt, strength, steps, seed=42,
         Detail follows REAL geometry; the ref keeps it faithful. This replaces
         the hallucination-prone ControlNet-Tile path.
     refiner='tile' (legacy): POST to /img2img_tile (the old behaviour).
+
+    HEAD FREEZE: when head_mask_paths is given, AFTER each view is refined we
+    composite the ORIGINAL render_<i> back over the head region:
+        final = render_i * head_mask + view_i * (1 - head_mask)
+    so SDXL never touches the (fragile AI-generated) face — the head stays the
+    original texture, only the body/clothes get refined. Applies to BOTH
+    refiners. Overwrites view_<i>.png in place.
 
     Requires the SDXL server already up (does NOT start it). Returns list of
     view_<i>.png paths.
@@ -649,6 +750,39 @@ def refine_views(render_paths, out_dir, prompt, strength, steps, seed=42,
         if not os.path.exists(out_p):
             log(f'ERROR: server reported ok but {out_p} is missing.')
             sys.exit(4)
+
+        # --- HEAD FREEZE composite (both refiners) ---------------------------
+        # final = render_i * head_mask + view_i * (1 - head_mask). Keeps the
+        # head/face/beard at the ORIGINAL render pixels so SDXL never degrades
+        # the AI-generated face; only the body/clothes carry refined detail.
+        hmp = (head_mask_paths[i]
+               if (head_mask_paths and i < len(head_mask_paths)) else None)
+        if hmp and os.path.exists(hmp):
+            try:
+                refined = Image.open(out_p).convert('RGB')
+                original = Image.open(rp).convert('RGB')
+                if original.size != refined.size:
+                    original = original.resize(refined.size, Image.LANCZOS)
+                hm = Image.open(hmp).convert('L')
+                if hm.size != refined.size:
+                    hm = hm.resize(refined.size, Image.LANCZOS)
+                # Soft seam: a few-px gaussian blur on the mask edge (optional).
+                from PIL import ImageFilter as _IF
+                hm = hm.filter(_IF.GaussianBlur(3))
+                m = (np.asarray(hm, dtype=np.float32) / 255.0)[..., None]  # (H,W,1)
+                orig_a = np.asarray(original, dtype=np.float32)
+                ref_a = np.asarray(refined, dtype=np.float32)
+                blended = orig_a * m + ref_a * (1.0 - m)
+                final = Image.fromarray(
+                    np.clip(blended, 0, 255).astype(np.uint8), 'RGB')
+                final.save(out_p)  # overwrite in place
+                frozen_frac = float((m > 0.5).mean() * 100.0)
+                log(f'    head-freeze composite ({frozen_frac:.1f}% frozen) '
+                    f'-> {out_p}')
+            except Exception as e:
+                log(f'    WARNING: head-freeze composite failed for view {i} '
+                    f'({e}); using refined view as-is.')
+
         view_paths.append(out_p)
         log(f'    -> {out_p}')
     return view_paths
@@ -726,6 +860,13 @@ def main():
                              '--refiner geo (default 0.8)')
     parser.add_argument('--ip-scale', type=float, default=0.6,
                         help='IP-Adapter scale for --refiner geo (default 0.6)')
+    parser.add_argument('--freeze-head', choices=['on', 'off'], default='on',
+                        help='Head/face FREEZE (default on): refine only the '
+                             'body/clothes and keep the ORIGINAL render for the '
+                             'head/face/beard — SDXL ControlNet destroys '
+                             'AI-generated faces no matter the params. "off" '
+                             'refines the whole mesh (legacy behaviour). '
+                             'Thresholds via FABMESH_FREEZE_HEAD_LO/HI.')
     parser.add_argument('--texture-size', type=int, default=4096,
                         help='Reprojection atlas resolution (default 4096)')
     parser.add_argument('--workdir', default=None,
@@ -757,15 +898,18 @@ def main():
 
     # --- STAGE 1: render ---
     log('STAGE 1: render (nvdiffrast)')
-    verts_cam, faces, uv, tex_rgb, norm_cam = load_mesh_for_render(mesh_path)
+    verts_cam, faces, uv, tex_rgb, norm_cam, head_weight = \
+        load_mesh_for_render(mesh_path)
     log(f'mesh: {len(verts_cam)} verts, {len(faces)} faces, '
         f'tex {tex_rgb.shape[1]}x{tex_rgb.shape[0]}')
     # Normal maps are the geometry control for --refiner geo; render them unless
     # we're explicitly on the legacy tile path (cheap, but skip if not needed).
     want_normal = (args.refiner == 'geo')
-    render_paths, normal_paths, _depth_paths = render_views(
+    want_head = (args.freeze_head == 'on')
+    render_paths, normal_paths, _depth_paths, head_mask_paths = render_views(
         verts_cam, faces, uv, tex_rgb, work, res=RENDER_RES,
-        norm_cam=norm_cam, write_normal=want_normal, write_depth=False)
+        norm_cam=norm_cam, write_normal=want_normal, write_depth=False,
+        head_weight=head_weight, write_head_mask=want_head)
     views_json = write_views_json(work)
 
     if args.render_only:
@@ -774,9 +918,14 @@ def main():
             log(f'  {p}')
         for p in normal_paths:
             log(f'  {p}')
+        for p in head_mask_paths:
+            log(f'  {p}')
         log(f'  {views_json}')
         log('Verify the orientation matches what texture_project expects '
             '(front face at view_0, etc.) BEFORE running the full pipeline.')
+        if head_mask_paths:
+            log('Also eyeball head_mask_*.png: WHITE = frozen (kept original), '
+                'BLACK = refined. The head/face/beard should be white.')
         return
 
     # --- STAGE 2: refine ---
@@ -784,11 +933,14 @@ def main():
         log('STAGE 2: refine (SDXL geometry-guided /refine_geo, port 5555)')
     else:
         log('STAGE 2: refine (SDXL ControlNet-Tile /img2img_tile, port 5555)')
+    if want_head:
+        log('  head/face FREEZE on: head region kept from original render.')
     view_paths = refine_views(
         render_paths, work, args.prompt, args.strength, args.steps,
         seed=args.seed, refiner=args.refiner, normal_paths=normal_paths,
         reference=args.reference, controlnet_scale=args.controlnet_scale,
-        ip_scale=args.ip_scale)
+        ip_scale=args.ip_scale,
+        head_mask_paths=(head_mask_paths if want_head else None))
 
     # --- STAGE 3: reproject ---
     log('STAGE 3: reproject (texture_project.py --multiview, CPU)')

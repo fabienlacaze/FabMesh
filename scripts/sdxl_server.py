@@ -461,22 +461,31 @@ def load_controlnet_geo():
                 pipe.vae.config.force_upcast = True
             except Exception:
                 pass
-        # IP-Adapter: load BEFORE pipe.to('cuda') so the injected image encoder /
-        # adapter weights move to GPU with the rest of the pipe. weight_name is the
-        # base SDXL ip-adapter; the image encoder (ViT-H) is auto-fetched from the
-        # h94/IP-Adapter repo's models/image_encoder subfolder by diffusers.
-        try:
-            pipe.load_ip_adapter(
-                IP_ADAPTER_REPO,
-                subfolder=IP_ADAPTER_SUBFOLDER,
-                weight_name=IP_ADAPTER_WEIGHT,
-            )
-            log("IP-Adapter loaded onto geo pipe")
-        except Exception as _ie:
-            # If the IP-Adapter can't load we STILL want a working geometry
-            # controlnet pipe (do_refine_geo handles ref_path=None / no adapter).
-            log(f"IP-Adapter load FAILED ({_ie}); geo pipe runs controlnet-only",
-                'warn')
+        # IP-Adapter adds the ViT-H image encoder (~2.5 GB VRAM + RAM). With it the
+        # full pipe is ~13.6 GB -> on a 16 GB card it needs cpu-offload, whose
+        # CPU<->GPU swap THRASHES when system RAM is tight (Electron/app running) =>
+        # ~70-100s/step. DEFAULT OFF so the pipe is ~9.5 GB and fits in VRAM WITHOUT
+        # offload (stable, ~2s/step). The geometry (normal) ControlNet is the real
+        # face-preservation lever anyway. Set FABMESH_GEO_IPADAPTER=1 on Modal / a
+        # bigger card to re-enable reference anchoring.
+        _geo_use_ip = os.environ.get('FABMESH_GEO_IPADAPTER', '0') == '1'
+        _ip_loaded = False
+        if _geo_use_ip:
+            try:
+                pipe.load_ip_adapter(
+                    IP_ADAPTER_REPO,
+                    subfolder=IP_ADAPTER_SUBFOLDER,
+                    weight_name=IP_ADAPTER_WEIGHT,
+                )
+                _ip_loaded = True
+                log("IP-Adapter loaded onto geo pipe")
+            except Exception as _ie:
+                log(f"IP-Adapter load FAILED ({_ie}); geo pipe runs controlnet-only",
+                    'warn')
+        else:
+            log("IP-Adapter OFF (FABMESH_GEO_IPADAPTER=0) — controlnet-only, "
+                "fits VRAM without offload")
+        pipe._fabmesh_has_ip = _ip_loaded
         # fp16 dtype cast FIRST (dtype only, on CPU — the cpu-offload hooks below
         # install device placement, so we must NOT pipe.to('cuda') here).
         try:
@@ -491,14 +500,16 @@ def load_controlnet_geo():
                 pipe.image_encoder.to(torch.float16)
         except Exception as _e:
             log(f"controlnet_geo fp16 cast skipped: {_e}")
-        # The geo pipe (RealVisXL + union controlnet + IP-Adapter ViT-H encoder)
-        # is ~13.6 GB resident; on a 16 GB card the 1024 inference buffers push it
-        # past VRAM and it THRASHES (~50s/step). model_cpu_offload keeps only the
-        # active submodule on GPU (peak ~7-8 GB) -> ~2-4s/step, no thrash.
-        try:
-            pipe.enable_model_cpu_offload()
-        except Exception as _oe:
-            log(f"geo enable_model_cpu_offload failed ({_oe}); pipe.to(cuda)", 'warn')
+        if _ip_loaded:
+            # Full pipe (~13.6 GB) won't fit 16 GB -> cpu-offload. Only sensible on
+            # a bigger card / Modal (the CPU<->GPU swap thrashes on tight RAM).
+            try:
+                pipe.enable_model_cpu_offload()
+            except Exception as _oe:
+                log(f"geo enable_model_cpu_offload failed ({_oe}); pipe.to(cuda)", 'warn')
+                pipe.to("cuda")
+        else:
+            # Controlnet-only pipe (~9.5 GB) fits VRAM directly -> no swap, fast.
             pipe.to("cuda")
         pipe.enable_vae_tiling()
         if os.environ.get('FABMESH_UNRESTRICTED') == '1':

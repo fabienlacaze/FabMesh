@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-06-27 (Backup avant tuning texture TRELLIS — geo IP-Adapter optionnel + head-freeze)
+
+- Commit de sauvegarde avant d'appliquer les réglages texture trouvés par l'audit (workflow
+  trellis-texturing-audit) : crop-sujet manquant, auto-brighten trop fort, guidance_rescale=0.0,
+  rescale_t=3.0 hérité de la forme. AVANT ça : sdxl_server `do_refine_geo` rend l'IP-Adapter
+  OPTIONNEL (`FABMESH_GEO_IPADAPTER`, défaut 0 → pipe ~9.5 GB tient en VRAM SANS offload, fini le
+  thrashing 50-100s/step) + `do_img2img_tile` REVENU à l'identique (existant non touché). detail_synth :
+  head-freeze géométrique (`--freeze-head`, gèle visage/barbe via l'axe vertical) — CODÉ, PAS TESTÉ.
+  Verdict empirique : SDXL détruit les visages IA quelle que soit l'approche → seul contournement =
+  ne pas toucher le visage. Branche backup poussée sur GitHub avant les modifs texture.
+
 ## 2026-06-27 (Détail-synthèse : render-refine-reproject — scripts/detail_synth.py, VALIDÉ)
 
 - Le bake trellis2 est plafonné (voxel 1024). Pour dépasser : nouveau pipeline `detail_synth.py`
