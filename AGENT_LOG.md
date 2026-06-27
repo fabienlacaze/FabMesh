@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-27 (Cloud: port du "lineage jump" desktop → MyFabmesh.AI)
+
+- Porté la feature "lineage jump" du desktop (src/renderer/index2.js + styles) vers le
+  cloud (cloud/public/app/index2.js + styles/index2.css).
+- Ajouté: `_sigKey` (strip de la query R2 signée volatile, modèle `_emKey`),
+  `_flashCenterSelected`, `_resolveParentMeshPath`, `_resolveParentRig`,
+  `jumpToSourceImage` / `jumpToMesh` / `jumpToRig`.
+- Boutons hover ajoutés: 📷 (image source) sur les mesh ; 📷 + 🧊 sur les rigs (+ green
+  check `used-for-3d` synchronisé) ; 📷 + 🧊 + 🦴 sur les vignettes d'animation (batch).
+- Adaptation cloud: TOUTE comparaison de chemin normalise la signed-URL via `_sigKey`
+  (la signature change à chaque /api/meshes). Les rigs/anims R2 n'ont pas de sourceImage
+  ni de rigPath → parents dérivés par stem de filename (jamais par champ stocké).
+- CSS: `.version-source-btn` / `.version-mesh-btn` / `.version-rig-btn`, hover-only,
+  2e rangée (top:30px) pour ne pas chevaucher le check (haut-gauche) ni le delete X
+  (haut-droite). Build `npm run build` OK, code présent dans out/.
+- Tout est gardé (pas de bouton quand la donnée manque) → zéro impact sur l'existant.
+
 ## 2026-06-27 (Backup avant tuning texture TRELLIS — geo IP-Adapter optionnel + head-freeze)
 
 - Commit de sauvegarde avant d'appliquer les réglages texture trouvés par l'audit (workflow

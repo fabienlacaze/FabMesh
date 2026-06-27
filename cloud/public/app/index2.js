@@ -2205,6 +2205,213 @@ async function renderImageVersions(p) {
   });
 }
 
+// ============================================================================
+// LINEAGE JUMP (ported from desktop src/renderer/index2.js).
+// Jump from a derived asset (mesh / rig / animation) back to the source image,
+// mesh or rig it descends from, then center + flash the matching version.
+//
+// CLOUD ADAPTATION: on the cloud every mesh/rig/image/anim ref is an R2 SIGNED
+// URL with a VOLATILE ?exp=&sig= query (re-minted on every /api/meshes call), so
+// raw === comparison NEVER matches the same object across calls. Mirror _emKey:
+// strip the /[?#].*$/ query before EVERY path compare. _sigKey() does exactly
+// that (backslash->slash + drop query + lowercase). Basename / filename-stem
+// matching is preferred because the R2 key tail is stable.
+//
+// All additions are GUARDED: a button is only rendered when its target resolves,
+// so missing lineage data == zero markup == zero impact on the working app.
+// ----------------------------------------------------------------------------
+
+// Normalize a path / signed URL to a stable comparable key: drop the volatile
+// ?signature / #fragment, normalize slashes, lowercase. Same rule as _emKey.
+function _sigKey(u) {
+  return String(u == null ? '' : u)
+    .replace(/\\/g, '/')
+    .replace(/[?#].*$/, '')
+    .toLowerCase();
+}
+
+// Center the currently-selected thumb of a versions strip in the viewport (not
+// top-aligned) and flash a blue glow twice. Guarded (no-op when strip/sel
+// missing). The 140ms delay lets the card expand/render first.
+function _flashCenterSelected(stripId) {
+  setTimeout(() => {
+    const strip = document.getElementById(stripId);
+    const sel = strip && strip.querySelector('.version-thumb.selected');
+    if (!sel) return;
+    try { sel.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }); } catch (_) {}
+    try {
+      sel.animate(
+        [{ boxShadow: '0 0 0 0 rgba(138,180,255,0.95)' },
+         { boxShadow: '0 0 0 7px rgba(138,180,255,0)' }],
+        { duration: 850, iterations: 2 });
+    } catch (_) {}
+  }, 140);
+}
+
+// Resolve the SOURCE MESH of a rig (or any derived item) by longest-prefix stem
+// match against p.meshes — a rig 'X_rigged_<engine>_<ts>' descends from mesh 'X'.
+// Stem match is on FILENAME (stable), not the signed URL; the fallback that
+// reads item.path strips the query first. Returns a mesh PATH (signed URL on
+// cloud) which the consumer (jumpToMesh) re-resolves via _sigKey compare.
+function _resolveParentMeshPath(item, p) {
+  if (!p || !Array.isArray(p.meshes) || !item) return null;
+  const stem = (s) => String(s || '').replace(/\.[^.]+$/, '');
+  const itemStem = stem(item.filename || _sigKey(item.path || '').split('/').pop());
+  if (!itemStem) return null;
+  const cands = p.meshes.filter((m) => {
+    const ms = stem(m.filename);
+    return ms && (itemStem === ms || itemStem.startsWith(ms + '_'));
+  });
+  if (!cands.length) return null;
+  cands.sort((a, b) => stem(b.filename).length - stem(a.filename).length);
+  return cands[0].path;
+}
+
+// Resolve the SOURCE RIG of an animation clip by longest-prefix stem match
+// against p.rigs. The anim filename embeds the rig stem before the
+// _<animType>_<batchId>_<ts>.glb tail; strip it then prefix-match the rig stem.
+function _resolveParentRig(clip, p) {
+  if (!p || !Array.isArray(p.rigs) || !clip) return null;
+  const fn = clip.filename || _sigKey(clip.path || clip.url || '').split('/').pop();
+  if (!fn) return null;
+  // Strip the animation tail to recover the rig stem.
+  const beforeAnim = String(fn)
+    .replace(/\.[^.]+$/, '')
+    .replace(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_(?:[A-Za-z0-9_-]{4,32}_)?\d{6,}$/i, '')
+    .replace(/_(anim|animation)_.*$/i, '');
+  const stem = (s) => String(s || '').replace(/\.[^.]+$/, '');
+  const cands = p.rigs.filter((r) => {
+    const rs = stem(r.filename);
+    return rs && (beforeAnim === rs || beforeAnim.startsWith(rs + '_') || rs.startsWith(beforeAnim + '_'));
+  });
+  if (!cands.length) return null;
+  cands.sort((a, b) => stem(b.filename).length - stem(a.filename).length);
+  return cands[0];
+}
+
+// Jump to the SOURCE IMAGE that produced a mesh/rig/anim. Non-destructive:
+// previews the matched version (purple), leaves selectedImagePath (green check)
+// untouched. Falls back to the lightbox if the source isn't a current version.
+async function jumpToSourceImage(imgPath) {
+  if (!imgPath) return;
+  const p = state.currentProject;
+  try { closeMeshLightbox(); } catch (_) {}
+  let matched = null;
+  if (p && Array.isArray(p.images)) {
+    // CLOUD: both sides are signed URLs — compare on the query-stripped key.
+    const _key = (x) => _sigKey(x && x.path ? x.path : x);
+    const _bn = (x) => _key(x).split('/').pop();
+    const _stem = (s) => s.replace(/\.[^.]+$/, '');
+    const target = _sigKey(imgPath);
+    const base = target.split('/').pop();
+    matched = p.images.find(im => _key(im) === target)
+           || p.images.find(im => _bn(im) === base);
+    if (!matched) {
+      const core = _stem(base)
+        .replace(/^fabmesh_rectified_\d+_/, '')
+        .replace(/^fabmesh_[a-z]+_\d+_/, '');
+      if (core && core !== _stem(base)) {
+        const cands = p.images.filter(im => {
+          const vs = _stem(_bn(im));
+          return vs === core || vs.startsWith(core + '_') || core.startsWith(vs + '_');
+        });
+        const selKey = _sigKey(p.selectedImagePath);
+        const prevKey = _sigKey(p.previewImagePath);
+        matched = cands.find(im => _key(im) === selKey)
+               || cands.find(im => _key(im) === prevKey)
+               || cands[0] || null;
+      }
+    }
+  }
+  if (!matched) {
+    // Source isn't one of the current versions — show it in the lightbox if
+    // the file still exists (the signed URL is directly fetchable as-is).
+    try {
+      const info = await API.getFileInfo(imgPath);
+      if (info && info.ok) {
+        showToast("Source absente des versions actuelles — affichée en grand.", 'info');
+        openLightbox(imgPath);
+        return;
+      }
+    } catch (_) {}
+    showToast("Image source introuvable (déplacée ou supprimée).", 'error');
+    return;
+  }
+  const matchedPath = matched.path || matched;
+  p.previewImagePath = matchedPath;
+  p._activeMultiview = null;
+  const imgCard = document.getElementById('step-card-image');
+  if (imgCard) {
+    imgCard.classList.remove('collapsed', 'disabled');
+    const createStage = imgCard.querySelector('.stage-create');
+    const editStage = imgCard.querySelector('.stage-edit');
+    if (createStage) createStage.open = false;
+    if (editStage) editStage.open = true;
+  }
+  try { await renderImageVersions(p); } catch (_) {}
+  try { showStep1Preview(matchedPath); } catch (_) {}
+  try { _restoreStyleDropdown(matchedPath); } catch (_) {}
+  _flashCenterSelected('ws-image-versions');
+}
+
+// Jump to the MESH a rig/animation was built from. Non-destructive (previews;
+// doesn't change which mesh is marked for rigging).
+async function jumpToMesh(meshPath) {
+  const p = state.currentProject;
+  if (!p || !meshPath) return;
+  // CLOUD: compare on the query-stripped key (both sides are signed URLs).
+  const key = _sigKey(meshPath);
+  const mesh = (p.meshes || []).find((m) => _sigKey(m.path) === key);
+  if (!mesh) { showToast('Maillage source introuvable.', 'error'); return; }
+  try { closeMeshLightbox(); } catch (_) {}
+  const card = document.getElementById('step-card-mesh');
+  if (card) {
+    card.classList.remove('collapsed', 'disabled');
+    const cs = card.querySelector('.stage-create');
+    const es = card.querySelector('.stage-edit');
+    if (cs) cs.open = false;
+    if (es) es.open = true;
+  }
+  p.previewMeshPath = mesh.path;
+  try { await renderMeshVersions(p); } catch (_) {}
+  try { showStep2Preview(mesh); } catch (_) {}
+  _flashCenterSelected('ws-mesh-versions');
+}
+
+// Jump to the RIG an animation was retargeted onto: open the Rig step, select +
+// center + flash that rig, and move the green used-check to it.
+async function jumpToRig(rigPath) {
+  const p = state.currentProject;
+  if (!p || !rigPath) return;
+  // CLOUD: compare on the query-stripped key.
+  const key = _sigKey(rigPath);
+  const rig = (p.rigs || []).find((r) => _sigKey(r.path) === key);
+  if (!rig) { showToast('Rig source introuvable.', 'error'); return; }
+  try { closeMeshLightbox(); } catch (_) {}
+  const card = document.getElementById('step-card-rig');
+  if (card) {
+    card.classList.remove('collapsed', 'disabled');
+    const cs = card.querySelector('.stage-create');
+    const es = card.querySelector('.stage-edit');
+    if (cs) cs.open = false;
+    if (es) es.open = true;
+  }
+  try { renderRigVersions(p); } catch (_) {}
+  // renderRigVersions defaults to selecting the newest; move the highlight to
+  // the target rig (matched by filename, which is set as the thumb title).
+  const strip = document.getElementById('ws-rig-versions');
+  if (strip) {
+    const thumbs = [...strip.querySelectorAll('.version-thumb')];
+    const target = thumbs.find((el) => el.title === rig.filename);
+    if (target) {
+      thumbs.forEach((x) => x.classList.remove('selected', 'used-for-3d'));
+      target.classList.add('selected', 'used-for-3d');
+    }
+  }
+  try { showStep3Preview(rig); } catch (_) {}
+  _flashCenterSelected('ws-rig-versions');
+}
+
 // "Use this image for 3D" button handler
 document.getElementById('ws-use-for-3d-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
@@ -7473,11 +7680,17 @@ async function renderMeshVersions(p) {
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
+    // Lineage: 📷 jump to the source image that generated this mesh. Guarded —
+    // no button when the mesh carries no sourceImage (signed URL on cloud).
+    const meshSourceBtn = m.sourceImage
+      ? '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh">&#128247;</button>'
+      : '';
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
       <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
+      ${meshSourceBtn}
       ${meshEmissiveBadge}
     `;
     t.title = m.filename;
@@ -7487,6 +7700,12 @@ async function renderMeshVersions(p) {
       p.previewMeshPath = m.path;
       showStep2Preview(m);
     });
+    if (m.sourceImage) {
+      t.querySelector('.version-source-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        jumpToSourceImage(m.sourceImage);
+      });
+    }
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!await customConfirm(`Delete mesh v${p.meshes.length - 1 - i}? This cannot be undone.`, 'Delete mesh version')) return;
@@ -13705,7 +13924,18 @@ function renderRigVersions(p) {
   p.rigs.forEach((r, i) => {
     const t = document.createElement('div');
     t.className = 'version-thumb';
-    if (i === 0) t.classList.add('selected');
+    // Selected rig also gets the green used-for-3d check (kept in sync with
+    // jumpToRig + on click), mirroring desktop.
+    if (i === 0) t.classList.add('selected', 'used-for-3d');
+    // Resolve the parent mesh once: drives both the 🧊 mesh-jump button and the
+    // 📷 source-image button (R2-listed rigs carry sourceImage:null on cloud, so
+    // the source image is inherited from the parent mesh).
+    const _rigMeshPath = _resolveParentMeshPath(r, p);
+    let _rigSourceImage = r.sourceImage || null;
+    if (!_rigSourceImage && _rigMeshPath) {
+      const pm = (p.meshes || []).find((m) => _sigKey(m.path) === _sigKey(_rigMeshPath));
+      if (pm && pm.sourceImage) _rigSourceImage = pm.sourceImage;
+    }
     let thumbSrc = '';
     if (r.thumb) {
       thumbSrc = r.thumb.startsWith('file:') ? r.thumb : _toFileUrl(r.thumb);
@@ -13714,18 +13944,37 @@ function renderRigVersions(p) {
     } else if (p.thumb) {
       thumbSrc = _toFileUrl(p.thumb);
     }
+    // Lineage buttons (guarded). 📷 = source image, 🧊 = parent mesh.
+    const rigSrcBtn = _rigSourceImage
+      ? '<button class="version-source-btn" title="Voir l\'image source">&#128247;</button>' : '';
+    const rigMeshBtn = _rigMeshPath
+      ? '<button class="version-mesh-btn" title="Voir le maillage source">&#129482;</button>' : '';
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
       <span class="v-label">v${p.rigs.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this rig">&#10005;</button>
+      ${rigSrcBtn}
+      ${rigMeshBtn}
     `;
     t.title = r.filename;
     t.addEventListener('click', () => {
-      strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected'));
-      t.classList.add('selected');
+      strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected', 'used-for-3d'));
+      t.classList.add('selected', 'used-for-3d');
       showStep3Preview(r);
     });
+    if (_rigSourceImage) {
+      t.querySelector('.version-source-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        jumpToSourceImage(_rigSourceImage);
+      });
+    }
+    if (_rigMeshPath) {
+      t.querySelector('.version-mesh-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        jumpToMesh(_rigMeshPath);
+      });
+    }
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!await customConfirm(`Delete rig v${p.rigs.length - 1 - i}? This cannot be undone.`, 'Delete rig version')) return;
@@ -14102,21 +14351,66 @@ function renderAnimVersions(p) {
     ? (typeof _toFileUrl === 'function' ? _toFileUrl(p.thumb) : p.thumb) : '';
   strip.innerHTML = batches.map((b, i) => {
     const vNum = batches.length - 1 - i;
+    // Lineage: the cloud has no per-clip rigPath/sourceImage, so derive from a
+    // representative clip of the batch (filename-stem matching). Guarded — a
+    // button is omitted when its parent can't be resolved.
+    const clip = (b.clips && b.clips[0]) || null;
+    const parentRig = clip ? _resolveParentRig(clip, p) : null;
+    const parentMeshPath = parentRig ? _resolveParentMeshPath(parentRig, p) : null;
+    let sourceImage = parentRig && parentRig.sourceImage ? parentRig.sourceImage : null;
+    if (!sourceImage && parentMeshPath) {
+      const pm = (p.meshes || []).find((m) => _sigKey(m.path) === _sigKey(parentMeshPath));
+      if (pm && pm.sourceImage) sourceImage = pm.sourceImage;
+    }
+    const imgBtn = sourceImage
+      ? '<button class="version-source-btn anim-jump" data-jump="img" title="Voir l\'image source">&#128247;</button>' : '';
+    const meshBtn = parentMeshPath
+      ? '<button class="version-mesh-btn anim-jump" data-jump="mesh" title="Voir le maillage source">&#129482;</button>' : '';
+    const rigBtn = parentRig
+      ? '<button class="version-rig-btn anim-jump" data-jump="rig" title="Voir le rig source">&#129460;</button>' : '';
     return `
       <div class="version-thumb${b.id === _step4SelectedBatch ? ' selected' : ''}" data-batch-id="${b.id}">
         ${projThumb ? `<img src="${projThumb}" alt="">` : ''}
         <span class="v-used-badge" title="Used for next step">&#10003;</span>
         <span class="v-label">v${vNum}</span>
         <button class="version-delete-btn" data-batch-id="${b.id}" title="Delete this version">&#10005;</button>
+        ${imgBtn}${meshBtn}${rigBtn}
       </div>`;
   }).join('');
   strip.querySelectorAll('.version-thumb').forEach(t => {
     t.addEventListener('click', (e) => {
-      // Ignore clicks on the delete button itself (it has its own handler).
+      // Ignore clicks on the delete button or the lineage jump buttons
+      // (each has its own handler).
       if (e.target.classList?.contains('version-delete-btn')) return;
+      if (e.target.classList?.contains('anim-jump')) return;
       _step4SelectedBatch = t.dataset.batchId;
       _step4SelectedClipInBatch = null;
       renderAnimVersions(p);
+    });
+    // Lineage jump buttons: resolve from a representative clip of this batch.
+    t.querySelectorAll('.anim-jump').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const batch = batches.find(b => b.id === t.dataset.batchId);
+        const clip = batch && batch.clips && batch.clips[0];
+        if (!clip) return;
+        const kind = btn.dataset.jump;
+        const parentRig = _resolveParentRig(clip, p);
+        if (kind === 'rig') {
+          if (parentRig) jumpToRig(parentRig.path);
+        } else if (kind === 'mesh') {
+          const mp = parentRig ? _resolveParentMeshPath(parentRig, p) : null;
+          if (mp) jumpToMesh(mp);
+        } else if (kind === 'img') {
+          let src = parentRig && parentRig.sourceImage ? parentRig.sourceImage : null;
+          const mp = parentRig ? _resolveParentMeshPath(parentRig, p) : null;
+          if (!src && mp) {
+            const pm = (p.meshes || []).find((m) => _sigKey(m.path) === _sigKey(mp));
+            if (pm && pm.sourceImage) src = pm.sourceImage;
+          }
+          if (src) jumpToSourceImage(src);
+        }
+      });
     });
   });
   strip.querySelectorAll('.version-delete-btn').forEach(btn => {

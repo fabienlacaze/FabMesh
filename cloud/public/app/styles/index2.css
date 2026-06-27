@@ -1478,6 +1478,72 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: var(--error);
   border-color: var(--error);
 }
+
+/* Lineage jump buttons (ported from desktop): 📷 source image / 🧊 mesh /
+   🦴 rig. Hover-only, positioned on a 2nd ROW (top:30px) so they never overlap
+   the green used-check (top-left) or the delete X (top-right). Blue highlight +
+   scale on the button's own hover. */
+.versions-strip .version-thumb .version-source-btn {
+  position: absolute;
+  top: 30px;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  font-size: 11px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  z-index: 2;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+.versions-strip .version-thumb:hover .version-source-btn {
+  display: inline-flex;
+}
+.versions-strip .version-thumb .version-source-btn:hover {
+  background: #3b6fd4;
+  border-color: #8ab4ff;
+  transform: scale(1.12);
+}
+.versions-strip .version-thumb .version-mesh-btn,
+.versions-strip .version-thumb .version-rig-btn {
+  position: absolute;
+  top: 30px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  font-size: 11px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  z-index: 2;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+.versions-strip .version-thumb .version-mesh-btn { left: 30px; }
+.versions-strip .version-thumb .version-rig-btn  { left: 56px; }
+.versions-strip .version-thumb:hover .version-mesh-btn,
+.versions-strip .version-thumb:hover .version-rig-btn {
+  display: inline-flex;
+}
+.versions-strip .version-thumb .version-mesh-btn:hover,
+.versions-strip .version-thumb .version-rig-btn:hover {
+  background: #3b6fd4;
+  border-color: #8ab4ff;
+  transform: scale(1.12);
+}
+
 .versions-strip:empty {
   display: none;
 }
@@ -1607,6 +1673,9 @@ button.tool-active {
   backdrop-filter: blur(4px);
 }
 .modal-overlay.hidden { display: none; }
+/* Generation/job popups must sit ABOVE the fullscreen viewers (#lightbox-2 at z-index
+   9500) so they stay visible when a generation runs while a viewer is open. */
+#modal-job-details { z-index: 10000; }
 .modal-card {
   background: var(--bg-1);
   border: 1px solid var(--border-strong);
@@ -3382,6 +3451,9 @@ details.stage-generating > summary .stage-icon-gear {
 }
 .lightbox-nav.prev { left: 24px; }
 .lightbox-nav.next { right: 24px; }
+/* In lightbox-2 the AI tools panel (.lb-toolbox, right:20px width:200px) hides the Next
+   arrow at the vertical centre — push it left of the panel. */
+#lightbox-2 .lightbox-nav.next { right: 236px; }
 .lightbox-nav:hover {
   background: var(--accent);
   border-color: var(--accent);
