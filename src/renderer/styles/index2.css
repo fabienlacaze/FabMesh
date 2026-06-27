@@ -1433,7 +1433,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
    highlights blue + slightly scales up on hover. */
 .versions-strip .version-thumb .version-source-btn {
   position: absolute;
-  top: 4px;
+  top: 30px;
   left: 4px;
   width: 22px;
   height: 22px;
@@ -1463,7 +1463,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .versions-strip .version-thumb .version-mesh-btn,
 .versions-strip .version-thumb .version-rig-btn {
   position: absolute;
-  top: 4px;
+  top: 30px;
   width: 22px;
   height: 22px;
   border-radius: 50%;

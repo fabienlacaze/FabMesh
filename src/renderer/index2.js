@@ -4394,8 +4394,8 @@ function jumpToRig(rigPath) {
     const thumbs = [...strip.querySelectorAll('.version-thumb')];
     const target = thumbs.find((el) => el.title === rig.filename);
     if (target) {
-      thumbs.forEach((x) => x.classList.remove('selected'));
-      target.classList.add('selected');
+      thumbs.forEach((x) => x.classList.remove('selected', 'used-for-3d'));
+      target.classList.add('selected', 'used-for-3d');
     }
   }
   try { showStep3Preview(rig); } catch (_) {}
@@ -12779,7 +12779,7 @@ function renderRigVersions(p) {
   rigs.forEach((r, i) => {
     const t = document.createElement('div');
     t.className = 'version-thumb';
-    if (i === 0) t.classList.add('selected');
+    if (i === 0) t.classList.add('selected', 'used-for-3d');
     let thumbSrc = '';
     if (r.thumb) {
       thumbSrc = r.thumb.startsWith('file:') ? r.thumb : 'file:///' + r.thumb.replace(/\\/g, '/');
@@ -12803,8 +12803,8 @@ function renderRigVersions(p) {
     `;
     t.title = r.filename;
     t.addEventListener('click', () => {
-      strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected'));
-      t.classList.add('selected');
+      strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected', 'used-for-3d'));
+      t.classList.add('selected', 'used-for-3d');
       showStep3Preview(r);
     });
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
@@ -13171,6 +13171,7 @@ function renderAnimVersions(p) {
       <span style="font-size:18px;">${iconFor(a.type)}</span>
       <span style="font-size:11px; font-weight:600;">${a.type || 'clip'}</span>
       <span style="font-size:9px; color:var(--text-2);">v${anims.length - 1 - i}</span>
+      <button class="version-delete-btn" title="Delete this animation">&#10005;</button>
       ${imgBtn}${meshBtn}${rigBtn}
     </div>
   `;
@@ -13180,6 +13181,15 @@ function renderAnimVersions(p) {
     el.addEventListener('click', () => {
       const idx = parseInt(el.dataset.animIdx, 10);
       if (Number.isFinite(idx) && anims[idx]) _selectAnim(anims[idx]);
+    });
+    el.querySelector('.version-delete-btn')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const idx = parseInt(el.dataset.animIdx, 10);
+      const a = anims[idx];
+      if (!a) return;
+      if (!await customConfirm(`Delete animation "${a.motionLabel || a.filename || ''}"? This cannot be undone.`, 'Delete animation')) return;
+      try { await API.deleteFile(a.path); } catch (_) {}
+      await reloadCurrentProject();
     });
     el.querySelectorAll('.anim-jump').forEach((btn) => {
       btn.addEventListener('click', (e) => {
