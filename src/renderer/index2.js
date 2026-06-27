@@ -7792,10 +7792,7 @@ async function renderMeshVersions(p) {
     // Per-version "source image" button (top-left): jumps to the photo this
     // mesh was generated from. Only shown when the .source sidecar resolved.
     const meshSourceBtn = m.sourceImage
-      ? '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh" '
-        + 'style="position:absolute; top:2px; left:2px; background:rgba(0,0,0,0.65); border:none; '
-        + 'border-radius:4px; width:22px; height:22px; cursor:pointer; font-size:12px; line-height:1; '
-        + 'padding:0; display:flex; align-items:center; justify-content:center; z-index:2;">&#128247;</button>'
+      ? '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh">&#128247;</button>'
       : '';
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}

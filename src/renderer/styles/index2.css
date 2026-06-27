@@ -1429,6 +1429,35 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: var(--error);
   border-color: var(--error);
 }
+/* Source-image button: hover-only (like the delete button) but top-left, and
+   highlights blue + slightly scales up on hover. */
+.versions-strip .version-thumb .version-source-btn {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(255,255,255,0.3);
+  font-size: 11px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  z-index: 2;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+.versions-strip .version-thumb:hover .version-source-btn {
+  display: inline-flex;
+}
+.versions-strip .version-thumb .version-source-btn:hover {
+  background: #3b6fd4;
+  border-color: #8ab4ff;
+  transform: scale(1.12);
+}
 .versions-strip:empty {
   display: none;
 }
