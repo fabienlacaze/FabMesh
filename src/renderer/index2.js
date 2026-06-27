@@ -571,11 +571,8 @@ async function refreshProjectsPage() {
   for (const a of animsOnDisk) {
     if (!a.rigStem) continue;
     for (const p of projectsMap.values()) {
-      const hit = (p.rigs || []).some(r => {
-        const rBase = (r.filename || '').replace(/\.[^.]+$/, '');
-        return rBase === a.rigStem;
-      });
-      if (hit) {
+      const rig = (p.rigs || []).find(r => (r.filename || '').replace(/\.[^.]+$/, '') === a.rigStem);
+      if (rig) {
         p.animations.push({
           id: a.filename,
           batchId: a.filename,  // each on-disk file is its own batch
@@ -587,6 +584,11 @@ async function refreshProjectsPage() {
           motionLabel: a.motionStem.replace(/^ANIM_/, '').replace(/_/g, ' '),
           created: a.created,
           mtime: a.mtime,
+          // Lineage (for jump buttons): the rig this clip was retargeted onto +
+          // the source image inherited from that rig.
+          rigPath: rig.path,
+          rigFilename: rig.filename,
+          sourceImage: rig.sourceImage,
         });
         break;
       }
@@ -13157,18 +13159,43 @@ function renderAnimVersions(p) {
     : t === 'death' ? '💀' : t === 'fly' ? '✈️' : '🎬';
   const selectedIdx = anims.findIndex(a => _selectedAnim && a.id === _selectedAnim.id);
   const activeIdx = selectedIdx >= 0 ? selectedIdx : 0;
-  strip.innerHTML = anims.map((a, i) => `
-    <div class="version-thumb${i === activeIdx ? ' selected' : ''}" data-anim-idx="${i}" style="width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === activeIdx ? 'var(--accent)' : 'transparent'};" title="${(a.motionLabel || a.filename || '').replace(/"/g, '&quot;')}">
+  strip.innerHTML = anims.map((a, i) => {
+    // Lineage jump buttons (hover-only): image / mesh / rig the clip came from.
+    const rig = (p.rigs || []).find(r => r.path === a.rigPath);
+    const animMeshPath = rig ? _resolveParentMeshPath(rig, p) : null;
+    const imgBtn = a.sourceImage ? '<button class="version-source-btn anim-jump" data-jump="img" title="Voir l\'image source">&#128247;</button>' : '';
+    const meshBtn = animMeshPath ? '<button class="version-mesh-btn anim-jump" data-jump="mesh" title="Voir le maillage source">&#129513;</button>' : '';
+    const rigBtn = a.rigPath ? '<button class="version-rig-btn anim-jump" data-jump="rig" title="Voir le rig source">&#129466;</button>' : '';
+    return `
+    <div class="version-thumb${i === activeIdx ? ' selected' : ''}" data-anim-idx="${i}" style="position:relative; width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === activeIdx ? 'var(--accent)' : 'transparent'};" title="${(a.motionLabel || a.filename || '').replace(/"/g, '&quot;')}">
       <span style="font-size:18px;">${iconFor(a.type)}</span>
       <span style="font-size:11px; font-weight:600;">${a.type || 'clip'}</span>
       <span style="font-size:9px; color:var(--text-2);">v${anims.length - 1 - i}</span>
+      ${imgBtn}${meshBtn}${rigBtn}
     </div>
-  `).join('');
-  // Wire clicks: select on thumb
+  `;
+  }).join('');
+  // Wire clicks: select on thumb + lineage jump buttons (image / mesh / rig).
   strip.querySelectorAll('.version-thumb').forEach((el) => {
     el.addEventListener('click', () => {
       const idx = parseInt(el.dataset.animIdx, 10);
       if (Number.isFinite(idx) && anims[idx]) _selectAnim(anims[idx]);
+    });
+    el.querySelectorAll('.anim-jump').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(el.dataset.animIdx, 10);
+        const a = anims[idx];
+        if (!a) return;
+        const kind = btn.dataset.jump;
+        if (kind === 'img' && a.sourceImage) jumpToSourceImage(a.sourceImage);
+        else if (kind === 'rig' && a.rigPath) jumpToRig(a.rigPath);
+        else if (kind === 'mesh') {
+          const r = (p.rigs || []).find(rr => rr.path === a.rigPath);
+          const mp = r ? _resolveParentMeshPath(r, p) : null;
+          if (mp) jumpToMesh(mp);
+        }
+      });
     });
   });
   // Auto-select first if nothing selected yet
