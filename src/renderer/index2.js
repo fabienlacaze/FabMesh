@@ -7778,11 +7778,14 @@ async function renderMeshVersions(p) {
     } else if (p.thumb) {
       thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
     }
-    const meshHasEmissive = (typeof _emissiveLayerHas === 'function') && (
-      (m.sourceImage && _emissiveLayerHas(m.sourceImage))
-      || (p.selectedImagePath && _emissiveLayerHas(p.selectedImagePath))
-      || (p.images || []).some((im) => _emissiveLayerHas(im.path))
-    );
+    // Per-mesh ONLY: this mesh's own source image (from the .glb.source sidecar)
+    // having a painted emissive layer. The two project-wide OR-clauses removed
+    // here (p.selectedImagePath, p.images.some) made the badge LEAK onto EVERY
+    // mesh as soon as ANY project image had an emissive layer — that was the bug.
+    // Legit case preserved: a mesh generated from a painted image has
+    // m.sourceImage == that painted path, so this still fires.
+    const meshHasEmissive = (typeof _emissiveLayerHas === 'function')
+      && !!m.sourceImage && _emissiveLayerHas(m.sourceImage);
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
