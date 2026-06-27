@@ -4163,6 +4163,7 @@ document.getElementById('lightbox-3d-use')?.addEventListener('click', (e) => {
     aligntex: 'ws-mesh-aligntex-btn',
     material: 'ws-mesh-material-btn',
     enhancetex: 'ws-mesh-enhance-tex-btn',
+    detailsynth: 'ws-mesh-detail-synth-btn',
     sculpt: 'ws-mesh-sculpt-btn',
     paintvert: 'ws-mesh-paintvert-btn',
     selectface: 'ws-mesh-selectface-btn',
@@ -8203,6 +8204,36 @@ document.getElementById('ws-mesh-enhance-tex-btn')?.addEventListener('click', ()
     } catch (e) {
       completeJob(job.id, false);
       if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Enhance texture error');
+    }
+  });
+});
+
+// Détail++ : render -> SDXL ControlNet-Tile refine -> reproject (detail_synth.py).
+// Adds GENUINE high-frequency surface detail and registers the result as a new
+// mesh version — same flow as Enhance texture above.
+document.getElementById('ws-mesh-detail-synth-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const m = getCurrentMeshObj();
+  if (!p || !m) { showToast('Pick a mesh first.', 'error'); return; }
+  const assetType = document.getElementById('ws-asset-type')?.value || p.assetType || 'character';
+  gatedRun('rig', `Détail++: ${p.name}`, async () => {
+    const job = pushJob(`Détail++: ${p.name}`, null, {
+      Method: 'render → SDXL tile → re-bake',
+      'Asset type': assetType,
+      'Source mesh': m.filename,
+    }, 240000, { sourceImageUrl: m.path, projectName: p.name });
+    try {
+      const r = await API.detailSynth({ meshPath: m.path, jobId: job.id, strength: 0.5, assetType, textureSize: 4096 });
+      if (r?.success || r?.newPath) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+      } else {
+        completeJob(job.id, false);
+        if (!job.cancelled) customError(r?.error || 'unknown', 'Détail++ failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Détail++ error');
     }
   });
 });
@@ -13619,7 +13650,7 @@ function _jobStepIndex(j) {
   if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr|enhance texture)/i.test(n)) return 2;
   // Mesh texture ops can carry a prefix (e.g. "trellis2 retex: …", "Region re-texture: …")
   // so the anchored test above misses them — match the texture keywords anywhere.
-  if (/(retex|re-?texture|texture variation|enhance texture)/i.test(n)) return 2;
+  if (/(retex|re-?texture|texture variation|enhance texture|détail\+\+|detail\+\+|detail synth)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;
   return 0;

@@ -4033,6 +4033,64 @@ ipcMain.handle('enhance-mesh-texture', async (event, { meshPath, jobId }) => {
   }
 });
 
+// Détail++ : render -> SDXL ControlNet-Tile refine -> reproject. Adds GENUINE
+// high-frequency surface detail beyond the TRELLIS-2 ceiling (scripts/detail_synth.py).
+// REQUIRES the SDXL tile server up (stage 2 POSTs to /img2img_tile). Returns the
+// same { success, newPath } shape as enhance-mesh-texture so the renderer treats
+// the result identically (adds it as a new mesh version).
+const DETAIL_SYNTH_PROMPTS = {
+  character: 'highly detailed character, sharp fine surface detail, realistic skin fabric and metal, intricate crisp texture, photoreal high detail',
+  humanoid: 'highly detailed character, sharp fine surface detail, realistic skin fabric and metal, intricate crisp texture, photoreal high detail',
+  armor: 'polished steel armor plates, riveted scales, crisp metallic highlights, intricate engraved detail, photoreal forged metal',
+  knight: 'polished steel armor plates, riveted scales, crisp metallic highlights, intricate engraved detail, photoreal forged metal',
+  creature: 'detailed creature skin, scales fur and horn, sharp organic surface detail, photoreal',
+  beast: 'detailed creature skin, scales fur and horn, sharp organic surface detail, photoreal',
+  animal: 'detailed creature skin, scales fur and horn, sharp organic surface detail, photoreal',
+  vehicle: 'polished panels, sharp mechanical detail, crisp edges, realistic worn metal and paint',
+};
+const DETAIL_SYNTH_DEFAULT_PROMPT = 'sharp intricate fine surface detail, crisp high-detail texture, photoreal materials';
+
+ipcMain.handle('detail-synth', async (event, { meshPath, jobId, strength, prompt, assetType, textureSize }) => {
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
+    // Stage 2 POSTs renders to the SDXL tile server — make sure it's up first.
+    await ensureSdxlServer();
+    if (!sdxlReady) return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
+    const dir = path.dirname(meshPath);
+    const ext = path.extname(meshPath) || '.glb';
+    const base = safeBase(path.basename(meshPath, ext));
+    const ts = Date.now();
+    const outPath = path.join(dir, `${base}_detail_${ts}${ext}`);
+    // Derive a default prompt from the asset type when the caller didn't pass one.
+    const effPrompt = (prompt && String(prompt).trim())
+      ? String(prompt)
+      : (DETAIL_SYNTH_PROMPTS[String(assetType || '').toLowerCase()] || DETAIL_SYNTH_DEFAULT_PROMPT);
+    const workdir = path.join(dir, '.debug', `detail_${ts}`);
+    try { fs.mkdirSync(workdir, { recursive: true }); } catch (e) {}
+    const DETAIL_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'detail_synth.py');
+    // detail_synth.py imports trimesh / nvdiffrast / requests — uses SYSTEM python
+    // (NOT the trellis venv), same as the mesh-tool handler.
+    const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
+    return await new Promise((resolve) => {
+      const proc = execFile('python', [
+        DETAIL_SCRIPT, meshPath, outPath,
+        '--strength', String(strength != null ? strength : 0.5),
+        '--texture-size', String(textureSize != null ? textureSize : 4096),
+        '--prompt', effPrompt,
+        '--workdir', workdir,
+      ], { timeout: 600000, maxBuffer: 50 * 1024 * 1024, env }, (error) => {
+        if (!error && fs.existsSync(outPath)) resolve({ success: true, newPath: outPath });
+        else resolve({ success: false, error: (error?.message || 'detail synth failed').slice(-300) });
+      });
+      proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
+      proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+      if (jobId) activeProcs.set(jobId, proc);
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed, cnScale, negPrompt }) => {
   try {
     const dir = path.dirname(imagePath);

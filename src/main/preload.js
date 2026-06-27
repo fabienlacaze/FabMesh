@@ -208,6 +208,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   recolor: (opts) => ipcRenderer.invoke('recolor', opts),
   texVariant: (opts) => ipcRenderer.invoke('tex-variant', opts),
   enhanceMeshTexture: (opts) => ipcRenderer.invoke('enhance-mesh-texture', opts),
+  detailSynth: (opts) => ipcRenderer.invoke('detail-synth', opts),
   saveEmissiveFile: (opts) => ipcRenderer.invoke('save-emissive-file', opts),
   maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),
