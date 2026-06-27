@@ -9,6 +9,17 @@ Endpoints:
   GET  /ping              - health check + model status
   GET  /status            - detailed model + GPU status
   POST /img2img           - { input, prompt, output, strength, guidance, steps, seed }
+  POST /img2img_tile      - { input, prompt, output, strength, controlnet_scale, guidance_scale, steps, seed, negative_prompt, control_guidance_end }
+  POST /refine_geo        - GEOMETRY-GUIDED + reference-anchored refine.
+                            { input, control, ref, prompt, output, strength,
+                              controlnet_scale, ip_scale, guidance_scale, steps,
+                              seed, negative_prompt, control_guidance_end }
+                            `control` is a world-space NORMAL map (or depth map)
+                            rendered from the mesh; the ControlNet-Union (normal
+                            mode) makes detail follow REAL surface geometry, and
+                            an IP-Adapter on `ref` keeps it faithful to the
+                            reference image. Replaces ControlNet-Tile for organic
+                            texture (no more hallucinated runes / frayed hair).
   POST /inpaint           - { input, target, prompt, output, dilate }
   POST /shutdown          - graceful exit
   POST /unload            - free a specific model from VRAM
@@ -58,6 +69,23 @@ CLIPSEG_MODEL = "CIDAS/clipseg-rd64-refined"
 # the UV layout: the tile ControlNet constrains SDXL to respect the
 # source image structure while still adding micro-detail.
 CONTROLNET_TILE_MODEL = "xinsir/controlnet-tile-sdxl-1.0"
+# ControlNet-Union SDXL — xinsir/controlnet-union-sdxl-1.0 (Apache 2.0,
+# commercial-safe). A single union model that handles 6 control types; we use
+# it in NORMAL mode (control_mode index 4) so the geometry-guided refine pass
+# conditions SDXL on the mesh's REAL surface normals — detail follows actual
+# geometry instead of free-associating (the ControlNet-Tile rune/hair failure).
+CONTROLNET_UNION_MODEL = "xinsir/controlnet-union-sdxl-1.0"
+# control_mode integer index for the NORMAL condition in the union model.
+# Mapping (from xinsir6/ControlNetPlus + diffusers): 0=openpose, 1=depth,
+# 2=hed/scribble/softedge, 3=canny/lineart/mlsd, 4=normal, 5=segment.
+CONTROLNET_UNION_NORMAL_MODE = 4
+# IP-Adapter — h94/IP-Adapter (Apache 2.0). The base SDXL ip-adapter keeps the
+# refine faithful to the reference image (image-prompt conditioning) without a
+# face model. Loaded onto the geo pipe; the image encoder (ViT) is auto-fetched
+# from the same repo's `models/image_encoder` subfolder by load_ip_adapter.
+IP_ADAPTER_REPO = "h94/IP-Adapter"
+IP_ADAPTER_SUBFOLDER = "sdxl_models"
+IP_ADAPTER_WEIGHT = "ip-adapter_sdxl.bin"
 
 # Identity-preserving prompt scaffolding (ported from cloud modal_app/_modify.py).
 # When the user is doing a low-strength "modify" pass (e.g. add a hat, change
@@ -110,6 +138,7 @@ class ModelState:
         self.img2img_pipe = None
         self.inpaint_pipe = None
         self.controlnet_tile_pipe = None
+        self.controlnet_geo_pipe = None
         self.clipseg_model = None
         self.clipseg_processor = None
         self.load_lock = threading.RLock()    # Reentrant - same thread can load multiple
@@ -171,6 +200,10 @@ def _free_heavy_except(keep):
         del state.controlnet_tile_pipe
         state.controlnet_tile_pipe = None
         freed.append('controlnet_tile')
+    if keep != 'controlnet_geo' and state.controlnet_geo_pipe is not None:
+        del state.controlnet_geo_pipe
+        state.controlnet_geo_pipe = None
+        freed.append('controlnet_geo')
     if freed:
         free_vram()
         log(f"Freed {freed} to fit '{keep}' ({vram_used_gb():.1f} GB VRAM)")
@@ -376,8 +409,110 @@ def load_controlnet_tile():
     return state.controlnet_tile_pipe
 
 
+def load_controlnet_geo():
+    """Lazy-load RealVisXL + ControlNet-Union (NORMAL mode) img2img pipeline,
+    with an IP-Adapter on top, for the geometry-guided + reference-anchored
+    refine pass (do_refine_geo).
+
+    This is the Meshy-style path: the ControlNet conditions SDXL on the mesh's
+    REAL surface normals (control_mode=4) so added detail follows actual
+    geometry instead of hallucinating; the IP-Adapter conditions on the source
+    reference image so the texture stays faithful. Together they replace the
+    ControlNet-Tile refine that invented runes on a wizard's beard.
+
+    VRAM ~10-11 GB (RealVisXL + union controlnet + IP-Adapter image encoder).
+    Mirrors load_controlnet_tile: frees the other heavy pipes first.
+    """
+    if state.controlnet_geo_pipe is not None:
+        state.last_use['controlnet_geo'] = time.time()
+        return state.controlnet_geo_pipe
+
+    with state.load_lock:
+        if state.controlnet_geo_pipe is not None:
+            return state.controlnet_geo_pipe
+        _free_heavy_except('controlnet_geo')
+        log(f"Loading {CONTROLNET_UNION_MODEL} (normal mode) + {IMG2IMG_MODEL} "
+            f"+ IP-Adapter...")
+        _set_memory_fraction()
+        from diffusers import (
+            ControlNetUnionModel,
+            StableDiffusionXLControlNetUnionImg2ImgPipeline,
+        )
+        t0 = time.time()
+        controlnet = ControlNetUnionModel.from_pretrained(
+            CONTROLNET_UNION_MODEL,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+        )
+        pipe = StableDiffusionXLControlNetUnionImg2ImgPipeline.from_pretrained(
+            IMG2IMG_MODEL,
+            controlnet=controlnet,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+        )
+        # fp16-fixed VAE (RealVis XL's native VAE overflows in fp16 -> noise).
+        try:
+            from diffusers import AutoencoderKL
+            pipe.vae = AutoencoderKL.from_pretrained(
+                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+        except Exception as _ve:
+            log(f"geo fp16-fix VAE unavailable ({_ve})")
+            try:
+                pipe.vae.config.force_upcast = True
+            except Exception:
+                pass
+        # IP-Adapter: load BEFORE pipe.to('cuda') so the injected image encoder /
+        # adapter weights move to GPU with the rest of the pipe. weight_name is the
+        # base SDXL ip-adapter; the image encoder (ViT-H) is auto-fetched from the
+        # h94/IP-Adapter repo's models/image_encoder subfolder by diffusers.
+        try:
+            pipe.load_ip_adapter(
+                IP_ADAPTER_REPO,
+                subfolder=IP_ADAPTER_SUBFOLDER,
+                weight_name=IP_ADAPTER_WEIGHT,
+            )
+            log("IP-Adapter loaded onto geo pipe")
+        except Exception as _ie:
+            # If the IP-Adapter can't load we STILL want a working geometry
+            # controlnet pipe (do_refine_geo handles ref_path=None / no adapter).
+            log(f"IP-Adapter load FAILED ({_ie}); geo pipe runs controlnet-only",
+                'warn')
+        # fp16 dtype cast FIRST (dtype only, on CPU — the cpu-offload hooks below
+        # install device placement, so we must NOT pipe.to('cuda') here).
+        try:
+            pipe.unet.to(torch.float16)
+            pipe.vae.to(torch.float16)
+            pipe.text_encoder.to(torch.float16)
+            pipe.text_encoder_2.to(torch.float16)
+            if hasattr(pipe, 'controlnet'):
+                pipe.controlnet.to(torch.float16)
+            # IP-Adapter image encoder, if present, also to fp16.
+            if getattr(pipe, 'image_encoder', None) is not None:
+                pipe.image_encoder.to(torch.float16)
+        except Exception as _e:
+            log(f"controlnet_geo fp16 cast skipped: {_e}")
+        # The geo pipe (RealVisXL + union controlnet + IP-Adapter ViT-H encoder)
+        # is ~13.6 GB resident; on a 16 GB card the 1024 inference buffers push it
+        # past VRAM and it THRASHES (~50s/step). model_cpu_offload keeps only the
+        # active submodule on GPU (peak ~7-8 GB) -> ~2-4s/step, no thrash.
+        try:
+            pipe.enable_model_cpu_offload()
+        except Exception as _oe:
+            log(f"geo enable_model_cpu_offload failed ({_oe}); pipe.to(cuda)", 'warn')
+            pipe.to("cuda")
+        pipe.enable_vae_tiling()
+        if os.environ.get('FABMESH_UNRESTRICTED') == '1':
+            if hasattr(pipe, 'safety_checker'):
+                pipe.safety_checker = None
+        state.controlnet_geo_pipe = pipe
+        state.last_use['controlnet_geo'] = time.time()
+        log(f"controlnet_geo loaded in {time.time()-t0:.1f}s "
+            f"({vram_used_gb():.1f} GB VRAM)")
+    return state.controlnet_geo_pipe
+
+
 def unload_model(name):
-    """Free a model from VRAM. name in ('img2img', 'inpaint', 'controlnet_tile', 'clipseg')."""
+    """Free a model from VRAM. name in ('img2img', 'inpaint', 'controlnet_tile', 'controlnet_geo', 'clipseg')."""
     with state.load_lock:
         before = vram_used_gb()
         if name == 'img2img' and state.img2img_pipe is not None:
@@ -389,6 +524,9 @@ def unload_model(name):
         elif name == 'controlnet_tile' and state.controlnet_tile_pipe is not None:
             del state.controlnet_tile_pipe
             state.controlnet_tile_pipe = None
+        elif name == 'controlnet_geo' and state.controlnet_geo_pipe is not None:
+            del state.controlnet_geo_pipe
+            state.controlnet_geo_pipe = None
         elif name == 'clipseg' and state.clipseg_model is not None:
             del state.clipseg_model
             del state.clipseg_processor
@@ -536,7 +674,7 @@ DEFAULT_TILE_NEG = ("text, letters, words, writing, runes, glyphs, symbols, "
 
 def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
                      controlnet_scale=0.7, guidance_scale=6.0, steps=None,
-                     seed=42, negative_prompt=None, control_guidance_end=0.6):
+                     seed=42, negative_prompt=None, control_guidance_end=1.0):
     """
     Tile-conditioned img2img: uses the source image as BOTH the init image
     AND the ControlNet Tile condition. This lets us push strength way higher
@@ -584,7 +722,10 @@ def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
             with torch.inference_mode():
                 result = pipe(
                     prompt=enhanced,
-                    negative_prompt=(negative_prompt or DEFAULT_TILE_NEG),
+                    # None by default -> identical to the ORIGINAL tile behaviour
+                    # (don't change the existing "Sharpen/Refine texture" tool).
+                    # The anti-rune negative lives ONLY on the new geo path.
+                    negative_prompt=negative_prompt,
                     image=img,
                     control_image=img,  # same tile image drives the ControlNet
                     strength=s,
@@ -609,6 +750,131 @@ def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
                     "size": [w, h], "strength": s, "controlnet_scale": cns}
         except Exception as e:
             log(f"img2img_tile error: {e}", 'err')
+            traceback.print_exc()
+            free_vram()
+            return {"ok": False, "error": str(e)}
+
+
+def do_refine_geo(input_path, control_path, ref_path, prompt, output_path,
+                  strength=0.5, controlnet_scale=0.8, ip_scale=0.6,
+                  guidance_scale=6.0, steps=None, seed=42,
+                  negative_prompt=None, control_guidance_end=1.0):
+    """
+    GEOMETRY-GUIDED + reference-anchored refine (the Meshy-style path).
+
+    Conditions SDXL on the mesh's REAL surface geometry via a ControlNet-Union
+    in NORMAL mode (control_mode=4) — so added micro-detail follows actual
+    surface normals and CAN'T free-associate runes/glyphs onto ambiguous organic
+    texture (the ControlNet-Tile failure). An IP-Adapter on `ref_path` keeps the
+    output faithful to the source reference image.
+
+    Args mirror do_img2img_tile where they overlap:
+      input_path        — the rendered view (img2img init image)
+      control_path      — the geometry control map (world-space NORMAL PNG,
+                          or a depth PNG if you wired a depth fallback). Required.
+      ref_path          — the source reference image for the IP-Adapter. If
+                          missing/None, the IP-Adapter image is skipped and the
+                          pipe runs controlnet-only.
+      strength          — img2img denoise strength (0.4-0.6 for a refine pass)
+      controlnet_scale  — normal ControlNet conditioning scale (0.6-0.9)
+      ip_scale          — IP-Adapter scale (0.0 = ignore ref, 1.0 = strong)
+      guidance_scale    — CFG (5-7 typical for RealVisXL)
+      control_guidance_end — fraction of steps the controlnet stays active
+                          (default 1.0: geometry guides the WHOLE denoise, unlike
+                          tile which we stop early to curb late invention)
+    """
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+    if not control_path or not os.path.exists(control_path):
+        return {"ok": False, "error": f"Control map not found: {control_path}"}
+
+    # Single SDXL pipe at a time to stay under 16 GB VRAM. The geo pipe is the
+    # heaviest (~10-11 GB with the IP-Adapter image encoder), so evict the others.
+    if state.img2img_pipe is not None:
+        unload_model('img2img')
+    if state.inpaint_pipe is not None:
+        unload_model('inpaint')
+    if state.controlnet_tile_pipe is not None:
+        unload_model('controlnet_tile')
+
+    pipe = load_controlnet_geo()
+    state.last_use['controlnet_geo'] = time.time()
+
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            img, (w, h) = resize_for_sdxl(img, max_dim=1024)
+
+            # Geometry control map -> SAME work size as the init so the union
+            # controlnet's spatial conditioning lines up pixel-for-pixel.
+            geo = Image.open(control_path).convert("RGB")
+            if geo.size != (w, h):
+                geo = geo.resize((w, h), Image.LANCZOS)
+
+            # Reference image for the IP-Adapter (optional).
+            ref_img = None
+            use_ip = bool(ref_path) and os.path.exists(ref_path)
+            if use_ip:
+                try:
+                    ref_img = Image.open(ref_path).convert("RGB")
+                except Exception as _re:
+                    log(f"refine_geo: ref image unreadable ({_re}); "
+                        f"skipping IP-Adapter", 'warn')
+                    use_ip = False
+            # set_ip_adapter_scale only matters if the adapter actually loaded.
+            ip_loaded = bool(getattr(pipe, 'image_encoder', None) is not None)
+            if ip_loaded:
+                try:
+                    # 0 effectively disables the adapter for this call when we
+                    # have no usable reference image.
+                    pipe.set_ip_adapter_scale(
+                        float(ip_scale) if use_ip else 0.0)
+                except Exception as _se:
+                    log(f"refine_geo: set_ip_adapter_scale failed ({_se})", 'warn')
+
+            enhanced = f"{prompt}, high quality, detailed"
+            s = max(0.1, min(1.0, float(strength)))
+            if steps is None:
+                steps = max(int(round(25 / s)), int(round(1 / s)) + 1)
+                steps = min(steps, 60)
+            cns = max(0.0, min(1.5, float(controlnet_scale)))
+            gen = None
+            if seed is not None and torch.cuda.is_available():
+                gen = torch.Generator('cuda').manual_seed(int(seed))
+
+            # Build kwargs so we can conditionally drop ip_adapter_image when we
+            # have no reference (passing None is fine too, but be explicit).
+            call_kwargs = dict(
+                prompt=enhanced,
+                negative_prompt=(negative_prompt or DEFAULT_TILE_NEG),
+                image=img,
+                control_image=geo,             # union auto-wraps to [geo]
+                control_mode=CONTROLNET_UNION_NORMAL_MODE,  # 4 = normal
+                strength=s,
+                num_inference_steps=steps,
+                guidance_scale=guidance_scale,
+                controlnet_conditioning_scale=cns,
+                control_guidance_end=float(control_guidance_end),
+                generator=gen,
+            )
+            if use_ip and ip_loaded and ref_img is not None:
+                call_kwargs['ip_adapter_image'] = ref_img
+
+            t0 = time.time()
+            with torch.inference_mode():
+                result = pipe(**call_kwargs).images[0]
+
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            result.save(output_path)
+            elapsed = time.time() - t0
+            log(f"refine_geo done in {elapsed:.1f}s "
+                f"(s={s:.2f}, cns={cns:.2f}, ip={'%.2f' % ip_scale if (use_ip and ip_loaded) else 'off'}, "
+                f"{steps} steps, {w}x{h}) -> {output_path}")
+            return {"ok": True, "output": output_path, "time": elapsed,
+                    "size": [w, h], "strength": s, "controlnet_scale": cns,
+                    "ip_scale": (float(ip_scale) if (use_ip and ip_loaded) else 0.0)}
+        except Exception as e:
+            log(f"refine_geo error: {e}", 'err')
             traceback.print_exc()
             free_vram()
             return {"ok": False, "error": str(e)}
@@ -1300,6 +1566,7 @@ class Handler(BaseHTTPRequestHandler):
                     "img2img": state.img2img_pipe is not None,
                     "inpaint": state.inpaint_pipe is not None,
                     "controlnet_tile": state.controlnet_tile_pipe is not None,
+                    "controlnet_geo": state.controlnet_geo_pipe is not None,
                     "clipseg": state.clipseg_model is not None,
                 },
                 "vram_gb": round(vram_used_gb(), 2),
@@ -1311,6 +1578,7 @@ class Handler(BaseHTTPRequestHandler):
                     "img2img": state.img2img_pipe is not None,
                     "inpaint": state.inpaint_pipe is not None,
                     "controlnet_tile": state.controlnet_tile_pipe is not None,
+                    "controlnet_geo": state.controlnet_geo_pipe is not None,
                     "clipseg": state.clipseg_model is not None,
                 },
                 "last_use": state.last_use,
@@ -1366,6 +1634,30 @@ class Handler(BaseHTTPRequestHandler):
                     data.get('guidance_scale', 6.0),
                     data.get('steps', None),
                     data.get('seed', 42),
+                )
+                self._json_response(200 if result.get('ok') else 500, result)
+
+            elif self.path == '/refine_geo':
+                # Geometry-guided + reference-anchored refine. `control` (the
+                # normal/depth map) is REQUIRED; `ref` is optional (skips the
+                # IP-Adapter image when absent).
+                if 'input' not in data or 'output' not in data or 'control' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output/control"})
+                    return
+                result = do_refine_geo(
+                    data['input'],
+                    data['control'],
+                    data.get('ref'),
+                    data.get('prompt', ''),
+                    data['output'],
+                    data.get('strength', 0.5),
+                    data.get('controlnet_scale', 0.8),
+                    data.get('ip_scale', 0.6),
+                    data.get('guidance_scale', 6.0),
+                    data.get('steps', None),
+                    data.get('seed', 42),
+                    data.get('negative_prompt'),
+                    data.get('control_guidance_end', 1.0),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 
@@ -1440,11 +1732,11 @@ class Handler(BaseHTTPRequestHandler):
 
             elif self.path == '/unload':
                 model_name = data.get('model', '')
-                if model_name in ('img2img', 'inpaint', 'clipseg'):
+                if model_name in ('img2img', 'inpaint', 'controlnet_tile', 'controlnet_geo', 'clipseg'):
                     unload_model(model_name)
                     self._json_response(200, {"ok": True, "vram_gb": round(vram_used_gb(), 2)})
                 else:
-                    self._json_response(400, {"ok": False, "error": "model must be img2img/inpaint/clipseg"})
+                    self._json_response(400, {"ok": False, "error": "model must be img2img/inpaint/controlnet_tile/controlnet_geo/clipseg"})
 
             elif self.path == '/shutdown':
                 self._json_response(200, {"ok": True, "bye": True})

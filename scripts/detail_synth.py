@@ -10,9 +10,13 @@ reproject" loop:
       Rasterize the mesh WITH its current baked baseColorTexture from N camera
       views, at 1024x1024, into render_<i>.png (white background).
 
-  STAGE 2 — REFINE   (SDXL ControlNet-Tile server, port 5555, ~9.5 GB VRAM)
-      POST each render to /img2img_tile. ControlNet-Tile adds micro-detail
-      while preserving structure -> view_<i>.png.
+  STAGE 2 — REFINE   (SDXL server, port 5555, ~9.5-11 GB VRAM)
+      Default (--refiner geo): also render a per-view world-space NORMAL map and
+      POST each render to /refine_geo. A ControlNet-Union in NORMAL mode makes
+      detail follow REAL surface geometry (no hallucinated runes/glyphs) and an
+      IP-Adapter on the reference image keeps it faithful -> view_<i>.png.
+      Legacy (--refiner tile): POST to /img2img_tile (ControlNet-Tile adds
+      micro-detail while preserving structure).
 
   STAGE 3 — REPROJECT (texture_project.py --multiview, CPU)
       Write views.json and re-bake the refined views back onto the mesh UV
@@ -169,6 +173,10 @@ def load_mesh_for_render(mesh_path):
         faces     : (F,3) int32
         uv        : (V,3) float32  per-vertex UV (V row, only XY used)
         tex_rgb   : (H,W,3) uint8  baseColorTexture (white if none)
+        norm_cam  : (V,3) float64  per-vertex normals rotated by R_undo (so they
+                    live in the SAME verts_cam frame). Per-view we rotate these
+                    again by R_w2c (rotation only) to get view-space normals for
+                    the geometry-guided refine ControlNet.
 
     NOTE on R_undo: texture_project applies it to recover SF3D's internal
     camera frame before projecting (verts_cam = R_undo @ vertices). The render
@@ -239,7 +247,26 @@ def load_mesh_for_render(mesh_path):
         log('R_undo: rot_x(90) @ rot_y(-90) (default, matches texture_project)')
 
     verts_cam = (R_undo @ vertices.T).T  # (V,3)
-    return verts_cam, faces, uv, tex_rgb
+
+    # Per-vertex world-space NORMALS, rotated into the verts_cam frame by the
+    # SAME R_undo. Normals transform by the rotation only (no translation) and
+    # R_undo is a pure rotation, so (R_undo @ n) is correct without an
+    # inverse-transpose. trimesh computes vertex_normals lazily (area-weighted
+    # from faces); guard against degenerate meshes that return an empty array.
+    try:
+        vnorm = np.asarray(mesh.vertex_normals, dtype=np.float64)
+    except Exception as e:
+        log(f'WARNING: vertex_normals unavailable ({e}); using +Z up')
+        vnorm = None
+    if vnorm is None or vnorm.shape != vertices.shape:
+        # Fallback: flat +Z so the normal map is at least a valid neutral image.
+        vnorm = np.tile(np.array([0.0, 0.0, 1.0]), (len(vertices), 1))
+    norm_cam = (R_undo @ vnorm.T).T  # (V,3), same frame as verts_cam
+    # Re-normalise (R_undo is orthonormal so this is just numerical hygiene).
+    _n = np.linalg.norm(norm_cam, axis=1, keepdims=True)
+    norm_cam = norm_cam / np.clip(_n, 1e-8, None)
+
+    return verts_cam, faces, uv, tex_rgb, norm_cam
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +347,22 @@ def _project_to_clip(verts_cam_t, R_w2c_t, t_w2c_t, focal, near=0.05, far=10.0):
     return clip
 
 
-def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES):
+def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
+                 norm_cam=None, write_normal=True, write_depth=False):
     """STAGE 1: rasterize each view with nvdiffrast, sample the baked texture,
-    write render_<i>.png (RGB, white background). Returns list of paths.
+    write render_<i>.png (RGB, white background). Returns
+        (render_paths, normal_paths, depth_paths)
+    where normal_paths / depth_paths are [] when not requested.
+
+    When write_normal and norm_cam are given, ALSO writes a world-space (view-
+    space) NORMAL map per view (normal_<i>.png): the geometry control image for
+    the /refine_geo ControlNet-Union normal mode. Per view we rotate norm_cam by
+    R_w2c (rotation only) so the normal map is in the SAME view frame as the
+    colour render, then map [-1,1] -> [0,1] RGB with a neutral (0.5,0.5,1.0)
+    background on un-hit pixels.
+
+    write_depth (optional) writes depth_<i>.png from rast z/w — only needed if
+    the refine falls back to a depth ControlNet instead of the union normal one.
 
     Frees the nvdiffrast context + all GPU tensors before returning so the GPU
     is clear for the SDXL stage.
@@ -339,6 +379,11 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES):
     # --- upload geometry / texture once ---
     verts_t = torch.tensor(verts_cam, dtype=torch.float32, device=device)  # (V,3)
     faces_t = torch.tensor(faces, dtype=torch.int32, device=device)        # (F,3)
+    # Per-vertex normals in the verts_cam frame (for the geometry control map).
+    do_normal = bool(write_normal and norm_cam is not None)
+    normals_t = None
+    if do_normal:
+        normals_t = torch.tensor(norm_cam, dtype=torch.float32, device=device)  # (V,3)
     # UV: nvdiffrast.texture expects uv in [0,1] with origin bottom-left and
     # V increasing upward. trimesh/glTF UVs use origin top-left (V down), so
     # flip V to match nvdiffrast's texel sampling.
@@ -353,6 +398,8 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES):
     glctx = dr.RasterizeCudaContext(device=device)
 
     paths = []
+    normal_paths = []
+    depth_paths = []
     for i, (azim, elev) in enumerate(VIEWS):
         R_w2c, t_w2c = w2c_for_view(azim, elev)
         R_w2c_t = torch.tensor(R_w2c, dtype=torch.float32, device=device)
@@ -385,13 +432,67 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES):
         paths.append(p)
         log(f'  rendered view {i} az={azim:.0f} el={elev:.0f} -> {p}')
 
+        # --- world/view-space NORMAL map (geometry control for /refine_geo) ---
+        normal_p = None
+        nrm_interp = None
+        if do_normal:
+            # View-space normals: rotate the verts_cam-frame normals by R_w2c
+            # (rotation only — normals ignore translation). R_w2c is orthonormal,
+            # so plain rotation is the correct normal transform.
+            nrm_view = (R_w2c_t @ normals_t.T).T.contiguous()          # (V,3)
+            nrm_interp, _ = dr.interpolate(
+                nrm_view[None, ...].contiguous(), rast, faces_t)       # (1,H,W,3)
+            n = nrm_interp[0]                                          # (H,W,3)
+            # Re-normalise interpolated normals (interpolation shortens them).
+            n = n / torch.clamp(torch.linalg.norm(n, dim=-1, keepdim=True), min=1e-6)
+            # Map [-1,1] -> [0,1] RGB (standard normal-map encoding).
+            n_rgb = (n * 0.5 + 0.5)
+            # Neutral background (0.5,0.5,1.0) on un-hit pixels (flat +Z facing
+            # the camera) so the ControlNet sees empty space, not garbage.
+            neutral = torch.tensor([0.5, 0.5, 1.0], device=device)
+            n_rgb = n_rgb * mask[0] + (1.0 - mask[0]) * neutral
+            n_np = n_rgb.clamp(0.0, 1.0).detach().cpu().numpy()
+            n_np = (n_np * 255.0 + 0.5).astype(np.uint8)
+            n_np = np.flipud(n_np)                                     # same flip as colour
+            normal_p = os.path.join(out_dir, f'normal_{i}.png')
+            Image.fromarray(n_np, mode='RGB').save(normal_p)
+            normal_paths.append(normal_p)
+            log(f'    + normal map -> {normal_p}')
+
+        # --- optional DEPTH map (only for a depth-controlnet fallback) ---
+        if write_depth:
+            # rast[...,2] is z/w (NDC depth in [-1,1] over the hit region).
+            z = rast[0, ..., 2]                                        # (H,W)
+            m2 = mask[0, ..., 0] > 0.5
+            if m2.any():
+                zmin = z[m2].min()
+                zmax = z[m2].max()
+                rng = torch.clamp(zmax - zmin, min=1e-6)
+                # Near = bright (1.0), far = dark — the diffusers depth controlnet
+                # convention. NDC z grows with distance, so invert.
+                d = 1.0 - (z - zmin) / rng
+            else:
+                d = torch.zeros_like(z)
+            d = torch.where(m2, d, torch.zeros_like(d))               # black bg
+            d_np = d.clamp(0.0, 1.0).detach().cpu().numpy()
+            d_np = (d_np * 255.0 + 0.5).astype(np.uint8)
+            d_np = np.flipud(d_np)
+            depth_p = os.path.join(out_dir, f'depth_{i}.png')
+            Image.fromarray(d_np, mode='L').convert('RGB').save(depth_p)
+            depth_paths.append(depth_p)
+            log(f'    + depth map -> {depth_p}')
+
         del R_w2c_t, t_w2c_t, clip, rast, uv_interp, color, mask
+        if nrm_interp is not None:
+            del nrm_interp
 
     # --- free the GPU before SDXL stage ---
     del glctx, verts_t, faces_t, uv_t, tex_t
+    if normals_t is not None:
+        del normals_t
     torch.cuda.empty_cache()
     log('nvdiffrast context + tensors freed; GPU clear for SDXL stage.')
-    return paths
+    return paths, normal_paths, depth_paths
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +532,7 @@ def _sdxl_up(host=SDXL_HOST, port=SDXL_PORT, timeout=2.0):
         return False
 
 
-def _post_json(url, payload, timeout=600):
+def _post_json(url, payload, timeout=1200):
     """POST JSON, return (status_code, parsed_dict_or_text). Uses requests if
     available, else urllib."""
     if _HAVE_REQUESTS:
@@ -460,8 +561,19 @@ def _post_json(url, payload, timeout=600):
                 return e.code, body
 
 
-def refine_views(render_paths, out_dir, prompt, strength, steps, seed=42):
-    """STAGE 2: POST each render_<i>.png to /img2img_tile -> view_<i>.png.
+def refine_views(render_paths, out_dir, prompt, strength, steps, seed=42,
+                 refiner='geo', normal_paths=None, reference=None,
+                 controlnet_scale=0.8, ip_scale=0.6,
+                 control_guidance_end=1.0):
+    """STAGE 2: refine each render_<i>.png -> view_<i>.png via the SDXL server.
+
+    refiner='geo'  (default): POST to /refine_geo — GEOMETRY-GUIDED. Passes the
+        per-view normal map (normal_<i>.png) as the ControlNet-Union normal
+        control, and `reference` (or the front view) as the IP-Adapter image.
+        Detail follows REAL geometry; the ref keeps it faithful. This replaces
+        the hallucination-prone ControlNet-Tile path.
+    refiner='tile' (legacy): POST to /img2img_tile (the old behaviour).
+
     Requires the SDXL server already up (does NOT start it). Returns list of
     view_<i>.png paths.
     """
@@ -472,22 +584,66 @@ def refine_views(render_paths, out_dir, prompt, strength, steps, seed=42):
         log('    python scripts/sdxl_server.py')
         sys.exit(3)
 
-    url = f'http://{SDXL_HOST}:{SDXL_PORT}/img2img_tile'
+    use_geo = (refiner == 'geo')
+    if use_geo and not normal_paths:
+        log('WARNING: refiner=geo but no normal maps were rendered; '
+            'falling back to /img2img_tile (tile).')
+        use_geo = False
+
+    # IP-Adapter reference: explicit --reference if given (and exists), else the
+    # refined-source FRONT render (view_0's input render_0) as a weak ref.
+    ref_abs = None
+    if use_geo:
+        if reference and os.path.exists(reference):
+            ref_abs = os.path.abspath(reference)
+        elif render_paths:
+            # Weak self-reference: the front render. Keeps the IP-Adapter on so
+            # texture stays anchored to the model's own colours/material.
+            ref_abs = os.path.abspath(render_paths[0])
+        if ref_abs:
+            log(f'  IP-Adapter reference: {ref_abs}')
+        else:
+            log('  no IP-Adapter reference -> controlnet-only refine')
+
+    endpoint = '/refine_geo' if use_geo else '/img2img_tile'
+    url = f'http://{SDXL_HOST}:{SDXL_PORT}{endpoint}'
     view_paths = []
     for i, rp in enumerate(render_paths):
         out_p = os.path.join(out_dir, f'view_{i}.png')
-        payload = {
-            'input': os.path.abspath(rp),
-            'prompt': prompt,
-            'output': os.path.abspath(out_p),
-            'strength': strength,
-            'steps': steps,
-            'seed': seed,
-        }
-        log(f'  refining view {i}: {rp} (strength={strength}, steps={steps})')
+        if use_geo:
+            ctrl = normal_paths[i] if i < len(normal_paths) else None
+            if not ctrl or not os.path.exists(ctrl):
+                log(f'ERROR: normal map for view {i} missing ({ctrl}).')
+                sys.exit(4)
+            payload = {
+                'input': os.path.abspath(rp),
+                'control': os.path.abspath(ctrl),
+                'prompt': prompt,
+                'output': os.path.abspath(out_p),
+                'strength': strength,
+                'controlnet_scale': controlnet_scale,
+                'ip_scale': ip_scale,
+                'steps': steps,
+                'seed': seed,
+                'control_guidance_end': control_guidance_end,
+            }
+            if ref_abs:
+                payload['ref'] = ref_abs
+            log(f'  refining view {i} (geo): {rp} ctrl={os.path.basename(ctrl)} '
+                f'(s={strength}, cns={controlnet_scale}, ip={ip_scale}, steps={steps})')
+        else:
+            payload = {
+                'input': os.path.abspath(rp),
+                'prompt': prompt,
+                'output': os.path.abspath(out_p),
+                'strength': strength,
+                'steps': steps,
+                'seed': seed,
+            }
+            log(f'  refining view {i} (tile): {rp} (strength={strength}, steps={steps})')
         status, body = _post_json(url, payload)
         if status != 200 or not (isinstance(body, dict) and body.get('ok')):
-            log(f'ERROR: /img2img_tile failed for view {i} '
+            log(f'ERROR: {endpoint} failed for view {i} '
                 f'(HTTP {status}): {body}')
             sys.exit(4)
         if not os.path.exists(out_p):
@@ -555,6 +711,21 @@ def main():
                         help='SDXL inference steps (default 22)')
     parser.add_argument('--seed', type=int, default=42,
                         help='SDXL seed (default 42)')
+    parser.add_argument('--refiner', choices=['geo', 'tile'], default='geo',
+                        help='Refine path: "geo" (default) = geometry-guided '
+                             'normal ControlNet + IP-Adapter (Meshy-style, '
+                             'detail follows real surface, no hallucinated '
+                             'runes); "tile" = legacy ControlNet-Tile.')
+    parser.add_argument('--reference', default=None,
+                        help='Source reference image (PNG) for the IP-Adapter in '
+                             '--refiner geo. Keeps the refine faithful to the '
+                             'reference. If omitted, the front render is used as '
+                             'a weak self-reference.')
+    parser.add_argument('--controlnet-scale', type=float, default=0.8,
+                        help='Normal ControlNet conditioning scale for '
+                             '--refiner geo (default 0.8)')
+    parser.add_argument('--ip-scale', type=float, default=0.6,
+                        help='IP-Adapter scale for --refiner geo (default 0.6)')
     parser.add_argument('--texture-size', type=int, default=4096,
                         help='Reprojection atlas resolution (default 4096)')
     parser.add_argument('--workdir', default=None,
@@ -586,16 +757,22 @@ def main():
 
     # --- STAGE 1: render ---
     log('STAGE 1: render (nvdiffrast)')
-    verts_cam, faces, uv, tex_rgb = load_mesh_for_render(mesh_path)
+    verts_cam, faces, uv, tex_rgb, norm_cam = load_mesh_for_render(mesh_path)
     log(f'mesh: {len(verts_cam)} verts, {len(faces)} faces, '
         f'tex {tex_rgb.shape[1]}x{tex_rgb.shape[0]}')
-    render_paths = render_views(verts_cam, faces, uv, tex_rgb, work,
-                                res=RENDER_RES)
+    # Normal maps are the geometry control for --refiner geo; render them unless
+    # we're explicitly on the legacy tile path (cheap, but skip if not needed).
+    want_normal = (args.refiner == 'geo')
+    render_paths, normal_paths, _depth_paths = render_views(
+        verts_cam, faces, uv, tex_rgb, work, res=RENDER_RES,
+        norm_cam=norm_cam, write_normal=want_normal, write_depth=False)
     views_json = write_views_json(work)
 
     if args.render_only:
         log('--render-only: stage 1 done. Inspect:')
         for p in render_paths:
+            log(f'  {p}')
+        for p in normal_paths:
             log(f'  {p}')
         log(f'  {views_json}')
         log('Verify the orientation matches what texture_project expects '
@@ -603,9 +780,15 @@ def main():
         return
 
     # --- STAGE 2: refine ---
-    log('STAGE 2: refine (SDXL ControlNet-Tile, port 5555)')
-    view_paths = refine_views(render_paths, work, args.prompt, args.strength,
-                              args.steps, seed=args.seed)
+    if args.refiner == 'geo':
+        log('STAGE 2: refine (SDXL geometry-guided /refine_geo, port 5555)')
+    else:
+        log('STAGE 2: refine (SDXL ControlNet-Tile /img2img_tile, port 5555)')
+    view_paths = refine_views(
+        render_paths, work, args.prompt, args.strength, args.steps,
+        seed=args.seed, refiner=args.refiner, normal_paths=normal_paths,
+        reference=args.reference, controlnet_scale=args.controlnet_scale,
+        ip_scale=args.ip_scale)
 
     # --- STAGE 3: reproject ---
     log('STAGE 3: reproject (texture_project.py --multiview, CPU)')
