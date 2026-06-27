@@ -5592,6 +5592,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   const PEAK_1024_GB = 20;
   let ultraQ      = trellis2UltraQ;
   let qualityPlus = trellis2QualityPlus;
+  let _ramHeadroomGB = null;
   try {
     const _os = require('os');
     const _physGB  = _os.totalmem() / (1024 ** 3);
@@ -5603,6 +5604,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     // Headroom under the budget right now. The chosen mode's peak must fit here
     // for the TOTAL (baseline + worker) to stay under the marker.
     const _headroomGB = _budgetGB - _usedGB;
+    _ramHeadroomGB = _headroomGB;
     log.info('main', `image-to-3d RAM gate: budget=${_budgetGB.toFixed(1)}GB used=${_usedGB.toFixed(1)}GB headroom=${_headroomGB.toFixed(1)}GB`);
     if (ultraQ && PEAK_1536_GB > _headroomGB) {
       log.warn('main', `image-to-3d: Ultra (1536, ~${PEAK_1536_GB}GB) > headroom ${_headroomGB.toFixed(1)}GB — downgrading to Quality+ (1024)`);
@@ -5616,6 +5618,20 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       qualityPlus = false;
     }
   } catch (_) {}
+
+  // Pre-flight RAM abort: if even base mode (~10 GB peak) won't fit the current
+  // headroom, fail FAST with a clear message instead of starting a ~3-minute run
+  // that OOM-crashes at pipeline load (the case the user kept hitting). Tunable
+  // via FABMESH_RAM_ABORT_GB.
+  const _PEAK_BASE_GB = parseFloat(process.env.FABMESH_RAM_ABORT_GB || '10');
+  if (_ramHeadroomGB != null && _ramHeadroomGB < _PEAK_BASE_GB) {
+    const _msg = `Pas assez de RAM pour générer : ~${Math.max(0, _ramHeadroomGB).toFixed(0)} GB `
+      + `disponibles, ~${_PEAK_BASE_GB.toFixed(0)} GB requis (même en mode de base). Fermez des `
+      + `applications lourdes (Unreal Engine, navigateurs, autres gros logiciels) puis réessayez.`;
+    log.warn('main', `image-to-3d ABORTED pre-flight: headroom ${_ramHeadroomGB.toFixed(1)}GB < ${_PEAK_BASE_GB}GB`);
+    try { safeSend('ai3d-progress', `[main] ${_msg}\n`); } catch (_) {}
+    return { success: false, error: _msg };
+  }
 
   // PRE-PROCESS: auto-rectify the source image to a canonical view.
   // - assetType='character' -> strict orthographic front (good for MV-Adapter
@@ -6013,8 +6029,14 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     // "Error" yet is only a warning, not the failure). Full dump → last_error.log.
     const combined = (err.stdout || '') + '\n' + (err.stderr || '');
     const _isWarn = (l) => /warnings\.warn|UserWarning|FutureWarning|DeprecationWarning|importing kaolin|ipyevents/i.test(l);
+    const _isHeader = (l) => /^\s*Traceback \(most recent call last\)/.test(l);
+    // The real cause is the EXCEPTION line ("RuntimeError: …", "MemoryError", …),
+    // NOT the "Traceback (most recent call last):" header. A traceback that shows
+    // only the header means the process was KILLED mid-print (OOM/crash) → leave
+    // pyErrorLine empty so the resource-exhaustion branch below fires.
     const pyErrorLine = combined.split(/\r?\n/).reverse()
-      .find(l => /MemoryError|CUDA|out of memory|Killed|bad_alloc|Error|Exception|Traceback/i.test(l.trim()) && !_isWarn(l)) || '';
+      .find(l => /MemoryError|CUDA|out of memory|Killed|bad_alloc|Cannot allocate|\b\w*(Error|Exception)\b\s*:/i.test(l.trim())
+                 && !_isWarn(l) && !_isHeader(l)) || '';
     // Resource-exhaustion heuristic: an OOM / killed crash leaves NO real Python
     // traceback (only warnings) and the run never reached 100% — the process was
     // killed mid-load. Detect explicit memory markers OR "no real error + did not
