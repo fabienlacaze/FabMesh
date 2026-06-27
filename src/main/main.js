@@ -6007,13 +6007,29 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
 
     return { success: true, ...result };
   } catch (err) {
-    const errMsg = err.error || err.message || String(err);
-    // Log to the structured logger so `fabmesh.log` has useful context.
-    // Extract the last meaningful Python error line from stderr/stdout for
-    // a concise summary — the full dump goes to last_error.log.
+    let errMsg = err.error || err.message || String(err);
+    // Extract the last meaningful Python error line — but SKIP benign import
+    // warnings (kaolin's optional ipyevents/visualize import contains the word
+    // "Error" yet is only a warning, not the failure). Full dump → last_error.log.
     const combined = (err.stdout || '') + '\n' + (err.stderr || '');
+    const _isWarn = (l) => /warnings\.warn|UserWarning|FutureWarning|DeprecationWarning|importing kaolin|ipyevents/i.test(l);
     const pyErrorLine = combined.split(/\r?\n/).reverse()
-      .find(l => /Error|Exception|CUDA|OOM|killed|Traceback/i.test(l.trim())) || '';
+      .find(l => /MemoryError|CUDA|out of memory|Killed|bad_alloc|Error|Exception|Traceback/i.test(l.trim()) && !_isWarn(l)) || '';
+    // Resource-exhaustion heuristic: an OOM / killed crash leaves NO real Python
+    // traceback (only warnings) and the run never reached 100% — the process was
+    // killed mid-load. Detect explicit memory markers OR "no real error + did not
+    // finish", and surface a clear, actionable message instead of the raw warning.
+    const _oomMarker = /MemoryError|CUDA out of memory|out of memory|Killed|bad_alloc|Cannot allocate|paging file|std::bad_alloc/i.test(combined);
+    const _reachedDone = /LOCAL_[A-Z0-9_]+_PROGRESS:\s*100\b/.test(combined);
+    if (_oomMarker || (!pyErrorLine && !_reachedDone)) {
+      errMsg = "La génération s'est interrompue — le plus souvent un manque de mémoire "
+        + "(RAM/VRAM saturée). Fermez les applications lourdes (Unreal Engine, navigateurs, "
+        + "autres gros logiciels) et réessayez ; un preset plus léger (2048 px) aide si la RAM "
+        + "est juste. (Le warning « kaolin / ipyevents » ci-dessous est inoffensif.) "
+        + "Détails complets : last_error.log.";
+    } else if (pyErrorLine) {
+      errMsg = pyErrorLine;
+    }
     log.error('main', `image-to-3d FAILED: ${pyErrorLine || errMsg}`);
     // Overwrite (not append) so last_error.log doesn't grow unboundedly.
     try {
