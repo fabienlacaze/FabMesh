@@ -4308,21 +4308,96 @@ async function jumpToSourceImage(imgPath) {
   try { await renderImageVersions(p); } catch (_) {}
   try { showStep1Preview(matchedPath); } catch (_) {}
   try { _restoreStyleDropdown(matchedPath); } catch (_) {}
+  _flashCenterSelected('ws-image-versions');
+}
+
+// Shared helper: CENTER the currently-selected thumb of a versions strip in the
+// viewport (not top-aligned) and flash a blue glow twice. Used by every
+// jump-to-* navigator so they land centred on the relevant vignette.
+function _flashCenterSelected(stripId) {
   setTimeout(() => {
-    try { imgCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
-    const strip = document.getElementById('ws-image-versions');
+    const strip = document.getElementById(stripId);
     const sel = strip && strip.querySelector('.version-thumb.selected');
-    if (sel) {
-      try { sel.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }); } catch (_) {}
-      // Flash a blue glow twice to draw the eye to the matched version.
-      try {
-        sel.animate(
-          [{ boxShadow: '0 0 0 0 rgba(138,180,255,0.95)' },
-           { boxShadow: '0 0 0 7px rgba(138,180,255,0)' }],
-          { duration: 850, iterations: 2 });
-      } catch (_) {}
-    }
+    if (!sel) return;
+    try { sel.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }); } catch (_) {}
+    try {
+      sel.animate(
+        [{ boxShadow: '0 0 0 0 rgba(138,180,255,0.95)' },
+         { boxShadow: '0 0 0 7px rgba(138,180,255,0)' }],
+        { duration: 850, iterations: 2 });
+    } catch (_) {}
   }, 140);
+}
+
+// Resolve the SOURCE MESH of a rig (or any derived item) by longest-prefix stem
+// match against p.meshes — a rig 'X_rigged_<engine>_<ts>' descends from mesh 'X'.
+function _resolveParentMeshPath(item, p) {
+  if (!p || !Array.isArray(p.meshes) || !item) return null;
+  const stem = (s) => String(s || '').replace(/\.[^.]+$/, '');
+  const itemStem = stem(item.filename || (item.path || '').split(/[\\/]/).pop());
+  if (!itemStem) return null;
+  const cands = p.meshes.filter((m) => {
+    const ms = stem(m.filename);
+    return ms && (itemStem === ms || itemStem.startsWith(ms + '_'));
+  });
+  if (!cands.length) return null;
+  cands.sort((a, b) => stem(b.filename).length - stem(a.filename).length);
+  return cands[0].path;
+}
+
+// Jump to the MESH a rig/animation was built from: open the Mesh step, select +
+// centre + flash that mesh version. Non-destructive (previews; doesn't change
+// which mesh is marked for rigging).
+async function jumpToMesh(meshPath) {
+  const p = state.currentProject;
+  if (!p || !meshPath) return;
+  const mesh = (p.meshes || []).find((m) => m.path === meshPath);
+  if (!mesh) { showToast('Maillage source introuvable.', 'error'); return; }
+  try { closeMeshLightbox(); } catch (_) {}
+  const card = document.getElementById('step-card-mesh');
+  if (card) {
+    card.classList.remove('collapsed', 'disabled');
+    const cs = card.querySelector('.stage-create');
+    const es = card.querySelector('.stage-edit');
+    if (cs) cs.open = false;
+    if (es) es.open = true;
+  }
+  p.previewMeshPath = mesh.path;
+  try { await renderMeshVersions(p); } catch (_) {}
+  try { showStep2Preview(mesh); } catch (_) {}
+  _flashCenterSelected('ws-mesh-versions');
+}
+
+// Jump to the RIG an animation was retargeted onto: open the Rig step, select +
+// centre + flash that rig version.
+function jumpToRig(rigPath) {
+  const p = state.currentProject;
+  if (!p || !rigPath) return;
+  const rig = (p.rigs || []).find((r) => r.path === rigPath);
+  if (!rig) { showToast('Rig source introuvable.', 'error'); return; }
+  try { closeMeshLightbox(); } catch (_) {}
+  const card = document.getElementById('step-card-rig');
+  if (card) {
+    card.classList.remove('collapsed', 'disabled');
+    const cs = card.querySelector('.stage-create');
+    const es = card.querySelector('.stage-edit');
+    if (cs) cs.open = false;
+    if (es) es.open = true;
+  }
+  try { renderRigVersions(p); } catch (_) {}
+  // renderRigVersions defaults to selecting the newest; move the highlight to
+  // the target rig (matched by filename, which it sets as the thumb title).
+  const strip = document.getElementById('ws-rig-versions');
+  if (strip) {
+    const thumbs = [...strip.querySelectorAll('.version-thumb')];
+    const target = thumbs.find((el) => el.title === rig.filename);
+    if (target) {
+      thumbs.forEach((x) => x.classList.remove('selected'));
+      target.classList.add('selected');
+    }
+  }
+  try { showStep3Preview(rig); } catch (_) {}
+  _flashCenterSelected('ws-rig-versions');
 }
 
 async function openLightbox(imgPath) {
@@ -12711,10 +12786,18 @@ function renderRigVersions(p) {
     } else if (p.thumb) {
       thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
     }
+    // Lineage jump buttons: source image + source mesh (hover-only, top-left).
+    const _rigMeshPath = _resolveParentMeshPath(r, p);
+    const rigSrcBtn = r.sourceImage
+      ? '<button class="version-source-btn" title="Voir l\'image source">&#128247;</button>' : '';
+    const rigMeshBtn = _rigMeshPath
+      ? '<button class="version-mesh-btn" title="Voir le maillage source">&#129513;</button>' : '';
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-label">v${p.rigs.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this rig">&#10005;</button>
+      ${rigSrcBtn}
+      ${rigMeshBtn}
     `;
     t.title = r.filename;
     t.addEventListener('click', () => {
@@ -12727,6 +12810,12 @@ function renderRigVersions(p) {
       if (!await customConfirm(`Delete rig v${p.rigs.length - 1 - i}? This cannot be undone.`, 'Delete rig version')) return;
       await API.deleteMesh(r.filename);
       await reloadCurrentProject();
+    });
+    if (r.sourceImage) t.querySelector('.version-source-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation(); jumpToSourceImage(r.sourceImage);
+    });
+    if (_rigMeshPath) t.querySelector('.version-mesh-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation(); jumpToMesh(_rigMeshPath);
     });
     strip.appendChild(t);
   });
