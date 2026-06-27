@@ -8008,6 +8008,18 @@ ipcMain.handle('get-file-info', async (event, filePath) => {
         info.height = dim.height;
       } catch (e) { /* image-size not installed, skip */ }
     }
+    // For 3D meshes, surface the source image recorded in the <mesh>.source
+    // sidecar (written at generation time) so viewers can offer a
+    // "jump to source image" link.
+    if (['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply'].includes(ext)) {
+      try {
+        const sidecar = filePath + '.source';
+        if (fs.existsSync(sidecar)) {
+          const src = fs.readFileSync(sidecar, 'utf-8').trim();
+          if (src) info.sourceImage = src;
+        }
+      } catch (e) { /* no sidecar — skip */ }
+    }
     return info;
   } catch (e) {
     return { ok: false, error: e.message };

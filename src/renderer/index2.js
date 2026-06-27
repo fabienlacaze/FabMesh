@@ -3894,7 +3894,27 @@ async function renderViewerInfo(targetEl, filePath, extras) {
         }
       }
     }
-    targetEl.innerHTML = `<span class="vi-title">${info.filename}</span>` + rows.join('');
+    // "Image source" link — the photo this mesh was generated from (from the
+    // <mesh>.source sidecar, surfaced by get-file-info). Clicking it opens the
+    // image in the 2D lightbox. pointer-events:auto keeps it clickable even if
+    // the info overlay is otherwise click-through.
+    let sourceRow = '';
+    if (info.sourceImage) {
+      const _esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      const _srcName = String(info.sourceImage).split(/[\\/]/).pop();
+      sourceRow = `<span class="vi-row"><b>Image source :</b> `
+        + `<a href="#" class="vi-source-link" title="${_esc(info.sourceImage)}" `
+        + `style="color:#8ab4ff;text-decoration:underline;cursor:pointer;pointer-events:auto;">`
+        + `${_esc(_srcName)}</a></span>`;
+    }
+    targetEl.innerHTML = `<span class="vi-title">${info.filename}</span>` + rows.join('') + sourceRow;
+    if (info.sourceImage) {
+      const _link = targetEl.querySelector('.vi-source-link');
+      if (_link) _link.addEventListener('click', (e) => {
+        e.preventDefault();
+        jumpToSourceImage(info.sourceImage);
+      });
+    }
   } catch (e) {
     console.warn('renderViewerInfo failed', e);
     targetEl.innerHTML = '';
@@ -4219,6 +4239,23 @@ window.addEventListener('resize', () => {
 // ----- Lightbox -----
 let _lightboxImages = []; // array of paths for prev/next
 let _lightboxIndex = 0;
+// Jump from a mesh to the source image it was generated from: validate the
+// path still exists, close the 3D lightbox if it's open, then show the image
+// in the 2D lightbox. Wired from the 3D viewer's "Image source" link and from
+// the per-mesh-version source button.
+async function jumpToSourceImage(imgPath) {
+  if (!imgPath) return;
+  try {
+    const info = await API.getFileInfo(imgPath);
+    if (!info || !info.ok) {
+      showToast("Image source introuvable (déplacée ou supprimée).", 'error');
+      return;
+    }
+  } catch (_) {}
+  try { closeMeshLightbox(); } catch (_) {}
+  openLightbox(imgPath);
+}
+
 async function openLightbox(imgPath) {
   // Parental control: block opening NSFW images in fullscreen
   try {
@@ -7680,10 +7717,19 @@ async function renderMeshVersions(p) {
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
+    // Per-version "source image" button (top-left): jumps to the photo this
+    // mesh was generated from. Only shown when the .source sidecar resolved.
+    const meshSourceBtn = m.sourceImage
+      ? '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh" '
+        + 'style="position:absolute; top:2px; left:2px; background:rgba(0,0,0,0.65); border:none; '
+        + 'border-radius:4px; width:22px; height:22px; cursor:pointer; font-size:12px; line-height:1; '
+        + 'padding:0; display:flex; align-items:center; justify-content:center; z-index:2;">&#128247;</button>'
+      : '';
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
+      ${meshSourceBtn}
       ${meshEmissiveBadge}
     `;
     t.title = m.filename;
@@ -7699,6 +7745,13 @@ async function renderMeshVersions(p) {
       await API.deleteMesh(m.filename);
       await reloadCurrentProject();
     });
+    if (m.sourceImage) {
+      const _srcBtn = t.querySelector('.version-source-btn');
+      if (_srcBtn) _srcBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        jumpToSourceImage(m.sourceImage);
+      });
+    }
     strip.appendChild(t);
   });
 }
