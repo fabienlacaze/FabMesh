@@ -342,10 +342,36 @@ def replace_glb_atlas(input_glb: str, output_glb: str,
             f.write(out)
 
 
+def _make_face_protect_mask(input_glb: str, atlas_size: int):
+    """Atlas-space mask of the FACE/HEAD UV region (white = protect, do NOT
+    refine). Reuses face_inpaint_atlas's proven render -> Haar-detect -> UV-project
+    pipeline (the SAME mask face-fix inpaints, used here to PRESERVE the face
+    instead of repainting it). Returns a PIL 'L' mask, or None if unbuildable."""
+    try:
+        import trimesh
+        from face_inpaint_atlas import (render_mesh_front, detect_face_bbox,
+                                         fallback_top_bbox, make_atlas_mask_from_bbox)
+        scene = trimesh.load(input_glb, process=False)
+        render_size = 1024
+        rendered = render_mesh_front(scene, render_size)
+        if rendered is None:
+            log('face-protect: renderer unavailable')
+            return None
+        bbox = detect_face_bbox(rendered)
+        if bbox is None:
+            bbox = fallback_top_bbox((render_size, render_size))
+            log('face-protect: Haar found no face -> top-band fallback')
+        return make_atlas_mask_from_bbox(scene, bbox, render_size, atlas_size)
+    except Exception as e:
+        log(f'face-protect mask failed ({type(e).__name__}: {e})')
+        return None
+
+
 def refine(input_glb: str, output_glb: str, strength: float = 0.25,
            prompt: str | None = None, target: int | None = None,
            use_controlnet_tile: bool = False,
-           controlnet_scale: float = 0.7, seed: int = 42) -> bool:
+           controlnet_scale: float = 0.7, seed: int = 42,
+           protect_face: bool = False) -> bool:
     import trimesh
     t0 = time.time()
     slog = Logger('tex_refine', input=os.path.basename(input_glb)) if Logger else None
@@ -367,6 +393,20 @@ def refine(input_glb: str, output_glb: str, strength: float = 0.25,
         if src.size != (target, target):
             src = src.resize((target, target), Image.LANCZOS)
             log(f'resized to {target}x{target} before refinement')
+
+    # FACE PROTECTION (paid 'Affinage' must NOT wreck the AI face): build the
+    # face UV mask BEFORE refining. If it can't be built (no renderer / no UVs),
+    # SKIP the refine entirely — "no improvement" is acceptable, a destroyed face
+    # is not. src.size is final here (after any --target resize above).
+    protect_mask = None
+    if protect_face:
+        protect_mask = _make_face_protect_mask(input_glb, src.size[0])
+        if protect_mask is None:
+            log('face-protect REQUESTED but mask unavailable -> SKIP refine '
+                '(copying original through to keep the face safe)')
+            replace_glb_atlas(input_glb, output_glb, src)
+            return True
+        log('face-protect: face mask ready -> body refines, face preserved')
 
     use_server = _server_alive()
     log(f'SDXL server alive: {use_server}')
@@ -405,6 +445,17 @@ def refine(input_glb: str, output_glb: str, strength: float = 0.25,
         new_atlas = ImageEnhance.Color(new_atlas).enhance(1.25)
         new_atlas = ImageEnhance.Contrast(new_atlas).enhance(1.12)
         log('post-refine punch: saturation x1.25, contrast x1.12')
+        # Composite the ORIGINAL (un-refined) atlas back over the face UV region
+        # so SDXL only sharpened the body and never touched the face.
+        if protect_mask is not None:
+            pm_arr = np.asarray(protect_mask.resize(new_atlas.size).convert('L'),
+                                dtype=np.float32)[..., None] / 255.0
+            src_arr = np.asarray(src.resize(new_atlas.size, Image.LANCZOS).convert('RGB'),
+                                 dtype=np.float32)
+            new_arr = np.asarray(new_atlas.convert('RGB'), dtype=np.float32)
+            new_atlas = Image.fromarray(
+                np.clip(new_arr * (1.0 - pm_arr) + src_arr * pm_arr, 0, 255).astype(np.uint8))
+            log('face-protect: original face composited back (body refined, face untouched)')
         _subpct(96, 'glb_rewrite')
         replace_glb_atlas(input_glb, output_glb, new_atlas)
         _subpct(99, 'refine_done')
@@ -440,12 +491,16 @@ if __name__ == '__main__':
                    help='ControlNet conditioning scale (0=off, 1=rigid). Default 0.7')
     p.add_argument('--seed', type=int, default=42,
                    help='Variation seed — a different seed = a different texture')
+    p.add_argument('--protect-face', action='store_true',
+                   help='Preserve the face/head UV region (composite the original '
+                        'back) so the body refines without wrecking the AI face')
     args = p.parse_args()
     try:
         ok = refine(args.input, args.output, args.strength,
                     args.prompt, args.target,
                     use_controlnet_tile=args.controlnet_tile,
-                    controlnet_scale=args.cn_scale, seed=args.seed)
+                    controlnet_scale=args.cn_scale, seed=args.seed,
+                    protect_face=args.protect_face)
         sys.exit(0 if ok else 1)
     except Exception as e:
         import traceback

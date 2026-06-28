@@ -5968,7 +5968,14 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         // on the sharpened texture. Low default strength (0.22) so it adds
         // micro-detail without inventing damage; the per-asset-type UI
         // defaults already turn it OFF for smooth surfaces (vehicles/icons).
-        const runRefine  = (next) => trellis2Refine   ? runStep('refine',  REFINE_SCRIPT,  ['--strength', '0.22', '--controlnet_tile'], 240000, next) : next();
+        // 'refine' img2img's the atlas. For asset types WITH a human-ish face,
+        // pass --protect-face so texture_refine preserves the face UV island
+        // (composite the original back) and only sharpens the BODY -> the paid
+        // option improves without wrecking the AI face. If the mask can't be
+        // built, texture_refine SKIPS the refine rather than damage the face.
+        const _refineArgs = ['--strength', '0.22', '--controlnet_tile'];
+        if (assetType === 'character' || assetType === 'creature') _refineArgs.push('--protect-face');
+        const runRefine  = (next) => trellis2Refine   ? runStep('refine',  REFINE_SCRIPT,  _refineArgs, 240000, next) : next();
         const runSmooth  = (next) => trellis2Smooth   ? runStep('smooth',  SMOOTH_SCRIPT,  [],                                    120000, next) : next();
         // Face-fix is a GENERATIVE SDXL repaint — gate it to humanoid characters
         // only and cap strength (0.45 invented eyes/skin/runes). Off by default in

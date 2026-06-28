@@ -1447,10 +1447,10 @@ const ASSET_OPTIONS_PROFILE = {
   character: {
     'ws-trellis2-rectify':      true,   // strict front T-pose
     'ws-trellis2-smooth':       false,  // skin grain is fine
-    // OFF by default: 'refine' img2img's the WHOLE 4096 atlas incl. the face UV
-    // island (no face mask yet) -> hallucinates runes/blotches on AI faces.
-    // Re-enable once texture_refine.py gets --protect-mask (opt-in meanwhile).
-    'ws-trellis2-refine':       false,
+    // ON: 'refine' sharpens the body. For character/creature, main.js passes
+    // --protect-face so texture_refine preserves the face UV island (Tier 2) —
+    // the option improves the body WITHOUT touching the AI face.
+    'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // face detail matters
     'ws-trellis2-ultra-hd':     true,
@@ -1461,7 +1461,7 @@ const ASSET_OPTIONS_PROFILE = {
   creature: {
     'ws-trellis2-rectify':      true,
     'ws-trellis2-smooth':       false,  // fur, scales
-    'ws-trellis2-refine':       false,  // OFF: same face-destroying whole-atlas img2img as character
+    'ws-trellis2-refine':       true,   // ON: main.js --protect-face preserves the face (Tier 2)
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // creature faces too
     'ws-trellis2-ultra-hd':     true,

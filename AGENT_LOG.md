@@ -15,9 +15,12 @@
     chemin — le bouton "Détail++" — donc ne protégeait pas la génération.)
 - TIER 1 (cette commit, sans GPU) : profils `character`+`creature` → refine:false + face-fix:false
   par défaut ; runFaceFix gaté à character + strength 0.45→0.20.
-- TIER 2 à venir : texture_refine.py --protect-mask (protège l'îlot UV du visage → affine le corps
-  sans toucher le visage) ; relabel honnête (i18n) ; Face-fix "expérimental". Verdicts workflow :
-  fixWillProtectFace + fixWillImproveBody = true (high).
+- TIER 2 (FAIT) : texture_refine.py --protect-face — génère le masque visage (render front + Haar +
+  UV-project, réutilise face_inpaint_atlas) AVANT le refine, puis composite l'ORIGINAL sur la zone
+  visage après → affine le corps sans toucher le visage. GARDE-FOU : si le masque échoue (pas de
+  renderer / pas d'UV), SKIP le refine (copie l'original) — jamais de destruction. main.js passe
+  --protect-face pour character/creature ; refine RÉACTIVÉ ON par défaut. À TESTER sur GPU.
+  Reste : relabel honnête (i18n) + Face-fix "expérimental". Verdicts : protège+améliore = true (high).
 
 ## 2026-06-27 (Cloud: port du "lineage jump" desktop → MyFabmesh.AI)
 
