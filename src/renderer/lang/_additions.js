@@ -307,7 +307,7 @@
   "Texture smooth (+~12s, cleaner smooth surfaces, no AI)": "Lissage de texture (+~12 s, surfaces lisses plus nettes, sans IA)",
   "Quality+ (cascade mode, decim 1M, +~30s)": "Qualité+ (mode cascade, décimation 1M, +~30 s)",
   "Fine mesh shape (1536_cascade — geometry, not texture, +~50s)": "Forme de maillage fine (1536_cascade — géométrie, pas texture, +~50 s)",
-  "Face fix (+~60s)": "Correction du visage (+~60 s)",
+  "Face fix (experimental) (+~60s)": "Retouche visage (expérimental · portraits) (+~60 s)",
   "Set Pivot": "Définir le pivot",
   "Regenerate ONLY the texture (geometry untouched) for visual variants — change the seed for a different look": "Régénérer UNIQUEMENT la texture (géométrie inchangée) pour des variantes visuelles — changez la seed pour un autre rendu",
   "Re-texture zone (IA)": "Re-texturer une zone (IA)",

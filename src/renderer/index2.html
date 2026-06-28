@@ -572,9 +572,9 @@
                          tracks the preset's forceUltraHd via JS. -->
                     <input type="checkbox" id="ws-trellis2-ultra-hd" style="display:none;" />
                     <div class="form-row check-row" style="margin-top:4px;">
-                      <label class="inline-check" style="font-size:11px;" title="Post-process the baseColor atlas to refine the face zone. Fixes blurry or distorted faces on characters. Strength 0.45.">
+                      <label class="inline-check" style="font-size:11px;" title="EXPERIMENTAL. Re-projects the sharp face from your SOURCE image onto the mesh (no AI repaint, never destructive). Helps most on PORTRAIT / face-focused sources; little gain on full-body subjects whose face is tiny in the image. Off by default.">
                         <input type="checkbox" id="ws-trellis2-face-fix" />
-                        Face fix (+~60s)
+                        Face fix (experimental) (+~60s)
                       </label>
                     </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
