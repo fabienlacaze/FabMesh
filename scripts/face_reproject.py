@@ -200,8 +200,95 @@ def render_perspective_front(vertices, faces, normals, r_undo, size=512):
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), mode='L')
 
 
+def _ortho_face_vert_idx(vertices, bbox, render_size):
+    """Vertex indices whose ORTHO front projection (the mask camera) falls in the
+    face bbox — the SAME in_bbox test make_atlas_mask_from_bbox uses, so the gate
+    operates on exactly the vertices the mask covers."""
+    v = vertices.astype(np.float64)
+    bb_min, bb_max = v.min(0), v.max(0)
+    center = (bb_min + bb_max) * 0.5
+    scale = max(bb_max - bb_min) or 1.0
+    vn = (v - center) / scale
+    sx = (vn[:, 0] + 0.6) / 1.2 * render_size
+    sy = ((-vn[:, 1]) + 0.6) / 1.2 * render_size
+    in_bbox = ((sx >= bbox[0]) & (sx <= bbox[2])
+               & (sy >= bbox[1]) & (sy <= bbox[3]))
+    return np.where(in_bbox)[0]
+
+
+def _perspective_face_bbox(vertices, normals, r_undo, face_idx, size):
+    """Project the KNOWN face vertices through texture_project's EXACT perspective
+    front camera and return their FRONT-FACING screen bbox (x0,y0,x1,y1) or None.
+    Replaces 'detect a face in a textureless silhouette render' (which never works)
+    with 'locate the face geometrically under the projecting camera'."""
+    if face_idx is None or len(face_idx) < 8:
+        return None
+    R_w2c_base = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], dtype=np.float64)
+    distance = 1.6
+    focal = 0.5 / np.tan(0.5 * np.radians(40.0))
+    fv = vertices[face_idx]
+    fn = normals[face_idx]
+    verts_cam = (r_undo @ fv.T).T
+    norms_cam = (r_undo @ fn.T).T
+    v_cs = (R_w2c_base @ verts_cam.T).T + np.array([0, 0, -distance])
+    n_cs = (R_w2c_base @ norms_cam.T).T
+    z = v_cs[:, 2]
+    safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
+    p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
+    p_v = 1.0 - (focal * v_cs[:, 1] / (-safe_z) + 0.5)
+    cam_dirs = -v_cs
+    cam_n = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
+    nn = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
+    facing = np.sum(nn * cam_n, axis=1)
+    front = facing > 0.1   # keep only front-facing face verts (drop back-of-head)
+    if front.sum() < 8:
+        return None
+    sx = p_u[front] * size
+    sy = p_v[front] * size
+    # Robust bbox: 3rd-97th percentile to ignore a few straggler vertices.
+    x0, x1 = np.percentile(sx, 3), np.percentile(sx, 97)
+    y0, y1 = np.percentile(sy, 3), np.percentile(sy, 97)
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return None
+    return (float(x0), float(y0), float(x1), float(y1))
+
+
+_KORNIA_DET = None
+
+
+def _kornia_bbox(pil_img, min_score=0.5):
+    """Largest high-confidence face bbox via kornia YuNet — robust on bearded /
+    hatted / stylized AI faces where Haar returns 0 (the exact case that made the
+    gate passthrough on a full-body wizard/samurai). (x0,y0,x1,y1) or None."""
+    try:
+        import torch
+        from kornia.contrib import FaceDetector, FaceDetectorResult
+        global _KORNIA_DET
+        if _KORNIA_DET is None:
+            _KORNIA_DET = FaceDetector().eval()
+        arr = np.asarray(pil_img.convert('RGB'))
+        t = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).float()
+        with torch.no_grad():
+            out = _KORNIA_DET(t)
+        faces = [FaceDetectorResult(o) for o in out[0]] if len(out) else []
+        faces = [r for r in faces if float(r.score) >= min_score]
+        if not faces:
+            return None
+        r = max(faces, key=lambda r: float(r.score))
+        tl = [int(v) for v in r.top_left.squeeze().tolist()]
+        br = [int(v) for v in r.bottom_right.squeeze().tolist()]
+        return (tl[0], tl[1], br[0], br[1])
+    except Exception as e:
+        log(f'kornia face-detect unavailable ({type(e).__name__}: {e}) -> Haar')
+        return None
+
+
 def _haar_bbox(pil_img):
-    """Largest Haar frontal-face bbox in image pixels, or None. (x0,y0,x1,y1)."""
+    """Largest face bbox in image pixels (x0,y0,x1,y1) or None. Tries kornia YuNet
+    first (robust on beards / hats / stylized), falls back to OpenCV Haar."""
+    b = _kornia_bbox(pil_img)
+    if b is not None:
+        return b
     try:
         import cv2
     except Exception as e:
@@ -237,17 +324,16 @@ def _gate_score(render_bbox, render_size, src_bbox, src_size):
         return False, 1e9, 'missing bbox'
     rcx, rcy, rscale = _bbox_metrics(render_bbox, render_size)
     scx, scy, sscale = _bbox_metrics(src_bbox, src_size)
-    dcx = abs(rcx - scx)
-    dcy = abs(rcy - scy)
-    centre_dist = float(np.hypot(dcx, dcy))
+    centre_dist = float(np.hypot(rcx - scx, rcy - scy))
     ratio = rscale / sscale if sscale > 1e-6 else 1e9
-    centre_ok = (dcx <= 0.06) and (dcy <= 0.06)
-    scale_ok = (0.82 <= ratio <= 1.22)
-    ok = centre_ok and scale_ok
+    # LOOSE acceptance: the Tier-2 2D warp corrects the residual offset/scale, so
+    # the gate only needs to reject MIS-ORIENTED candidates (face on the side/back),
+    # not demand pixel alignment. Rank by a combined centre + scale-mismatch score.
+    ok = (centre_dist <= 0.18) and (0.5 <= ratio <= 2.0)
+    score = centre_dist + abs(np.log(max(ratio, 1e-6)))
     detail = (f'centre=({rcx:.2f},{rcy:.2f}) vs ({scx:.2f},{scy:.2f}) '
-              f'd={centre_dist:.3f} ratio={ratio:.2f} '
-              f'centre_ok={centre_ok} scale_ok={scale_ok}')
-    return ok, centre_dist, detail
+              f'd={centre_dist:.3f} ratio={ratio:.2f} score={score:.3f} ok={ok}')
+    return ok, score, detail
 
 
 def _reinhard_match(proj_arr, orig_arr, mask01):
@@ -295,9 +381,11 @@ def main():
     ap.add_argument('--feather', type=int, default=12,
                     help='Gaussian feather radius (px) on the face UV mask edge.')
     ap.add_argument('--min-coverage', dest='min_coverage', type=float,
-                    default=0.012,
+                    default=0.004,
                     help='Min fraction of atlas the face mask must cover; below '
-                         'this -> guardrail passthrough.')
+                         'this -> guardrail passthrough. 0.004 lets a full-body '
+                         'character (small face UV island) through; the alignment '
+                         'gate is the real safety, not coverage.')
     ap.add_argument('--res', type=int, default=0,
                     help='Projection tex_res; 0 = use the native atlas size.')
     args = ap.parse_args()
@@ -393,27 +481,60 @@ def main():
     log(f'source face bbox = {src_bbox} on {src_w}x{src_h}')
 
     gate_size = 512
+    face_idx = _ortho_face_vert_idx(vertices, mask_bbox, render_size)
+    log(f'gate: {len(face_idx)} face vertices (from ortho bbox)')
     best = None  # (label, env, score, detail)
     for label, env in R_UNDO_CANDIDATES:
         r_undo = _r_undo_for_flag(env)
+        # Locate the face GEOMETRICALLY under the projecting camera (a textureless
+        # silhouette render has no detectable face) — project the known face verts.
         try:
-            gate_render = render_perspective_front(
-                vertices, faces, normals, r_undo, size=gate_size)
+            rb = _perspective_face_bbox(vertices, normals, r_undo,
+                                        face_idx, gate_size)
         except Exception as e:
-            log(f'gate render failed for R_undo={label} ({e})')
+            log(f'gate projection failed for R_undo={label} ({e})')
             continue
-        rb = _haar_bbox(gate_render)
         ok, score, detail = _gate_score(rb, gate_size, src_bbox,
                                         max(src_w, src_h))
-        log(f'gate R_undo={label}: bbox={rb} {detail} -> '
+        log(f'gate R_undo={label}: face-bbox={rb} {detail} -> '
             f'{"OK" if ok else "reject"}')
         if ok and (best is None or score < best[2]):
-            best = (label, env, score, detail)
+            best = (label, env, score, detail, rb)
     if best is None:
         guardrail('no R_undo flag aligned the projecting camera with the '
                   'source face')
-    chosen_label, chosen_env, chosen_score, chosen_detail = best
+    chosen_label, chosen_env, chosen_score, chosen_detail, chosen_rb = best
     log(f'chosen R_undo = {chosen_label} (score={chosen_score:.3f})')
+
+    # ------------------------------------------------------------------
+    # 3b. TIER-2 2D ALIGNMENT WARP — move the SOURCE face onto where the chosen
+    #     camera projects the mesh face, so the projection samples the face
+    #     on-feature (corrects the residual centre/scale the gate tolerated).
+    # ------------------------------------------------------------------
+    proj_source = args.source
+    try:
+        import cv2
+        # mesh face bbox (gate frame) -> source pixels: the projection samples the
+        # source at [0,1]*src, and the gate used the SAME perspective camera.
+        tgt = (chosen_rb[0] / gate_size * src_w, chosen_rb[1] / gate_size * src_h,
+               chosen_rb[2] / gate_size * src_w, chosen_rb[3] / gate_size * src_h)
+        scx = 0.5 * (src_bbox[0] + src_bbox[2]); scy = 0.5 * (src_bbox[1] + src_bbox[3])
+        sscale = max(src_bbox[2] - src_bbox[0], src_bbox[3] - src_bbox[1])
+        tcx = 0.5 * (tgt[0] + tgt[2]); tcy = 0.5 * (tgt[1] + tgt[3])
+        tscale = max(tgt[2] - tgt[0], tgt[3] - tgt[1])
+        s = (tscale / sscale) if sscale > 1e-6 else 1.0
+        M = np.array([[s, 0, tcx - s * scx], [0, s, tcy - s * scy]], dtype=np.float64)
+        warped = cv2.warpAffine(
+            cv2.cvtColor(np.asarray(src_img), cv2.COLOR_RGB2BGR), M, (src_w, src_h),
+            flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE)
+        warped_png = args.output + '.srcwarp.tmp.png'
+        cv2.imwrite(warped_png, warped)
+        proj_source = warped_png
+        log(f'Tier-2 warp: source face -> mesh face (scale={s:.2f} '
+            f'dx={tcx - scx:.0f} dy={tcy - scy:.0f}); using warped source')
+    except Exception as e:
+        log(f'Tier-2 warp failed ({type(e).__name__}: {e}) -> raw source')
+        proj_source = args.source
 
     # ------------------------------------------------------------------
     # 4. SHARP-FACE PATCH via texture_project (front --source only).
@@ -446,7 +567,7 @@ def main():
         for k, v in proj_env.items():
             os.environ[k] = v
         log(f'texture_project env: {proj_env}')
-        ok = project_texture(args.input, args.source, proj_glb,
+        ok = project_texture(args.input, proj_source, proj_glb,
                              tex_res=tex_res, multiview_dir=None,
                              rotation_offset_deg=0.0)
     except Exception as e:
