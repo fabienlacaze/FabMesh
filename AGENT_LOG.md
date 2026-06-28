@@ -1,5 +1,33 @@
 # FabMesh Agent Log
 
+## 2026-06-28 (Face-fix REMPLACÉ : SDXL repaint → reprojection photo source, scripts/face_reproject.py)
+
+- L'autopsie a prouvé que `scripts/face_inpaint_atlas.py` est cassé par construction : SDXL est
+  génératif, donc "améliorer le visage" devient toujours "inventer un nouveau visage" (efface le
+  style). NOUVEAU `scripts/face_reproject.py` (non destructif) qui REPROJETTE le visage NET de
+  l'image SOURCE sur l'UV visage du mesh via `texture_project`. Hors masque = byte-identique au
+  bake original (ORIG_ATLAS chargé indépendamment).
+- Pipeline : (1) ORIG_ATLAS indépendant = sol. (2) masque UV visage (réutilise render_mesh_front /
+  detect_face_bbox / fallback_top_bbox / make_atlas_mask_from_bbox de face_inpaint_atlas), feather.
+  (3) AUTO-R_undo + GATE caméra PERSPECTIVE : on rend le mesh via la caméra perspective EXACTE de
+  texture_project (R_undo candidat → R_w2c_base, dist 1.6, fov 40, p_u/p_v identiques), Haar sur le
+  rendu, comparé au bbox visage SOURCE (centre <6% du cadre, ratio d'échelle [0.82,1.22]). On
+  essaie les flags R_undo (SF3D undo défaut / SKIP_UNDO identité / HI3DGEN_UNDO) et on garde celui
+  qui aligne le mieux. (4) projection front seul via texture_project : BASE_ATLAS=1, FRAME_FIX=1,
+  UFLIP off, PREFILL_DOMINANT=0, UV_REPACK=0, pas de multiview ; rejet oblique = STACK_VIS_FLOOR
+  (VIS_THRESH no-op sur le chemin stack/atlas). PROJ_ATLAS relu depuis le GLB de sortie (_tex.png =
+  fallback). (5) colour-match Reinhard par canal proj→orig dans le masque. (6) composite feathered
+  out = ORIG*(1-m) + PROJ_matched*m. (7) écriture via texture_refine.replace_glb_atlas (swap
+  baseColor in-place, normal map/UV/skin préservés).
+- 3 fixes vérificateur : A la GATE utilise la caméra perspective de PROJECTION (pas l'ortho du
+  masque qui ne SÉLECTIONNE que les triangles) ; B auto-détection R_undo (frame TRELLIS2 non
+  validée sous l'undo SF3D par défaut) ; C garde-fou partout (masque None / aucun R_undo aligné /
+  coverage < --min-coverage / désaccord bbox → copy input→output, exit 0). Issue UNIQUEMENT
+  "même visage plus net" ou "original inchangé", jamais pire.
+- main.js : FACE_SCRIPT → face_reproject.py ; runFaceFix passe `['--source', imagePath]` (imagePath
+  = front rectifié à ce point). Gate character conservé (non-character = vue ISO 3/4 qui ne
+  s'overlaye pas sur une projection front). Port cloud = follow-up séparé.
+
 ## 2026-06-28 (Options texture payantes détruisaient le visage — diagnostic + Tier 1)
 
 - Plainte produit : un perso généré avec "Affinage des détails" + "Correction du visage" cochés

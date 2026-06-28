@@ -5958,7 +5958,13 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
 
         const REFINE_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_refine.py');
         const SMOOTH_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_smooth.py');
-        const FACE_SCRIPT   = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
+        // Face-fix REPLACED 2026-06-28: face_inpaint_atlas.py (SDXL repaint) is
+        // doomed by construction — a generative model repaints/erases stylized
+        // faces. face_reproject.py instead re-projects the SHARP face from the
+        // user SOURCE image onto the mesh face UV (non-destructive: outside the
+        // face mask stays byte-identical; guardrail passthrough on any failure
+        // so the paid option never ships a WORSE face).
+        const FACE_SCRIPT   = path.join(__dirname, '..', '..', 'scripts', 'face_reproject.py');
         const UPSCALE_SCRIPT= path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
 
         // 2026-06-13: wire "Detail refine". texture_refine.py was already
@@ -5977,10 +5983,14 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         if (['character', 'creature', 'other_living'].includes(assetType)) _refineArgs.push('--protect-face');
         const runRefine  = (next) => trellis2Refine   ? runStep('refine',  REFINE_SCRIPT,  _refineArgs, 240000, next) : next();
         const runSmooth  = (next) => trellis2Smooth   ? runStep('smooth',  SMOOTH_SCRIPT,  [],                                    120000, next) : next();
-        // Face-fix is a GENERATIVE SDXL repaint — gate it to humanoid characters
-        // only and cap strength (0.45 invented eyes/skin/runes). Off by default in
-        // the asset profile; this is the safety net when the user manually enables it.
-        const runFaceFix = (next) => (trellis2FaceFix && assetType === 'character') ? runStep('face', FACE_SCRIPT, ['--strength', '0.20'], 240000, next) : next();
+        // Face-fix now re-projects the SHARP SOURCE face onto the mesh face UV
+        // (face_reproject.py), NOT an SDXL repaint. imagePath is the rectified
+        // front at this point — exactly the front view the projection overlays.
+        // Keep the character-only gate: for non-character the source is a 3/4
+        // ISO view that would not overlay a front projection, so reprojecting
+        // there would misalign. The script self-guardrails (copy input->output)
+        // on any misalignment/low-coverage, so it can never ship a worse face.
+        const runFaceFix = (next) => (trellis2FaceFix && assetType === 'character') ? runStep('face', FACE_SCRIPT, ['--source', imagePath], 240000, next) : next();
         const runUpscale = (next) => trellis2UltraHD  ? runStep('8k',      UPSCALE_SCRIPT, ['--scale', '2', '--tile', '512'],     600000, next) : next();
 
         runRefine(() => runSmooth(() => runFaceFix(() => runUpscale(finishAndResolve))));
