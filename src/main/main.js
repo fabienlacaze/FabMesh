@@ -5974,7 +5974,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         // option improves without wrecking the AI face. If the mask can't be
         // built, texture_refine SKIPS the refine rather than damage the face.
         const _refineArgs = ['--strength', '0.22', '--controlnet_tile'];
-        if (assetType === 'character' || assetType === 'creature') _refineArgs.push('--protect-face');
+        if (['character', 'creature', 'other_living'].includes(assetType)) _refineArgs.push('--protect-face');
         const runRefine  = (next) => trellis2Refine   ? runStep('refine',  REFINE_SCRIPT,  _refineArgs, 240000, next) : next();
         const runSmooth  = (next) => trellis2Smooth   ? runStep('smooth',  SMOOTH_SCRIPT,  [],                                    120000, next) : next();
         // Face-fix is a GENERATIVE SDXL repaint — gate it to humanoid characters

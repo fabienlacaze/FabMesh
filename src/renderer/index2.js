@@ -1549,14 +1549,14 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-face-fix':     null,
   },
   // Per-category "Other …" types mirror their category's checkbox profile.
-  other_living: {   // like creature
+  other_living: {   // like creature (faces possible -> same face-safety as character)
     'ws-trellis2-rectify':      true,
     'ws-trellis2-smooth':       false,
-    'ws-trellis2-refine':       true,
+    'ws-trellis2-refine':       true,   // safe: main.js passes --protect-face for other_living
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,
     'ws-trellis2-ultra-hd':     true,
-    'ws-trellis2-face-fix':     true,
+    'ws-trellis2-face-fix':     false,  // OFF: generative face repaint wrecks identity
   },
   other_vehicle: {  // like vehicle (refine OFF on smooth surfaces)
     'ws-trellis2-rectify':      true,
