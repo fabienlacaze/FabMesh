@@ -1447,20 +1447,25 @@ const ASSET_OPTIONS_PROFILE = {
   character: {
     'ws-trellis2-rectify':      true,   // strict front T-pose
     'ws-trellis2-smooth':       false,  // skin grain is fine
-    'ws-trellis2-refine':       true,   // skin pores, hair detail
+    // OFF by default: 'refine' img2img's the WHOLE 4096 atlas incl. the face UV
+    // island (no face mask yet) -> hallucinates runes/blotches on AI faces.
+    // Re-enable once texture_refine.py gets --protect-mask (opt-in meanwhile).
+    'ws-trellis2-refine':       false,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // face detail matters
     'ws-trellis2-ultra-hd':     true,
-    'ws-trellis2-face-fix':     true,
+    // OFF by default: 'face-fix' is a GENERATIVE SDXL repaint of the face ->
+    // wrecks stylized/AI identity even when there's no artifact. Opt-in only.
+    'ws-trellis2-face-fix':     false,
   },
   creature: {
     'ws-trellis2-rectify':      true,
     'ws-trellis2-smooth':       false,  // fur, scales
-    'ws-trellis2-refine':       true,
+    'ws-trellis2-refine':       false,  // OFF: same face-destroying whole-atlas img2img as character
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // creature faces too
     'ws-trellis2-ultra-hd':     true,
-    'ws-trellis2-face-fix':     true,
+    'ws-trellis2-face-fix':     false,  // OFF: generative face repaint wrecks identity (see character)
   },
   insect: {
     'ws-trellis2-rectify':      false,  // the 3/4 iso image IS the reference; do NOT re-rectify to a front view (head-on breaks insect meshes — no depth)

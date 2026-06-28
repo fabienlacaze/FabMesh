@@ -5970,7 +5970,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         // defaults already turn it OFF for smooth surfaces (vehicles/icons).
         const runRefine  = (next) => trellis2Refine   ? runStep('refine',  REFINE_SCRIPT,  ['--strength', '0.22', '--controlnet_tile'], 240000, next) : next();
         const runSmooth  = (next) => trellis2Smooth   ? runStep('smooth',  SMOOTH_SCRIPT,  [],                                    120000, next) : next();
-        const runFaceFix = (next) => trellis2FaceFix  ? runStep('face',    FACE_SCRIPT,    ['--strength', '0.45'],                240000, next) : next();
+        // Face-fix is a GENERATIVE SDXL repaint — gate it to humanoid characters
+        // only and cap strength (0.45 invented eyes/skin/runes). Off by default in
+        // the asset profile; this is the safety net when the user manually enables it.
+        const runFaceFix = (next) => (trellis2FaceFix && assetType === 'character') ? runStep('face', FACE_SCRIPT, ['--strength', '0.20'], 240000, next) : next();
         const runUpscale = (next) => trellis2UltraHD  ? runStep('8k',      UPSCALE_SCRIPT, ['--scale', '2', '--tile', '512'],     600000, next) : next();
 
         runRefine(() => runSmooth(() => runFaceFix(() => runUpscale(finishAndResolve))));

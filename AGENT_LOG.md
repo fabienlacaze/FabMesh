@@ -1,5 +1,24 @@
 # FabMesh Agent Log
 
+## 2026-06-28 (Options texture payantes détruisaient le visage — diagnostic + Tier 1)
+
+- Plainte produit : un perso généré avec "Affinage des détails" + "Correction du visage" cochés
+  sort avec le VISAGE détruit (taches rouges/distorsion) — inacceptable pour un produit payant
+  (le profil `character` activait LES DEUX par défaut). Workflow fix-paid-texture-options (6
+  agents) a tracé la cause :
+  - "Affinage des détails" (ws-trellis2-refine) → scripts/texture_refine.py img2img TOUTES les
+    tuiles du 4096 atlas, visage compris, SANS masque → ControlNet-Tile hallucine sur la peau
+    plate du visage. DESTRUCTEUR PRINCIPAL.
+  - "Correction du visage" (ws-trellis2-face-fix) → scripts/face_inpaint_atlas.py = inpaint SDXL
+    GÉNÉRATIF à --strength 0.45, masque Haar grossier, prompt "photoreal humain" → efface
+    l'identité stylisée. 2ᵉ destructeur. (Le head-freeze de detail_synth.py est sur un AUTRE
+    chemin — le bouton "Détail++" — donc ne protégeait pas la génération.)
+- TIER 1 (cette commit, sans GPU) : profils `character`+`creature` → refine:false + face-fix:false
+  par défaut ; runFaceFix gaté à character + strength 0.45→0.20.
+- TIER 2 à venir : texture_refine.py --protect-mask (protège l'îlot UV du visage → affine le corps
+  sans toucher le visage) ; relabel honnête (i18n) ; Face-fix "expérimental". Verdicts workflow :
+  fixWillProtectFace + fixWillImproveBody = true (high).
+
 ## 2026-06-27 (Cloud: port du "lineage jump" desktop → MyFabmesh.AI)
 
 - Porté la feature "lineage jump" du desktop (src/renderer/index2.js + styles) vers le
