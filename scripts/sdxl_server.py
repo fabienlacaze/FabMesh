@@ -239,6 +239,7 @@ def load_img2img():
             from diffusers import AutoencoderKL
             pipe.vae = AutoencoderKL.from_pretrained(
                 "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+            pipe.vae.config.force_upcast = False  # fp16-fix VAE is fp16-stable; no fp32 upcast (fixes Half vs float)
         except Exception as _ve:
             log(f"fp16-fix VAE unavailable ({_ve}); using force_upcast fallback")
             try:
@@ -321,6 +322,7 @@ def load_inpaint():
                 from diffusers import AutoencoderKL
                 pipe.vae = AutoencoderKL.from_pretrained(
                     "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+                pipe.vae.config.force_upcast = False  # fp16-fix VAE is fp16-stable; no fp32 upcast (fixes Half vs float)
             except Exception as _ve:
                 log(f"inpaint fp16-fix VAE unavailable ({_ve})")
                 try:
@@ -380,6 +382,7 @@ def load_controlnet_tile():
             from diffusers import AutoencoderKL
             pipe.vae = AutoencoderKL.from_pretrained(
                 "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+            pipe.vae.config.force_upcast = False  # fp16-fix VAE is fp16-stable; no fp32 upcast (fixes Half vs float)
         except Exception as _ve:
             log(f"tile fp16-fix VAE unavailable ({_ve})")
             try:
@@ -455,6 +458,7 @@ def load_controlnet_geo():
             from diffusers import AutoencoderKL
             pipe.vae = AutoencoderKL.from_pretrained(
                 "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+            pipe.vae.config.force_upcast = False  # fp16-fix VAE is fp16-stable; no fp32 upcast (fixes Half vs float)
         except Exception as _ve:
             log(f"geo fp16-fix VAE unavailable ({_ve})")
             try:

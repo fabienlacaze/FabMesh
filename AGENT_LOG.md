@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Bug gén image : VAE « Half vs float » — force_upcast=False sur le VAE fp16-fix)
+
+- Sur le PC d'un ami (clean install, venv torch 2.7), la génération d'image plante :
+  `RuntimeError: Input type (struct c10::Half) and bias type (float) should be the same` — dans le décodage VAE.
+- Cause : `sdxl_server.py` charge le VAE fp16-fix (madebyollin, stable en fp16) dans ses 4 pipelines
+  (img2img/inpaint/+2) mais ne désactive PAS `force_upcast` → diffusers upcast le VAE en fp32 sans caster
+  les latents (fp16) → mismatch. Le dev ne le voit pas (son torch/diffusers diffère de l'env installé chez l'user).
+- Fix : `pipe.vae.config.force_upcast = False` juste après chaque chargement du VAE fp16-fix (4 sites, chemin
+  SUCCÈS ; le fallback garde `force_upcast=True` pour le VAE natif). Décodage pur fp16 → plus de danse de dtype.
+  NON testable côté dev (env diffère) → re-test sur le PC de l'ami après rebuild.
+- NOTE : `local_juggernaut_bridge.py` (engine local-flux/lightning) a un pattern similaire (`upcast_vae()` manuel
+  → VAE fp32 + latents fp16) — à corriger SI l'ami a utilisé cet engine (défaut = RealVisXL = sdxl_server.py).
+
 ## 2026-06-30 (UI fixes : dialog quit — hauteur des options + faux « 1 job en cours »)
 
 - Dialog « Jobs are running » (`modal-quit-jobs`, index2.html) : les 4 boutons héritaient `display:flex`
