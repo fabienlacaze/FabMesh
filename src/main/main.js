@@ -6946,6 +6946,41 @@ function _embeddedPython() {
   return 'python';  // dev fallback
 }
 
+// One-click diagnostics export: bundles the logs + system info into a
+// single .txt on the user's Desktop so they (or a friend testing the
+// app) can send it to support without hunting through %APPDATA%.
+ipcMain.handle('export-diagnostics', async () => {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
+    const out = path.join(app.getPath('desktop'), `MyFabmesh-diagnostics-${stamp}.txt`);
+    const tail = (name, max = 500 * 1024) => {
+      try {
+        const b = fs.readFileSync(path.join(LOGS_DIR, name));
+        return b.length > max
+          ? '...(truncated, last ' + Math.round(max / 1024) + ' KB)...\n' + b.slice(b.length - max).toString('utf8')
+          : b.toString('utf8');
+      } catch (e) { return '(not available: ' + (e && e.message) + ')'; }
+    };
+    const body = [
+      'MyFabmesh.AI diagnostics',
+      'generated : ' + new Date().toISOString(),
+      'version   : ' + app.getVersion() + '   packaged: ' + app.isPackaged,
+      'os        : ' + process.platform + ' ' + os.release() + ' ' + process.arch,
+      'dataBase  : ' + DATA_BASE,
+      'aiPython  : exists=' + fs.existsSync(path.join(AI_PYTHON_DIR, 'python.exe')) + '  torchReady=' + _aiPythonReady(),
+      '',
+      '===== fabmesh.log =====', tail('fabmesh.log'),
+      '', '===== wizard.log =====', tail('wizard.log'),
+      '', '===== last_error.log =====', tail('last_error.log'),
+    ].join('\n');
+    fs.writeFileSync(out, body, 'utf8');
+    try { shell.showItemInFolder(out); } catch (_) {}
+    return { ok: true, path: out };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+});
+
 // Interpreter for AI scripts (need torch/diffusers). Resolution order:
 //  - packaged + provisioned -> the writable copy under userData/python
 //  - dev                    -> system 'python' (the dev already has torch)

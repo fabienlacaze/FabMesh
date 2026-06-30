@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Support : bouton « Export logs » — diagnostics 1-clic vers le Bureau)
+
+- IPC `export-diagnostics` (main.js) : bundle `fabmesh.log` + `wizard.log` + `last_error.log` (tail 500 KB
+  chacun) + version/OS/dataBase/torchReady dans un seul `MyFabmesh-diagnostics-<ts>.txt` sur le Bureau,
+  puis `shell.showItemInFolder`. Exposé en `wizardAPI.exportDiagnostics` + `meshyAPI.exportDiagnostics`.
+- Bouton **« Export logs »** dans le topbar du wizard (wizard.html + handler wizard.js). Permet à un user /
+  un ami testeur d'envoyer les logs en 1 clic sans fouiller `%APPDATA%` — essentiel pour le support à
+  distance (cas concret : install bloquée sur le PC d'un ami, impossible d'aller chercher les logs à la main).
+
 ## 2026-06-30 (Packaging polish : NSIS oneClick = wizard branché unique, fix RAM=0, wording Welcome)
 
 - **NSIS `oneClick: true`** : l'installeur Windows multi-pages (Back/Next/Cancel) devient une install

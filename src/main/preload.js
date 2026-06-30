@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('wizardAPI', {
   cancel: () => ipcRenderer.invoke('wizard:cancel'),
   installDeps: () => ipcRenderer.invoke('wizard:install-deps'),
   onInstallProgress: (cb) => ipcRenderer.on('wizard:install-progress', (_e, p) => cb(p)),
+  exportDiagnostics: () => ipcRenderer.invoke('export-diagnostics'),
 });
 
 // ----------------------------------------------------------
@@ -156,6 +157,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   onAppCloseRequested: (cb) => ipcRenderer.on('app-close-requested', () => cb()),
   confirmAppClose: (opts) => ipcRenderer.send('app-close-confirmed', opts || {}),
   openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
+  exportDiagnostics: () => ipcRenderer.invoke('export-diagnostics'),
   calibRun: (opts) => ipcRenderer.invoke('calib-run', opts || {}),
   calibLastReport: () => ipcRenderer.invoke('calib-last-report'),
   calibOpenReport: (opts) => ipcRenderer.invoke('calib-open-report', opts || {}),

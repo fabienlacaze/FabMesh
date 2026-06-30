@@ -346,6 +346,25 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   await window.wizardAPI.completeSetup({ mode: chosenMode, hw: hwReport });
 });
 
+// Export logs button — one click → diagnostics .txt on the Desktop,
+// so a user (or a friend testing the app) can send it to support
+// instead of hunting through %APPDATA%.
+(() => {
+  const btn = document.getElementById('wiz-export-logs');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Exporting…';
+    let label = 'Export failed';
+    try {
+      const r = await window.wizardAPI.exportDiagnostics();
+      if (r && r.ok) label = 'Saved to Desktop ✓';
+    } catch (_) {}
+    btn.textContent = label;
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3500);
+  });
+})();
+
 // Brand in the topbar = link to the public website.
 (() => {
   const brand = document.querySelector('#topbar .brand');
