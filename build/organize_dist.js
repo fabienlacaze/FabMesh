@@ -21,10 +21,25 @@ if (!fs.existsSync(OUT)) {
 fs.mkdirSync(EXE_DIR, { recursive: true });
 fs.mkdirSync(STORE_DIR, { recursive: true });
 
-let toExe = 0, toStore = 0;
+// Build intermediates that are regenerated every build — delete them so the
+// channel folders only hold real deliverables (.exe / .appx) + the small
+// auto-update files (latest.yml, *.blockmap). win-unpacked & nsis staging
+// dirs are directories; builder-debug.yml is electron-builder debug noise.
+function _isIntermediate(name, isDir) {
+  return isDir || name === 'builder-debug.yml';
+}
+
+let toExe = 0, toStore = 0, removed = 0;
 for (const name of fs.readdirSync(OUT)) {
   if (KEEP.has(name)) continue;
   const src = path.join(OUT, name);
+  let isDir = false;
+  try { isDir = fs.statSync(src).isDirectory(); } catch (_) { continue; }
+  if (_isIntermediate(name, isDir)) {
+    try { fs.rmSync(src, { recursive: true, force: true }); removed++; }
+    catch (e) { console.warn('[organize-dist] kept ' + name + ': ' + (e && e.message)); }
+    continue;
+  }
   const isAppx = name.toLowerCase().endsWith('.appx');
   const target = path.join(isAppx ? STORE_DIR : EXE_DIR, name);
   try {
@@ -35,4 +50,12 @@ for (const name of fs.readdirSync(OUT)) {
     console.warn('[organize-dist] could not move ' + name + ': ' + (e && e.message));
   }
 }
-console.log('[organize-dist] InstallEXE: +' + toExe + ' | MicrosoftStore: +' + toStore);
+// Also sweep intermediates the user may have moved INTO InstallEXE by hand.
+try {
+  for (const name of fs.readdirSync(EXE_DIR)) {
+    const p = path.join(EXE_DIR, name);
+    let isDir = false; try { isDir = fs.statSync(p).isDirectory(); } catch (_) { continue; }
+    if (_isIntermediate(name, isDir)) { try { fs.rmSync(p, { recursive: true, force: true }); removed++; } catch (_) {} }
+  }
+} catch (_) {}
+console.log('[organize-dist] InstallEXE: +' + toExe + ' | MicrosoftStore: +' + toStore + ' | removed ' + removed + ' intermediate(s)');

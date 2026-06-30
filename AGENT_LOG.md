@@ -4,8 +4,10 @@
 
 - electron-builder sort tout dans `dist/installer/` (directories.output) ; un rangement manuel est écrasé
   au build suivant. Ajout `build/organize_dist.js` (post-build) : trie `*.appx` → `MicrosoftStore/`, le reste
-  (.exe, .blockmap, latest.yml, win-unpacked…) → `InstallEXE/`. Idempotent + safe à re-run. Câblé dans
-  `build:installer` / `build:msix` / `build:all` (`&& node build/organize_dist.js`). Testé (fichiers factices) : OK.
+  livrables (.exe + .blockmap + latest.yml) → `InstallEXE/`, et SUPPRIME les intermédiaires régénérés à
+  chaque build (win-unpacked, dossiers de staging nsis, builder-debug.yml) — y compris ceux déplacés à la
+  main dans InstallEXE. Donc InstallEXE = juste l'installeur + les fichiers d'auto-update. Idempotent.
+  Câblé dans `build:installer` / `build:msix` / `build:all`. Testé : InstallEXE nettoyé (3 intermédiaires supprimés).
 
 ## 2026-06-30 (Feature : emplacement des données configurable — modèles + venv hors C:)
 
