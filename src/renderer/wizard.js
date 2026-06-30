@@ -101,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Opening the cloud URL relies on the main process — we just send
       // an IPC. For now, fall back to window.open if wizardAPI doesn't
       // expose openExternal yet.
-      const url = 'https://fabmesh.com/cloud';
+      const url = 'https://myfabmesh-cloud.fabien65400.workers.dev';
       if (window.wizardAPI && window.wizardAPI.openExternal) {
         window.wizardAPI.openExternal(url);
       } else {
