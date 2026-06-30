@@ -220,6 +220,37 @@ async function startDownload() {
     return;
   }
 
+  // ---- Phase 1: provision the AI engine (torch/diffusers) into a
+  // writable per-user Python env. REQUIRED before the model download,
+  // which itself needs huggingface_hub installed here.
+  list.innerHTML = `
+    <div class="wiz-dl-row in-progress" data-id="__aienv">
+      <span class="name">Installing AI engine (PyTorch, diffusers)…</span>
+      <span class="timer" id="aienv-step"></span>
+      <span class="size">~5 GB</span>
+      <div class="bar"><div class="bar-fill"></div></div>
+    </div>`;
+  window.wizardAPI.onInstallProgress((p) => {
+    const row = document.querySelector('.wiz-dl-row[data-id="__aienv"]');
+    if (!row) return;
+    if (typeof p.pct === 'number') row.querySelector('.bar-fill').style.width = p.pct + '%';
+    const step = document.getElementById('aienv-step');
+    if (step) step.textContent = p.current ? '' : (p.msg || p.step || '');
+    if (p.done) { row.classList.add('done'); row.classList.remove('in-progress'); }
+  });
+  try {
+    await window.wizardAPI.installDeps();
+  } catch (e) {
+    list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">AI engine install failed: ${e.message}. <a href="#" id="retry-dl">Retry</a></span></div>`;
+    document.getElementById('retry-dl')?.addEventListener('click', () => {
+      initialized.delete('download');
+      startDownload();
+    });
+    return;
+  }
+
+  // ---- Phase 2: download the model weights.
+  list.innerHTML = '<div class="wiz-dl-row"><span class="name">Preparing model list…</span></div>';
   const plan = await window.wizardAPI.getDownloadPlan(chosenMode);
   list.innerHTML = '';
   for (const item of plan.items) {

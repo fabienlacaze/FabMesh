@@ -11,9 +11,11 @@
   pas de venv) puis pip-install torch/diffusers DANS la copie (writable) → plus d'EACCES.
 - Routage : 35 spawns `'python'` en dur → `_aiPython()` (dev-safe). `trellis2_native` (5860) →
   `app.isPackaged ? _aiPython() : external/.venv` (dev préservé). `node --check` OK, dev byte-identique.
-- RESTE Tier B 2/2 : câbler `wizard:install-deps` dans le flow wizard (étape avant download, renderer) ;
-  COMPLÉTER les listes de deps (`wizard_install_deps.py` n'installe pas kaolin/spconv/trellis2-specific —
-  torch 2.7 vs 2.8 requis par trellis2) ; test réel install ~5 GB sur un vrai package.
+- Tier B 2/2 : `wizard:install-deps` CÂBLÉ dans `startDownload()` (wizard.js) — Phase 1 install IA
+  (torch/diffusers dans la copie writable) → Phase 2 download modèles (qui a besoin de huggingface_hub).
+  Le flow wizard installe enfin les deps au 1er run.
+- RESTE (Tier B deps) : COMPLÉTER `wizard_install_deps.py` (n'installe pas kaolin/spconv/trellis2-specific ;
+  torch 2.7 vs 2.8 requis par trellis2_native) ; test réel de l'install ~5 GB sur un vrai package MSIX.
 
 ## 2026-06-30 (Packaging Store/MSIX — Tier A : B1 chemins scripts → SCRIPTS_DIR, B5 last_error.log → LOGS_DIR)
 
