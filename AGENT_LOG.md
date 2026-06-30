@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Fix release tooling : submit_appx.ps1 ne parsait pas sous PowerShell 5.1 — BOM UTF-8 manquant)
+
+- `scripts/submit_appx.ps1` (automation de soumission Microsoft Store via l'API Store) était
+  committé SANS BOM UTF-8 alors qu'il contient des em-dashes `—` (octets UTF-8 `e2 80 94`) dans
+  les messages d'erreur. PowerShell 5.1 lit un `.ps1` sans BOM en ANSI (Windows-1252) : l'octet
+  `0x94` devient `U+201D "`, un délimiteur de chaîne pour PowerShell → équilibre des guillemets
+  cassé → cascade « Missing argument / Missing closing '}' ». Le script ne parsait MÊME PAS →
+  l'automation n'avait jamais pu tourner depuis le commit `bf30a1e`.
+- FIX : BOM UTF-8 (`EF BB BF`) en tête. PS 5.1 lit alors le fichier en UTF-8, les em-dashes
+  restent intacts dans les strings, le script parse + tourne de bout en bout (Step 1 credentials →
+  Step 2 appx → Step 3 OAuth). Validé via `-DryRun`. Scan des autres `.ps1` (scripts/, build/) =
+  RAS, submit_appx.ps1 était le seul avec du non-ASCII.
+- Reste un blocker HORS CODE : `.env > MS_STORE_CLIENT_SECRET` est encore le placeholder
+  (« PAS… », 23 char) → OAuth renvoie 401. À remplir avec le vrai secret Azure AD (action user).
+
 ## 2026-06-28 (Face-fix REMPLACÉ : SDXL repaint → reprojection photo source, scripts/face_reproject.py)
 
 - L'autopsie a prouvé que `scripts/face_inpaint_atlas.py` est cassé par construction : SDXL est

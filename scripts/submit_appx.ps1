@@ -1,4 +1,4 @@
-# submit_appx.ps1
+﻿# submit_appx.ps1
 # Automated Microsoft Store submission for MyFabmesh.AI.
 # See docs/MS_STORE_AUTOMATION.md for the one-time Azure AD setup.
 #
