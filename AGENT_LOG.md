@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Packaging Store/MSIX — Tier B 1/2 : infra venv IA + routage interpréteur, dev-safe)
+
+- Constat (contre-analyse) : `python-embed` (23 MB) est NU + embeddable (pas de module `venv`) +
+  `wizard:install-deps` était code mort → torch jamais installé pour un end-user. Le python embarqué
+  est read-only sous MSIX. `python-embed` a `get-pip.py` + `import site` activé dans `._pth`.
+- Helpers : `AI_PYTHON_DIR = DATA_BASE/python` (writable) ; `_aiPython()` (packagé+provisionné → la
+  copie ; dev → `'python'` inchangé ; packagé pas prêt → embedded) ; `_aiPythonReady()` (torch présent ?).
+- `wizard:install-deps` RESSUSCITÉ : copie `python-embed` → `AI_PYTHON_DIR` (`fs.cpSync` car embeddable =
+  pas de venv) puis pip-install torch/diffusers DANS la copie (writable) → plus d'EACCES.
+- Routage : 35 spawns `'python'` en dur → `_aiPython()` (dev-safe). `trellis2_native` (5860) →
+  `app.isPackaged ? _aiPython() : external/.venv` (dev préservé). `node --check` OK, dev byte-identique.
+- RESTE Tier B 2/2 : câbler `wizard:install-deps` dans le flow wizard (étape avant download, renderer) ;
+  COMPLÉTER les listes de deps (`wizard_install_deps.py` n'installe pas kaolin/spconv/trellis2-specific —
+  torch 2.7 vs 2.8 requis par trellis2) ; test réel install ~5 GB sur un vrai package.
+
 ## 2026-06-30 (Packaging Store/MSIX — Tier A : B1 chemins scripts → SCRIPTS_DIR, B5 last_error.log → LOGS_DIR)
 
 - Audit MSIX (workflow, 6 agents) + contre-analyse adversariale (workflow, 10 agents) : l'app ne

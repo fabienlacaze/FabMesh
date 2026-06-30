@@ -497,6 +497,10 @@ const IMAGES_DIR   = path.join(DATA_BASE, 'images');
 const HISTORY_DIR  = path.join(DATA_BASE, 'history');
 const LOGS_DIR     = path.join(DATA_BASE, 'logs');
 const CONFIG_PATH  = path.join(DATA_BASE, 'config.json');
+// Writable AI Python env: resources/python-embed is READ-ONLY under
+// MSIX, so on first run we copy it here and pip-install torch/diffusers
+// into the copy. AI scripts run from this interpreter (see _aiPython()).
+const AI_PYTHON_DIR = path.join(DATA_BASE, 'python');
 
 // SCRIPTS_DIR is READ-ONLY: in prod the .py files are copied to
 // process.resourcesPath/scripts by electron-builder extraResources.
@@ -762,7 +766,7 @@ function startSdxlServer() {
     const sdxlEnv = { ...process.env };
     if (sdxlEnv.FABMESH_VRAM_FRACTION) { /* already set */ }
     else { sdxlEnv.FABMESH_VRAM_FRACTION = '0.95'; }
-    sdxlProc = require('child_process').spawn('python', [serverScript], {
+    sdxlProc = require('child_process').spawn(_aiPython(), [serverScript], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: sdxlEnv
@@ -1185,7 +1189,7 @@ async function handleGenerateImages(params) {
         ? fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f) && !f.startsWith('.'))
         : []
     );
-    const proc = execFile('python', [bridgeScript, params.prompt, imagesDir, count, steps], {
+    const proc = execFile(_aiPython(), [bridgeScript, params.prompt, imagesDir, count, steps], {
       timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1', FABMESH_VRAM_FRACTION: process.env.FABMESH_VRAM_FRACTION || '0.95' },
     }, (error, stdout, stderr) => {
@@ -1227,7 +1231,7 @@ async function handleImageTo3D(params) {
   const subdiv = String(params.subdivide || 0);
 
   return new Promise((resolve) => {
-    const proc = execFile('python', [bridgeScript, imagePath, meshPath, texRes, verts, remesh, subdiv], {
+    const proc = execFile(_aiPython(), [bridgeScript, imagePath, meshPath, texRes, verts, remesh, subdiv], {
       timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1', FABMESH_VRAM_FRACTION: process.env.FABMESH_VRAM_FRACTION || '0.95' },
     }, (error, stdout, stderr) => {
@@ -1289,7 +1293,7 @@ async function handleAutoRigAI(params) {
 
   const runStep = (label, args) => new Promise((resolve) => {
     safeSend('ai3d-progress', `[MCP-${label}] Starting...`);
-    const proc = execFile('python', args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const proc = execFile(_aiPython(), args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       resolve({ error, stdout, stderr });
     });
     proc.stdout?.on('data', d => safeSend('ai3d-progress', `[MCP-${label}] ${d.toString()}`));
@@ -1488,7 +1492,7 @@ out.save(sys.argv[2])
 print("OK")
 `;
   return new Promise((resolve) => {
-    execFile('python', ['-c', pyCode, imagePath, outPath],
+    execFile(_aiPython(), ['-c', pyCode, imagePath, outPath],
         { timeout: 300000 }, (error, stdout, stderr) => {
       if (error || !fs.existsSync(outPath)) {
         const st = (stderr || '').trim();
@@ -2204,7 +2208,7 @@ except Exception as e:
     print(json.dumps({"nsfw": ratio > 0.35, "score": round(ratio, 3)}))
 `;
   return new Promise((resolve) => {
-    execFile('python', ['-c', pyCode, imagePath],
+    execFile(_aiPython(), ['-c', pyCode, imagePath],
         { timeout: 30000 }, (error, stdout) => {
       if (error) { resolve({ nsfw: false, score: 0 }); return; }
       try {
@@ -2249,7 +2253,7 @@ ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
   const scanScript = path.join(SCRIPTS_DIR, 'nsfw_scan.py');
 
   return new Promise((resolve) => {
-    execFile('python', [scanScript, tmpFile, outFile], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(_aiPython(), [scanScript, tmpFile, outFile], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       try { fs.unlinkSync(tmpFile); } catch(_) {}
       if (error) { log.error('main', `NSFW scan failed: ${stderr?.slice(-200) || error.message}`); resolve(decided); return; }
       if (!fs.existsSync(outFile)) { resolve(decided); return; }
@@ -2693,7 +2697,7 @@ ipcMain.handle('calib-run', async (event, { skipSf3d = false, env = {}, tag = ''
     args.push('--env', `${k}=${v}`);
   }
   return new Promise((resolve) => {
-    const proc = execFile('python', args, {
+    const proc = execFile(_aiPython(), args, {
       timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
       cwd: path.join(__dirname, '..', '..'),
@@ -2788,7 +2792,7 @@ ipcMain.handle('calib-v3', async (event, opts = {}) => {
   if (opts.skipStage4) args.push('--skip-stage4');
   return new Promise((resolve) => {
     _calibCancelFlag = false;
-    const proc = execFile('python', args, {
+    const proc = execFile(_aiPython(), args, {
       timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
       cwd: path.join(__dirname, '..', '..'),
@@ -2958,7 +2962,7 @@ ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
     const script = path.join(SCRIPTS_DIR, 'image_adjust_bridge.py');
 
     return await new Promise((resolve) => {
-      const proc = execFile('python', [script, operation, imagePath, newImagePath], {
+      const proc = execFile(_aiPython(), [script, operation, imagePath, newImagePath], {
         timeout: 60000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
@@ -3011,7 +3015,7 @@ ipcMain.handle('analyze-skeleton', async (event, { templateId }) => {
     const script = path.join(SCRIPTS_DIR, 'analyze_skeleton.py');
 
     return await new Promise((resolve) => {
-      const proc = execFile('python', [script, fbxPath, cachePath, config.blenderPath], {
+      const proc = execFile(_aiPython(), [script, fbxPath, cachePath, config.blenderPath], {
         timeout: 120000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
@@ -3373,7 +3377,7 @@ ipcMain.handle('animate-ai', async (event, { rigPath, animType, prompt, engine, 
       args.push('--prompt', prompt.slice(0, 400));
     }
     const { spawn } = require('child_process');
-    const proc = spawn('python', args, { cwd: path.dirname(bridge) });
+    const proc = spawn(_aiPython(), args, { cwd: path.dirname(bridge) });
     let stderrBuf = '';
     let lastStdoutJson = null;
     proc.stdout?.on('data', (d) => {
@@ -3476,7 +3480,7 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) 
     }
 
     return await new Promise((resolve) => {
-      const proc = execFile('python', args, {
+      const proc = execFile(_aiPython(), args, {
         timeout: 300000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
@@ -4072,7 +4076,7 @@ ipcMain.handle('detail-synth', async (event, { meshPath, jobId, strength, prompt
     // (NOT the trellis venv), same as the mesh-tool handler.
     const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
     return await new Promise((resolve) => {
-      const proc = execFile('python', [
+      const proc = execFile(_aiPython(), [
         DETAIL_SCRIPT, meshPath, outPath,
         '--strength', String(strength != null ? strength : 0.5),
         '--texture-size', String(textureSize != null ? textureSize : 4096),
@@ -4164,7 +4168,7 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
 
     const script = path.join(SCRIPTS_DIR, 'local_inpaint_bridge.py');
     return new Promise((resolve) => {
-      const proc = execFile('python', [script, imagePath, targetText, prompt || '', newImagePath, String(dilate || 15)], {
+      const proc = execFile(_aiPython(), [script, imagePath, targetText, prompt || '', newImagePath, String(dilate || 15)], {
         timeout: 300000, maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) {
@@ -4397,7 +4401,7 @@ print("OK")`,
     if (!script) return { success: false, error: `Unknown operation: ${operation}` };
 
     return await new Promise((resolve) => {
-      execFile('python', ['-c', script], { timeout: 120000 }, (error, stdout, stderr) => {
+      execFile(_aiPython(), ['-c', script], { timeout: 120000 }, (error, stdout, stderr) => {
         if (error || !fs.existsSync(outPath)) {
           resolve({ success: false, error: (error?.message || stderr || 'failed').slice(-300) });
         } else {
@@ -4432,7 +4436,7 @@ ipcMain.handle('remove-background', async (event, imagePath) => {
     // pressure (a heavy job paging to disk) onnxruntime inference can crawl and
     // the old 60s timeout KILLED it — the user then only saw an opaque "Command
     // failed". The wider timeout + surfacing real stderr makes it diagnosable.
-    const proc = execFile('python', [script, newImagePath], { timeout: 300000 }, (error, stdout, stderr) => {
+    const proc = execFile(_aiPython(), [script, newImagePath], { timeout: 300000 }, (error, stdout, stderr) => {
       if (error) {
         cleanup();
         const st = (stderr || '').trim();
@@ -4571,7 +4575,7 @@ function startTranslateServer() {
   const scriptT = path.join(SCRIPTS_DIR, 'translate_server.py');
   if (!fs.existsSync(scriptT)) return;
   try {
-    translateProc = require('child_process').spawn('python', [scriptT], {
+    translateProc = require('child_process').spawn(_aiPython(), [scriptT], {
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, CUDA_VISIBLE_DEVICES: '', CT2_FORCE_CPU: '1', FABMESH_TRANSLATE_PORT: String(TRANSLATE_PORT) },
     });
@@ -4625,7 +4629,7 @@ function startNsfwServer() {
   const scriptN = path.join(SCRIPTS_DIR, 'nsfw_server.py');
   if (!fs.existsSync(scriptN)) return;
   try {
-    nsfwProc = require('child_process').spawn('python', [scriptN], {
+    nsfwProc = require('child_process').spawn(_aiPython(), [scriptN], {
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, CUDA_VISIBLE_DEVICES: '', FABMESH_NSFW_PORT: String(NSFW_PORT) },
     });
@@ -5293,7 +5297,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 
       try {
         await new Promise((resolve, reject) => {
-          execFile('python', args, { timeout: 1800000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+          execFile(_aiPython(), args, { timeout: 1800000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
             if (error) { reject({ error: error.message, stdout, stderr }); return; }
             if (!fs.existsSync(meshPath)) { reject({ error: 'Mesh not created' }); return; }
             resolve();
@@ -5383,7 +5387,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
           : []
       );
       const result = await new Promise((resolve, reject) => {
-        const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4), String(stepsClamped)], {
+        const proc = execFile(_aiPython(), [bridgeScript, prompt, imagesDir, String(numImages || 4), String(stepsClamped)], {
           timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
           env: turbo ? { ...childEnv, FABMESH_TURBO: '1' } : childEnv,
         }, (error, stdout, stderr) => {
@@ -5857,9 +5861,14 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     // TRELLIS-2 native needs torch 2.8 + flash_attn + kaolin, which only
     // live in external/TRELLIS2_win/.venv. Other engines use the system
     // Python (torch 2.7.1). Pick the right interpreter per engine.
-    const _pythonExe = (engine === 'trellis2_native')
-      ? path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe')
-      : 'python';
+    // Packaged: every engine runs on the provisioned AI venv (_aiPython).
+    // Dev: keep the per-engine behavior — trellis2_native uses its own
+    // external/.venv (torch 2.8 + kaolin), others use the dev's python.
+    const _pythonExe = app.isPackaged
+      ? _aiPython()
+      : ((engine === 'trellis2_native')
+          ? path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe')
+          : 'python');
     const result = await new Promise((resolve, reject) => {
       let stdoutBuf = '';
       let stderrBuf = '';
@@ -6107,7 +6116,7 @@ ipcMain.handle('image-to-3d-trellis', async (event, { imagePath, outputName, tex
     const bridgeScript = path.join(SCRIPTS_DIR, 'trellis_bridge.py');
 
     const result = await new Promise((resolve, reject) => {
-      const proc = execFile('python', [bridgeScript, imagePath, meshPath, String(textureSize || 1024)], {
+      const proc = execFile(_aiPython(), [bridgeScript, imagePath, meshPath, String(textureSize || 1024)], {
         timeout: 1800000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
@@ -6135,7 +6144,7 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
     const bridgeScript = path.join(SCRIPTS_DIR, 'trellis_bridge.py');
 
     const result = await new Promise((resolve, reject) => {
-      execFile('python', [bridgeScript, imagePath, meshPath], {
+      execFile(_aiPython(), [bridgeScript, imagePath, meshPath], {
         timeout: 300000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
@@ -6232,7 +6241,7 @@ ipcMain.handle('generate-multiview', async (_event, opts) => {
       FABMESH_MV_UPSCALE: upscaleFlag,
     };
     log.info('multiview', `options: harmonize=${harmonizeFlag} upscale=${upscaleFlag}`);
-    const proc = execFile('python', [script, imagePath, outDir], {
+    const proc = execFile(_aiPython(), [script, imagePath, outDir], {
       timeout: 900000, maxBuffer: 10 * 1024 * 1024,
       env: mvEnv
     }, (error, stdout, stderr) => {
@@ -6346,7 +6355,7 @@ ipcMain.handle('mesh:render-front', async (_e, { meshPath } = {}) => {
   return new Promise((resolve) => {
     // Distinct dummy output so the script's in==out guard passes; --render-only
     // exits before any GLB is written.
-    execFile('python', [script, meshPath, meshPath + '.ignore', '--render-only', out],
+    execFile(_aiPython(), [script, meshPath, meshPath + '.ignore', '--render-only', out],
       { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error) => {
         if (error || !fs.existsSync(out)) { resolve({ ok: false, error: (error && error.message) || 'render failed' }); return; }
         try {
@@ -6366,7 +6375,7 @@ ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, 
   const base = path.basename(meshPath, path.extname(meshPath));
   const out = path.join(path.dirname(meshPath), `${base}_retex_${Date.now()}.glb`);
   return new Promise((resolve) => {
-    execFile('python', [script, meshPath, out,
+    execFile(_aiPython(), [script, meshPath, out,
       (uvMask ? '--uv-mask' : '--mask'), maskPath, '--prompt', String(prompt || 'detailed texture'),
       '--strength', String(strength || 0.8)],
       { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout) => {
@@ -6397,7 +6406,7 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
     // Force UTF-8 stdio so a non-ASCII log line (accent, arrow, …) can't
     // crash the script with a cp1252 UnicodeEncodeError on Windows.
     const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
-    execFile('python', args, { timeout: 900000, maxBuffer: 10 * 1024 * 1024, env }, (error, stdout, stderr) => {
+    execFile(_aiPython(), args, { timeout: 900000, maxBuffer: 10 * 1024 * 1024, env }, (error, stdout, stderr) => {
       if (stdout) log.info('mesh-tool', stdout.trim());
       if (error) {
         log.error('mesh-tool', error.message);
@@ -6440,7 +6449,7 @@ ipcMain.handle('material-adjust', async (_event, {
     '--hue-shift',  String(hue_shift ?? 0),
   ];
   return new Promise((resolve) => {
-    execFile('python', args, {
+    execFile(_aiPython(), args, {
       timeout: 120000, maxBuffer: 10 * 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (stdout) log.info('material-adjust', stdout.trim());
@@ -6474,7 +6483,7 @@ ipcMain.handle('caption-image', async (_event, { imagePath }) => {
   const script = path.join(SCRIPTS_DIR, 'caption_image.py');
   return new Promise((resolve) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
-    execFile('python', [script, imagePath], {
+    execFile(_aiPython(), [script, imagePath], {
       env, timeout: 180000, maxBuffer: 10 * 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (stdout) log.info('caption-image', stdout.trim().slice(-500));
@@ -6574,7 +6583,7 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
     if (sheetViews && [2, 4, 6].includes(Number(sheetViews))) {
       env.FABMESH_SHEET_VIEWS = String(sheetViews);
     }
-    execFile('python', args, {
+    execFile(_aiPython(), args, {
       env, timeout: 600000, maxBuffer: 50 * 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (stdout) log.info('generate-back-view', stdout.trim().slice(-2000));
@@ -6646,7 +6655,7 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
                                  'mesh_pre_transform.py');
     try {
       await new Promise((resolve, reject) => {
-        execFile('python', [preScript, meshPath, tmpPath,
+        execFile(_aiPython(), [preScript, meshPath, tmpPath,
                             String(translateX), String(translateY),
                             String(meshScale), String(translateZ)], {
           timeout: 60000, maxBuffer: 4 * 1024 * 1024,
@@ -6665,7 +6674,7 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
     }
   }
   return new Promise((resolve) => {
-    execFile('python', args, {
+    execFile(_aiPython(), args, {
       env, timeout: 300000, maxBuffer: 10 * 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (stdout) log.info('mesh:align-texture', stdout.trim().slice(-2000));
@@ -6785,7 +6794,7 @@ ipcMain.handle('create-project-from-mesh', (event, { projectName, meshPath, mesh
 ipcMain.handle('wizard:detect-hardware', async () => {
   const script = path.join(SCRIPTS_DIR, 'hw_detect.py');
   return new Promise((resolve, reject) => {
-    execFile('python', [script], { timeout: 30000 }, (err, stdout, stderr) => {
+    execFile(_aiPython(), [script], { timeout: 30000 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(stderr || err.message));
       try { resolve(JSON.parse(stdout.trim().split(/\r?\n/).pop())); }
       catch (e) { reject(new Error('cannot parse hw_detect output: ' + e.message)); }
@@ -6838,7 +6847,7 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
   // progress lines to our stdout listener.
   const script = path.join(SCRIPTS_DIR, 'wizard_download.py');
   return new Promise((resolve, reject) => {
-    const proc = execFile('python', [script, '--mode', mode], {
+    const proc = execFile(_aiPython(), [script, '--mode', mode], {
       timeout: 0, maxBuffer: 10 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     }, (err) => err ? reject(new Error(err.message)) : resolve({ ok: true }));
@@ -6869,7 +6878,7 @@ ipcMain.handle('wizard:final-test', async (event, mode) => {
     // streaming it live to the wizard — those leak internal model
     // identifiers and confuse the user. Only flush on failure.
     let stderrBuf = '';
-    const proc = execFile('python', [script, '--mode', mode], {
+    const proc = execFile(_aiPython(), [script, '--mode', mode], {
       timeout: 180000, maxBuffer: 5 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     }, (err) => {
@@ -6933,16 +6942,42 @@ function _embeddedPython() {
   if (fs.existsSync(devPath)) return devPath;
   return 'python';  // dev fallback
 }
-ipcMain.handle('wizard:get-python-exe', () => _embeddedPython());
 
-// Runs scripts/wizard_install_deps.py — pulls torch/flash_attn/kaolin
-// wheels from our CDN + diffusers/transformers/etc. from PyPI into the
-// embedded Python. Streams JSONL progress via wizard:install-progress.
+// Interpreter for AI scripts (need torch/diffusers). Resolution order:
+//  - packaged + provisioned -> the writable copy under userData/python
+//  - dev                    -> system 'python' (the dev already has torch)
+//  - packaged, not set up    -> embedded (bare; AI scripts must wait for
+//    first-run setup to finish before they are invoked)
+function _aiPython() {
+  const provisioned = path.join(AI_PYTHON_DIR, 'python.exe');
+  if (fs.existsSync(provisioned)) return provisioned;
+  if (!app.isPackaged) return 'python';
+  return _embeddedPython();
+}
+// True once torch has been installed into the writable copy.
+function _aiPythonReady() {
+  return fs.existsSync(path.join(AI_PYTHON_DIR, 'Lib', 'site-packages', 'torch'));
+}
+ipcMain.handle('wizard:get-python-exe', () => _embeddedPython());
+ipcMain.handle('wizard:ai-python-ready', () => _aiPythonReady());
+
+// First-run AI env provisioning. The embedded python (resources/
+// python-embed) is read-only under MSIX and has no venv module, so we
+// COPY it to a writable per-user dir (AI_PYTHON_DIR) once, then pip-
+// install torch/diffusers/etc. INTO the copy via wizard_install_deps.py.
+// Streams JSONL progress via wizard:install-progress.
 ipcMain.handle('wizard:install-deps', async (event) => {
+  const destPy = path.join(AI_PYTHON_DIR, 'python.exe');
+  // 1. Copy the embedded interpreter to the writable location (once).
+  if (!fs.existsSync(destPy)) {
+    const srcDir = path.dirname(_embeddedPython());
+    event.sender.send('wizard:install-progress', { step: 'copy-python', pct: 0, done: false, msg: 'Preparing Python environment' });
+    fs.cpSync(srcDir, AI_PYTHON_DIR, { recursive: true });
+  }
+  // 2. pip-install torch + diffusers + etc. INTO the writable copy.
   const script = path.join(SCRIPTS_DIR, 'wizard_install_deps.py');
-  const py = _embeddedPython();
   return new Promise((resolve, reject) => {
-    const proc = execFile(py, [script, '--python', py], {
+    const proc = execFile(destPy, [script, '--python', destPy], {
       timeout: 0, maxBuffer: 20 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     }, (err) => err ? reject(new Error(err.message)) : resolve({ ok: true }));
