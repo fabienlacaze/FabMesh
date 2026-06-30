@@ -1,5 +1,12 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Build : rangement auto de dist/installer — InstallEXE / MicrosoftStore)
+
+- electron-builder sort tout dans `dist/installer/` (directories.output) ; un rangement manuel est écrasé
+  au build suivant. Ajout `build/organize_dist.js` (post-build) : trie `*.appx` → `MicrosoftStore/`, le reste
+  (.exe, .blockmap, latest.yml, win-unpacked…) → `InstallEXE/`. Idempotent + safe à re-run. Câblé dans
+  `build:installer` / `build:msix` / `build:all` (`&& node build/organize_dist.js`). Testé (fichiers factices) : OK.
+
 ## 2026-06-30 (Feature : emplacement des données configurable — modèles + venv hors C:)
 
 - Avant : venv (~5 GB) dans `userData/python` ET modèles (~7-22 GB) dans `~/.cache/huggingface` — TOUT sur C:,
