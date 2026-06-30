@@ -221,22 +221,41 @@ async function startDownload() {
   }
 
   // ---- Phase 1: provision the AI engine (torch/diffusers) into a
-  // writable per-user Python env. REQUIRED before the model download,
-  // which itself needs huggingface_hub installed here.
+  // writable per-user Python env. REQUIRED before the model download.
+  // This is a big (~5 GB) one-time install — show CLEAR, PATIENT progress
+  // with named steps so users don't think it froze (it can take 10-20 min
+  // on a slow connection; the pip phase reports by step, not by bytes).
+  const _AIENV_STEPS = {
+    'copy-python': 'Preparing the Python environment…',
+    'pip-bootstrap': 'Setting up the installer…',
+    'torch': 'Downloading PyTorch (~2.5 GB)…',
+    'pypi': 'Installing libraries (diffusers, transformers…)…',
+    'xformers-optional': 'Installing xformers (speed boost)…',
+    'flash-attn-optional': 'Finishing up…',
+    'done': 'AI engine ready ✓',
+  };
   list.innerHTML = `
     <div class="wiz-dl-row in-progress" data-id="__aienv">
-      <span class="name">Installing AI engine (PyTorch, diffusers)…</span>
-      <span class="timer" id="aienv-step"></span>
+      <span class="name" id="aienv-name">Installing the AI engine…</span>
       <span class="size">~5 GB</span>
       <div class="bar"><div class="bar-fill"></div></div>
-    </div>`;
+    </div>
+    <div class="wiz-dl-row"><span class="name" style="opacity:.65" id="aienv-note">One-time setup — this can take several minutes. Keep this window open.</span></div>`;
+  // The byte/speed/ETA counters are for the MODEL download, not this pip
+  // install (which reports by step, not by bytes) — show "—" meanwhile so
+  // they don't read as "frozen at 0".
+  for (const id of ['dl-done', 'dl-total', 'dl-speed', 'dl-eta']) {
+    const el = document.getElementById(id); if (el) el.textContent = '—';
+  }
   window.wizardAPI.onInstallProgress((p) => {
-    const row = document.querySelector('.wiz-dl-row[data-id="__aienv"]');
-    if (!row) return;
-    if (typeof p.pct === 'number') row.querySelector('.bar-fill').style.width = p.pct + '%';
-    const step = document.getElementById('aienv-step');
-    if (step) step.textContent = p.current ? '' : (p.msg || p.step || '');
-    if (p.done) { row.classList.add('done'); row.classList.remove('in-progress'); }
+    const fill = document.querySelector('.wiz-dl-row[data-id="__aienv"] .bar-fill');
+    if (fill && typeof p.pct === 'number') fill.style.width = Math.max(3, p.pct) + '%';
+    const name = document.getElementById('aienv-name');
+    if (name && p.step && _AIENV_STEPS[p.step]) name.textContent = _AIENV_STEPS[p.step];
+    if (p.done) {
+      const row = document.querySelector('.wiz-dl-row[data-id="__aienv"]');
+      if (row) { row.classList.add('done'); row.classList.remove('in-progress'); }
+    }
   });
   try {
     await window.wizardAPI.installDeps();

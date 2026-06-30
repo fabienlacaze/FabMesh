@@ -7006,19 +7006,37 @@ ipcMain.handle('wizard:ai-python-ready', () => _aiPythonReady());
 // Streams JSONL progress via wizard:install-progress.
 ipcMain.handle('wizard:install-deps', async (event) => {
   const destPy = path.join(AI_PYTHON_DIR, 'python.exe');
+  log.info('main', 'install-deps: START. AI_PYTHON_DIR=' + AI_PYTHON_DIR + ' destPy exists=' + fs.existsSync(destPy));
   // 1. Copy the embedded interpreter to the writable location (once).
   if (!fs.existsSync(destPy)) {
     const srcDir = path.dirname(_embeddedPython());
+    log.info('main', 'install-deps: copying ' + srcDir + ' -> ' + AI_PYTHON_DIR);
     event.sender.send('wizard:install-progress', { step: 'copy-python', pct: 0, done: false, msg: 'Preparing Python environment' });
-    fs.cpSync(srcDir, AI_PYTHON_DIR, { recursive: true });
+    try {
+      fs.cpSync(srcDir, AI_PYTHON_DIR, { recursive: true });
+      log.info('main', 'install-deps: copy done (destPy now exists=' + fs.existsSync(destPy) + ')');
+    } catch (e) {
+      log.error('main', 'install-deps: COPY FAILED: ' + (e && e.message));
+      return { ok: false, error: 'copy failed: ' + (e && e.message) };
+    }
   }
   // 2. pip-install torch + diffusers + etc. INTO the writable copy.
   const script = path.join(SCRIPTS_DIR, 'wizard_install_deps.py');
+  log.info('main', 'install-deps: spawning ' + destPy + ' ' + script);
   return new Promise((resolve, reject) => {
+    let stderrBuf = '';
     const proc = execFile(destPy, [script, '--python', destPy], {
-      timeout: 0, maxBuffer: 20 * 1024 * 1024,
+      timeout: 0, maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
-    }, (err) => err ? reject(new Error(err.message)) : resolve({ ok: true }));
+    }, (err) => {
+      if (err) {
+        log.error('main', 'install-deps: FAILED code=' + err.code + ' msg=' + err.message + ' | stderr tail: ' + stderrBuf.slice(-2000));
+        reject(new Error(err.message + (stderrBuf ? ' | ' + stderrBuf.slice(-400) : '')));
+      } else {
+        log.info('main', 'install-deps: process exited 0 — SUCCESS. torchReady=' + _aiPythonReady());
+        resolve({ ok: true });
+      }
+    });
     let buf = '';
     proc.stdout?.on('data', (d) => {
       buf += d.toString();
@@ -7029,10 +7047,12 @@ ipcMain.handle('wizard:install-deps', async (event) => {
         if (!line) continue;
         try {
           const p = JSON.parse(line);
+          if (p.step) log.info('main', 'install-deps step=' + p.step + ' pct=' + p.pct + (p.error ? ' ERROR=' + p.error : '') + (p.warn ? ' warn=' + p.warn : ''));
           event.sender.send('wizard:install-progress', p);
         } catch (_) {}
       }
     });
+    proc.stderr?.on('data', (d) => { stderrBuf += d.toString(); if (stderrBuf.length > 200000) stderrBuf = stderrBuf.slice(-100000); });
   });
 });
 
