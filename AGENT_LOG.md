@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Packaging Store/MSIX — Tier A : B1 chemins scripts → SCRIPTS_DIR, B5 last_error.log → LOGS_DIR)
+
+- Audit MSIX (workflow, 6 agents) + contre-analyse adversariale (workflow, 10 agents) : l'app ne
+  fonctionne PAS une fois packagée (NSIS comme MSIX), pas seulement sous Store. Sur 9 candidats,
+  **5 blockers réels confirmés** (B1/B2/B4/B5/B8) ; 4 overstated/cleanups (B3 = code mort,
+  B6 guardé+gaté Blender, B7 slider live seulement, B9 vc_redist jamais lancé).
+- **B1** : 54 sites (sur 55, déf l.506 exclue) construisaient les chemins de scripts via
+  `path.join(__dirname,'..','..','scripts',X)` = à l'intérieur de `app.asar` (illisible par un
+  `python.exe` externe → ENOENT). Le garde `existsSync` ne protège pas (Electron lit DANS l'asar
+  → renvoie true). Routés vers `SCRIPTS_DIR` (= `process.resourcesPath/scripts` en packagé,
+  identique en dev).
+- **B5** : les 6 écritures `last_error.log` ciblaient `__dirname/../..` (racine du package,
+  read-only). La non gardée (l.5741) faisait échouer CHAQUE génération via le catch l.6045.
+  Routées vers `LOGS_DIR` (= `userData/logs` en packagé, writable).
+- Vérifié `node --check`. Dev byte-identique. RESTE : Tier B (bootstrap venv + deps — `wizard:install-deps`
+  est code mort donc torch jamais installé) ; B2/B4 (interpréteur → venv/_embeddedPython) ; Tier C (vc_redist hors appx, guard autoUpdater).
+
 ## 2026-06-30 (Fix release tooling : submit_appx.ps1 ne parsait pas sous PowerShell 5.1 — BOM UTF-8 manquant)
 
 - `scripts/submit_appx.ps1` (automation de soumission Microsoft Store via l'API Store) était

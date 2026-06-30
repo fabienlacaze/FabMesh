@@ -751,7 +751,7 @@ function _refreshSdxlVram() {
 
 function startSdxlServer() {
   if (sdxlProc) return;
-  const serverScript = path.join(__dirname, '..', '..', 'scripts', 'sdxl_server.py');
+  const serverScript = path.join(SCRIPTS_DIR, 'sdxl_server.py');
   if (!fs.existsSync(serverScript)) {
     console.warn('SDXL server script not found, falling back to subprocess mode');
     return;
@@ -1173,7 +1173,7 @@ async function handleGenerateImages(params) {
     // Notify renderer that a job is starting
     safeSend('mcp-job-start', { type: 'image', name: `MCP: Generate images (${safeName})`, params });
 
-    const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_juggernaut_bridge.py');
+    const bridgeScript = path.join(SCRIPTS_DIR, 'local_juggernaut_bridge.py');
     const count = String(params.numImages || params.count || 1);
     const steps = String(params.steps || 30);
     // Snapshot the directory BEFORE generation so we can compute the diff
@@ -1220,7 +1220,7 @@ async function handleImageTo3D(params) {
 
   safeSend('mcp-job-start', { type: 'mesh', name: `MCP: Generate 3D (${safeName})`, params });
 
-  const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py');
+  const bridgeScript = path.join(SCRIPTS_DIR, 'local_sf3d_bridge.py');
   const texRes = String(params.textureSize || 1024);
   const verts = String(params.targetFaces || -1);
   const remesh = (params.targetFaces && params.targetFaces > 0) ? 'triangle' : 'none';
@@ -1280,7 +1280,7 @@ async function handleAutoRigAI(params) {
 
   safeSend('mcp-job-start', { type: 'rig', name: `MCP: Auto-rig (${path.basename(meshPath)})`, params });
 
-  const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
+  const scriptsDir = path.join(SCRIPTS_DIR);
   const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
   const rigTs = Date.now();
   const tempUnirigGlb = path.join(MESHES_DIR, `${baseName}_unirig_temp_${rigTs}.glb`);
@@ -1474,7 +1474,7 @@ async function handleRemoveBackground(params) {
   const ext = path.extname(imagePath);
   const base = safeBase(path.basename(imagePath, ext));
   const outPath = path.join(dir, `${base}_nobg_${Date.now()}${ext}`);
-  const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
+  const script = path.join(SCRIPTS_DIR, 'remove_bg.py');
   // Fallback: use rembg directly. Paths go through sys.argv (not string
   // interpolation) — a filename containing a double-quote would break
   // out of the `r"..."` literal and let an attacker run arbitrary
@@ -2246,7 +2246,7 @@ ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
   const tmpFile = path.join(LOGS_DIR, '_nsfw_scan_paths.json');
   const outFile = path.join(LOGS_DIR, '_nsfw_scan_results.json');
   fs.writeFileSync(tmpFile, JSON.stringify(toScan), 'utf-8');
-  const scanScript = path.join(__dirname, '..', '..', 'scripts', 'nsfw_scan.py');
+  const scanScript = path.join(SCRIPTS_DIR, 'nsfw_scan.py');
 
   return new Promise((resolve) => {
     execFile('python', [scanScript, tmpFile, outFile], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
@@ -2685,7 +2685,7 @@ ipcMain.handle('open-logs-folder', () => {
 
 // IPC: calibration pipeline
 ipcMain.handle('calib-run', async (event, { skipSf3d = false, env = {}, tag = '' } = {}) => {
-  const calibScript = path.join(__dirname, '..', '..', 'scripts', 'calibrate.py');
+  const calibScript = path.join(SCRIPTS_DIR, 'calibrate.py');
   const args = [calibScript];
   if (skipSf3d) args.push('--skip-sf3d');
   if (tag) { args.push('--tag', String(tag)); }
@@ -2780,7 +2780,7 @@ ipcMain.handle('calib-v3', async (event, opts = {}) => {
   // Calibration v3: per-stage independent checks.
   // Stage 4 runs unconditionally (deterministic, ~7s, no SF3D/Zero123++).
   // Other stages run only if --ref / --mesh / --mv-dir are passed.
-  const script = path.join(__dirname, '..', '..', 'scripts', 'run_calibration_v3.py');
+  const script = path.join(SCRIPTS_DIR, 'run_calibration_v3.py');
   const args = [script];
   if (opts.ref) args.push('--ref', opts.ref);
   if (opts.mvDir) args.push('--mv-dir', opts.mvDir);
@@ -2955,7 +2955,7 @@ ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_${operation}_${ts}${ext}`);
 
-    const script = path.join(__dirname, '..', '..', 'scripts', 'image_adjust_bridge.py');
+    const script = path.join(SCRIPTS_DIR, 'image_adjust_bridge.py');
 
     return await new Promise((resolve) => {
       const proc = execFile('python', [script, operation, imagePath, newImagePath], {
@@ -2983,12 +2983,12 @@ ipcMain.handle('analyze-skeleton', async (event, { templateId }) => {
   try {
     if (!templateId) return { success: false, error: 'no templateId' };
     // Find the template FBX path from registry
-    const registryPath = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'skm', 'registry.json');
+    const registryPath = path.join(SCRIPTS_DIR, 'rig_templates', 'skm', 'registry.json');
     if (!fs.existsSync(registryPath)) return { success: false, error: 'registry missing' };
     const reg = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
     const tpl = (reg.skm_templates || []).find(t => t.id === templateId);
     if (!tpl) return { success: false, error: 'template not in registry' };
-    const fbxPath = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', tpl.fbx);
+    const fbxPath = path.join(SCRIPTS_DIR, 'rig_templates', tpl.fbx);
     if (!fs.existsSync(fbxPath)) return { success: false, error: 'fbx missing' };
 
     // Cache: <fbx>.bones.json next to the FBX
@@ -3008,7 +3008,7 @@ ipcMain.handle('analyze-skeleton', async (event, { templateId }) => {
     // Run blender to extract bones
     const config = loadConfig();
     if (!config.blenderPath) return { success: false, error: 'Blender path not configured' };
-    const script = path.join(__dirname, '..', '..', 'scripts', 'analyze_skeleton.py');
+    const script = path.join(SCRIPTS_DIR, 'analyze_skeleton.py');
 
     return await new Promise((resolve) => {
       const proc = execFile('python', [script, fbxPath, cachePath, config.blenderPath], {
@@ -3070,7 +3070,7 @@ ipcMain.handle('load-landmarks', (event, { meshPath }) => {
 // List available SKM templates (custom FBX) and generic templates from registry
 ipcMain.handle('list-rig-templates', () => {
   try {
-    const registryPath = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'skm', 'registry.json');
+    const registryPath = path.join(SCRIPTS_DIR, 'rig_templates', 'skm', 'registry.json');
     if (!fs.existsSync(registryPath)) return { skm: [], generic: [] };
     const data = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
     return {
@@ -3088,7 +3088,7 @@ ipcMain.handle('list-rig-templates', () => {
 ipcMain.handle('list-rig-animations', (event, { templateName }) => {
   try {
     if (!templateName || !/^[a-z0-9_-]+$/i.test(templateName)) return [];
-    const dir = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'animations', templateName);
+    const dir = path.join(SCRIPTS_DIR, 'rig_templates', 'animations', templateName);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return [];
     return fs.readdirSync(dir)
       .filter(f => /\.fbx$/i.test(f))
@@ -3106,7 +3106,7 @@ ipcMain.handle('list-rig-animations', (event, { templateName }) => {
 ipcMain.handle('read-bones-json', async (_event, targetName) => {
   const safe = String(targetName || '').replace(/[^a-z0-9_-]/gi, '');
   if (!safe) return { ok: false, error: 'name required' };
-  const p = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'skm', safe + '.bones.json');
+  const p = path.join(SCRIPTS_DIR, 'rig_templates', 'skm', safe + '.bones.json');
   try {
     const raw = JSON.parse(fs.readFileSync(p, 'utf-8'));
     const bones = Array.isArray(raw.bones) ? raw.bones : [];
@@ -3130,7 +3130,7 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
     if (!isPathAllowed(meshPath)) {
       return { success: false, error: 'Mesh path not allowed' };
     }
-    const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
+    const scriptsDir = path.join(SCRIPTS_DIR);
 
     // ------------------------------------------------------------------
     // Step-1 bridge selection: Puppeteer (default) or UniRig (legacy fallback)
@@ -3201,7 +3201,7 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
       console.log(`[auto-rig-ai] Step 1 FAILED duration=${dur}s`);
       try {
         fs.writeFileSync(
-          path.join(__dirname, '..', '..', 'last_error.log'),
+          path.join(LOGS_DIR, 'last_error.log'),
           `[${new Date().toISOString()}] auto-rig-ai step1 (duration=${dur}s)\nmesh: ${meshPath}\n\n=== STDOUT ===\n${step1.stdout || ''}\n\n=== STDERR ===\n${step1.stderr || ''}\n`
         );
       } catch (_e) {}
@@ -3286,7 +3286,7 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
         console.log(`[auto-rig-ai] Step 2 FAILED duration=${dur2}s`);
         try {
           fs.writeFileSync(
-            path.join(__dirname, '..', '..', 'last_error.log'),
+            path.join(LOGS_DIR, 'last_error.log'),
             `[${new Date().toISOString()}] auto-rig-ai step2 (duration=${dur2}s)\nmesh: ${meshPath}\n\n=== STEP1 STDOUT ===\n${step1.stdout || ''}\n=== STEP1 STDERR ===\n${step1.stderr || ''}\n\n=== STEP2 STDOUT ===\n${step2.stdout || ''}\n=== STEP2 STDERR ===\n${step2.stderr || ''}\n`
           );
         } catch (_e) {}
@@ -3314,7 +3314,7 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
     console.log(`[auto-rig-ai] END duration=${dur}s error=${!!step3.error}`);
     try {
       fs.writeFileSync(
-        path.join(__dirname, '..', '..', 'last_error.log'),
+        path.join(LOGS_DIR, 'last_error.log'),
         `[${new Date().toISOString()}] auto-rig-ai (duration=${dur}s)\nmesh: ${meshPath}\noutput: ${outputGlb}\n\n=== STEP1 STDOUT ===\n${step1.stdout || ''}\n=== STEP1 STDERR ===\n${step1.stderr || ''}\n\n=== STEP2 STDOUT ===\n${step2.stdout || ''}\n=== STEP2 STDERR ===\n${step2.stderr || ''}\n\n=== STEP3 STDOUT ===\n${step3.stdout || ''}\n=== STEP3 STDERR ===\n${step3.stderr || ''}\n`
       );
     } catch (_e) {}
@@ -3359,7 +3359,7 @@ ipcMain.handle('animate-ai', async (event, { rigPath, animType, prompt, engine, 
     try { fs.mkdirSync(animsDir, { recursive: true }); } catch (_) {}
     const outPath = path.join(animsDir, `${safeAnim}_${Date.now()}.glb`);
 
-    const bridge = path.join(__dirname, '..', '..', 'scripts', 'anytop_bridge.py');
+    const bridge = path.join(SCRIPTS_DIR, 'anytop_bridge.py');
     if (!fs.existsSync(bridge)) {
       return { success: false, error: 'anytop_bridge.py missing — reinstall FabMesh' };
     }
@@ -3463,7 +3463,7 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) 
     const rigTimestamp = Date.now();
     const outputFbx = path.join(MESHES_DIR, `${baseName}_rigged_${templateName}_${rigTimestamp}.glb`);
 
-    const script = path.join(__dirname, '..', '..', 'scripts', 'auto_rig_bridge.py');
+    const script = path.join(SCRIPTS_DIR, 'auto_rig_bridge.py');
 
     // Write landmarks to a temp file (avoids long argv on Windows)
     const args = [script, meshPath, templateName, outputFbx, config.blenderPath];
@@ -3487,7 +3487,7 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) 
         // shows the truncated error message).
         try {
           fs.writeFileSync(
-            path.join(__dirname, '..', '..', 'last_error.log'),
+            path.join(LOGS_DIR, 'last_error.log'),
             `[${new Date().toISOString()}] auto-rig (duration=${_dur}s)\nmesh: ${meshPath}\noutput: ${outputFbx}\ntemplate: ${templateName}\n\n=== STDOUT ===\n${stdout || ''}\n\n=== STDERR ===\n${stderr || ''}\n`
           );
         } catch (_e) {}
@@ -4017,7 +4017,7 @@ ipcMain.handle('enhance-mesh-texture', async (event, { meshPath, jobId }) => {
     const newMeshPath = path.join(dir, `${base}_enhanced_${Date.now()}${ext}`);
     const venvPy = path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe');
     const py = fs.existsSync(venvPy) ? venvPy : 'python';
-    const UPSCALE_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
+    const UPSCALE_SCRIPT = path.join(SCRIPTS_DIR, 'texture_upscale.py');
     return await new Promise((resolve) => {
       const proc = execFile(py, [UPSCALE_SCRIPT, meshPath, newMeshPath, '--scale', '2', '--tile', '512'],
         { timeout: 600000, maxBuffer: 50 * 1024 * 1024 }, (error) => {
@@ -4067,7 +4067,7 @@ ipcMain.handle('detail-synth', async (event, { meshPath, jobId, strength, prompt
       : (DETAIL_SYNTH_PROMPTS[String(assetType || '').toLowerCase()] || DETAIL_SYNTH_DEFAULT_PROMPT);
     const workdir = path.join(dir, '.debug', `detail_${ts}`);
     try { fs.mkdirSync(workdir, { recursive: true }); } catch (e) {}
-    const DETAIL_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'detail_synth.py');
+    const DETAIL_SCRIPT = path.join(SCRIPTS_DIR, 'detail_synth.py');
     // detail_synth.py imports trimesh / nvdiffrast / requests — uses SYSTEM python
     // (NOT the trellis venv), same as the mesh-tool handler.
     const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
@@ -4162,7 +4162,7 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
       console.warn('[inpaint] SDXL server failed, falling back to subprocess:', r.error);
     }
 
-    const script = path.join(__dirname, '..', '..', 'scripts', 'local_inpaint_bridge.py');
+    const script = path.join(SCRIPTS_DIR, 'local_inpaint_bridge.py');
     return new Promise((resolve) => {
       const proc = execFile('python', [script, imagePath, targetText, prompt || '', newImagePath, String(dilate || 15)], {
         timeout: 300000, maxBuffer: 50 * 1024 * 1024
@@ -4427,7 +4427,7 @@ ipcMain.handle('remove-background', async (event, imagePath) => {
       return;
     }
 
-    const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
+    const script = path.join(SCRIPTS_DIR, 'remove_bg.py');
     // 300s, not 60s: Remove BG is normally <5s, but under system memory/CPU
     // pressure (a heavy job paging to disk) onnxruntime inference can crawl and
     // the old 60s timeout KILLED it — the user then only saw an opaque "Command
@@ -4568,7 +4568,7 @@ function _bumpTranslateIdle() {
 }
 function startTranslateServer() {
   if (translateProc) return;
-  const scriptT = path.join(__dirname, '..', '..', 'scripts', 'translate_server.py');
+  const scriptT = path.join(SCRIPTS_DIR, 'translate_server.py');
   if (!fs.existsSync(scriptT)) return;
   try {
     translateProc = require('child_process').spawn('python', [scriptT], {
@@ -4622,7 +4622,7 @@ let nsfwReady = false;
 const NSFW_PORT = 5558;
 function startNsfwServer() {
   if (nsfwProc) return;
-  const scriptN = path.join(__dirname, '..', '..', 'scripts', 'nsfw_server.py');
+  const scriptN = path.join(SCRIPTS_DIR, 'nsfw_server.py');
   if (!fs.existsSync(scriptN)) return;
   try {
     nsfwProc = require('child_process').spawn('python', [scriptN], {
@@ -4699,7 +4699,7 @@ ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
       return { text: sv };
     }
   } catch (_) { /* fall through to per-call */ }
-  const script = path.join(__dirname, '..', '..', 'scripts', 'translate_prompt.py');
+  const script = path.join(SCRIPTS_DIR, 'translate_prompt.py');
   // End-users have no python on PATH → prefer the bundled embedded interpreter.
   // If it lacks argostranslate (--strict → exit 3), fall back to system python
   // (the dev box has argos there). Last resort: fail open with the original text.
@@ -4771,7 +4771,7 @@ ipcMain.handle('set-gpu-limits', (event, limits) => {
     }
   }
   try {
-    const limitsFile = path.join(__dirname, '..', '..', 'scripts', '.gpu_limit.json');
+    const limitsFile = path.join(SCRIPTS_DIR, '.gpu_limit.json');
     const payload = {
       gpu:  process.env.FABMESH_GPU_LIMIT  ? Number(process.env.FABMESH_GPU_LIMIT)  : null,
       temp: process.env.FABMESH_TEMP_LIMIT ? Number(process.env.FABMESH_TEMP_LIMIT) : null,
@@ -5281,8 +5281,8 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
       let selectedEngine = engine || 'trellis';
       if (selectedEngine === 'sf3d') selectedEngine = 'trellis';
       const bridgeScripts = {
-        'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
-        'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
+        'local':   path.join(SCRIPTS_DIR, 'local_triposr_bridge.py'),
+        'trellis': path.join(SCRIPTS_DIR, 'trellis_bridge.py')
       };
       const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['trellis'];
       const argsMap = {
@@ -5374,7 +5374,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     // LOCAL GPU: Juggernaut XL v9 (recommended, photorealistic SDXL fine-tune)
     if (engine === 'local-flux' || engine === 'local-lightning') {
       const turbo = engine === 'local-lightning';
-      const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_juggernaut_bridge.py');
+      const bridgeScript = path.join(SCRIPTS_DIR, 'local_juggernaut_bridge.py');
       const stepsClamped = turbo ? 4 : Math.max(4, Math.min(60, parseInt(steps) || 30));
       // Snapshot the dir BEFORE the run so we only return the new images.
       const filesBefore = new Set(
@@ -5642,7 +5642,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   // engines have their own opinions about the source view.
   if (trellis2RectifySource && imagePath && fs.existsSync(imagePath)
       && engine === 'trellis2_native') {
-    const rectifyScript = path.join(__dirname, '..', '..', 'scripts', 'generate_front_strict.py');
+    const rectifyScript = path.join(SCRIPTS_DIR, 'generate_front_strict.py');
     // Write the rectified image INTO the project image folder so it becomes a
     // real gallery VERSION: it is the actual input that generated the mesh, so
     // the user wants to see it (and "jump to source" lands on it). The gallery
@@ -5690,13 +5690,13 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const meshFilename = `${safeName}_${engine || 'ai'}_${timestamp}.glb`;
     const meshPath = path.join(MESHES_DIR, meshFilename);
     const bridgeScripts = {
-      'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
-      'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
+      'local':   path.join(SCRIPTS_DIR, 'local_triposr_bridge.py'),
+      'sf3d':    path.join(SCRIPTS_DIR, 'local_sf3d_bridge.py'),
       // TRELLIS-2 native: single-shot mesh + PBR texture via
       // microsoft/TRELLIS.2-4B's Trellis2ImageTo3DPipeline. Default engine
       // since 2026-05-19.
-      'trellis2_native': path.join(__dirname, '..', '..', 'scripts', 'trellis2_native_full_pipeline.py'),
-      'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
+      'trellis2_native': path.join(SCRIPTS_DIR, 'trellis2_native_full_pipeline.py'),
+      'trellis': path.join(SCRIPTS_DIR, 'trellis_bridge.py')
     };
     const bridgeScript = bridgeScripts[engine] || bridgeScripts['trellis2_native'];
 
@@ -5738,7 +5738,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['trellis2_native'];
 
     console.log('IMAGE-TO-3D fixedArgs:', JSON.stringify(fixedArgs));
-    fs.writeFileSync(path.join(__dirname, '..', '..', 'last_error.log'), `imagePath: ${imagePath}\nfixedArgs: ${JSON.stringify(fixedArgs)}\n`);
+    fs.writeFileSync(path.join(LOGS_DIR, 'last_error.log'), `imagePath: ${imagePath}\nfixedArgs: ${JSON.stringify(fixedArgs)}\n`);
     // VRAM fraction enforced in Python via torch.cuda.set_per_process_memory_fraction.
     const fraction = (typeof vramFraction === 'number' && vramFraction > 0 && vramFraction <= 1)
       ? vramFraction : 0.95;
@@ -5956,16 +5956,16 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
           proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
         };
 
-        const REFINE_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_refine.py');
-        const SMOOTH_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_smooth.py');
+        const REFINE_SCRIPT = path.join(SCRIPTS_DIR, 'texture_refine.py');
+        const SMOOTH_SCRIPT = path.join(SCRIPTS_DIR, 'texture_smooth.py');
         // Face-fix REPLACED 2026-06-28: face_inpaint_atlas.py (SDXL repaint) is
         // doomed by construction — a generative model repaints/erases stylized
         // faces. face_reproject.py instead re-projects the SHARP face from the
         // user SOURCE image onto the mesh face UV (non-destructive: outside the
         // face mask stays byte-identical; guardrail passthrough on any failure
         // so the paid option never ships a WORSE face).
-        const FACE_SCRIPT   = path.join(__dirname, '..', '..', 'scripts', 'face_reproject.py');
-        const UPSCALE_SCRIPT= path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
+        const FACE_SCRIPT   = path.join(SCRIPTS_DIR, 'face_reproject.py');
+        const UPSCALE_SCRIPT= path.join(SCRIPTS_DIR, 'texture_upscale.py');
 
         // 2026-06-13: wire "Detail refine". texture_refine.py was already
         // present (SDXL Tile img2img on the baked atlas) but the checkbox
@@ -6076,7 +6076,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     // Overwrite (not append) so last_error.log doesn't grow unboundedly.
     try {
       fs.writeFileSync(
-        path.join(__dirname, '..', '..', 'last_error.log'),
+        path.join(LOGS_DIR, 'last_error.log'),
         `[${new Date().toISOString()}]\nERROR: ${errMsg}\n\n=== PYTHON STDOUT (last 100 lines) ===\n${(err.stdout || '').split('\n').slice(-100).join('\n')}\n\n=== PYTHON STDERR (last 50 lines) ===\n${(err.stderr || '').split('\n').slice(-50).join('\n')}\n`
       );
     } catch (e) { /* disk full / readonly */ }
@@ -6104,7 +6104,7 @@ ipcMain.handle('image-to-3d-trellis', async (event, { imagePath, outputName, tex
     const timestamp = Date.now();
     const meshFilename = `${safeName}_${timestamp}.glb`;
     const meshPath = path.join(MESHES_DIR, meshFilename);
-    const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py');
+    const bridgeScript = path.join(SCRIPTS_DIR, 'trellis_bridge.py');
 
     const result = await new Promise((resolve, reject) => {
       const proc = execFile('python', [bridgeScript, imagePath, meshPath, String(textureSize || 1024)], {
@@ -6132,7 +6132,7 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
     const timestamp = Date.now();
     const meshFilename = `${safeName}_${timestamp}.glb`;
     const meshPath = path.join(MESHES_DIR, meshFilename);
-    const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py');
+    const bridgeScript = path.join(SCRIPTS_DIR, 'trellis_bridge.py');
 
     const result = await new Promise((resolve, reject) => {
       execFile('python', [bridgeScript, imagePath, meshPath], {
@@ -6200,7 +6200,7 @@ function _mvScriptForEngine(engineOverride) {
   };
   const name = map[engine] || 'multiview_mvadapter_gen.py';
   log.info('multiview', `engine=${engine} script=${name}`);
-  return path.join(__dirname, '..', '..', 'scripts', name);
+  return path.join(SCRIPTS_DIR, name);
 }
 
 ipcMain.handle('generate-multiview', async (_event, opts) => {
@@ -6341,7 +6341,7 @@ ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer, base64 })
 // draw a mask aligned to face_inpaint_atlas.py's projection, then re-texture the
 // painted region with a prompt (generalises face inpaint beyond the face).
 ipcMain.handle('mesh:render-front', async (_e, { meshPath } = {}) => {
-  const script = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
+  const script = path.join(SCRIPTS_DIR, 'face_inpaint_atlas.py');
   const out = path.join(os.tmpdir(), `fabmesh_front_${Date.now()}.png`);
   return new Promise((resolve) => {
     // Distinct dummy output so the script's in==out guard passes; --render-only
@@ -6358,7 +6358,7 @@ ipcMain.handle('mesh:render-front', async (_e, { meshPath } = {}) => {
   });
 });
 ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, strength, uvMask } = {}) => {
-  const script = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
+  const script = path.join(SCRIPTS_DIR, 'face_inpaint_atlas.py');
   const maskPath = path.join(os.tmpdir(), `fabmesh_mask_${Date.now()}.png`);
   try {
     fs.writeFileSync(maskPath, Buffer.from(String(maskDataUrl || '').replace(/^data:image\/\w+;base64,/, ''), 'base64'));
@@ -6378,7 +6378,7 @@ ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, 
 });
 
 ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
-  const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_tools.py');
+  const script = path.join(SCRIPTS_DIR, 'mesh_tools.py');
   const timestamp = Date.now();
   const ext = path.extname(meshPath);
   let base = path.basename(meshPath, ext);
@@ -6424,7 +6424,7 @@ ipcMain.handle('material-adjust', async (_event, {
   meshPath, brightness, saturation, contrast,
   emissive, metallic, roughness, hue_shift,
 }) => {
-  const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_material_adjust.py');
+  const script = path.join(SCRIPTS_DIR, 'mesh_material_adjust.py');
   const timestamp = Date.now();
   const ext = path.extname(meshPath);
   const base = path.basename(meshPath, ext);
@@ -6471,7 +6471,7 @@ ipcMain.handle('caption-image', async (_event, { imagePath }) => {
   if (!imagePath || !fs.existsSync(imagePath)) {
     return { success: false, error: `image not found: ${imagePath}` };
   }
-  const script = path.join(__dirname, '..', '..', 'scripts', 'caption_image.py');
+  const script = path.join(SCRIPTS_DIR, 'caption_image.py');
   return new Promise((resolve) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
     execFile('python', [script, imagePath], {
@@ -6562,7 +6562,7 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
     mvadapter: 'generate_back_view_mvadapter.py',
   };
   const scriptName = SCRIPT_BY_MODE[resolvedMode] || 'generate_back_view.py';
-  const script = path.join(__dirname, '..', '..', 'scripts', scriptName);
+  const script = path.join(SCRIPTS_DIR, scriptName);
   log.info('generate-back-view', `mode=${resolvedMode} assetType=${assetType || '(none)'} -> ${scriptName}`);
   // Pass the front stem as a 5th arg so the python script names files
   // back_<stem>_0.png (avoids collision when multiple fronts in same project).
@@ -6611,7 +6611,7 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
   if (!imagePath || !fs.existsSync(imagePath)) {
     return { ok: false, error: `image not found: ${imagePath}` };
   }
-  const projectScript = path.join(__dirname, '..', '..', 'scripts',
+  const projectScript = path.join(SCRIPTS_DIR,
                                    'texture_project.py');
   const args = [projectScript, meshPath, imagePath, meshPath, '1024'];
   // Look for an mv/ dir alongside the mesh to enable multi-view.
@@ -6642,7 +6642,7 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
   let workMeshPath = meshPath;
   if (needsPreTransform) {
     const tmpPath = meshPath.replace(/\.glb$/i, '.aligntemp.glb');
-    const preScript = path.join(__dirname, '..', '..', 'scripts',
+    const preScript = path.join(SCRIPTS_DIR,
                                  'mesh_pre_transform.py');
     try {
       await new Promise((resolve, reject) => {
@@ -6783,7 +6783,7 @@ ipcMain.handle('create-project-from-mesh', (event, { projectName, meshPath, mesh
 // All wizard:* IPC calls live here. Keep the surface minimal — every
 // extra channel is one more thing to validate.
 ipcMain.handle('wizard:detect-hardware', async () => {
-  const script = path.join(__dirname, '..', '..', 'scripts', 'hw_detect.py');
+  const script = path.join(SCRIPTS_DIR, 'hw_detect.py');
   return new Promise((resolve, reject) => {
     execFile('python', [script], { timeout: 30000 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(stderr || err.message));
@@ -6836,7 +6836,7 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
   // We delegate the actual snapshot_download() to a small Python helper
   // that knows about HuggingFace's resume + cache, and streams JSONL
   // progress lines to our stdout listener.
-  const script = path.join(__dirname, '..', '..', 'scripts', 'wizard_download.py');
+  const script = path.join(SCRIPTS_DIR, 'wizard_download.py');
   return new Promise((resolve, reject) => {
     const proc = execFile('python', [script, '--mode', mode], {
       timeout: 0, maxBuffer: 10 * 1024 * 1024,
@@ -6862,7 +6862,7 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
 ipcMain.handle('wizard:final-test', async (event, mode) => {
   // Cloud mode has nothing to test locally — succeed immediately.
   if (mode === 'cloud') return { success: true, duration_s: 0 };
-  const script = path.join(__dirname, '..', '..', 'scripts', 'wizard_smoke_test.py');
+  const script = path.join(SCRIPTS_DIR, 'wizard_smoke_test.py');
   const t0 = Date.now();
   return new Promise((resolve) => {
     // Buffer stderr (PyTorch warnings, CUDA path traces) instead of
@@ -6939,7 +6939,7 @@ ipcMain.handle('wizard:get-python-exe', () => _embeddedPython());
 // wheels from our CDN + diffusers/transformers/etc. from PyPI into the
 // embedded Python. Streams JSONL progress via wizard:install-progress.
 ipcMain.handle('wizard:install-deps', async (event) => {
-  const script = path.join(__dirname, '..', '..', 'scripts', 'wizard_install_deps.py');
+  const script = path.join(SCRIPTS_DIR, 'wizard_install_deps.py');
   const py = _embeddedPython();
   return new Promise((resolve, reject) => {
     const proc = execFile(py, [script, '--python', py], {
@@ -7143,7 +7143,7 @@ ipcMain.handle('connect-claude-desktop', async () => {
     const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
     const claudeDir = path.join(appData, 'Claude');
     const configPath = path.join(claudeDir, 'claude_desktop_config.json');
-    const mcpServerScript = path.join(__dirname, '..', '..', 'scripts', 'mcp_server.py').replace(/\\/g, '\\\\');
+    const mcpServerScript = path.join(SCRIPTS_DIR, 'mcp_server.py').replace(/\\/g, '\\\\');
     const projectRoot = path.join(__dirname, '..', '..').replace(/\\/g, '\\\\');
 
     // Read existing config or start fresh
@@ -8005,7 +8005,7 @@ elif fmt == 'ply':
       // inspect the EXPORT: lines that tell what textures were embedded.
       try {
         fs.writeFileSync(
-          path.join(__dirname, '..', '..', 'last_error.log'),
+          path.join(LOGS_DIR, 'last_error.log'),
           `[${new Date().toISOString()}] export-mesh\nsource: ${sourcePath}\noutput: ${outputPath}\nformat: ${targetFormat}\n\n=== STDOUT ===\n${stdout || ''}\n\n=== STDERR ===\n${stderr || ''}\n`
         );
       } catch (e) {}
