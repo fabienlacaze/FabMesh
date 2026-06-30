@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Packaging polish : NSIS oneClick = wizard branché unique, fix RAM=0, wording Welcome)
+
+- **NSIS `oneClick: true`** : l'installeur Windows multi-pages (Back/Next/Cancel) devient une install
+  minimale + auto-launch (icône + petit splash, ZÉRO page Windows). Le seul wizard visible = le wizard
+  branché de l'app. (Le `.appx` Store n'a déjà aucun installeur Windows.)
+- **`hw_detect.py` RAM=0** : lisait la RAM via `wmic OS get TotalVisibleMemorySize`, mais **wmic est
+  SUPPRIMÉ de Windows 11 24H2+** (build 26200) → échec → fallback psutil (absent du python embarqué nu)
+  → 0. Fix : `GlobalMemoryStatusEx` via `ctypes` (stdlib pur). Validé sur le python embarqué nu : **31 GB**
+  détectés (au lieu de 0). Le `wmic` reste en fallback pour les vieux Windows.
+- **wizard.html** : bullet Welcome « Download the AI models » → « Install the AI engine and download the
+  models » (ne mentionnait pas l'install du moteur câblée en Tier B).
+
 ## 2026-06-30 (Packaging Store/MSIX — Tier B 1/2 : infra venv IA + routage interpréteur, dev-safe)
 
 - Constat (contre-analyse) : `python-embed` (23 MB) est NU + embeddable (pas de module `venv`) +

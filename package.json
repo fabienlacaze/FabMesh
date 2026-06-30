@@ -120,17 +120,16 @@
       }
     ],
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "allowElevation": true,
+      "runAfterFinish": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "MyFabmesh.AI",
       "uninstallDisplayName": "MyFabmesh.AI ${version}",
       "deleteAppDataOnUninstall": false,
       "include": "build/uninstaller.nsh",
-      "license": "LICENSE.txt",
+      "installerHeaderIcon": "icon.ico",
       "artifactName": "MyFabmesh.AI-Setup-${version}.${ext}",
       "differentialPackage": true
     }
