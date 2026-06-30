@@ -147,6 +147,9 @@ let _updater = null;
 let _updateDownloaded = false;
 (function _initAutoUpdate() {
   try {
+    // Under MSIX/Store the install dir is read-only and the Store
+    // handles updates — electron-updater cannot replace files here.
+    if (process.windowsStore) { _updater = null; return; }
     const { autoUpdater } = require('electron-updater');
     _updater = autoUpdater;
     autoUpdater.autoDownload = true;
