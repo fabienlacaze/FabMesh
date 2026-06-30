@@ -1883,7 +1883,12 @@ function fullCleanup() {
 function _runningJobsCount() {
   try { return allActiveProcs ? allActiveProcs.size : 0; } catch (_) { return 0; }
 }
-ipcMain.handle('jobs:running-count', () => _runningJobsCount());
+// The quit-confirm dialog must count only real GENERATION jobs (activeProcs,
+// keyed by jobId) — NOT persistent helpers (SDXL server, MCP bridge, etc.)
+// which live in allActiveProcs. Counting helpers popped the "jobs running"
+// dialog when nothing was actually generating. _runningJobsCount() (all
+// procs) stays for kill-all / the Settings process panel.
+ipcMain.handle('jobs:running-count', () => { try { return activeProcs ? activeProcs.size : 0; } catch (_) { return 0; } });
 ipcMain.handle('jobs:kill-all', () => {
   const n = _runningJobsCount();
   killAllActiveProcs();

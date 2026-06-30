@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (UI fixes : dialog quit — hauteur des options + faux « 1 job en cours »)
+
+- Dialog « Jobs are running » (`modal-quit-jobs`, index2.html) : les 4 boutons héritaient `display:flex`
+  de la classe → libellé + description côte à côte, puis trop serrés en hauteur. Passés `display:block` +
+  `height:auto` + `padding:12px` + `line-height:1.45` → libellé en gras au-dessus, description dessous,
+  hauteur qui s'adapte (descriptions 2 lignes OK).
+- **Faux « 1 job is still running » sans job** : `jobs:running-count` retournait `allActiveProcs.size` =
+  TOUS les process (serveur SDXL / MCP bridge / helpers persistants). Changé pour `activeProcs.size` = vrais
+  jobs de génération (Map jobId). `_runningJobsCount` (all procs) reste pour kill-all / le panneau Processes.
+  Usage unique (quit handler) → safe.
+
 ## 2026-06-30 (Build : rangement auto de dist/installer — InstallEXE / MicrosoftStore)
 
 - electron-builder sort tout dans `dist/installer/` (directories.output) ; un rangement manuel est écrasé
