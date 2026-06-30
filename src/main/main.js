@@ -500,10 +500,20 @@ const IMAGES_DIR   = path.join(DATA_BASE, 'images');
 const HISTORY_DIR  = path.join(DATA_BASE, 'history');
 const LOGS_DIR     = path.join(DATA_BASE, 'logs');
 const CONFIG_PATH  = path.join(DATA_BASE, 'config.json');
-// Writable AI Python env: resources/python-embed is READ-ONLY under
-// MSIX, so on first run we copy it here and pip-install torch/diffusers
-// into the copy. AI scripts run from this interpreter (see _aiPython()).
-const AI_PYTHON_DIR = path.join(DATA_BASE, 'python');
+// HEAVY data (the AI venv + the ~7-22 GB models) is RELOCATABLE: default is
+// userData, but config.dataDir can point it at another drive so the big
+// download need not land on C:. loadConfig() is hoisted and CONFIG_PATH is
+// set above, so reading it here at module init is safe (defaults to DATA_BASE
+// on any error). Changing dataDir takes effect after an app restart.
+let HEAVY_DIR = DATA_BASE;
+try {
+  const _dd = loadConfig().dataDir;
+  if (_dd && typeof _dd === 'string' && _dd.trim()) HEAVY_DIR = _dd.trim();
+} catch (_) {}
+// Writable AI Python env (copy of python-embed + pip-installed torch).
+const AI_PYTHON_DIR = path.join(HEAVY_DIR, 'python');
+// HuggingFace model cache (the big download); HF_HOME points here.
+const HF_CACHE_DIR  = path.join(HEAVY_DIR, 'hf_cache');
 
 // SCRIPTS_DIR is READ-ONLY: in prod the .py files are copied to
 // process.resourcesPath/scripts by electron-builder extraResources.
@@ -2702,7 +2712,7 @@ ipcMain.handle('calib-run', async (event, { skipSf3d = false, env = {}, tag = ''
   return new Promise((resolve) => {
     const proc = execFile(_aiPython(), args, {
       timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
       cwd: path.join(__dirname, '..', '..'),
     }, (error, stdout, stderr) => {
       if (error) {
@@ -2797,7 +2807,7 @@ ipcMain.handle('calib-v3', async (event, opts = {}) => {
     _calibCancelFlag = false;
     const proc = execFile(_aiPython(), args, {
       timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
       cwd: path.join(__dirname, '..', '..'),
     }, (error, stdout, stderr) => {
       _calibDiagnoseProc = null;
@@ -5370,6 +5380,8 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     const _assetType = (typeof assetType === 'string' && assetType.trim()) ? assetType.trim().toLowerCase() : 'character';
     const childEnv = {
       ...process.env,
+      HF_HOME: HF_CACHE_DIR,
+      HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub'),
       FABMESH_VRAM_FRACTION: String(fracVal),
       FABMESH_ASSET_TYPE: _assetType,
       PYTORCH_CUDA_ALLOC_CONF: _allocConf,
@@ -5677,7 +5689,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
           '--mode', rectifyMode,
           '--seeds', '3',
         ], { timeout: 180000, maxBuffer: 10 * 1024 * 1024,
-             env: { ...process.env, PYTHONUNBUFFERED: '1' } },
+             env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') } },
         (err) => err ? reject(err) : resolve());
         proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
         proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
@@ -5946,7 +5958,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
           safeSend('ai3d-progress', `[main] ${label}: starting...\n`);
           const proc = execFile(_pythonExe, [script, meshPath, tempOut, ...extraArgs], {
             timeout, maxBuffer: 10 * 1024 * 1024,
-            env: { ...process.env, PYTHONUNBUFFERED: '1' },
+            env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
           }, (err) => {
             if (!err && fs.existsSync(tempOut)) {
               try {
@@ -6852,7 +6864,7 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
   return new Promise((resolve, reject) => {
     const proc = execFile(_aiPython(), [script, '--mode', mode], {
       timeout: 0, maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
     }, (err) => err ? reject(new Error(err.message)) : resolve({ ok: true }));
     let buf = '';
     proc.stdout?.on('data', (d) => {
@@ -6883,7 +6895,7 @@ ipcMain.handle('wizard:final-test', async (event, mode) => {
     let stderrBuf = '';
     const proc = execFile(_aiPython(), [script, '--mode', mode], {
       timeout: 180000, maxBuffer: 5 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
     }, (err) => {
       const duration_s = Math.round((Date.now() - t0) / 1000);
       if (err) {
@@ -6999,6 +7011,36 @@ function _aiPythonReady() {
 ipcMain.handle('wizard:get-python-exe', () => _embeddedPython());
 ipcMain.handle('wizard:ai-python-ready', () => _aiPythonReady());
 
+// Data location (relocatable heavy data: AI venv + models). Lets the user
+// move the ~7-22 GB download off C: onto another drive (config.dataDir).
+ipcMain.handle('get-data-location', () => {
+  let freeBytes = null;
+  try {
+    const base = fs.existsSync(HEAVY_DIR) ? HEAVY_DIR : path.parse(HEAVY_DIR).root;
+    const s = fs.statfsSync(base);
+    freeBytes = s.bavail * s.bsize;
+  } catch (_) {}
+  return { path: HEAVY_DIR, isDefault: HEAVY_DIR === DATA_BASE, freeBytes };
+});
+ipcMain.handle('pick-data-folder', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose where to store the AI models + engine (~7-22 GB)',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false };
+  const dir = path.join(r.filePaths[0], 'MyFabmesh-data');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return { ok: false, error: e.message }; }
+  try { const t = path.join(dir, '.write_test'); fs.writeFileSync(t, 'ok'); fs.unlinkSync(t); }
+  catch (e) { return { ok: false, error: 'Folder is not writable: ' + e.message }; }
+  let freeBytes = null;
+  try { const s = fs.statfsSync(dir); freeBytes = s.bavail * s.bsize; } catch (_) {}
+  const cfg = loadConfig(); cfg.dataDir = dir; saveConfig(cfg);
+  log.info('main', 'data location set to ' + dir + ' (restart to apply)');
+  return { ok: true, path: dir, freeBytes, restartNeeded: HEAVY_DIR !== dir };
+});
+// HEAVY_DIR is read once at boot, so a new location applies after a restart.
+ipcMain.handle('restart-app', () => { app.relaunch(); app.exit(0); });
+
 // First-run AI env provisioning. The embedded python (resources/
 // python-embed) is read-only under MSIX and has no venv module, so we
 // COPY it to a writable per-user dir (AI_PYTHON_DIR) once, then pip-
@@ -7027,7 +7069,7 @@ ipcMain.handle('wizard:install-deps', async (event) => {
     let stderrBuf = '';
     const proc = execFile(destPy, [script, '--python', destPy], {
       timeout: 0, maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
     }, (err) => {
       if (err) {
         log.error('main', 'install-deps: FAILED code=' + err.code + ' msg=' + err.message + ' | stderr tail: ' + stderrBuf.slice(-2000));

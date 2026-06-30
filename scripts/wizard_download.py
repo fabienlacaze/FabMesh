@@ -76,7 +76,13 @@ def _hf_cache_size_mb(repo):
     """Walk the HF cache for a given repo and return total size in MB.
     Used by the heartbeat to compute live progress without waiting for
     snapshot_download to return."""
-    cache_dir = os.path.expanduser('~/.cache/huggingface/hub')
+    # Honor HF_HOME / HUGGINGFACE_HUB_CACHE so the cache follows the user's
+    # chosen data location (set by the Electron spawn env). snapshot_download
+    # already respects these; this size-walk must look in the same place.
+    cache_dir = (os.environ.get('HUGGINGFACE_HUB_CACHE')
+                 or (os.path.join(os.environ['HF_HOME'], 'hub')
+                     if os.environ.get('HF_HOME')
+                     else os.path.expanduser('~/.cache/huggingface/hub')))
     repo_dir = os.path.join(cache_dir, 'models--' + repo.replace('/', '--'))
     if not os.path.isdir(repo_dir):
         return 0

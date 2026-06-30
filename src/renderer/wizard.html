@@ -91,6 +91,10 @@
             <div class="wiz-mode-desc">Basic mesh generation only. Needs 6+ GB VRAM.</div>
           </label>
         </div>
+        <div id="wiz-data-loc" style="margin-top:14px; padding:10px 12px; background:rgba(255,255,255,.04); border-radius:8px; display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px;">
+          <span>📁 Install location: <strong id="wiz-data-path">…</strong> <span id="wiz-data-free" style="opacity:.55"></span></span>
+          <button class="ghost-btn" id="wiz-data-change" style="padding:4px 12px; font-size:11px; height:26px;">Change…</button>
+        </div>
         <div class="wiz-actions">
           <button class="ghost-btn" data-back="detect">Back</button>
           <button class="primary-btn" data-next="download" id="btn-mode-next" disabled>Continue</button>

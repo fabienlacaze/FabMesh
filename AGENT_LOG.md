@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Feature : emplacement des données configurable — modèles + venv hors C:)
+
+- Avant : venv (~5 GB) dans `userData/python` ET modèles (~7-22 GB) dans `~/.cache/huggingface` — TOUT sur C:,
+  codé en dur (`wizard_download.py:79`). Aucun choix d'emplacement.
+- `HEAVY_DIR = config.dataDir || DATA_BASE` (lu au boot) → `AI_PYTHON_DIR` + `HF_CACHE_DIR` sous ce dossier.
+  `HF_HOME`/`HUGGINGFACE_HUB_CACHE` injectés dans `childEnv` + les 7 spawns `PYTHONUNBUFFERED` → download
+  ET runtime utilisent le dossier choisi. `wizard_download.py` honore `HF_HOME` (size-walk inclus).
+- IPC `get-data-location` (path + espace libre via `fs.statfsSync`) + `pick-data-folder` (dialog
+  openDirectory → crée `<choix>/MyFabmesh-data`, test d'écriture, sauve `config.dataDir`) + `restart-app`.
+  Exposés au wizard. UI : ligne « 📁 Install location … [Change] » sur la page Mode + confirm de restart.
+- Changement = restart (instantané au 1er run, avant tout download). Défaut inchangé (userData) → dev intact.
+
 ## 2026-06-30 (Support : bouton « Export logs » — diagnostics 1-clic vers le Bureau)
 
 - IPC `export-diagnostics` (main.js) : bundle `fabmesh.log` + `wizard.log` + `last_error.log` (tail 500 KB

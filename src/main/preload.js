@@ -57,6 +57,9 @@ contextBridge.exposeInMainWorld('wizardAPI', {
   installDeps: () => ipcRenderer.invoke('wizard:install-deps'),
   onInstallProgress: (cb) => ipcRenderer.on('wizard:install-progress', (_e, p) => cb(p)),
   exportDiagnostics: () => ipcRenderer.invoke('export-diagnostics'),
+  getDataLocation: () => ipcRenderer.invoke('get-data-location'),
+  pickDataFolder: () => ipcRenderer.invoke('pick-data-folder'),
+  restartApp: () => ipcRenderer.invoke('restart-app'),
 });
 
 // ----------------------------------------------------------

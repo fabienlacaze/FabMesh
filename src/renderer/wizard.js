@@ -69,6 +69,7 @@ function goto(step) {
   if (step === 'mode' && hwReport) {
     // Safe to call every time — just re-renders the card states.
     renderModeCards();
+    renderDataLocation();
   }
   if (step === 'download' && !initialized.has('download')) {
     initialized.add('download'); startDownload();
@@ -203,6 +204,48 @@ document.querySelectorAll('.wiz-mode-card').forEach(card => {
     document.getElementById('btn-mode-next').disabled = false;
   });
 });
+
+// ---------- Data location (shown on the Mode step) ----------
+async function renderDataLocation() {
+  try {
+    const loc = await window.wizardAPI.getDataLocation();
+    const pathEl = document.getElementById('wiz-data-path');
+    const freeEl = document.getElementById('wiz-data-free');
+    if (pathEl) {
+      pathEl.textContent = loc.isDefault ? 'Default (your user folder, on C:)' : loc.path;
+      pathEl.title = loc.path;
+    }
+    if (freeEl) {
+      freeEl.style.color = '';
+      freeEl.textContent = loc.freeBytes ? '· ' + (loc.freeBytes / 1073741824).toFixed(0) + ' GB free' : '';
+    }
+  } catch (_) {}
+}
+(() => {
+  const btn = document.getElementById('wiz-data-change');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const r = await window.wizardAPI.pickDataFolder();
+      if (r && r.ok) {
+        await renderDataLocation();
+        if (r.restartNeeded) {
+          const ok = await wizConfirm({
+            title: 'Restart to apply',
+            body: 'MyFabmesh.AI will restart to use the new location:\n' + r.path + '\n\nNothing is downloaded yet, so this is instant.',
+            okLabel: 'Restart now', cancelLabel: 'Later',
+          });
+          if (ok) { await window.wizardAPI.restartApp(); }
+        }
+      } else if (r && r.error) {
+        const freeEl = document.getElementById('wiz-data-free');
+        if (freeEl) { freeEl.style.color = 'var(--error)'; freeEl.textContent = '· ' + r.error; }
+      }
+    } catch (_) {}
+    btn.disabled = false;
+  });
+})();
 
 // ---------- STEP 4: download ----------
 async function startDownload() {
