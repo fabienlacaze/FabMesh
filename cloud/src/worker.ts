@@ -11244,11 +11244,33 @@ async function reapStuckJobs(env: Env): Promise<void> {
   console.log(`[reaper] scanned ${stuck.length} processing jobs >20min, failed+refunded ${reaped}`);
 }
 
+// Weekly keep-alive so the free-tier Supabase project doesn't auto-pause after
+// 7 days of inactivity. One cheap read; best-effort (never throws).
+async function keepAliveSupabase(env: Env): Promise<void> {
+  try {
+    const url = env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) return;
+    await fetch(`${url}/rest/v1/profiles?select=id&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+  } catch {
+    /* best-effort — inactivity ping only */
+  }
+}
+
 export default {
-  async scheduled(_event: unknown, env: Env, ctx: { waitUntil: (p: Promise<unknown>) => void }): Promise<void> {
-    ctx.waitUntil(preWarmCog(env));
-    ctx.waitUntil(purgeTransientUploads(env));
-    ctx.waitUntil(reapStuckJobs(env));
+  async scheduled(event: { cron?: string }, env: Env, ctx: { waitUntil: (p: Promise<unknown>) => void }): Promise<void> {
+    // Weekly keep-alive: one cheap Supabase read so the free-tier project never
+    // auto-pauses (7-day inactivity). Cheap + safe — runs on every cron.
+    ctx.waitUntil(keepAliveSupabase(env));
+    // Heavier maintenance (pre-warm / purge / reap) runs only on the frequent
+    // heartbeat cron — NOT the weekly keep-alive ping (avoids any credit burn).
+    if (event.cron !== '0 6 * * 1') {
+      ctx.waitUntil(preWarmCog(env));
+      ctx.waitUntil(purgeTransientUploads(env));
+      ctx.waitUntil(reapStuckJobs(env));
+    }
   },
 
   async fetch(req: Request, env: Env, _ctx: unknown): Promise<Response> {

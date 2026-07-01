@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-30 (Cloud : keep-alive Supabase — cron hebdo anti-pause free-tier, gratuit)
+
+- Supabase free-tier pause les projets après 7j sans activité → casserait le cloud (auth/DB comptes/crédits/
+  Stripe) + la future license .exe. Réveil manuel fait (ping API : auth 200 + PostgREST DB hit).
+- Fix permanent (`cloud/src/worker.ts`) : `keepAliveSupabase(env)` = 1 read cheap sur `profiles` (service_role) ;
+  `scheduled()` le lance sur CHAQUE cron. Le pre-warm/purge/reap NE tourne PAS sur le cron hebdo (`0 6 * * 1`) —
+  évite le credit-burn de `preWarmCog` (la raison pour laquelle le `*/4min` avait été désactivé).
+- `cloud/wrangler.toml` : `[triggers] crons = ["0 6 * * 1"]` (lundi 6h UTC). **Déployé** — wrangler confirme
+  `schedule: 0 6 * * 1`. Gratuit (cron Cloudflare = plan free). Le projet ne se mettra plus jamais en pause.
+
 ## 2026-06-30 (Bug gén image : VAE « Half vs float » — force_upcast=False sur le VAE fp16-fix)
 
 - Sur le PC d'un ami (clean install, venv torch 2.7), la génération d'image plante :

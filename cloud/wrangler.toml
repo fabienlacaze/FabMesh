@@ -78,6 +78,12 @@ bucket_name = "myfabmesh-meshes"
 # [triggers]
 # crons = ["*/4 * * * *"]
 
+# ACTIVE: weekly keep-alive so the free-tier Supabase project never auto-pauses
+# (7-day inactivity). scheduled() runs ONLY the cheap Supabase ping for this
+# cron — no pre-warm / credit burn. Free (Cloudflare cron is on the free plan).
+[triggers]
+crons = ["0 6 * * 1"]
+
 [vars]
 MOCK = "0"
 NEXT_PUBLIC_MOCK = "0"
