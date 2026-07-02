@@ -186,13 +186,20 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                 pipe.controlnet.to(torch.float16)
         except Exception as _e:
             print(f"LOCAL_REALVIS: fp16 cast skipped: {_e}", flush=True)
-        # Upcast VAE to fp32 — SDXL's fp16 VAE NaNs to a flat grey image.
+        # fp16-STABLE VAE. The native SDXL fp16 VAE NaNs to a flat grey image,
+        # and a manual upcast_vae() leaves a fp16/fp32 boundary inside the
+        # decoder that crashes at decode ("Input type (Half) and bias type
+        # (float)"). madebyollin's fp16-fix VAE decodes cleanly in pure fp16 —
+        # no upcast, no boundary, no grey. SAME fix as sdxl_server.py.
         try:
-            pipe.upcast_vae()
-        except Exception as _e:
-            try: pipe.vae.to(torch.float32)
+            from diffusers import AutoencoderKL
+            pipe.vae = AutoencoderKL.from_pretrained(
+                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+            pipe.vae.config.force_upcast = False
+        except Exception as _ve:
+            print(f"LOCAL_REALVIS: fp16-fix VAE unavailable ({_ve}); force_upcast fallback", flush=True)
+            try: pipe.vae.config.force_upcast = True
             except Exception: pass
-            print(f"LOCAL_REALVIS: upcast_vae fallback ({_e})", flush=True)
         pipe.enable_model_cpu_offload()
         _ctrl_pipe = pipe
         steps = min(int(steps), 8)
@@ -213,17 +220,21 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             pipe.text_encoder_2.to(torch.float16)
         except Exception as _e:
             print(f"LOCAL_REALVIS: fp16 cast skipped: {_e}", flush=True)
-        # SDXL's VAE is NUMERICALLY UNSTABLE in fp16: it overflows to NaN latents
-        # and decodes a FLAT GREY/black image (observed: ref_0 grey ~165, var~0,
-        # triggered while changing the quality/steps slider). Upcast the VAE to
-        # fp32 (diffusers handles the fp16->fp32 decode); fall back to a plain
-        # fp32 cast. This is the standard fix for SDXL grey/black outputs.
+        # SDXL's native VAE is NUMERICALLY UNSTABLE in fp16: it overflows to NaN
+        # latents and decodes a FLAT GREY/black image (observed: ref_0 grey ~165,
+        # var~0). A manual upcast_vae() "fixes" the grey but leaves a fp16/fp32
+        # boundary inside the decoder that crashes ("Input type (Half) and bias
+        # type (float)"). madebyollin's fp16-fix VAE decodes cleanly in pure fp16
+        # — no upcast, no boundary, no grey. SAME fix as sdxl_server.py.
         try:
-            pipe.upcast_vae()
-        except Exception as _e:
-            try: pipe.vae.to(torch.float32)
+            from diffusers import AutoencoderKL
+            pipe.vae = AutoencoderKL.from_pretrained(
+                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+            pipe.vae.config.force_upcast = False
+        except Exception as _ve:
+            print(f"LOCAL_REALVIS: fp16-fix VAE unavailable ({_ve}); force_upcast fallback", flush=True)
+            try: pipe.vae.config.force_upcast = True
             except Exception: pass
-            print(f"LOCAL_REALVIS: upcast_vae fallback ({_e})", flush=True)
         # SDXL-Lightning turbo: fuse the 4-step LoRA + Euler 'trailing' scheduler
         # BEFORE cpu-offload (load LoRA while weights are on-device).
         if _turbo:

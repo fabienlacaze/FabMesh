@@ -14455,6 +14455,26 @@ async function refreshJobDetailsModal(id) {
   }
 }
 document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
+document.getElementById('job-details-export-logs')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const _orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Exporting…';
+  try {
+    const res = await window.meshyAPI.exportDiagnostics();
+    if (res && res.ok) {
+      btn.innerHTML = '✓ Saved to Desktop';
+      showToast && showToast('Logs saved: ' + (res.path || 'Desktop'), 'success');
+    } else {
+      btn.innerHTML = _orig;
+      showToast && showToast('Export failed: ' + ((res && res.error) || 'unknown'), 'error');
+    }
+  } catch (err) {
+    btn.innerHTML = _orig;
+    showToast && showToast('Export failed: ' + (err.message || err), 'error');
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = _orig; }, 2500);
+  }
+});
 document.getElementById('job-details-unlock')?.addEventListener('click', () => {
   // Close this modal, open the legal-warning + PIN flow, then re-run the blocked job.
   closeJobDetails();

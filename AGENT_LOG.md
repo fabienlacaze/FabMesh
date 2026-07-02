@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-07-02 (Bug gén image CONFIRMÉ : c'était `local_juggernaut`, pas `sdxl_server` — même fix VAE)
+
+- L'ami re-teste le build post-fix → la gén plante ENCORE (screenshot « Task failed », engine
+  « Balanced (quality/speed) »). Diagnostic : « Balanced » = `<option value="local-flux">` = engine `local-flux`
+  = `local_juggernaut_bridge.py` (le moteur PAR DÉFAUT), PAS `sdxl_server.py`. Mon fix du 06-30 ne couvrait
+  donc pas le moteur réellement utilisé. C'est exactement le « NOTE » laissé le 30/06 (ligne ~23).
+- Cause identique : `local_juggernaut_bridge.py` appelait `pipe.upcast_vae()` manuel (2 sites : DreamShaper XL
+  Lightning ~L191 + RealVis XL ~L222) → VAE partiellement fp32 avec une frontière fp16/fp32 dans le décodeur
+  → `Input type (Half) and bias type (float)` au decode.
+- Fix : remplacé les 2 `upcast_vae()` par le MÊME pattern prouvé que sdxl_server → charge le VAE fp16-fix
+  (`madebyollin/sdxl-vae-fp16-fix`, fp16) + `pipe.vae.config.force_upcast = False` (fallback `force_upcast=True`
+  si le VAE ne se télécharge pas). Décodage pur fp16, plus de frontière de dtype. Placé AVANT
+  `enable_model_cpu_offload()` (le nouveau VAE reçoit les hooks d'offload). Syntaxe vérifiée (ast.parse OK).
+- UX debug : ajouté un bouton **« Export logs »** dans la modale d'échec (`index2.html` `#job-details-export-logs`
+  + handler `index2.js` → `meshyAPI.exportDiagnostics()`) → 1 clic = .txt sur le Bureau, plus besoin de fouiller
+  `%APPDATA%\myfabmesh-ai\logs`. Rebuild requis pour que l'ami en profite.
+
 ## 2026-06-30 (Cloud : keep-alive Supabase — cron hebdo anti-pause free-tier, gratuit)
 
 - Supabase free-tier pause les projets après 7j sans activité → casserait le cloud (auth/DB comptes/crédits/
