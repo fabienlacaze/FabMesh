@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('wizardAPI', {
   log: (payload) => ipcRenderer.send('wizard-log', payload),
   detectHardware: () => ipcRenderer.invoke('wizard:detect-hardware'),
   getDownloadPlan: (mode) => ipcRenderer.invoke('wizard:download-plan', mode),
+  freeSpace: () => ipcRenderer.invoke('wizard:free-space'),
   startDownload: (mode) => ipcRenderer.invoke('wizard:start-download', mode),
   onDownloadProgress: (cb) => ipcRenderer.on('wizard:download-progress', (_e, p) => cb(p)),
   runFinalTest: (mode) => ipcRenderer.invoke('wizard:final-test', mode),

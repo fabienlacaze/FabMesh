@@ -6859,6 +6859,22 @@ ipcMain.handle('wizard:download-plan', (_e, mode) => {
   return { mode, items, total_mb };
 });
 
+// Free-space probe for the drive that will hold the AI env + models
+// (HEAVY_DIR / the configured dataDir). The wizard calls this BEFORE starting
+// a multi-GB download so a user with too little space is warned up front,
+// instead of after 30 min of downloading into a disk that then fills and
+// leaves a half-written, permanently-broken install. Probes the drive ROOT
+// (always exists) rather than HF_CACHE_DIR (may not be created yet).
+ipcMain.handle('wizard:free-space', () => {
+  try {
+    const root = path.parse(HF_CACHE_DIR).root || HEAVY_DIR;
+    const s = fs.statfsSync(root);
+    return { ok: true, freeBytes: s.bavail * s.bsize, drive: root };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('wizard:start-download', async (event, mode) => {
   const items = WIZARD_MODELS[mode] || [];
   if (!items.length) return { skipped: true };
@@ -6867,10 +6883,21 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
   // progress lines to our stdout listener.
   const script = path.join(SCRIPTS_DIR, 'wizard_download.py');
   return new Promise((resolve, reject) => {
+    // Capture stderr so a real failure (wizard_download.py exits 1 and writes
+    // the failing model(s) to stderr) surfaces a MEANINGFUL message to the
+    // wizard's Retry UI instead of Node's generic "Command failed". maxBuffer
+    // bumped to 64 MB: a long download with retries emits many progress lines.
+    let stderrBuf = '';
     const proc = execFile(_aiPython(), [script, '--mode', mode], {
-      timeout: 0, maxBuffer: 10 * 1024 * 1024,
+      timeout: 0, maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
-    }, (err) => err ? reject(new Error(err.message)) : resolve({ ok: true }));
+    }, (err) => {
+      if (err) {
+        const detail = (stderrBuf.trim() || err.message || 'download failed');
+        return reject(new Error(detail));
+      }
+      resolve({ ok: true });
+    });
     let buf = '';
     proc.stdout?.on('data', (d) => {
       buf += d.toString();
@@ -6884,6 +6911,10 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
           event.sender.send('wizard:download-progress', p);
         } catch (_) {}
       }
+    });
+    proc.stderr?.on('data', (d) => {
+      stderrBuf += d.toString();
+      if (stderrBuf.length > 65536) stderrBuf = stderrBuf.slice(-65536);
     });
   });
 });

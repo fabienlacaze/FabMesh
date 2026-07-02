@@ -84,6 +84,28 @@ def emit(obj):
     sys.stdout.flush()
 
 
+def _lower_priority():
+    """Drop this process (and the pip children it spawns) to BELOW_NORMAL so
+    the ~5 GB torch install doesn't freeze the desktop. Best-effort; no-op off
+    Windows or on failure. On Windows the priority class is inherited by
+    subprocess.Popen children (no creationflags), so pip stays throttled too.
+    Uses the typed-ctypes idiom (restype=c_void_p) required so the 64-bit
+    GetCurrentProcess() pseudo-handle isn't truncated → SetPriorityClass works."""
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.windll.kernel32
+            k32.GetCurrentProcess.restype = ctypes.c_void_p
+            k32.SetPriorityClass.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+            k32.SetPriorityClass.restype = wintypes.BOOL
+            k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000)  # BELOW_NORMAL_PRIORITY_CLASS
+        else:
+            os.nice(10)
+    except Exception:
+        pass
+
+
 _TOTAL_STEPS = (len(TORCH_PACKAGES) + len(COMPILED_WHEELS_NVIDIA)
                 + 1  # flash_attn
                 + len(PYPI_PACKAGES))
@@ -91,14 +113,20 @@ _TOTAL_STEPS = (len(TORCH_PACKAGES) + len(COMPILED_WHEELS_NVIDIA)
 
 def _run(args, step):
     """Run a subprocess and stream a coarse progress event on each
-    pip output line containing 'Downloading' / 'Installing'."""
+    pip output line containing 'Downloading' / 'Installing'. On failure,
+    include the tail of pip's output so the UI shows WHY (disk full, network,
+    etc.) instead of a bare 'pip exited 1'."""
     emit({'step': step, 'pct': 0, 'done': False, 'msg': ' '.join(args[-3:])})
     proc = subprocess.Popen(args, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True,
                              encoding='utf-8', errors='replace')
     seen_pkgs = set()
+    tail = []
     for line in proc.stdout:
         line = line.rstrip()
+        tail.append(line)
+        if len(tail) > 20:
+            tail = tail[-20:]
         if 'Downloading' in line or 'Installing collected packages' in line:
             for token in line.split():
                 if '==' in token or token.endswith('.whl'):
@@ -108,10 +136,19 @@ def _run(args, step):
                   'current': line[:120]})
     proc.wait()
     if proc.returncode != 0:
-        raise RuntimeError(f'pip exited {proc.returncode} on step {step}')
+        ctx = '\n'.join(tail)
+        low = ctx.lower()
+        if ('no space left' in low or 'errno 28' in low
+                or 'not enough space' in low or 'disk full' in low):
+            raise RuntimeError(
+                'Not enough free disk space to install the AI engine. Free up '
+                'space (or move the data folder to a bigger drive in Settings) '
+                'and retry.\n\n' + ctx)
+        raise RuntimeError(f'pip exited {proc.returncode} on step {step}:\n{ctx}')
 
 
 def main():
+    _lower_priority()  # keep the desktop responsive during the ~5 GB install
     ap = argparse.ArgumentParser()
     ap.add_argument('--python', default=sys.executable,
                     help='path to the embedded python.exe; default = current')

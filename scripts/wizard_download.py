@@ -22,6 +22,44 @@ import time
 import urllib.request
 
 
+# Slow-link resilience: HuggingFace's default connect/etag timeout is 10s,
+# which can abort a large-file transfer on rural DSL / mobile tethering /
+# hotel wifi. Raise them BEFORE huggingface_hub is imported (it reads these
+# at import time). This does NOT cap total download time — a slow transfer
+# keeps going; it only stops premature aborts on a sluggish connection.
+os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '30')
+os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '30')
+
+
+def _lower_priority():
+    """Drop this process (and the children it spawns) to BELOW_NORMAL so the
+    multi-GB download + concurrent disk writes don't freeze the desktop.
+    Best-effort; no-op off Windows or on failure. Uses the typed-ctypes idiom
+    (restype=c_void_p) that scripts/trellis2_native_full_pipeline.py proved is
+    required so the 64-bit GetCurrentProcess() pseudo-handle isn't truncated
+    to 32 bits (which makes SetPriorityClass silently fail)."""
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.windll.kernel32
+            k32.GetCurrentProcess.restype = ctypes.c_void_p
+            k32.SetPriorityClass.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+            k32.SetPriorityClass.restype = wintypes.BOOL
+            k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000)  # BELOW_NORMAL_PRIORITY_CLASS
+        else:
+            os.nice(10)
+    except Exception:
+        pass
+
+
+# Models that are OPTIONAL — the app still generates without them (esrgan =
+# upscaler, florence2 = secondary captioner). A failure on THESE only warns;
+# a failure on any other (essential) model fails the install loudly so the
+# user never proceeds with a broken setup.
+_OPTIONAL_MODELS = {'esrgan', 'florence2'}
+
+
 MODELS = {
     'lite': [
         ('trellis2', 'microsoft/TRELLIS.2-4B', 4100),
@@ -192,11 +230,62 @@ def _already_installed(repo, expected_mb):
         return False
 
 
+def _with_retry(fn, item_id, total_done_mb_ref, attempts=5):
+    """Retry fn() on TRANSIENT network/server errors with exponential
+    backoff (4s, 8s, 16s… capped 120s + jitter). Permanent errors (gated /
+    missing repo, revision, file, or auth 401/403) re-raise immediately —
+    retrying them just wastes minutes before the identical failure.
+    snapshot_download resumes from the HF cache, so each retry continues
+    where the last attempt stopped rather than restarting from 0."""
+    import random
+    try:
+        from requests.exceptions import (ConnectionError as _ConnErr,
+                                          Timeout as _Timeout,
+                                          ChunkedEncodingError as _ChunkErr)
+        _TRANSIENT_NET = (_ConnErr, _Timeout, _ChunkErr)
+    except Exception:
+        _TRANSIENT_NET = ()
+    try:
+        from huggingface_hub.utils import HfHubHTTPError as _HTTPErr
+    except Exception:
+        try:
+            from huggingface_hub.errors import HfHubHTTPError as _HTTPErr
+        except Exception:
+            _HTTPErr = None
+    try:
+        from huggingface_hub.errors import (RepositoryNotFoundError,
+                                            GatedRepoError, RevisionNotFoundError,
+                                            EntryNotFoundError)
+        _PERMANENT = (RepositoryNotFoundError, GatedRepoError,
+                      RevisionNotFoundError, EntryNotFoundError)
+    except Exception:
+        _PERMANENT = ()
+    delay = 4.0
+    for n in range(1, attempts + 1):
+        try:
+            return fn()
+        except _PERMANENT:
+            raise  # never retry: user must accept a license / fix the repo id
+        except Exception as e:
+            is_http = bool(_HTTPErr) and isinstance(e, _HTTPErr)
+            status = getattr(getattr(e, 'response', None), 'status_code', None) if is_http else None
+            transient = (isinstance(e, _TRANSIENT_NET)
+                         or (is_http and status in (429, 500, 502, 503, 504)))
+            if not transient or n == attempts:
+                raise
+            emit({'id': item_id, 'pct': 0, 'done': False, 'in_progress': True,
+                  'msg': f'network hiccup, retry {n}/{attempts - 1} in {int(delay)}s…',
+                  'total_done_mb': total_done_mb_ref[0]})
+            time.sleep(delay + random.uniform(0, 2))
+            delay = min(delay * 2, 120)
+
+
 def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
     """Use huggingface_hub.snapshot_download. A background thread emits
     progress events every second based on actual cache growth, so the
-    UI never looks frozen even on multi-GB repos. Retries once with
-    the embedded read-only token if anonymous hits a rate-limit."""
+    UI never looks frozen even on multi-GB repos. Transient network/server
+    errors are retried with backoff (_with_retry); a rate-limit falls back
+    to the embedded read-only token."""
     from huggingface_hub import snapshot_download
     from huggingface_hub.utils import HfHubHTTPError
 
@@ -232,23 +321,23 @@ def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
         args=(item_id, repo, expected_mb, total_done_mb_ref, stop, t0),
         daemon=True)
     hb.start()
+    def _dl(tok):
+        return snapshot_download(repo_id=repo, resume_download=True,
+                                 max_workers=4, token=tok,
+                                 allow_patterns=ALLOW_PATTERNS.get(repo))
     try:
         token = _hf_token()
         try:
-            snapshot_download(repo_id=repo, resume_download=True,
-                              max_workers=4, token=token,
-                              allow_patterns=ALLOW_PATTERNS.get(repo))
-        except HfHubHTTPError as e:
-            # Rate-limit (429) or auth (401/403) — try once with the
-            # embedded fallback token if we have one and weren't already
-            # using a token.
+            _with_retry(lambda: _dl(token), item_id, total_done_mb_ref)
+        except HfHubHTTPError:
+            # Rate-limit / auth that survived the retries — try once with the
+            # embedded read-only fallback token if we have one and weren't
+            # already using a token (also retried on transient failures).
             if not token and HF_FALLBACK_TOKEN:
                 emit({'id': item_id, 'pct': 0, 'done': False,
                       'in_progress': True, 'msg': 'retrying with fallback token',
                       'total_done_mb': total_done_mb_ref[0]})
-                snapshot_download(repo_id=repo, resume_download=True,
-                                  max_workers=4, token=HF_FALLBACK_TOKEN,
-                                  allow_patterns=ALLOW_PATTERNS.get(repo))
+                _with_retry(lambda: _dl(HF_FALLBACK_TOKEN), item_id, total_done_mb_ref)
             else:
                 raise
     finally:
@@ -280,35 +369,49 @@ def download_esrgan(item_id, expected_mb, total_done_mb_ref):
           'total_done_mb': total_done_mb_ref[0]})
     t0 = time.time()
     last_emit = 0
-    with urllib.request.urlopen(url, timeout=60) as resp, open(target, 'wb') as f:
-        total = int(resp.headers.get('content-length') or expected_mb * 1024 * 1024)
-        read = 0
-        while True:
-            chunk = resp.read(1024 * 256)
-            if not chunk: break
-            f.write(chunk)
-            read += len(chunk)
-            now = time.time()
-            if now - last_emit > 0.3:
-                pct = round(read * 100 / total, 1)
-                speed = (read / (1024 * 1024)) / max(now - t0, 0.001)
-                emit({'id': item_id, 'pct': pct, 'done': False,
-                      'speed_mbps': speed,
-                      'eta': _eta_str((total - read) / (1024 * 1024), speed),
-                      'total_done_mb': total_done_mb_ref[0] + read // (1024 * 1024)})
-                last_emit = now
+    _attempt = 0
+    while True:
+        _attempt += 1
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp, open(target, 'wb') as f:
+                total = int(resp.headers.get('content-length') or expected_mb * 1024 * 1024)
+                read = 0
+                while True:
+                    chunk = resp.read(1024 * 256)
+                    if not chunk: break
+                    f.write(chunk)
+                    read += len(chunk)
+                    now = time.time()
+                    if now - last_emit > 0.3:
+                        pct = round(read * 100 / total, 1)
+                        speed = (read / (1024 * 1024)) / max(now - t0, 0.001)
+                        emit({'id': item_id, 'pct': pct, 'done': False,
+                              'speed_mbps': speed,
+                              'eta': _eta_str((total - read) / (1024 * 1024), speed),
+                              'total_done_mb': total_done_mb_ref[0] + read // (1024 * 1024)})
+                        last_emit = now
+            break
+        except Exception as e:
+            if _attempt >= 3:
+                raise
+            emit({'id': item_id, 'pct': 0, 'done': False, 'in_progress': True,
+                  'msg': f'download hiccup, retry {_attempt}/2…',
+                  'total_done_mb': total_done_mb_ref[0]})
+            time.sleep(3 * _attempt)
     total_done_mb_ref[0] += expected_mb
     emit({'id': item_id, 'pct': 100, 'done': True,
           'total_done_mb': total_done_mb_ref[0]})
 
 
 def main():
+    _lower_priority()  # keep the desktop responsive during the multi-GB pull
     ap = argparse.ArgumentParser()
     ap.add_argument('--mode', choices=list(MODELS.keys()), required=True)
     args = ap.parse_args()
 
     items = MODELS[args.mode]
     total_done = [0]
+    failures = []
     for item_id, repo, size in items:
         try:
             if item_id == 'esrgan':
@@ -316,13 +419,29 @@ def main():
             else:
                 download_hf(item_id, repo, size, total_done)
         except Exception as e:
-            emit({'id': item_id, 'pct': 0, 'done': False,
-                  'error': str(e)})
-            # Continue with the next model — partial install is still
-            # better than aborting. The smoke test will tell us if the
-            # bare minimum is in place.
-    emit({'id': '__all__', 'pct': 100, 'done': True,
-          'total_done_mb': total_done[0]})
+            emit({'id': item_id, 'pct': 0, 'done': False, 'error': str(e)})
+            failures.append((item_id, str(e)))
+            # Keep going so an OPTIONAL model (upscaler / extra captioner)
+            # failing doesn't block essentials from downloading.
+
+    essential_failures = [(i, e) for i, e in failures if i not in _OPTIONAL_MODELS]
+    if essential_failures:
+        # An essential model is missing → DO NOT report success. Emit the
+        # error to the UI (so the Retry path fires) and exit non-zero so the
+        # Electron promise rejects instead of silently marking setup complete.
+        detail = '; '.join(f'{i}: {e}' for i, e in failures)
+        emit({'id': '__all__', 'pct': 100, 'done': False, 'error': detail,
+              'total_done_mb': total_done[0]})
+        sys.stderr.write('wizard_download failed: ' + detail + '\n')
+        sys.stderr.flush()
+        sys.exit(1)
+
+    # All essentials present. If only optional models failed, warn but proceed.
+    done_obj = {'id': '__all__', 'pct': 100, 'done': True,
+                'total_done_mb': total_done[0]}
+    if failures:
+        done_obj['warn'] = '; '.join(f'{i}: {e}' for i, e in failures)
+    emit(done_obj)
 
 
 if __name__ == '__main__':

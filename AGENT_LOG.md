@@ -1,5 +1,33 @@
 # FabMesh Agent Log
 
+## 2026-07-02 (Robustesse download/install sur hardware hétérogène — 2 workflows adversariaux → fixes ciblés)
+
+- Demande user : garantir que « les modèles IA ne se téléchargent pas puis que ça met super long » ne se reproduise
+  plus, en pensant aux **PC variés** (net lent/instable, HDD, peu de RAM/disque, antivirus, non-NVIDIA). Deux workflows
+  ultracode (18 + 42 agents, chaque finding vérifié en adversarial) ont audité tout le flux first-run.
+- **wizard_download.py** : (1) **fail-loud** — `main()` exit(1) + stderr si un modèle ESSENTIEL échoue (avant :
+  `emit(error)` puis `done:true` → le wizard croyait à un succès, la gén plantait plus tard « poids manquants ». Les
+  modèles OPTIONNELS {esrgan, florence2} ne bloquent plus, juste un warn). (2) **`_with_retry`** — retry transient-only
+  (429/500/502/503/504 + ConnectionError/Timeout/ChunkedEncoding) avec backoff expo (4→120s + jitter), permanents
+  (gated/404/auth) ré-raisés immédiatement ; snapshot_download `resume_download=True` → reprend où il s'est arrêté.
+  (3) **timeouts HF** `HF_HUB_DOWNLOAD_TIMEOUT`/`ETAG_TIMEOUT` = 30s (défaut 10s abortait les liens lents). (4) retry
+  ×3 sur le download ESRGAN GitHub. (5) `_lower_priority()` BELOW_NORMAL (idiome ctypes typé anti-troncature du
+  pseudo-handle 64-bit).
+- **wizard_install_deps.py** : `_lower_priority()` en 1re ligne de main() (pip enfants héritent la classe → plus de
+  freeze PC) ; `_run()` capture le tail (20 lignes) et donne un message ENOSPC clair au lieu de « pip exited 1 ».
+- **main.js** : handler `wizard:start-download` capture stderr → le message d'échec nomme le modèle fautif (au lieu du
+  générique « Command failed ») ; maxBuffer 10→64 MB. Nouvel IPC `wizard:free-space` (statfs de la racine du drive
+  data). NB : les orphelins étaient DÉJÀ tués (execFile monkey-patché → allActiveProcs → fullCleanup on before/will-quit).
+- **preload.js** : expose `freeSpace()`.
+- **wizard.js** : précheck disque avant download (bloque avec message clair si free < models+7 GB) ; note patiente
+  « PC peut ralentir / la barre peut se figer — c'est normal » ; affichage inline des échecs par modèle. NB : le gate
+  non-NVIDIA→page no-gpu/cloud existait déjà (wizard.js:90-92).
+- **Faux positifs écartés** (vérif adversariale) : générateurs de vues en fp16 (sûrs : `.to(fp16)`+force_upcast=True →
+  upcast fp32 auto), `--no-cache-dir` (ne halve pas l'I/O), `windowsHide` (no-op sous Node 20), max_workers 4→2 (throttle
+  la fibre), mvadapter sans force_upcast=False (le VAE fp16-fix ship déjà force_upcast:false dans son config.json).
+- Différés (notés) : max_workers adaptatif HDD, hash d'intégrité (trop lent sur 17 GB), single-instance lock,
+  uninstaller.nsh mauvais chemins (orthogonal), listeners IPC dupliqués au Retry (bénin).
+
 ## 2026-07-02 (Bug gén image CONFIRMÉ : c'était `local_juggernaut`, pas `sdxl_server` — même fix VAE)
 
 - L'ami re-teste le build post-fix → la gén plante ENCORE (screenshot « Task failed », engine

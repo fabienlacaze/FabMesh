@@ -263,6 +263,27 @@ async function startDownload() {
     return;
   }
 
+  // ---- Preflight: is there enough free disk on the data drive? A multi-GB
+  // install that dies half-way on a full disk leaves a permanently-broken
+  // setup, so warn UP FRONT. Needed ≈ models (from the plan) + ~7 GB for the
+  // torch/diffusers env. Non-fatal if the probe itself fails (fall through).
+  try {
+    const _plan0 = await window.wizardAPI.getDownloadPlan(chosenMode);
+    const _fs0 = await window.wizardAPI.freeSpace();
+    if (_fs0 && _fs0.ok && typeof _fs0.freeBytes === 'number') {
+      const neededGb = ((_plan0.total_mb || 0) / 1024) + 7;
+      const freeGb = _fs0.freeBytes / (1024 ** 3);
+      if (freeGb < neededGb) {
+        list.innerHTML = `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Not enough free space on ${_fs0.drive || 'your data drive'}: about <b>${neededGb.toFixed(0)} GB</b> is needed but only <b>${freeGb.toFixed(1)} GB</b> is free.<br>Free up space (or change the data folder to a bigger drive), then <a href="#" id="retry-dl">Retry</a>.</span></div>`;
+        document.getElementById('retry-dl')?.addEventListener('click', () => {
+          initialized.delete('download');
+          startDownload();
+        });
+        return;  // btn-dl-next stays disabled — can't proceed until space is freed
+      }
+    }
+  } catch (_) { /* probe failed — don't block, let the install try */ }
+
   // ---- Phase 1: provision the AI engine (torch/diffusers) into a
   // writable per-user Python env. REQUIRED before the model download.
   // This is a big (~5 GB) one-time install — show CLEAR, PATIENT progress
@@ -283,7 +304,7 @@ async function startDownload() {
       <span class="size">~5 GB</span>
       <div class="bar"><div class="bar-fill"></div></div>
     </div>
-    <div class="wiz-dl-row"><span class="name" style="opacity:.65" id="aienv-note">One-time setup — this can take several minutes. Keep this window open.</span></div>`;
+    <div class="wiz-dl-row"><span class="name" style="opacity:.65" id="aienv-note">One-time setup (~5 GB). Your PC may feel slow and the progress bar may pause for a few minutes during the big downloads — this is normal. You can leave it running; just keep this window open.</span></div>`;
   // The byte/speed/ETA counters are for the MODEL download, not this pip
   // install (which reports by step, not by bytes) — show "—" meanwhile so
   // they don't read as "frozen at 0".
@@ -329,6 +350,20 @@ async function startDownload() {
   document.getElementById('dl-total').textContent = plan.total_mb;
 
   window.wizardAPI.onDownloadProgress((p) => {
+    // A per-model error: essential-model failures also reject the whole
+    // promise (Retry path below), but OPTIONAL models (upscaler / extra
+    // captioner) only warn and keep going — surface which one failed inline
+    // so a "complete"-looking list isn't silently missing a model.
+    if (p.error && p.id && p.id !== '__all__') {
+      const erow = document.querySelector(`.wiz-dl-row[data-id="${p.id}"]`);
+      if (erow && !erow.dataset.errShown) {
+        erow.dataset.errShown = '1';
+        erow.classList.remove('in-progress');
+        const nm = erow.querySelector('.name');
+        if (nm) nm.insertAdjacentHTML('beforeend', ` <span style="color:var(--error)">— failed</span>`);
+      }
+      return;
+    }
     const row = document.querySelector(`.wiz-dl-row[data-id="${p.id}"]`);
     if (row) {
       row.querySelector('.bar-fill').style.width = p.pct + '%';
