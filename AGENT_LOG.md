@@ -1,5 +1,33 @@
 # FabMesh Agent Log
 
+## 2026-07-02 (Audit cross-hardware complet — 48 agents, 34 gaps confirmés → 4 CRITIQUES + 1 fix corrigés)
+
+- Workflow ultracode « will INSTALL + USE work on many different PCs ? » : 7 axes (GPU/VRAM/arch, OS/env,
+  chemins/unicode, sécurité SAC/AV, stabilité, affichage/WebGL, install résiduel) + critique de complétude, chaque
+  finding vérifié en adversarial. 34 confirmés, 6 réfutés. Appliqué les 4 CRITIQUES + 1 (les blockers « installé mais
+  ça marche pas sur plein de PC ») :
+- **#1/#14 VC++ App Local** : `build/python-embed` n'avait que vcruntime140*.dll — il MANQUAIT msvcp140/msvcp140_1/
+  msvcp140_2/concrt140/vcomp140.dll → sur machine vierge (sans VC++ redist installé) `import torch` mourait « DLL load
+  failed ». Le vc_redist.x64.exe bundlé n'était JAMAIS exécuté. Fix : copié les 5 DLL depuis System32 dans python-embed
+  (App Local, licence VC++ OK, marche NSIS ET MSIX, sans élévation). Le dev ne le voyait pas (VS installe le runtime).
+- **#2/#9 UTF-8 global** : le python embarqué a stdout en cp1252 sur Windows non-anglais → tout print d'accent / « → » /
+  « — » / emoji lève UnicodeEncodeError et CRASHE la génération (ex : AnyTop bvh_to_gltf_anim.py). ~36/38 spawns
+  n'avaient pas PYTHONUTF8. Fix : `process.env.PYTHONUTF8='1'` + `PYTHONIOENCODING='utf-8'` en tête de main.js → hérité
+  par TOUS les spawns (`...process.env`). Vars Python-only, Node les ignore.
+- **#3/#13 WebGL guard** : `new THREE.WebGLRenderer` throw (iGPU faible/blocklist, RDP, VM, accel désactivée) →
+  bloquait TOUTE l'appli (panneau « failed to start »), même en cloud. Fix : try/catch dans Viewer3D + message inline
+  « 3D preview unavailable » + méthodes renderer-dépendantes no-op (resize/startTickLoop gardés). + cap DPR à 1.5
+  (200% HiDPI = 4x pixels → fond les iGPU faibles).
+- **#4/#33 data files** : extraResources scripts ne bundlait que `**/*.py` → 156 JSON + 4 npy de rigging
+  (rig_templates, rig_mappings, anchors) ABSENTS de l'app installée → rigging cassé. Fix : filter += json/npy/png
+  (exclut .venv/__pycache__). + exclu `*.backup`/`*.bak` du package (évite d'expédier des copies de main.js).
+- **#12 render-process-gone** : crash GPU renderer → fenêtre blanche définitive. Fix : handler `render-process-gone`
+  qui reload (sauf clean-exit/killed/quitting) + handler `unresponsive`.
+- SKIP justifié : #6 (cap VRAM 0.95 → skip petites cartes) = gain marginal 5% avec contre-argument réel (torch à 100%
+  peut freezer l'écran) → pas touché. Le reste (OOM→cloud msg, offline local_files_only, single-instance lock gaté
+  !HEADLESS, orphan reap, driver check, wmic-GPU, basicsr/realesrgan cassé, SDXL cold-start 120s, watchdog nvidia-smi
+  bloquant, disk precheck mesh) = HIGH/MEDIUM à traiter dans une 2e passe (demandent + de soin/test). Bump 1.0.8.
+
 ## 2026-07-02 (Logs install/download à distance — comblé le trou Phase 2)
 
 - Question user : a-t-on des logs pendant l'install de l'appli + des modèles sur les PC des autres ? Réponse : oui —

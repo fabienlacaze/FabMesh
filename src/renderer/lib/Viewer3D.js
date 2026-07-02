@@ -45,17 +45,34 @@ export class Viewer3D {
     const w = this.canvas.clientWidth || this.canvas.width || 512;
     const h = this.canvas.clientHeight || this.canvas.height || 512;
 
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: this.canvas,
-      antialias: true,
-      alpha: opts.alpha !== false,
-    });
-    this.renderer.setSize(w, h, false);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    if (opts.toneMapping !== false) {
-      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.renderer.toneMappingExposure = 1.0;
+    // Renderer — GUARD WebGL creation. On a machine with no usable WebGL
+    // context (weak/old Intel iGPU on Chromium's GL blocklist, RDP, a VM,
+    // "disable hardware acceleration" on), `new THREE.WebGLRenderer` THROWS.
+    // Uncaught, that exception bubbles to the app-level error panel and bricks
+    // the WHOLE app — even a cloud-only user who just wants to VIEW a mesh.
+    // Catch it, mark the viewer unavailable + show an inline note, and leave
+    // the instance inert-but-safe (renderer-using methods no-op below).
+    this.renderer = null;
+    this.webglUnavailable = false;
+    try {
+      this.renderer = new THREE.WebGLRenderer({
+        canvas: this.canvas,
+        antialias: true,
+        alpha: opts.alpha !== false,
+      });
+      this.renderer.setSize(w, h, false);
+      // Cap the device pixel ratio: at 200% HiDPI devicePixelRatio=2 → 4x the
+      // pixels to shade, which melts weak iGPUs. 1.5 stays crisp without the
+      // 4x blowup.
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      if (opts.toneMapping !== false) {
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 1.0;
+      }
+    } catch (e) {
+      this.renderer = null;
+      this.webglUnavailable = true;
+      try { this._renderWebglFallback(); } catch (_) {}
     }
 
     // Scene
@@ -130,8 +147,24 @@ export class Viewer3D {
     this._resizeObserver.observe(this.canvas);
   }
 
+  /** Inject an inline "3D preview unavailable" note when WebGL can't start,
+   *  so the app stays fully usable (generation + file output still work). */
+  _renderWebglFallback() {
+    const host = this.canvas.parentElement || this.canvas;
+    const note = document.createElement('div');
+    note.className = 'webgl-fallback';
+    note.textContent = '3D preview unavailable on this display (no WebGL / graphics acceleration). Generation still works and the mesh is saved to disk.';
+    note.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:#aab;font-size:13px;line-height:1.5;opacity:.85;';
+    try {
+      if (host !== this.canvas && getComputedStyle(host).position === 'static') host.style.position = 'relative';
+      host.appendChild(note);
+      this.canvas.style.display = 'none';
+    } catch (_) {}
+  }
+
   /** Resize renderer + camera to current canvas size. */
   resize() {
+    if (!this.renderer) return;
     const w = this.canvas.clientWidth || 512;
     const h = this.canvas.clientHeight || 512;
     if (w === 0 || h === 0) return;
@@ -142,6 +175,7 @@ export class Viewer3D {
 
   /** Start a render-on-visible tick loop. Idempotent. */
   startTickLoop() {
+    if (!this.renderer) return;  // no WebGL → nothing to render (safe no-op)
     if (this._ticking) return;
     this._ticking = true;
     const tick = () => {

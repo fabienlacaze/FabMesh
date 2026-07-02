@@ -1,6 +1,6 @@
 {
   "name": "myfabmesh-ai",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "MyFabmesh.AI — image-to-3D mesh generator with local AI.",
   "main": "src/main/main.js",
   "author": {
@@ -46,14 +46,21 @@
       "!**/*.pyc",
       "!**/*.log",
       "!**/_dbg_*.*",
-      "!**/test_*.py"
+      "!**/test_*.py",
+      "!**/*.backup",
+      "!**/*.bak"
     ],
     "extraResources": [
       {
         "from": "scripts",
         "to": "scripts",
         "filter": [
-          "**/*.py"
+          "**/*.py",
+          "**/*.json",
+          "**/*.npy",
+          "**/*.png",
+          "!**/.venv/**",
+          "!**/__pycache__/**"
         ]
       },
       {

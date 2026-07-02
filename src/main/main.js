@@ -77,6 +77,18 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Force UTF-8 in EVERY spawned Python child. The embedded Windows python
+// defaults its stdout/file encoding to the console codepage (cp1252 on
+// French/German/Spanish/most Western Windows), so any accented / arrow (→) /
+// em-dash (—) / emoji character in a print() or file read raises
+// UnicodeEncode/DecodeError and CRASHES the generation mid-run. Setting these
+// in process.env means all ~38 execFile/spawn sites (which spread
+// ...process.env) inherit them without touching each call. PYTHONUTF8 /
+// PYTHONIOENCODING are Python-only vars — Node/Electron ignore them, so this
+// is safe for the main process itself.
+process.env.PYTHONUTF8 = '1';
+process.env.PYTHONIOENCODING = 'utf-8';
+
 _log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion ? app.getVersion() : '?'));
 
 // ===========================================================
@@ -985,6 +997,20 @@ function createWindow() {
     _ses.on('spellcheck-dictionary-download-failure', (e, lang) => log.warn('main', `spellcheck dict download FAILED: ${lang} (CDN blocked?)`));
     _ses.on('spellcheck-dictionary-initialized', (e, lang) => log.info('main', `spellcheck dict ready: ${lang}`));
   } catch (_) {}
+  // GPU / renderer crash recovery. On an old/unstable GPU driver the renderer
+  // (GPU) process can die, leaving a permanently BLANK window with no way out.
+  // Auto-reload — but NOT during a normal shutdown ('clean-exit'/'killed') or
+  // while quitting, which would cause a reload loop. reload() re-loads the
+  // current page; in-flight renderer state is lost but that beats a dead window.
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    try { log.error('main', 'renderer gone: ' + (details && details.reason)); } catch (_) {}
+    if (_isQuitting) return;
+    if (details && (details.reason === 'clean-exit' || details.reason === 'killed')) return;
+    if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.reload(); } catch (_) {} }
+  });
+  mainWindow.webContents.on('unresponsive', () => {
+    try { log.warn('main', 'renderer unresponsive (page may recover)'); } catch (_) {}
+  });
   mainWindow.webContents.on('context-menu', (event, params) => {
     if (!params.isEditable && !params.misspelledWord) return;
     const { Menu, MenuItem } = require('electron');
