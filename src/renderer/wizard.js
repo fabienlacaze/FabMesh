@@ -321,9 +321,12 @@ async function startDownload() {
       if (row) { row.classList.add('done'); row.classList.remove('in-progress'); }
     }
   });
+  console.log('[wizard] Phase 1: installing AI engine (torch/diffusers)…');
   try {
     await window.wizardAPI.installDeps();
+    console.log('[wizard] Phase 1: AI engine install OK');
   } catch (e) {
+    console.error('[wizard] AI engine install FAILED:', (e && e.message) || e);
     list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">AI engine install failed: ${e.message}. <a href="#" id="retry-dl">Retry</a></span></div>`;
     document.getElementById('retry-dl')?.addEventListener('click', () => {
       initialized.delete('download');
@@ -382,10 +385,13 @@ async function startDownload() {
     document.getElementById('dl-eta').textContent = p.eta || '–';
   });
 
+  console.log(`[wizard] Phase 2: downloading models (mode=${chosenMode}, ${plan.total_mb} MB)…`);
   try {
     await window.wizardAPI.startDownload(chosenMode);
+    console.log('[wizard] Phase 2: model download OK');
     document.getElementById('btn-dl-next').disabled = false;
   } catch (e) {
+    console.error('[wizard] Model download FAILED:', (e && e.message) || e);
     list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Download failed: ${e.message}. <a href="#" id="retry-dl">Retry</a></span></div>`;
     document.getElementById('retry-dl')?.addEventListener('click', () => {
       initialized.delete('download');

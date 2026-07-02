@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-07-02 (Logs install/download à distance — comblé le trou Phase 2)
+
+- Question user : a-t-on des logs pendant l'install de l'appli + des modèles sur les PC des autres ? Réponse : oui —
+  `wizard.log` (console du renderer wizard via override → wizard-log IPC, main.js:6346) + `fabmesh.log` (main) +
+  `last_error.log`, tous dans `%APPDATA%\myfabmesh-ai\logs\`, exportables en 1 clic (bouton Export logs du wizard ET de
+  la modale d'échec → `export-diagnostics` bundle les 3 en .txt sur le Bureau).
+- TROU comblé : le handler `wizard:start-download` (Phase 2 = download des modèles) ne journalisait RIEN dans
+  fabmesh.log (seul l'install Phase 1 le faisait). Ajouté `log.info` (start/success) + `log.error` (échec avec détail
+  stderr) + journal par-modèle des error/warn/retry/done (pas chaque tick → pas de spam). Côté wizard.js : `console.log`
+  jalons Phase 1/2 + `console.error` dans les catch install/download → capturés dans wizard.log. Remote debug fiable.
+- Bump 1.0.7.
+
 ## 2026-07-02 (Robustesse download/install sur hardware hétérogène — 2 workflows adversariaux → fixes ciblés)
 
 - Demande user : garantir que « les modèles IA ne se téléchargent pas puis que ça met super long » ne se reproduise

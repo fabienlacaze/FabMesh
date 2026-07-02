@@ -6882,6 +6882,7 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
   // that knows about HuggingFace's resume + cache, and streams JSONL
   // progress lines to our stdout listener.
   const script = path.join(SCRIPTS_DIR, 'wizard_download.py');
+  log.info('wizard', `start-download: mode=${mode}, ${items.length} model(s), cache=${HF_CACHE_DIR}`);
   return new Promise((resolve, reject) => {
     // Capture stderr so a real failure (wizard_download.py exits 1 and writes
     // the failing model(s) to stderr) surfaces a MEANINGFUL message to the
@@ -6894,8 +6895,10 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
     }, (err) => {
       if (err) {
         const detail = (stderrBuf.trim() || err.message || 'download failed');
+        log.error('wizard', `start-download FAILED (mode=${mode}): ${detail.slice(-1500)}`);
         return reject(new Error(detail));
       }
+      log.info('wizard', `start-download: mode=${mode} completed OK`);
       resolve({ ok: true });
     });
     let buf = '';
@@ -6908,6 +6911,12 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
         if (!line) continue;
         try {
           const p = JSON.parse(line);
+          // Journal per-model outcomes (not every progress tick) so a remote
+          // fabmesh.log has a clear timeline for support without spamming.
+          if (p.error) log.warn('wizard', `download ${p.id}: ERROR ${p.error}`);
+          else if (p.warn) log.warn('wizard', `download ${p.id}: WARN ${p.warn}`);
+          else if (p.msg && /retry/i.test(p.msg)) log.info('wizard', `download ${p.id}: ${p.msg}`);
+          else if (p.done && p.id && p.id !== '__all__') log.info('wizard', `download ${p.id}: done`);
           event.sender.send('wizard:download-progress', p);
         } catch (_) {}
       }
