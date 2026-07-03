@@ -75,10 +75,6 @@
         "to": "vc_redist.x64.exe"
       },
       {
-        "from": "build/hf_fallback_token.txt",
-        "to": "hf_fallback_token.txt"
-      },
-      {
         "from": "build/sentry-dsn.txt",
         "to": "sentry-dsn.txt"
       }

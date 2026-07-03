@@ -1,5 +1,30 @@
 # FabMesh Agent Log
 
+## 2026-07-03 (Audit solution complète cloud+desktop+marketplace — 46 agents, 35 gaps → lot code sûr appliqué)
+
+- Workflow launch-readiness (6 axes : cloud backend, paiement, RGPD, desktop↔cloud/licence, marketplace, E2E) +
+  critique de complétude, vérif adversariale. 35 confirmés, 4 réfutés. Backup poussé avant :
+  `backup-pre-launch-readiness-20260703-182136`. Appliqué le lot CODE sûr (le cloud N'EST PAS déployé — l'user
+  valide avant `wrangler deploy`) :
+- **Desktop** : bouton « Ouvrir le Cloud » réparé — ajout du host EXACT `myfabmesh-cloud.fabien65400.workers.dev`
+  à `_EXTERNAL_HOST_ALLOWLIST` (main.js) (PAS de wildcard `workers.dev`). Retiré `hf_fallback_token.txt` des
+  extraResources (package.json) — le vrai token hf_ était extractible de l'.exe ; wizard_download.py gère l'absence
+  (download anonyme + retry). ⚠️ L'user DOIT rotationner le token exposé.
+- **Cloud worker.ts** : `/api/jobs/:id` (handleJob) était NON authentifié → IDOR (URL de mesh de n'importe qui).
+  Ajouté `getSessionUser` + `owns()` (user_id===... || admin) sur les branches modal + replicate (mock/dev intact).
+  VÉRIFIÉ sûr : web (`getJSON`) et mobile (`apiGet`) envoient `credentials:'include'`. Messages 429 budget (2 sites)
+  ne fuitent plus le nom de variable d'env → message client neutre. `tsc --noEmit` = 0 erreur.
+- **Cloud wrangler.toml** : réactivé le cron maintenance `*/15 * * * *` (reaper de jobs abandonnés + purge R2) à côté
+  du keep-alive hebdo ; `preWarmCog` gate sur `isUserOnline()` → pas de credit-burn au repos.
+- **CI (build-release.yml)** : la release était VIDE (organize_dist déplace vers InstallEXE/+MicrosoftStore/ mais les
+  chemins d'upload pointaient sur le niveau plat) → corrigé les chemins ; `-p never` (stop publish implicite
+  electron-builder qui throw sur GH_TOKEN absent) ; `prerelease: false` (sinon invisible à electron-updater +
+  /releases/latest 404).
+- RESTE = actions EXTERNES/décisions user (pas du code) : Stripe go-live (KYC+clés live+webhook), position TVA/OSS UE,
+  set `R2_URL_SIGNING_SECRET` + disable public access R2 (ferme la fuite meshes/visages), cert de signature .exe,
+  construire la licence .exe (ou partir cloud-only), Supabase plan payant (backups), modération uploads, domaine
+  email transactionnel, décision budget caps par-user. Détaillé au user.
+
 ## 2026-07-02 (Audit cross-hardware complet — 48 agents, 34 gaps confirmés → 4 CRITIQUES + 1 fix corrigés)
 
 - Workflow ultracode « will INSTALL + USE work on many different PCs ? » : 7 axes (GPU/VRAM/arch, OS/env,

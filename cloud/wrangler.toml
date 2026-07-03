@@ -78,11 +78,18 @@ bucket_name = "myfabmesh-meshes"
 # [triggers]
 # crons = ["*/4 * * * *"]
 
-# ACTIVE: weekly keep-alive so the free-tier Supabase project never auto-pauses
-# (7-day inactivity). scheduled() runs ONLY the cheap Supabase ping for this
-# cron — no pre-warm / credit burn. Free (Cloudflare cron is on the free plan).
+# ACTIVE crons:
+#   "*/15 * * * *"  → maintenance: reapStuckJobs (refund abandoned jobs) +
+#                     purgeTransientUploads (R2 retention). preWarmCog is gated
+#                     on isUserOnline() so it NO-OPS (no credit burn) when no tab
+#                     is open — that was the reason the old */4min cron was
+#                     disabled; */15 + the gate is safe.
+#   "0 6 * * 1"     → weekly Supabase keep-alive ONLY (cheap ping, no pre-warm),
+#                     anti free-tier auto-pause.
+# scheduled() routes by event.cron: the weekly tick runs only keepAliveSupabase;
+# every other tick runs the maintenance set. Free (Cloudflare cron = free plan).
 [triggers]
-crons = ["0 6 * * 1"]
+crons = ["*/15 * * * *", "0 6 * * 1"]
 
 [vars]
 MOCK = "0"

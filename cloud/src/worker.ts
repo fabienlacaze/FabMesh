@@ -4040,7 +4040,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     : await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH);
   if (remainingBudget == null) {
     const provider = 'Cloud GPU';
-    return err(429, `daily ${provider} budget reached. Try again after midnight UTC, or raise MAX_DAILY_${useModalMesh ? 'MODAL_' : ''}SPEND_USD.`);
+    return err(429, 'The service is temporarily at capacity — your credits are safe and you were not charged. Please try again shortly.');
   }
   const refundMeshSpend = async () => {
     if (useModalMesh) await refundModalSpend(env, ESTIMATED_USD_MESH);
@@ -4385,6 +4385,18 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     return json({ status: 'processing' });
   }
 
+  // Authenticate + enforce ownership (fix IDOR): /api/jobs/:id must NOT return
+  // another user's mesh download URL. Every other status endpoint checks the
+  // session + row owner; this one was the exception. Both the web app
+  // (getJSON) and mobile (apiGet) already send credentials, so requiring auth
+  // here is safe. Ownership mismatch returns a generic "not found" so a caller
+  // can't confirm a job id exists.
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const _isJobAdmin = !!(user.email && ADMIN_EMAILS.has(user.email.toLowerCase()));
+  const owns = (j: unknown): boolean =>
+    !!j && (((j as { user_id?: string }).user_id === user.id) || _isJobAdmin);
+
   // Modal-backed mesh jobs use a `modal_<uuid>` id and are polled
   // through callModalMeshStatus instead of Replicate. Once the GLB
   // is ready we persist it to R2 (so the renderer gets a stable URL
@@ -4393,6 +4405,7 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     const sbm = supabaseAdmin(env);
     const { data: job } = await sbm.from('jobs').select('*').eq('id', id).maybeSingle();
     if (!job) return json({ status: 'failed', error: 'job not found' });
+    if (!owns(job)) return json({ status: 'failed', error: 'job not found' });
     if (job.status === 'succeeded' && job.mesh_url) {
       const start = job.created_at ? new Date(job.created_at as string).getTime() : Date.now();
       return json({ status: 'succeeded', url: job.mesh_url as string,
@@ -4438,6 +4451,10 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
 
   const sb = supabaseAdmin(env);
   const { data: job } = await sb.from('jobs').select('*').eq('id', id).maybeSingle();
+  // Ownership gate (fix IDOR): a non-owner — or a null row that would otherwise
+  // fall through to a bare Replicate predictions.get(id) leaking a mesh URL — is
+  // treated as not-found.
+  if (!owns(job)) return json({ status: 'failed', error: 'job not found' });
   // Short-circuit on terminal Supabase status (admin cancel writes
   // status='canceled' with error='admin canceled'). Replicate's own
   // cancel propagates eventually but the row is the source of truth,
@@ -6342,7 +6359,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   if (remainingBudget == null) {
     const provider = 'Cloud GPU';
     return json({ ok: false, success: false,
-      error: `daily ${provider} budget reached. Try again after midnight UTC, or raise MAX_DAILY_${useModal ? 'MODAL_' : ''}SPEND_USD.` }, { status: 429 });
+      error: 'The service is temporarily at capacity — your credits are safe and you were not charged. Please try again shortly.' }, { status: 429 });
   }
   // Per-user daily call cap — refund on failure too.
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);

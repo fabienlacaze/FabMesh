@@ -64,25 +64,29 @@ jobs:
           }
 
       - name: Build NSIS installer
-        run: npm run build:installer
+        # -p never: don't let electron-builder implicit-publish on tag (it throws
+        # on the missing GH_TOKEN before organize_dist runs → empty release).
+        # softprops/action-gh-release below is the sole publisher.
+        run: npx electron-builder --win nsis -p never && node build/organize_dist.js
 
       - name: Build MSIX (.appx) for Microsoft Store
         # Skip if previous step failed but keep the workflow running
         if: success() || failure()
-        run: npm run build:msix
+        run: npx electron-builder --win appx -p never && node build/organize_dist.js
 
       - name: List built artifacts
         if: always()
         shell: pwsh
         run: |
-          Get-ChildItem dist/installer -File | Format-Table Name, Length, LastWriteTime -AutoSize
+          # organize_dist.js sorts deliverables into InstallEXE/ + MicrosoftStore/
+          Get-ChildItem dist/installer -Recurse -File | Format-Table FullName, Length, LastWriteTime -AutoSize
 
       - name: Upload NSIS installer as artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nsis-installer
-          path: dist/installer/MyFabmesh.AI-Setup-*.exe
+          path: dist/installer/InstallEXE/MyFabmesh.AI-Setup-*.exe
           if-no-files-found: warn
           retention-days: 30
 
@@ -91,7 +95,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: msix-appx
-          path: dist/installer/MyFabmesh.AI*.appx
+          path: dist/installer/MicrosoftStore/MyFabmesh.AI*.appx
           if-no-files-found: warn
           retention-days: 30
 
@@ -100,7 +104,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: latest-yml
-          path: dist/installer/latest.yml
+          path: dist/installer/InstallEXE/latest.yml
           if-no-files-found: warn
 
       - name: Publish to GitHub Release (tag pushes only)
@@ -108,13 +112,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/installer/MyFabmesh.AI-Setup-*.exe
-            dist/installer/MyFabmesh.AI*.appx
-            dist/installer/latest.yml
-            dist/installer/*.blockmap
+            dist/installer/InstallEXE/MyFabmesh.AI-Setup-*.exe
+            dist/installer/MicrosoftStore/MyFabmesh.AI*.appx
+            dist/installer/InstallEXE/latest.yml
+            dist/installer/InstallEXE/*.blockmap
           fail_on_unmatched_files: false
           draft: false
-          prerelease: true   # Beta releases are pre-releases
+          # false = a STABLE release so electron-updater's /releases/latest lookup
+          # (allowPrerelease defaults false) actually finds it, and the
+          # /releases/latest/download/ redirect resolves for itch/Gumroad links.
+          prerelease: false
           generate_release_notes: true
           name: "MyFabmesh.AI ${{ github.ref_name }}"
           body: |

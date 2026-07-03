@@ -7250,10 +7250,11 @@ ipcMain.handle('wizard:cancel', () => {
 // (which could be exploited by a hostile asset) cannot launch
 // arbitrary protocols or sketchy domains.
 const _EXTERNAL_HOST_ALLOWLIST = [
-  'myfabmesh.ai',           // future custom domain
+  'myfabmesh.ai',           // future custom domain (also covers cloud.myfabmesh.ai)
   'fabmesh.com',            // legacy redirect domain
   'fabienlacaze.github.io', // current GitHub Pages URL
   'github.com',             // for /MyFabmesh repo links
+  'myfabmesh-cloud.fabien65400.workers.dev', // LIVE cloud host (the no-GPU "Open Cloud" button)
 ];
 
 function _isAllowedExternal(u) {
