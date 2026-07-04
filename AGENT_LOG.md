@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-07-04 (E2E restants — liens morts marketing + page compte + tableau prix honnête)
+
+- Marketing (docs/index.html, GitHub Pages) : brand `/`→`index.html`, nav Marketplace `/market`→URL workers.dev
+  complète (le market est servi par le worker, pas Pages), CTA « Get from Microsoft Store » (fiche 410 non publiée)
+  → « Download for Windows (Beta) » vers `/releases/latest` (page, pas d'asset version-figé qui 404), lien direct
+  1.0.0 périmé → releases/latest.
+- Page compte (cloud/src/app/account/page.tsx) : lien `view`→`/project/[id]` (route jamais construite, 404) retiré
+  (garde le download) ; **re-poll `/api/me`** toutes les 2s pendant 30s après `?paid=1` → le solde reflète le crédit
+  du webhook sans refresh manuel (avant : pouvait afficher 0 juste après paiement).
+- Buy (cloud/src/app/buy/page.tsx) : tableau « How credits convert » périmé (Lite/Standard/Full 1-2 cr) → valeurs
+  RÉELLES de PRICING_DEFAULTS (Fast 1 / Balanced 2 / Quality 4 / Ultra 8K 8) + révèle le coût text→image (2 cr) non
+  divulgué. tsc --noEmit = 0 erreur.
+- Reste (décision/gros) : SSO desktop↔cloud, signature .exe, Stripe live, TVA — côté user.
+
 ## 2026-07-03 (Audit E2E parcours — 16 breaks → cluster crédits corrigé + Supabase RÉVEILLÉ)
 
 - Re-run E2E (3 scopes focalisés, l'ancien mega-agent avait saturé le retry cap) : 16 breaks confirmés, 3 réfutés.

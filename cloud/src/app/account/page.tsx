@@ -46,6 +46,24 @@ export default function AccountPage() {
   const [stripeReturn, setStripeReturn] = useState<'return' | 'refresh' | null>(null);
   const [onboardBusy, setOnboardBusy] = useState(false);
 
+  // After a Stripe payment (?paid=1), the credit grant lands via the webhook a
+  // moment AFTER the redirect, so the first /api/me can still show the old
+  // balance. Re-poll every 2s for ~30s so the Balance card updates itself
+  // instead of the user seeing 0 credits right after paying.
+  useEffect(() => {
+    if (!paidBanner) return;
+    let n = 0;
+    const iv = setInterval(async () => {
+      n += 1;
+      try {
+        const r = await fetch('/api/me');
+        if (r.ok) { const m = await r.json(); setUser(m.user); }
+      } catch {}
+      if (n >= 15) clearInterval(iv);
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [paidBanner]);
+
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search);
     setPaidBanner(qs.get('paid') === '1');
@@ -170,8 +188,10 @@ export default function AccountPage() {
                     <td>{j.mode}</td>
                     <td><span className={`pill ${statusClass}`}>{j.status}</span></td>
                     <td style={{ textAlign: 'right' }}>
-                      <Link href={`/project/${j.id}`} className="nav-link" style={{ fontSize: 12 }}>view</Link>
-                      {j.mesh_url && <a href={j.mesh_url} download className="nav-link" style={{ fontSize: 12, marginLeft: 8 }}>⬇</a>}
+                      {/* /project/[id] detail page was never built → 404; the download below is the useful action */}
+                      {j.mesh_url
+                        ? <a href={j.mesh_url} download className="nav-link" style={{ fontSize: 12 }}>⬇ download</a>
+                        : <span style={{ fontSize: 12, opacity: 0.5 }}>—</span>}
                     </td>
                   </tr>
                 );

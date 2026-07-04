@@ -96,14 +96,17 @@ export default function BuyPage() {
             <tr><th>Mesh option</th><th>Cost</th><th>Details</th></tr>
           </thead>
           <tbody>
-            <tr><td><strong>Lite</strong> mesh</td><td>1 credit</td><td>~60 s · 100k tris · voxel 1024</td></tr>
-            <tr><td><strong>Standard</strong> mesh</td><td>1 credit</td><td>~90 s · 500k tris · voxel 1024</td></tr>
-            <tr><td><strong>Full</strong> mesh</td><td>2 credits</td><td>~180 s · 1.5M tris · cascade 1536</td></tr>
-            <tr><td>Fast mode (H100)</td><td>+1 credit</td><td>~50 s instead of 90 s</td></tr>
-            <tr><td>Ultra HD 8K texture</td><td>+1 credit</td><td>Real-ESRGAN x2 upscale</td></tr>
-            <tr><td>Face fix (AI inpaint)</td><td>+1 credit</td><td>Characters / creatures only</td></tr>
+            <tr><td><strong>Fast</strong> mesh</td><td>1 credit</td><td>~50 s · quick draft</td></tr>
+            <tr><td><strong>Balanced</strong> mesh</td><td>2 credits</td><td>~90 s · recommended</td></tr>
+            <tr><td><strong>Quality</strong> mesh</td><td>4 credits</td><td>~180 s · high detail</td></tr>
+            <tr><td><strong>Ultra 8K</strong> mesh</td><td>8 credits</td><td>maximum detail + texture</td></tr>
+            <tr><td>Text → image (before the mesh)</td><td>2 credits</td><td>only if you start from a text prompt, not an image</td></tr>
+            <tr><td>8K texture · Face fix · Refine</td><td>+2 to +3 credits</td><td>optional add-ons</td></tr>
           </tbody>
         </table>
+        <p style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 8 }}>
+          Standard rates. Your remaining balance is always shown before you generate.
+        </p>
       </div>
     </div>
   );
