@@ -1,5 +1,24 @@
 # FabMesh Agent Log
 
+## 2026-07-03 (Audit E2E parcours — 16 breaks → cluster crédits corrigé + Supabase RÉVEILLÉ)
+
+- Re-run E2E (3 scopes focalisés, l'ancien mega-agent avait saturé le retry cap) : 16 breaks confirmés, 3 réfutés.
+- **CRITIQUE — cul-de-sac inscription** : l'écran verify demandait un code 6 chiffres mais confirm-signup.html
+  n'envoyait qu'un lien (pas de `{{ .Token }}`). Ajouté le bloc code 6 chiffres (mirroir reset-password.html) →
+  **appliqué au live** via supabase-apply-email-templates.mjs (CONFIRMATION → true).
+- **CRITIQUE — crédits gratuits 50 vs 5 vs 0** : landing=50, email=5, prod=0 → nouvel user à 0 → 402 au 1er
+  « Générer ». Décision user = **50**. Aligné : confirm-signup.html (5→50), 3 fichiers schema (0→50 : les 2
+  migrations + cloud/sql/schema.sql), wizard.html (« ta licence desktop inclut 50 crédits » → « les nouveaux comptes
+  démarrent avec 50 crédits », véridique). **Trigger appliqué au live** via l'API Management (verify: `email, 50`).
+- **⚠️ Supabase était EN PAUSE (INACTIVE)** — le keep-alive HEBDO était trop rare pour la pause à 7j. **Restauré**
+  via API Management (POST /restore → COMING_UP → ACTIVE_HEALTHY). Le cron `*/15` déployé aujourd'hui pinge
+  keepAliveSupabase toutes les 15 min → ne re-pausera plus. Région eu-west-3 (Paris, OK RGPD).
+- Autres E2E corrigés (desktop) : bouton « Ouvrir le Cloud » deep-linké `/login?next=/app&src=desktop` (arrive sur
+  Sign in, plus anonyme) ; tooltip « myfabmesh.ai » → « MyFabmesh.AI website » (domaine mort). Cloud : description
+  Stripe checkout `myfabmesh.ai/cloud` → `MyFabmesh.AI` (domaine mort que le client voyait).
+- RESTE E2E (flag user) : CTA Store 410 (fiche pas publiée), liens /account post-paiement 404 + re-poll crédits,
+  nav marketing root-relative 404 (GitHub Pages), tableau prix à revérifier, SSO desktop↔cloud (gros).
+
 ## 2026-07-03 (Audit solution complète cloud+desktop+marketplace — 46 agents, 35 gaps → lot code sûr appliqué)
 
 - Workflow launch-readiness (6 axes : cloud backend, paiement, RGPD, desktop↔cloud/licence, marketplace, E2E) +

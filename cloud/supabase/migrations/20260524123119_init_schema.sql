@@ -10,12 +10,12 @@ create table if not exists public.profiles (
   updated_at   timestamptz not null default now()
 );
 
--- Auto-create profile on signup. New users get 0 free credits
--- (cash-positive policy — change to 1 here if you want a demo).
+-- Auto-create profile on signup. New users get 50 free credits (trial-
+-- conversion policy — matches the landing page + confirmation email).
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, email, credits) values (new.id, new.email, 0)
+  insert into public.profiles (id, email, credits) values (new.id, new.email, 50)
     on conflict (id) do nothing;
   return new;
 end;

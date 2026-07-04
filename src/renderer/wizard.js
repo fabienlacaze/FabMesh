@@ -99,10 +99,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const cloudBtn = document.getElementById('btn-open-cloud');
   if (cloudBtn) {
     cloudBtn.addEventListener('click', () => {
-      // Opening the cloud URL relies on the main process — we just send
-      // an IPC. For now, fall back to window.open if wizardAPI doesn't
-      // expose openExternal yet.
-      const url = 'https://myfabmesh-cloud.fabien65400.workers.dev';
+      // Deep-link straight to Sign in → /app (not the marketing root), so a
+      // no-GPU user lands on login and bounces into the app after auth instead
+      // of an anonymous landing page. src=desktop tags the origin for later.
+      const url = 'https://myfabmesh-cloud.fabien65400.workers.dev/login?next=/app&src=desktop';
       if (window.wizardAPI && window.wizardAPI.openExternal) {
         window.wizardAPI.openExternal(url);
       } else {
@@ -473,7 +473,7 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   const brand = document.querySelector('#topbar .brand');
   if (!brand) return;
   brand.style.cursor = 'pointer';
-  brand.title = 'Open myfabmesh.ai';
+  brand.title = 'Open the MyFabmesh.AI website';  // matches the github.io destination (myfabmesh.ai is not live)
   brand.addEventListener('click', () => {
     if (window.wizardAPI?.openExternal) {
       window.wizardAPI.openExternal('https://fabienlacaze.github.io/MyFabmesh/');

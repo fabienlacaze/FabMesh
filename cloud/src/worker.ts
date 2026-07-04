@@ -3715,7 +3715,7 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
         currency: 'eur',
         product_data: {
           name: `${pack.credits} crédits MyFabmesh.AI (${pack.name})`,
-          description: `Crédits pour la génération 3D sur myfabmesh.ai/cloud — pack ${pack.name}`,
+          description: `Crédits pour la génération 3D MyFabmesh.AI — pack ${pack.name}`,
         },
         unit_amount: pack.euros * 100,
       },
