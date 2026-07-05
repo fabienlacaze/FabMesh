@@ -389,8 +389,8 @@ def load_controlnet_tile():
                 pipe.vae.config.force_upcast = True
             except Exception:
                 pass
-        pipe.to("cuda")
-        # Same fp16 force-cast (diffusers 0.34 / torch 2.7.1)
+        # fp16 force-cast (diffusers 0.34 / torch 2.7.1) — dtype only, BEFORE the
+        # offload hooks are attached (modules still on CPU here).
         try:
             pipe.unet.to(torch.float16)
             pipe.vae.to(torch.float16)
@@ -400,7 +400,14 @@ def load_controlnet_tile():
                 pipe.controlnet.to(torch.float16)
         except Exception as _e:
             log(f"controlnet_tile fp16 cast skipped: {_e}")
-        # attention_slicing removed (torch 2.7/SDPA slowdown, no mem gain).
+        # VRAM: model_cpu_offload keeps ONLY the active module on the GPU (peak
+        # ~4-6 GB) instead of pipe.to("cuda") which holds the whole ~12 GB
+        # ControlNet+img2img pipe resident. On a 16 GB card (Windows, where
+        # expandable_segments is unsupported → no defrag) the resident version
+        # spilled to system RAM and thrashed — the Age/recolor tool then took
+        # minutes and looked stuck. Offload is a bit slower per step but never
+        # spills, so wall-clock is far better when VRAM is tight.
+        pipe.enable_model_cpu_offload()
         pipe.enable_vae_tiling()
         if os.environ.get('FABMESH_UNRESTRICTED') == '1':
             if hasattr(pipe, 'safety_checker'):
