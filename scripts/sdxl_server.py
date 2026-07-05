@@ -1115,9 +1115,14 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5
     if not prompt or not prompt.strip():
         return {"ok": False, "error": "prompt required (e.g. 'cape rouge')"}
     noun, color_spec = parse_recolor_prompt(prompt)
-    if color_spec is None:
-        # No colour word → a material/style prompt ('rusty metal', 'sunset
-        # gradient') → ControlNet-Tile AI render (whole image if recolor_all).
+    # Route to the COHERENT ControlNet re-render when either:
+    #  - there's no bare colour word at all (a material/style: 'rusty metal',
+    #    'sunset gradient'), OR
+    #  - it's a whole-image recolour whose prompt has DESCRIPTIVE words beyond a
+    #    bare colour ('military green camo' strips to noun 'military camo').
+    # Without this, 'military green camo' matched 'green' → the flat HSV path →
+    # a tartiné tint that barely showed. A bare colour ('green') still uses HSV.
+    if color_spec is None or (recolor_all and noun.strip()):
         return do_recolor_tile(input_path, noun, prompt, output_path, dilate, rel,
                                recolor_all=recolor_all, strength=strength)
     load_clipseg()
