@@ -1676,6 +1676,9 @@ button.tool-active {
 /* Generation/job popups must sit ABOVE the fullscreen viewers (#lightbox-2 at z-index
    9500) so they stay visible when a generation runs while a viewer is open. */
 #modal-job-details { z-index: 10000; }
+/* A confirm/error dialog is triggered FROM other modals and must sit ABOVE them
+   (the JS also sets an inline 10200). Kept here for parity with desktop. */
+#modal-confirm { z-index: 10100; }
 .modal-card {
   background: var(--bg-1);
   border: 1px solid var(--border-strong);
@@ -2051,18 +2054,26 @@ button.tool-active {
 }
 .settings-header h2 { margin: 0; }
 .settings-close-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
   background: none;
-  border: none;
-  color: var(--text-2);
-  font-size: 18px;
+  border: 1.5px solid rgba(255,255,255,0.55);  /* white circle */
+  color: var(--text-0);
+  font-size: 15px;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 0;
+  border-radius: 50%;
   line-height: 1;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .settings-close-x:hover {
-  background: rgba(255,255,255,0.08);
-  color: var(--text-0);
+  background: #dc2626;        /* red on hover */
+  border-color: #dc2626;
+  color: #fff;
 }
 .settings-section-header {
   font-size: 10px;
@@ -2653,7 +2664,7 @@ details.stage-generating > summary .stage-icon-gear {
 .job-gpu-monitor {
   position: absolute;
   top: 18px;
-  right: 18px;
+  right: 54px;  /* leave room for the top-right close X */
   display: flex;
   flex-direction: column;
   gap: 2px;

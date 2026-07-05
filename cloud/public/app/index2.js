@@ -329,7 +329,7 @@ function customError(message, title = 'Error') {
   okBtn.classList.remove('danger');
   cancelBtn.style.display = 'none';
   const _prevZ = modal.style.zIndex;
-  modal.style.zIndex = '10000';
+  modal.style.zIndex = '10200';  // above #modal-job-details (10000) so a confirm opened FROM it is reachable
   modal.classList.remove('hidden');
   return new Promise(resolve => {
     function cleanup() {
@@ -380,7 +380,7 @@ function customErrorWithAction(message, title, actionLabel) {
   cancelBtn.textContent = 'OK';
   cancelBtn.style.display = '';
   const _prevZ = modal.style.zIndex;
-  modal.style.zIndex = '10000';
+  modal.style.zIndex = '10200';  // above #modal-job-details (10000) so a confirm opened FROM it is reachable
   modal.classList.remove('hidden');
   return new Promise((resolve) => {
     function cleanup(result) {
@@ -487,7 +487,7 @@ function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
     // Bump above the landmarks fullscreen (9600) and 3D lightbox (9500).
     // Restored in cleanup() so we don't pollute unrelated modals.
     const _prevZ = modal.style.zIndex;
-    modal.style.zIndex = '10000';
+    modal.style.zIndex = '10200';  // above #modal-job-details (10000) so a confirm opened FROM it is reachable
     modal.classList.remove('hidden');
     function cleanup(result) {
       modal.classList.add('hidden');
@@ -4411,7 +4411,7 @@ if (qualityEl && qualityLabel) {
 //  3. Negative prompt (local_juggernaut_bridge.py) blocks grid layouts.
 const ASSET_TYPE_PROMPTS = {
   character: 'isolated 3D character, full body, fully clothed, wearing a complete outfit, dressed in appropriate clothing, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, centered, clean silhouette, no text, no UI',
-  building: 'isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, not a village, not a town',
+  building: 'architectural building exterior, complete edifice, isolated, full structure, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI, not a village, not a town',
   vehicle: 'isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no rear view inset',
   weapon: 'isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI',
   prop: 'isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
@@ -4485,10 +4485,19 @@ const ASSET_STYLE_PROMPTS = {
   });
 })();
 
+// Category PREFIXES (ported from desktop) — lead with the category so a
+// dominant noun in the user's text (e.g. "robot house") doesn't win the early,
+// higher-weighted SDXL tokens and render a FIGURE instead of the building.
+const ASSET_TYPE_PREFIXES = {
+  building:    'an architectural building, a complete standalone structure',
+  environment: 'an architectural structure',
+};
+
 function buildFullPrompt(userPrompt, assetType, assetStyle) {
+  const typePrefix = ASSET_TYPE_PREFIXES[assetType] || '';
   const typeSuffix = ASSET_TYPE_PROMPTS[assetType] || '';
   const stylePrefix = ASSET_STYLE_PROMPTS[assetStyle] || '';
-  const parts = [stylePrefix, userPrompt, typeSuffix].filter(Boolean);
+  const parts = [stylePrefix, typePrefix, userPrompt, typeSuffix].filter(Boolean);
   return parts.join(', ');
 }
 
@@ -4502,6 +4511,7 @@ function stripKnownPromptSuffixes(raw) {
   let txt = raw;
   const allSuffixes = [
     ...Object.values(ASSET_TYPE_PROMPTS),
+    ...Object.values(ASSET_TYPE_PREFIXES),
     ...Object.values(ASSET_STYLE_PROMPTS),
   ].filter(s => s && s.length > 10);
   // Multi-pass removal: each suffix may appear several times in legacy data.
@@ -16197,12 +16207,12 @@ async function refreshJobDetailsModal(id) {
     const stepIdx = _jobStepIndex(j);
     gotoBtn.style.display = stepIdx > 0 ? '' : 'none';
     if (stepIdx > 0) {
-      const labels = ['Image','3D Mesh','Rig','Animation'];
-      gotoBtn.textContent = `→ Go to ${labels[stepIdx - 1]}`;
+      // Unified label (ported from desktop).
+      gotoBtn.textContent = '→ Go to generation';
     }
   }
 }
-document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
+document.getElementById('job-details-close-x')?.addEventListener('click', closeJobDetails);
 document.getElementById('job-details-unlock')?.addEventListener('click', () => {
   // Close this modal, open the legal-warning + PIN flow, then re-run the blocked job.
   closeJobDetails();
