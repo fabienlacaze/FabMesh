@@ -14749,7 +14749,10 @@ document.getElementById('ws-recolor-btn')?.addEventListener('click', () => {
   // Reset the "Recolor all" toggle + re-show the detection fields each open.
   const rcAll = document.getElementById('rc-all');
   if (rcAll) rcAll.checked = false;
+  const rcAllP = document.getElementById('rc-all-prompt');
+  if (rcAllP) rcAllP.value = '';
   document.querySelectorAll('#modal-recolor .rc-detect-only').forEach(el => { el.style.display = ''; });
+  document.querySelectorAll('#modal-recolor .rc-all-only').forEach(el => { el.style.display = 'none'; });
   const srcImg = document.getElementById('rc-source-img');
   if (srcImg) { srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now(); srcImg.style.opacity = ''; }
   _rcSrcPath = target;
@@ -14848,6 +14851,9 @@ document.getElementById('rc-all')?.addEventListener('change', (e) => {
   document.querySelectorAll('#modal-recolor .rc-detect-only').forEach(el => {
     el.style.display = on ? 'none' : '';
   });
+  document.querySelectorAll('#modal-recolor .rc-all-only').forEach(el => {
+    el.style.display = on ? '' : 'none';   // "Coloring / style" prompt field
+  });
   const srcImg = document.getElementById('rc-source-img');
   if (on && srcImg && _rcSrcPath) {
     srcImg.src = 'file:///' + _rcSrcPath.replace(/\\/g, '/') + '?t=0';
@@ -14863,6 +14869,7 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
   const imagePath = editTarget(p);
   if (!imagePath) return;
   const recolorAll = !!document.getElementById('rc-all')?.checked;
+  const stylePrompt = (document.getElementById('rc-all-prompt')?.value || '').trim();
   const fieldRaw = (document.getElementById('rc-prompt').value || '').trim();
   const part = _stripColorWords(fieldRaw).trim();
   const fieldHasColor = fieldRaw !== part;
@@ -14871,14 +14878,22 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
     document.getElementById('rc-prompt')?.focus();
     return;
   }
-  if (!_rcSelectedColor && !fieldHasColor) {
+  if (recolorAll) {
+    if (!stylePrompt && !_rcSelectedColor) {
+      showToast('Describe the colours/style, or pick a colour', 'error');
+      document.getElementById('rc-all-prompt')?.focus();
+      return;
+    }
+  } else if (!_rcSelectedColor && !fieldHasColor) {
     showToast('Pick a colour below (or type one)', 'error');
     return;
   }
-  // "Recolor all" → the whole image; the prompt is just the colour (no part,
-  // no CLIPSeg). Otherwise: part (field) + colour (swatch or typed).
+  // "Recolor all" → the whole image. A free-text style prompt ("sunset
+  // gradient", "cyberpunk neon") routes to the ControlNet-Tile AI render; a
+  // plain colour word / swatch goes through the fast HSV shift. Otherwise:
+  // part (field) + colour (swatch or typed).
   const rawPrompt = recolorAll
-    ? (_rcSelectedColor || fieldRaw)
+    ? (stylePrompt || _rcSelectedColor)
     : (_rcSelectedColor ? (part + ' ' + _rcSelectedColor) : fieldRaw);
   const strength = (parseInt(document.getElementById('rc-strength').value) || 100) / 100;
   const dilate = parseInt(document.getElementById('rc-dilate').value) || 15;

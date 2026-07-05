@@ -1116,7 +1116,9 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5
         return {"ok": False, "error": "prompt required (e.g. 'cape rouge')"}
     noun, color_spec = parse_recolor_prompt(prompt)
     if color_spec is None:
-        return do_recolor_tile(input_path, noun, prompt, output_path, dilate, rel)
+        # No colour word → a material/style prompt ('rusty metal', 'sunset
+        # gradient') → ControlNet-Tile AI render (whole image if recolor_all).
+        return do_recolor_tile(input_path, noun, prompt, output_path, dilate, rel, recolor_all=recolor_all)
     load_clipseg()
     with state.inference_lock:
         try:
@@ -1169,10 +1171,11 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5
             return {"ok": False, "error": str(e)}
 
 
-def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0.5):
+def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0.5, recolor_all=False):
     """ControlNet-Tile fallback for material/non-colour requests ('metal rouille',
-    'cuir vieilli'): low-denoise structure-preserving re-paint, composited through
-    the CLIPSeg mask so only the detected region changes."""
+    'cuir vieilli', or a whole-image style like 'sunset gradient'): low-denoise
+    structure-preserving re-paint, composited through the CLIPSeg mask so only
+    the detected region changes. recolor_all=True → whole image (full mask)."""
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
     load_clipseg()
@@ -1186,17 +1189,22 @@ def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0
             orig_size = img.size
             img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
             t0 = time.time()
-            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun or full_prompt, dilate, rel)
-            coverage = (np.array(mask_soft) > 128).mean() * 100
-            if coverage < 0.2:
-                return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
+            if recolor_all:
+                mask_soft = Image.new("L", (work_w, work_h), 255)  # whole image
+                coverage = 100.0
+            else:
+                mask_soft = _clipseg_mask(img_work, work_w, work_h, noun or full_prompt, dilate, rel)
+                coverage = (np.array(mask_soft) > 128).mean() * 100
+                if coverage < 0.2:
+                    return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
             with torch.inference_mode():
                 result = pipe(
                     prompt=f"{full_prompt}, same shape, preserve folds and details, photorealistic",
                     negative_prompt="deformed, distorted, blurry, low quality, changed shape, extra parts",
                     image=img_work,
                     control_image=img_work,
-                    strength=0.18,
+                    # whole-image style needs a bit more denoise to actually take.
+                    strength=(0.35 if recolor_all else 0.18),
                     num_inference_steps=20,
                     guidance_scale=5.5,
                     controlnet_conditioning_scale=0.65,
