@@ -1644,6 +1644,10 @@ button.tool-active {
 #modal-recolor .modal-card.modal-card-wide { width: 880px; }
 #modal-recolor .modal-with-image { grid-template-columns: minmax(400px, 1.2fr) 1fr; }
 #modal-recolor .modal-image-side { min-height: 440px; }
+/* The form column is stretched to the (taller) image row; keep the mode <select>
+   at a fixed height so it doesn't absorb the vertical slack and balloon. */
+#modal-recolor .modal-form-side { justify-content: flex-start; }
+#modal-recolor #rc-mode { flex: 0 0 auto; height: 40px; box-sizing: border-box; }
 .modal-with-image {
   display: grid;
   grid-template-columns: 280px 1fr;
