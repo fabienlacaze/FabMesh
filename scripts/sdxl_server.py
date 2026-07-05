@@ -1090,7 +1090,7 @@ def _clipseg_mask(img_work, work_w, work_h, target_text, dilate, rel=0.5):
     mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
     mask_prob = 1 / (1 + np.exp(-mask_logits))
     arr = np.array(Image.fromarray((mask_prob * 255).astype(np.uint8)).resize((work_w, work_h), Image.LANCZOS)).astype(np.float32)
-    thr = max(60.0, float(arr.max()) * float(rel))
+    thr = max(50.0, float(arr.max()) * float(rel))  # floor 50 (was 60): catch weaker parts like building windows
     mask_binary = Image.fromarray((arr > thr).astype(np.uint8) * 255, mode="L")
     d = max(0, int(dilate))
     if d > 0:
@@ -1116,10 +1116,29 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5
             orig_size = img.size
             img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
             t0 = time.time()
-            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun, dilate, rel)
-            coverage = (np.array(mask_soft) > 128).mean() * 100
+            # CLIPSeg is weak on small / repeated parts (e.g. building "windows").
+            # Try a few phrasings and keep the strongest mask before giving up.
+            _base = noun.strip()
+            _nl = _base.lower()
+            _variants = [_base]
+            if _nl.endswith('s') and len(_nl) > 3:
+                _variants.append(_base[:-1])          # windows -> window
+            else:
+                _variants.append(_base + 's')         # window  -> windows
+            _variants += ['the ' + _base, _base + ' area']
+            mask_soft, coverage, _seen = None, 0.0, set()
+            for _vt in _variants:
+                if not _vt or _vt in _seen:
+                    continue
+                _seen.add(_vt)
+                _m = _clipseg_mask(img_work, work_w, work_h, _vt, dilate, rel)
+                _c = (np.array(_m) > 128).mean() * 100
+                if _c > coverage:
+                    mask_soft, coverage = _m, _c
+                if coverage >= 2.0:  # good enough — stop early
+                    break
             if coverage < 0.2:
-                return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
+                return {"ok": False, "error": f"'{noun}' not found. CLIPSeg couldn't segment it — try a broader/simpler word (e.g. the whole facade, roof, walls), or lower Detection precision."}
             if coverage > 80:
                 log(f"WARNING: recolor mask covers {coverage:.0f}%", 'warn')
             save_debug_mask(output_path, mask_soft)

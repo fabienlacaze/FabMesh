@@ -70,13 +70,31 @@ def generate(
     work_h = (work_h // 8) * 8
     img_work = img.resize((work_w, work_h), Image.LANCZOS)
 
-    mask = _segment(seg_processor, seg_model, img_work, target_text,
-                    work_w, work_h, dilate)
-    coverage = (np.array(mask) > 128).mean() * 100
+    # CLIPSeg is weak on small / repeated parts (e.g. building "windows").
+    # Try a few phrasings and keep the strongest mask before giving up.
+    _base = (target_text or '').strip()
+    _nl = _base.lower()
+    _variants = [_base]
+    if _nl.endswith('s') and len(_nl) > 3:
+        _variants.append(_base[:-1])          # windows -> window
+    elif _base:
+        _variants.append(_base + 's')         # window  -> windows
+    _variants += ['the ' + _base, _base + ' area']
+    mask, coverage, _seen = None, 0.0, set()
+    for _vt in _variants:
+        if not _vt or _vt in _seen:
+            continue
+        _seen.add(_vt)
+        _m = _segment(seg_processor, seg_model, img_work, _vt, work_w, work_h, dilate)
+        _c = (np.array(_m) > 128).mean() * 100
+        if _c > coverage:
+            mask, coverage = _m, _c
+        if coverage >= 2.0:  # good enough — stop early
+            break
     print(f'[auto-inpaint] mask covers {coverage:.1f}% '
           f'(target="{target_text[:60]}")', flush=True)
     if coverage < 0.2:
-        raise ValueError(f'mask empty — "{target_text}" not found in image')
+        raise ValueError(f'"{target_text}" not found — try a broader/simpler word (facade, roof, walls)')
 
     # Detect "remove" intent — same heuristic as desktop.
     p = (prompt or '').strip()

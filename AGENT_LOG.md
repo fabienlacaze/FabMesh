@@ -10,8 +10,10 @@
   n'expose pas Age).
 - **Recolor** : diagnostiqué NON cassé pour les bâtiments — `recolor_hsv_masked` booste bien la saturation (plancher
   110 → blanc→couleur OK) et `do_recolor` renvoie une erreur claire si CLIPSeg ne détecte pas le part (coverage<0.2%).
-  Le cas « windows » = détection CLIPSeg faible sur zones petites/éparses (universel, pas building-spécifique). Pas de
-  changement backend ; conseils à l'user (terme plus large / baisser la precision).
+  Le cas « windows » = détection CLIPSeg faible sur zones petites/éparses. **AMÉLIORATION** (sdxl_server.py:do_recolor +
+  modal_app/_auto_inpaint.py) : essaie plusieurs formulations (windows / window / the windows / windows area) et garde le
+  masque de meilleure couverture, plancher CLIPSeg 60→50, message d'erreur plus utile. ⚠️ Desktop : nécessite un restart
+  du serveur SDXL (Settings → Kill AI engine). Cloud : nécessite `modal deploy` (action user).
 - **Carte « Create a new project »** : `grid.appendChild` → `grid.prepend` (première, haut-gauche). Porté desktop + cloud.
 - **Asset-type desktop vs cloud** : divergence — le DESKTOP est le superset (a en plus Other living/vehicle/structure/item,
   entièrement câblés : profils + prompts). Le CLOUD ne les avait pas. Uniformisé vers le haut (cloud ← desktop, aucune
