@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-07-05 (Outil Age asset-aware + carte « New project » en premier + diag Recolor)
+
+- **Age tool** : `_ageBuildPrompt` était 100% visage (« wrinkles, skin, hair or fur, big eyes, grey/white hair ») →
+  sur un bâtiment SDXL hallucinait des YEUX + passait en GRIS. Rendu ASSET-AWARE (index2.js) : personnages =
+  vieillissement facial (inchangé) ; inanimés (building/vehicle/prop/environment) = PATINE/USURE (moussu, fissuré,
+  rouillé / vs neuf pristine), avec « full color » + un NEGATIVE qui bloque face/eyes/grayscale, et cnScale verrouillé
+  (0.55) pour que la FORME ne morphe pas (l'usure est surfacique). Type via `ws-asset-type`. Desktop-only (le cloud
+  n'expose pas Age).
+- **Recolor** : diagnostiqué NON cassé pour les bâtiments — `recolor_hsv_masked` booste bien la saturation (plancher
+  110 → blanc→couleur OK) et `do_recolor` renvoie une erreur claire si CLIPSeg ne détecte pas le part (coverage<0.2%).
+  Le cas « windows » = détection CLIPSeg faible sur zones petites/éparses (universel, pas building-spécifique). Pas de
+  changement backend ; conseils à l'user (terme plus large / baisser la precision).
+- **Carte « Create a new project »** : `grid.appendChild` → `grid.prepend` (première, haut-gauche). Porté desktop + cloud.
+- **Asset-type desktop vs cloud** : divergence — le DESKTOP est le superset (a en plus Other living/vehicle/structure/item,
+  entièrement câblés : profils + prompts). Le CLOUD ne les avait pas. Uniformisé vers le haut (cloud ← desktop, aucune
+  perte) : ajouté les 4 options `other_*` au `<select>` cloud + les 4 entrées `ASSET_TYPE_PROMPTS`. La config
+  `ASSET_OPTIONS_PROFILE` est gardée (`[type] || custom`) → pas de crash pour other_* (retombe sur custom).
+
 ## 2026-07-05 (Bug prompt : « robot house » type Building → robot humanoïde au lieu d'un bâtiment)
 
 - Reproduit par l'user : ASSET TYPE=Building, prompt « robot house », engine Balanced (local_juggernaut) → SDXL sort

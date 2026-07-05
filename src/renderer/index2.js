@@ -1206,7 +1206,7 @@ async function renderProjectsGrid() {
   // Sync the alternate home views with fresh project data.
   if (_homeView === 'images') renderAllImagesGrid();
   else if (_homeView === 'meshes') renderAllMeshesGrid();
-  // Add the "+ New" card at the end
+  // "+ New" card FIRST (top-left of the grid).
   const newCard = document.createElement('div');
   newCard.className = 'project-card new-card';
   newCard.innerHTML = `
@@ -1216,7 +1216,7 @@ async function renderProjectsGrid() {
     </div>
   `;
   newCard.addEventListener('click', () => openNewProjectModal());
-  grid.appendChild(newCard);
+  grid.prepend(newCard);
 }
 
 function escapeHtml(s) {
@@ -14894,17 +14894,39 @@ function _ageLabel(v) {
   const lvl = m > 66 ? 'strong' : m > 33 ? 'medium' : 'slight';
   return `${dir} (${lvl})`;
 }
-function _ageBuildPrompt(v) {
+function _ageBuildPrompt(v, assetType) {
   if (v === 0) return null;
   const m = Math.abs(v);
-  if (v < 0) {  // younger — at the extreme, push PROPORTIONS (baby/cub: bigger head, smaller body)
-    if (m > 66) return 'a baby / juvenile version, much younger, smaller body with a noticeably larger head proportion, short stubby limbs, soft rounded features, big eyes, smooth youthful skin or downy fur';
-    if (m > 33) return 'a younger, adolescent version, slimmer, smoother skin, softer rounder features';
-    return 'slightly younger, fresher smoother skin';
+  const t = assetType || 'character';
+  const isChar = ['character', 'creature', 'animal', 'humanoid', 'dragon'].includes(t);
+  // CHARACTERS/CREATURES: facial + body aging (the original behaviour).
+  if (isChar) {
+    if (v < 0) {  // younger — at the extreme, push PROPORTIONS (baby/cub)
+      if (m > 66) return 'a baby / juvenile version, much younger, smaller body with a noticeably larger head proportion, short stubby limbs, soft rounded features, big eyes, smooth youthful skin or downy fur';
+      if (m > 33) return 'a younger, adolescent version, slimmer, smoother skin, softer rounder features';
+      return 'slightly younger, fresher smoother skin';
+    }
+    if (m > 66) return 'a very old, elderly version, aged, deep wrinkles, sagging skin, grey or white hair or fur, gaunt weathered look';
+    if (m > 33) return 'an older, mature version, some wrinkles, greying hair or fur, aged skin';
+    return 'slightly older, a few wrinkles, mature look';
   }
-  if (m > 66) return 'a very old, elderly version, aged, deep wrinkles, sagging skin, grey or white hair or fur, gaunt weathered look';
-  if (m > 33) return 'an older, mature version, some wrinkles, greying hair or fur, aged skin';
-  return 'slightly older, a few wrinkles, mature look';
+  // INANIMATE (building / vehicle / prop / environment / weapon): "age" = surface
+  // weathering / patina, NOT a face. Keep the original colors + materials.
+  const isVehicle = ['vehicle', 'bateau', 'avion', 'other_vehicle'].includes(t);
+  if (v < 0) {  // younger = newer / pristine
+    if (m > 66) return 'a brand-new pristine version, freshly built, factory-new, spotless, immaculate clean surfaces, vivid clean materials, no wear, same colors, full color';
+    if (m > 33) return 'a newer cleaner version, well-maintained, fresh paint, minimal wear, same colors, full color';
+    return 'slightly newer and cleaner, fresh surfaces, same colors, full color';
+  }
+  if (isVehicle) {  // older vehicle = rust / dents / faded paint
+    if (m > 66) return 'a heavily aged weathered rusty version, corroded metal, peeling and faded paint, dents, deep scratches, grime and dust, patina, aged but still full color';
+    if (m > 33) return 'an aged worn version, some rust, faded paint, scratches, dust and grime, full color';
+    return 'slightly aged, light wear, a few scratches and dust, full color';
+  }
+  // building / environment / prop / weapon / structure = weathering + moss + cracks
+  if (m > 66) return 'a very old heavily weathered version, aged and decayed, cracked and crumbling surfaces, moss and lichen, water stains, rust streaks, peeling paint, faded but still colored materials, overgrown, ruined patina, full color';
+  if (m > 33) return 'an aged weathered version, worn surfaces, some cracks, moss, stains, faded paint, patina, full color';
+  return 'slightly aged and weathered, light wear, faint stains and patina, full color';
 }
 function _ageStrength(v) {
   const m = Math.abs(v) / 100;
@@ -14936,17 +14958,27 @@ document.getElementById('age-go')?.addEventListener('click', async () => {
   const v = parseInt(document.getElementById('age-slider').value) || 0;
   if (v === 0) { showToast('Move the slider toward younger or older first', 'error'); return; }
   const guide = (document.getElementById('age-guide').value || '').trim();
-  let prompt = _ageBuildPrompt(v);
+  const assetType = document.getElementById('ws-asset-type')?.value || 'character';
+  const isChar = ['character', 'creature', 'animal', 'humanoid', 'dragon'].includes(assetType);
+  let prompt = _ageBuildPrompt(v, assetType);
   if (guide) prompt = prompt + ', ' + (await translateUserPrompt(guide));
   const strength = _ageStrength(v);
-  // Variable structure lock: a small age change keeps the silhouette (high cn), a strong
-  // one (slider near the extremes) frees the PROPORTIONS so a cub/baby actually gets a
-  // bigger head + smaller body — not just a re-textured adult.
+  // Variable structure lock: for CHARACTERS a small age change keeps the
+  // silhouette (high cn), a strong one frees the PROPORTIONS (cub/baby). For
+  // INANIMATE assets weathering is surface-only, so keep the shape LOCKED even
+  // at the extreme.
   const m = Math.abs(v) / 100;
-  const cnScale = 0.52 - m * 0.32;  // 0.52 (mild) -> 0.20 (extreme)
-  const negPrompt = m > 0.55
-    ? 'deformed, mutated, extra limbs, missing limbs, fused limbs, blurry, low quality, bad anatomy'  // strong: allow proportion change
-    : null;  // mild: default shape-locked negative prompt
+  const cnScale = isChar ? (0.52 - m * 0.32) : 0.55;  // char: 0.52→0.20 ; inanimate: locked
+  let negPrompt = m > 0.55
+    ? 'deformed, mutated, extra limbs, missing limbs, fused limbs, blurry, low quality, bad anatomy'
+    : null;
+  if (!isChar) {
+    // Inanimate: NEVER grow a face and NEVER go grayscale — the facial-aging
+    // model otherwise adds eyes and desaturates buildings/vehicles.
+    negPrompt = 'human face, face, eyes, mouth, person, people, portrait, character, humanoid, mask, skull, '
+      + 'grayscale, greyscale, black and white, monochrome, desaturated, sepia, '
+      + 'blurry, low quality' + (negPrompt ? ', ' + negPrompt : '');
+  }
   document.getElementById('modal-age').classList.add('hidden');
   gatedRun('img2img', `Age: ${p.name}`, async () => {
     const job = pushJob(`Age: ${p.name}`, null, {

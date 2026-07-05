@@ -1111,7 +1111,7 @@ async function renderProjectsGrid() {
   if (_homeView === 'images') renderAllImagesGrid();
   else if (_homeView === 'meshes') renderAllMeshesGrid();
   else if (_homeView === 'rigs') renderAllRigsGrid();
-  // Add the "+ New" card at the end
+  // "+ New" card FIRST (top-left of the grid).
   const newCard = document.createElement('div');
   newCard.className = 'project-card new-card';
   newCard.innerHTML = `
@@ -1121,7 +1121,7 @@ async function renderProjectsGrid() {
     </div>
   `;
   newCard.addEventListener('click', () => openNewProjectModal());
-  grid.appendChild(newCard);
+  grid.prepend(newCard);
 }
 
 function escapeHtml(s) {
@@ -4423,6 +4423,10 @@ const ASSET_TYPE_PROMPTS = {
   animal: '3D game asset reference sheet, full body character reference, long shot, full figure shot, wide establishing shot, distant camera, entire animal visible from nose to tail to feet, body fills 60 percent of frame, full body lateral profile, all four feet flat on the ground, body horizontal parallel to floor, belly close to ground, four legs supporting the body from below, plain white background, even studio lighting, no shadows, NEVER bipedal, NEVER upright, NEVER standing on hind legs, NEVER humanoid posture, NEVER T-pose, NEVER cartoon mascot stance, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot, NOT head and shoulders',
   insect: '3D game asset reference sheet, full body reference, long shot, full figure shot, distant camera, entire insect visible, body fills 60 percent of frame, isolated, exactly six legs in total, three legs on the left side and three legs on the right side, six legs and no more, anatomically correct insect leg count, segmented body with distinct head thorax and abdomen, hard exoskeleton, antennae, 3/4 isometric view, high three-quarter angle seen from above and to the side, all six legs clearly visible and separated, plain white background, even studio lighting, no shadows, NOT eight legs, NOT a spider, NOT an arachnid, no extra legs, no doubled legs, no duplicated legs, no overlapping duplicate limbs, no mirrored extra legs, NO tail, no fur, NOT a mammal, NOT a quadruped, no humanoid posture, NOT a front head-on view, NOT a portrait, NOT a close-up, NOT a headshot, no text, no UI',
   custom: '',
+  other_living:  'full body, isolated, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI',
+  other_vehicle: 'complete vehicle, isolated, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI',
+  other_built:   'full structure, isolated, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
+  other_item:    'ONE item only, single item, only one instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate, no second item',
 };
 
 const ASSET_STYLE_PROMPTS = {
