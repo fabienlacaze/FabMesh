@@ -1,6 +1,19 @@
 # FabMesh Agent Log
 
-## 2026-07-05 (Recolor : viewer agrandi + menu déroulant 3 modes)
+## 2026-07-06 (Audit complet multi-agents — AUDIT_2026-07-06.md)
+
+- Audit 9 dimensions (stubs, IPC, endpoints cloud, parité desktop/cloud, Python, erreurs, UI,
+  hygiène repo, docs vs code) + vérification adversariale de chaque finding : **44 confirmés,
+  31 partiels, 2 réfutés**. Rapport complet dans `AUDIT_2026-07-06.md` à la racine.
+- Blockers packaging confirmés et précisés : `wizard_install_deps.py` pose torch 2.7.0 sans kaolin
+  (trellis2_native exige 2.8+kaolin) ; venv Puppeteer jamais provisionné en packagé ; CI release ne
+  fetch ni python-embed ni vc_redist (gitignorés) → tout installeur CI est mort au first-run.
+- Features cassées trouvées : anim « Custom (text prompt) » desktop (prompt jamais lu), notation
+  marketplace ({stars} vs {rating}), NSFW cloud stub « toujours safe » + NameError `Image` dans
+  local_juggernaut_bridge.py:485 (tampon NSFW neutralisé), Paint Emissive desktop (bouton absent),
+  Retarget FBX cloud (zéro handler), swap post-process non atomique image-to-3d (perte mesh + job
+  gelé, main.js:5996), refund crédits cloud avalé (worker.ts:7693).
+- Aucune modification de code — audit en lecture seule, rapport seul commité.
 
 - **UI Recolor refondue** (desktop only — le cloud n'a pas d'outil Recolor, juste des chaînes i18n) : remplacé la
   checkbox « Recolor the whole image » par un **menu déroulant `rc-mode` à 3 modes** clairs :
