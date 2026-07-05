@@ -14461,8 +14461,8 @@ async function refreshJobDetailsModal(id) {
     const stepIdx = _jobStepIndex(j);
     gotoBtn.style.display = stepIdx > 0 ? '' : 'none';
     if (stepIdx > 0) {
-      const labels = ['Image','3D Mesh','Rig','Animation'];
-      gotoBtn.textContent = `→ Go to ${labels[stepIdx - 1]}`;
+      // Unified label (was "Go to Image / 3D Mesh / Rig / Animation").
+      gotoBtn.textContent = '→ Go to generation';
     }
   }
 }

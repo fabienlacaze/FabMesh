@@ -1465,7 +1465,7 @@
       <div class="modal-content" style="width:88vw; height:86vh; max-width:1500px; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
           <h3 style="margin:0;" id="mt-title">Mesh tool</h3>
-          <button id="mt-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+          <button id="mt-close-x" class="settings-close-x">&#10005;</button>
         </div>
         <p id="mt-subtitle" style="margin:0; font-size:12px; color:var(--text-muted);"></p>
         <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
@@ -1645,7 +1645,7 @@
       <div class="modal-content" style="width:88vw; height:86vh; max-width:1500px; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
           <h3 style="margin:0;">&#127912; Re-texture a region (AI)</h3>
-          <button id="rrx-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+          <button id="rrx-close-x" class="settings-close-x">&#10005;</button>
         </div>
         <p style="margin:0; font-size:12px; color:var(--text-muted);">Name the part — the AI detects it — and type what it should look like, then Apply. (Optional: paint to refine.) Geometry stays intact.</p>
         <div style="display:flex; flex:1 1 0; gap:12px; min-height:400px;">
@@ -2225,7 +2225,7 @@
         <div id="jd-error-box" class="jd-error-box hidden"></div>
         <div class="modal-actions" style="flex-wrap:wrap;">
           <button class="ghost-btn" id="job-details-export-logs" style="white-space:nowrap;" title="Save all logs to a text file on the Desktop (to send for support)">&#128203; Export logs</button>
-          <button class="primary-btn" id="job-details-goto-step" style="display:none; white-space:nowrap; background:linear-gradient(135deg,#7c3aed,#a855f7);">&#8594; Go to step</button>
+          <button class="primary-btn" id="job-details-goto-step" style="display:none; white-space:nowrap; background:linear-gradient(135deg,#7c3aed,#a855f7);">&#8594; Go to generation</button>
           <button class="primary-btn" id="job-details-open-settings" style="display:none; background:linear-gradient(135deg,#6a5acd,#9370db);">&#9881; Open Settings</button>
           <button class="primary-btn" id="job-details-unlock" style="display:none; background:linear-gradient(135deg,#f59e0b,#f97316);">&#128275; Unlock</button>
           <button class="primary-btn danger" id="job-details-cancel" style="white-space:nowrap;">Cancel task</button>
@@ -2311,7 +2311,7 @@
       <div class="modal-content" style="width:95vw; height:95vh; max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <h3 style="margin:0;">Draw Mask (paint the area to replace or remove)</h3>
-          <button id="mask-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+          <button id="mask-modal-close" class="settings-close-x">&#10005;</button>
         </div>
         <div style="font-size: 11px; color: var(--text-muted);">
           <strong>Click & drag</strong> to paint &nbsp;|&nbsp;
@@ -2361,7 +2361,7 @@
       <div class="modal-content" style="width:95vw; height:95vh; max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <h3 style="margin:0;">Clone Stamp</h3>
-          <button id="clone-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+          <button id="clone-modal-close" class="settings-close-x">&#10005;</button>
         </div>
         <div style="font-size: 11px; color: var(--text-muted);">
           <strong>Ctrl+Click</strong> to set source point &nbsp;|&nbsp;
@@ -2549,7 +2549,7 @@
     <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">Blur / Sharpen Brush</h3>
-        <button id="blur-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+        <button id="blur-close-x" class="settings-close-x">&#10005;</button>
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <label style="display:flex; align-items:center; gap:4px; flex:1 1 140px;">
@@ -2589,7 +2589,7 @@
     <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">Crop</h3>
-        <button id="crop-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+        <button id="crop-close-x" class="settings-close-x">&#10005;</button>
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <button id="crop-preset-free" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">Free</button>
@@ -2617,7 +2617,7 @@
     <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">Symmetrize</h3>
-        <button id="sym-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        <button id="sym-close" class="settings-close-x">&#10005;</button>
       </div>
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <label style="font-size:11px; display:flex; align-items:center; gap:4px;">
@@ -2675,7 +2675,7 @@
           <button id="paint-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
           <button id="paint-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
           <button id="paint-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
-          <button id="paint-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
+          <button id="paint-close-x" class="settings-close-x" style="margin-left:4px;">&#10005;</button>
         </div>
       </div>
       <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
@@ -2762,7 +2762,7 @@
         <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
           <button id="me-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
           <button id="me-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
-          <button id="me-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
+          <button id="me-close-x" class="settings-close-x" style="margin-left:4px;">&#10005;</button>
         </div>
       </div>
       <!-- General controls toolbar (always visible): symmetry + brush sliders -->
