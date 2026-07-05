@@ -34,7 +34,7 @@ def _segment(seg_processor, seg_model, image: Image.Image, target_text: str,
     mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize(
         (work_w, work_h), Image.LANCZOS)
     arr = np.array(mask_img)
-    binary = (arr > 60).astype(np.uint8) * 255   # assouplir (was 100): detect fainter CLIPSeg responses
+    binary = (arr > 50).astype(np.uint8) * 255   # floor 50 (was 60/100): parity w/ desktop, catch faint parts (windows)
     m = Image.fromarray(binary, mode='L')
     if dilate > 0:
         m = m.filter(ImageFilter.MaxFilter(dilate * 2 + 1))
