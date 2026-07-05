@@ -1118,7 +1118,8 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5
     if color_spec is None:
         # No colour word → a material/style prompt ('rusty metal', 'sunset
         # gradient') → ControlNet-Tile AI render (whole image if recolor_all).
-        return do_recolor_tile(input_path, noun, prompt, output_path, dilate, rel, recolor_all=recolor_all)
+        return do_recolor_tile(input_path, noun, prompt, output_path, dilate, rel,
+                               recolor_all=recolor_all, strength=strength)
     load_clipseg()
     with state.inference_lock:
         try:
@@ -1171,11 +1172,12 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5
             return {"ok": False, "error": str(e)}
 
 
-def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0.5, recolor_all=False):
+def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0.5, recolor_all=False, strength=1.0):
     """ControlNet-Tile fallback for material/non-colour requests ('metal rouille',
     'cuir vieilli', or a whole-image style like 'sunset gradient'): low-denoise
     structure-preserving re-paint, composited through the CLIPSeg mask so only
-    the detected region changes. recolor_all=True → whole image (full mask)."""
+    the detected region changes. recolor_all=True → whole image (full mask); the
+    Strength slider (strength) then drives how strongly the style is applied."""
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
     load_clipseg()
@@ -1197,17 +1199,27 @@ def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0
                 coverage = (np.array(mask_soft) > 128).mean() * 100
                 if coverage < 0.2:
                     return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
+            # Whole-image restyle needs real denoise or the style barely shows
+            # (0.35 kept a "military green camo" building silver). Drive it from
+            # the Strength slider: 20%→0.44, 100%→0.76. ControlNet still holds the
+            # shape (lower cond so colours can actually change). Part material
+            # recolor stays conservative (0.18) to preserve the detected region.
+            _s = max(0.2, min(1.0, float(strength)))
+            _denoise = (0.4 + _s * 0.36) if recolor_all else 0.18
+            _cn = 0.5 if recolor_all else 0.65
+            _prompt = (f"{full_prompt}, entire subject recoloured, keep the exact shape and structure, photorealistic"
+                       if recolor_all else
+                       f"{full_prompt}, same shape, preserve folds and details, photorealistic")
             with torch.inference_mode():
                 result = pipe(
-                    prompt=f"{full_prompt}, same shape, preserve folds and details, photorealistic",
+                    prompt=_prompt,
                     negative_prompt="deformed, distorted, blurry, low quality, changed shape, extra parts",
                     image=img_work,
                     control_image=img_work,
-                    # whole-image style needs a bit more denoise to actually take.
-                    strength=(0.35 if recolor_all else 0.18),
-                    num_inference_steps=20,
-                    guidance_scale=5.5,
-                    controlnet_conditioning_scale=0.65,
+                    strength=_denoise,
+                    num_inference_steps=(28 if recolor_all else 20),
+                    guidance_scale=(6.5 if recolor_all else 5.5),
+                    controlnet_conditioning_scale=_cn,
                     generator=torch.Generator("cuda").manual_seed(42),
                 ).images[0]
             if result.size != (work_w, work_h):
