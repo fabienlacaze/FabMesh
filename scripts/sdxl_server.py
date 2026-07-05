@@ -1098,10 +1098,11 @@ def _clipseg_mask(img_work, work_w, work_h, target_text, dilate, rel=0.5):
     return mask_binary.filter(ImageFilter.GaussianBlur(3))
 
 
-def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5):
+def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5, recolor_all=False):
     """Auto-recolour: detect the named part (CLIPSeg) and recolour ONLY it via a
     luminance-preserving HSV shift (shape/folds intact). Falls back to
-    ControlNet-Tile when the prompt names a material rather than a colour."""
+    ControlNet-Tile when the prompt names a material rather than a colour.
+    recolor_all=True skips CLIPSeg and recolours the WHOLE image (full mask)."""
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
     if not prompt or not prompt.strip():
@@ -1116,32 +1117,37 @@ def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15, rel=0.5
             orig_size = img.size
             img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
             t0 = time.time()
-            # CLIPSeg is weak on small / repeated parts (e.g. building "windows").
-            # Try a few phrasings and keep the strongest mask before giving up.
-            _base = noun.strip()
-            _nl = _base.lower()
-            _variants = [_base]
-            if _nl.endswith('s') and len(_nl) > 3:
-                _variants.append(_base[:-1])          # windows -> window
+            if recolor_all:
+                # Whole-image recolour: no CLIPSeg detection, mask = every pixel.
+                mask_soft = Image.new("L", (work_w, work_h), 255)
+                coverage = 100.0
             else:
-                _variants.append(_base + 's')         # window  -> windows
-            _variants += ['the ' + _base, _base + ' area']
-            mask_soft, coverage, _seen = None, 0.0, set()
-            for _vt in _variants:
-                if not _vt or _vt in _seen:
-                    continue
-                _seen.add(_vt)
-                _m = _clipseg_mask(img_work, work_w, work_h, _vt, dilate, rel)
-                _c = (np.array(_m) > 128).mean() * 100
-                if _c > coverage:
-                    mask_soft, coverage = _m, _c
-                if coverage >= 2.0:  # good enough — stop early
-                    break
-            if coverage < 0.2:
-                return {"ok": False, "error": f"'{noun}' not found. CLIPSeg couldn't segment it — try a broader/simpler word (e.g. the whole facade, roof, walls), or lower Detection precision."}
-            if coverage > 80:
-                log(f"WARNING: recolor mask covers {coverage:.0f}%", 'warn')
-            save_debug_mask(output_path, mask_soft)
+                # CLIPSeg is weak on small / repeated parts (e.g. building "windows").
+                # Try a few phrasings and keep the strongest mask before giving up.
+                _base = noun.strip()
+                _nl = _base.lower()
+                _variants = [_base]
+                if _nl.endswith('s') and len(_nl) > 3:
+                    _variants.append(_base[:-1])          # windows -> window
+                else:
+                    _variants.append(_base + 's')         # window  -> windows
+                _variants += ['the ' + _base, _base + ' area']
+                mask_soft, coverage, _seen = None, 0.0, set()
+                for _vt in _variants:
+                    if not _vt or _vt in _seen:
+                        continue
+                    _seen.add(_vt)
+                    _m = _clipseg_mask(img_work, work_w, work_h, _vt, dilate, rel)
+                    _c = (np.array(_m) > 128).mean() * 100
+                    if _c > coverage:
+                        mask_soft, coverage = _m, _c
+                    if coverage >= 2.0:  # good enough — stop early
+                        break
+                if coverage < 0.2:
+                    return {"ok": False, "error": f"'{noun}' not found. CLIPSeg couldn't segment it — try a broader/simpler word (e.g. the whole facade, roof, walls), or lower Detection precision."}
+                if coverage > 80:
+                    log(f"WARNING: recolor mask covers {coverage:.0f}%", 'warn')
+                save_debug_mask(output_path, mask_soft)
             recolored = recolor_hsv_masked(img_work, mask_soft, color_spec, strength)
             if (work_w, work_h) != orig_size:
                 recolored = recolored.resize(orig_size, Image.LANCZOS)
@@ -1757,6 +1763,7 @@ class Handler(BaseHTTPRequestHandler):
                     data.get('strength', 1.0),
                     data.get('dilate', 15),
                     data.get('rel', 0.5),
+                    recolor_all=bool(data.get('recolor_all', False)),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

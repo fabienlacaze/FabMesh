@@ -1370,17 +1370,25 @@
             </div>
           </div>
           <div class="modal-form-side">
-            <label>What to recolor</label>
-            <input type="text" id="rc-prompt" placeholder="cape, armor, helmet, axe..." />
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:8px;">
+              <input type="checkbox" id="rc-all" />
+              <span>Recolor the whole image</span>
+            </label>
+            <div class="rc-detect-only">
+              <label>What to recolor</label>
+              <input type="text" id="rc-prompt" placeholder="cape, armor, helmet, axe..." />
+            </div>
             <label style="margin-top:10px;">Colour</label>
             <div id="rc-swatches" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;"></div>
             <label style="margin-top:12px;">Strength <span id="rc-strength-val" class="slider-val">100%</span></label>
             <input type="range" id="rc-strength" min="20" max="100" value="100" />
-            <label>Detection precision <span id="rc-precision-val" class="slider-val">50%</span></label>
-            <input type="range" id="rc-precision" min="0" max="100" value="50" />
-            <label>Detection padding <span id="rc-dilate-val" class="slider-val">15px</span></label>
-            <input type="range" id="rc-dilate" min="0" max="40" value="15" />
-            <small class="modal-subtitle" style="display:block; margin-top:5px; font-size:11px; line-height:1.3;">The AI detects the named part and only changes its colour (shape, folds and shadows preserved). A material (e.g. "rusty metal") goes through a slower AI render.</small>
+            <div class="rc-detect-only">
+              <label>Detection precision <span id="rc-precision-val" class="slider-val">50%</span></label>
+              <input type="range" id="rc-precision" min="0" max="100" value="50" />
+              <label>Detection padding <span id="rc-dilate-val" class="slider-val">15px</span></label>
+              <input type="range" id="rc-dilate" min="0" max="40" value="15" />
+              <small class="modal-subtitle" style="display:block; margin-top:5px; font-size:11px; line-height:1.3;">The AI detects the named part and only changes its colour (shape, folds and shadows preserved). A material (e.g. "rusty metal") goes through a slower AI render.</small>
+            </div>
           </div>
         </div>
         <div class="modal-actions">

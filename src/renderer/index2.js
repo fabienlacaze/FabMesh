@@ -14746,6 +14746,10 @@ document.getElementById('ws-recolor-btn')?.addEventListener('click', () => {
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
   document.getElementById('rc-prompt').value = '';
+  // Reset the "Recolor all" toggle + re-show the detection fields each open.
+  const rcAll = document.getElementById('rc-all');
+  if (rcAll) rcAll.checked = false;
+  document.querySelectorAll('#modal-recolor .rc-detect-only').forEach(el => { el.style.display = ''; });
   const srcImg = document.getElementById('rc-source-img');
   if (srcImg) { srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now(); srcImg.style.opacity = ''; }
   _rcSrcPath = target;
@@ -14837,15 +14841,33 @@ function _rcClearColor() {
 document.getElementById('rc-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-recolor').classList.add('hidden');
 });
+// "Recolor the whole image" → hide the part field + detection sliders (no
+// CLIPSeg), and drop the mask-preview overlay back to the plain image.
+document.getElementById('rc-all')?.addEventListener('change', (e) => {
+  const on = !!e.target.checked;
+  document.querySelectorAll('#modal-recolor .rc-detect-only').forEach(el => {
+    el.style.display = on ? 'none' : '';
+  });
+  const srcImg = document.getElementById('rc-source-img');
+  if (on && srcImg && _rcSrcPath) {
+    srcImg.src = 'file:///' + _rcSrcPath.replace(/\\/g, '/') + '?t=0';
+    srcImg.style.opacity = '';
+    const sp = document.getElementById('rc-detect-spinner');
+    if (sp) sp.style.display = 'none';
+  } else if (!on) {
+    _rcSchedulePreview();  // re-detect when switching back to part mode
+  }
+});
 document.getElementById('rc-go')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const imagePath = editTarget(p);
   if (!imagePath) return;
+  const recolorAll = !!document.getElementById('rc-all')?.checked;
   const fieldRaw = (document.getElementById('rc-prompt').value || '').trim();
   const part = _stripColorWords(fieldRaw).trim();
   const fieldHasColor = fieldRaw !== part;
-  if (!part) {
-    showToast('Type what to recolor (e.g. cape, mane, saddle)', 'error');
+  if (!recolorAll && !part) {
+    showToast('Type what to recolor — or tick "Recolor the whole image"', 'error');
     document.getElementById('rc-prompt')?.focus();
     return;
   }
@@ -14853,20 +14875,23 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
     showToast('Pick a colour below (or type one)', 'error');
     return;
   }
-  // Part comes from the field; colour comes from the selected swatch (or typed in the field).
-  const rawPrompt = _rcSelectedColor ? (part + ' ' + _rcSelectedColor) : fieldRaw;
+  // "Recolor all" → the whole image; the prompt is just the colour (no part,
+  // no CLIPSeg). Otherwise: part (field) + colour (swatch or typed).
+  const rawPrompt = recolorAll
+    ? (_rcSelectedColor || fieldRaw)
+    : (_rcSelectedColor ? (part + ' ' + _rcSelectedColor) : fieldRaw);
   const strength = (parseInt(document.getElementById('rc-strength').value) || 100) / 100;
   const dilate = parseInt(document.getElementById('rc-dilate').value) || 15;
   document.getElementById('modal-recolor').classList.add('hidden');
   const prompt = await translateUserPrompt(rawPrompt);  // -> EN so CLIPSeg detects the part
   gatedRun('img2img', `Recolor: ${p.name}`, async () => {
     const job = pushJob(`Recolor: ${p.name}`, null, {
-      Prompt: rawPrompt,
+      Prompt: recolorAll ? (rawPrompt + ' (whole image)') : rawPrompt,
       Strength: Math.round(strength * 100) + '%',
-      Padding: dilate + 'px',
+      Padding: recolorAll ? '—' : dilate + 'px',
     }, 20000, { sourceImageUrl: imagePath, projectName: p.name });
     try {
-      const r = await API.recolor({ imagePath, prompt, strength, dilate, rel: _rcRel(), jobId: job.id });
+      const r = await API.recolor({ imagePath, prompt, strength, dilate, rel: _rcRel(), recolorAll, jobId: job.id });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();

@@ -4164,7 +4164,7 @@ ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed,
 });
 
 // Recolor: auto-detect a part (CLIPSeg) and recolor ONLY it, shape preserved.
-ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate, rel }) => {
+ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate, rel, recolorAll }) => {
   try {
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
@@ -4175,7 +4175,7 @@ ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate, r
     const r = await sdxlServerCall('/recolor', {
       input: imagePath, prompt: prompt || '', output: newImagePath,
       strength: (strength != null ? strength : 1.0), dilate: dilate || 15,
-      rel: (rel != null ? rel : 0.5),
+      rel: (rel != null ? rel : 0.5), recolor_all: !!recolorAll,
     });
     if (r.ok) {
       _handleMultiviewInheritance(newImagePath).catch(() => {});
