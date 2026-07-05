@@ -60,15 +60,23 @@ _ANATOMY_NEG = {
     # Buildings/structures: SDXL's isometric-architecture prior tiles a
     # whole village/town into one frame ("house for orc" -> 30-house
     # diorama). Front-load anti-cluster tokens so they reach the U-Net.
+    # ...plus figure-suppression: a noun like "robot house" makes SDXL render
+    # the FIGURE (a robot) instead of the building; "no characters" in the
+    # positive is ignored, so weight it out of the negative here.
     'building':    "(village:1.6), (town:1.6), (city:1.6), (cityscape:1.5), "
                    "(multiple buildings:1.6), (rows of houses:1.5), "
                    "(many houses:1.5), (suburb:1.4), (neighborhood:1.4), "
                    "(aerial view:1.4), (isometric city:1.5), "
-                   "(tiled:1.4), (repeated pattern:1.4), (diorama:1.4)",
+                   "(tiled:1.4), (repeated pattern:1.4), (diorama:1.4), "
+                   "(humanoid:1.5), (android:1.5), (robot figure:1.5), "
+                   "(character:1.4), (person:1.4), (mascot:1.4), "
+                   "(standing figure:1.4), (statue:1.3), (mannequin:1.3)",
     'environment': "(village:1.5), (town:1.5), (city:1.5), "
                    "(multiple buildings:1.5), (rows of houses:1.4), "
                    "(many houses:1.4), (aerial view:1.4), "
-                   "(isometric city:1.4), (tiled:1.4), (diorama:1.4)",
+                   "(isometric city:1.4), (tiled:1.4), (diorama:1.4), "
+                   "(humanoid:1.5), (android:1.5), (character:1.4), "
+                   "(person:1.4), (mascot:1.4), (standing figure:1.4)",
 }
 
 

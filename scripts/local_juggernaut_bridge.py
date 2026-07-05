@@ -351,7 +351,12 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                 "multiple buildings, rows of houses, many houses, "
                 "housing development, street, aerial view, bird's eye view, "
                 "isometric city, tiled, repeated pattern, duplicate, "
-                "two buildings, collage, grid layout, diorama"
+                "two buildings, collage, grid layout, diorama, "
+                # A noun like "robot house" makes SDXL render the FIGURE, not
+                # the building — "no characters" in the positive is ignored, so
+                # suppress the figure shapes here instead (< 77 CLIP tokens).
+                "humanoid, android, robot figure, character, person, people, "
+                "mascot, standing figure, statue, mannequin, creature, animal"
             )
         else:
             negative_prompt = (

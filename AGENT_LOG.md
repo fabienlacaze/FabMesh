@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-05 (Bug prompt : « robot house » type Building → robot humanoïde au lieu d'un bâtiment)
+
+- Reproduit par l'user : ASSET TYPE=Building, prompt « robot house », engine Balanced (local_juggernaut) → SDXL sort
+  un ROBOT humanoïde debout, pas un bâtiment. Cause : (1) le scaffolding positif building met « no characters » —
+  SDXL IGNORE les négations dans le positif (voire les inverse) ; (2) le negative building était dédié UNIQUEMENT à
+  l'anti-cluster (village/town/diorama, le bug « house for orc → 30 maisons »), sans AUCUNE suppression de figure →
+  le token « robot » domine et fabrique un personnage.
+- Fix (desktop + cloud) : ajouté au NEGATIVE building/environment la suppression de figures — local_juggernaut_bridge.py
+  L348 (`humanoid, android, robot figure, character, person, mascot, standing figure, statue, mannequin, creature,
+  animal`, < 77 tokens CLIP) ; modal_app/_realvis.py L63/68 (mêmes termes pondérés Compel `(humanoid:1.5)` etc.).
+  Positif building (index2.js:4690) : ancré « architectural building exterior, complete edifice » en TÊTE (SDXL pèse
+  les tokens de début) + retiré le « no characters » inefficace.
+- À TESTER : régénérer « robot house » en Building → doit sortir un bâtiment (maison robotisée), plus un robot. Si
+  l'user voulait un robot → choisir le type Character. Syntaxe vérifiée (ast + node --check).
+
 ## 2026-07-04 (E2E restants — liens morts marketing + page compte + tableau prix honnête)
 
 - Marketing (docs/index.html, GitHub Pages) : brand `/`→`index.html`, nav Marketplace `/market`→URL workers.dev
