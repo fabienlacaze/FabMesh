@@ -1003,7 +1003,13 @@ function renderAllRigsGrid() {
   });
 }
 
+let _renderProjectsGen = 0;
 async function renderProjectsGrid() {
+  // Re-entrancy guard: async fn clears the grid at the top but appends cards +
+  // the "New project" tile AFTER two awaits. Two concurrent calls interleave at
+  // those awaits → duplicate "Create a new project" tiles. Only the newest
+  // render may touch the DOM after an await.
+  const myGen = ++_renderProjectsGen;
   const grid = document.getElementById('projects-grid');
   const empty = document.getElementById('projects-empty');
   grid.innerHTML = '';
@@ -1015,10 +1021,12 @@ async function renderProjectsGrid() {
       restricted = !ps.unrestricted;
     }
   } catch(_) {}
+  if (myGen !== _renderProjectsGen) return;   // superseded by a newer render
 
   let visibleProjects = state.projects;
   if (restricted) {
     const checks = await Promise.all(state.projects.map(p => _isProjectNSFW(p)));
+    if (myGen !== _renderProjectsGen) return; // superseded by a newer render
     visibleProjects = state.projects.filter((_, i) => !checks[i]);
   }
 
@@ -1121,6 +1129,7 @@ async function renderProjectsGrid() {
     </div>
   `;
   newCard.addEventListener('click', () => openNewProjectModal());
+  grid.querySelectorAll('.new-card').forEach(n => n.remove());  // never leave a stale one
   grid.prepend(newCard);
 }
 
