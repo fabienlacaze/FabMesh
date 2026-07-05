@@ -1640,6 +1640,10 @@ button.tool-active {
 .modal-card.modal-card-wide {
   width: 760px;
 }
+/* Recolor modal — bigger preview viewer (scoped so other wide modals are untouched). */
+#modal-recolor .modal-card.modal-card-wide { width: 880px; }
+#modal-recolor .modal-with-image { grid-template-columns: minmax(400px, 1.2fr) 1fr; }
+#modal-recolor .modal-image-side { min-height: 440px; }
 .modal-with-image {
   display: grid;
   grid-template-columns: 280px 1fr;

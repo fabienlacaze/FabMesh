@@ -1,5 +1,24 @@
 # FabMesh Agent Log
 
+## 2026-07-05 (Recolor : viewer agrandi + menu déroulant 3 modes)
+
+- **UI Recolor refondue** (desktop only — le cloud n'a pas d'outil Recolor, juste des chaînes i18n) : remplacé la
+  checkbox « Recolor the whole image » par un **menu déroulant `rc-mode` à 3 modes** clairs :
+  1. **`general`** (défaut) — Couleur générale : toute l'image teintée avec un swatch → `recolorAll=true` + mot-couleur
+     seul → backend HSV plein masque (tint uniforme, éclairage gardé). Affiche : swatches + strength.
+  2. **`zone`** — Prompt de zone : détecte un part nommé (CLIPSeg) + preview overlay live. Affiche : champ « what to
+     recolor » + swatches + sliders détection.
+  3. **`whole-style`** — Toute l'image + style : prompt libre (« military green camo », « cyberpunk neon ») →
+     `recolorAll=true` + noun non vide → backend `do_recolor_tile` = rendu IA cohérent (qualité Age). Affiche : champ style.
+- Visibilité pilotée par `_rcApplyMode()` via classes `.rc-f-zone` / `.rc-f-color` / `.rc-f-style` + hint contextuel
+  (`#rc-mode-hint`). Preview CLIPSeg déclenché uniquement en mode zone ; les autres modes affichent l'image brute.
+- **Viewer agrandi** : `#modal-recolor` scopé (CSS) — card 760→880px, colonne image `minmax(400px,1.2fr)`, min-height
+  460px. Scopé au seul modal recolor pour ne pas toucher Age et les autres modals partageant `.modal-card-wide` /
+  `.modal-with-image`.
+- Backend inchangé : `do_recolor` (sdxl_server.py:1108) route déjà correctement les 3 cas — la refonte est purement UI
+  (validation par mode + mapping mode→`recolorAll`+prompt). Rappel : les changements backend recolor de la session
+  nécessitent toujours un restart du serveur SDXL (Settings → Kill AI engine).
+
 ## 2026-07-05 (Outil Age asset-aware + carte « New project » en premier + diag Recolor)
 
 - **Age tool** : `_ageBuildPrompt` était 100% visage (« wrinkles, skin, hair or fur, big eyes, grey/white hair ») →

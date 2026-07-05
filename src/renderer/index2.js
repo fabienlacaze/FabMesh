@@ -14746,17 +14746,17 @@ document.getElementById('ws-recolor-btn')?.addEventListener('click', () => {
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
   document.getElementById('rc-prompt').value = '';
-  // Reset the "Recolor all" toggle + re-show the detection fields each open.
-  const rcAll = document.getElementById('rc-all');
-  if (rcAll) rcAll.checked = false;
+  // Reset to the default mode (couleur générale) + clear fields each open.
+  const rcMode = document.getElementById('rc-mode');
+  if (rcMode) rcMode.value = 'general';
   const rcAllP = document.getElementById('rc-all-prompt');
   if (rcAllP) rcAllP.value = '';
-  document.querySelectorAll('#modal-recolor .rc-detect-only').forEach(el => { el.style.display = ''; });
-  document.querySelectorAll('#modal-recolor .rc-all-only').forEach(el => { el.style.display = 'none'; });
+  _rcClearColor();
   const srcImg = document.getElementById('rc-source-img');
   if (srcImg) { srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now(); srcImg.style.opacity = ''; }
   _rcSrcPath = target;
   document.getElementById('modal-recolor').classList.remove('hidden');
+  _rcApplyMode();
 });
 let _rcSrcPath = null;
 let _rcPreviewTimer = null;
@@ -14844,57 +14844,73 @@ function _rcClearColor() {
 document.getElementById('rc-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-recolor').classList.add('hidden');
 });
-// "Recolor the whole image" → hide the part field + detection sliders (no
-// CLIPSeg), and drop the mask-preview overlay back to the plain image.
-document.getElementById('rc-all')?.addEventListener('change', (e) => {
-  const on = !!e.target.checked;
-  document.querySelectorAll('#modal-recolor .rc-detect-only').forEach(el => {
-    el.style.display = on ? 'none' : '';
-  });
-  document.querySelectorAll('#modal-recolor .rc-all-only').forEach(el => {
-    el.style.display = on ? '' : 'none';   // "Coloring / style" prompt field
-  });
+// Mode dropdown → show only the relevant controls.
+//   general     : whole image tinted with a swatch colour (fast HSV shift)
+//   zone        : detect a named part + recolour it (CLIPSeg + preview overlay)
+//   whole-style : whole image repainted from a free-text style prompt (AI render)
+function _rcApplyMode() {
+  const mode = document.getElementById('rc-mode')?.value || 'general';
+  const show = (sel, on) => document.querySelectorAll('#modal-recolor ' + sel)
+    .forEach(el => { el.style.display = on ? '' : 'none'; });
+  show('.rc-f-zone', mode === 'zone');                          // part field + detection sliders
+  show('.rc-f-color', mode === 'general' || mode === 'zone');   // colour swatches
+  show('.rc-f-style', mode === 'whole-style');                  // style prompt field
+  const hint = document.getElementById('rc-mode-hint');
+  if (hint) hint.textContent =
+    mode === 'zone'
+      ? 'The AI detects the named part and only changes its colour — shape, folds and shadows are preserved.'
+    : mode === 'whole-style'
+      ? 'The whole image is repainted following your style prompt, with a coherent, realistic palette (shapes and shading kept).'
+      : 'The whole image is re-tinted with the chosen colour while keeping the original lighting and shading.';
   const srcImg = document.getElementById('rc-source-img');
-  if (on && srcImg && _rcSrcPath) {
-    srcImg.src = 'file:///' + _rcSrcPath.replace(/\\/g, '/') + '?t=0';
+  if (mode === 'zone') {
+    _rcSchedulePreview();                       // live mask overlay
+  } else if (srcImg && _rcSrcPath) {
+    srcImg.src = 'file:///' + _rcSrcPath.replace(/\\/g, '/') + '?t=0';   // plain image, no overlay
     srcImg.style.opacity = '';
     const sp = document.getElementById('rc-detect-spinner');
     if (sp) sp.style.display = 'none';
-  } else if (!on) {
-    _rcSchedulePreview();  // re-detect when switching back to part mode
   }
-});
+}
+document.getElementById('rc-mode')?.addEventListener('change', _rcApplyMode);
 document.getElementById('rc-go')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const imagePath = editTarget(p);
   if (!imagePath) return;
-  const recolorAll = !!document.getElementById('rc-all')?.checked;
+  const mode = document.getElementById('rc-mode')?.value || 'general';
+  const recolorAll = (mode === 'general' || mode === 'whole-style');
   const stylePrompt = (document.getElementById('rc-all-prompt')?.value || '').trim();
   const fieldRaw = (document.getElementById('rc-prompt').value || '').trim();
   const part = _stripColorWords(fieldRaw).trim();
   const fieldHasColor = fieldRaw !== part;
-  if (!recolorAll && !part) {
-    showToast('Type what to recolor — or tick "Recolor the whole image"', 'error');
-    document.getElementById('rc-prompt')?.focus();
-    return;
-  }
-  if (recolorAll) {
-    if (!stylePrompt && !_rcSelectedColor) {
-      showToast('Describe the colours/style, or pick a colour', 'error');
+  // Per-mode validation.
+  if (mode === 'general') {
+    if (!_rcSelectedColor) { showToast('Pick a colour', 'error'); return; }
+  } else if (mode === 'whole-style') {
+    if (!stylePrompt) {
+      showToast('Describe the colours / style you want', 'error');
       document.getElementById('rc-all-prompt')?.focus();
       return;
     }
-  } else if (!_rcSelectedColor && !fieldHasColor) {
-    showToast('Pick a colour below (or type one)', 'error');
-    return;
+  } else { // zone
+    if (!part) {
+      showToast('Type what to recolor', 'error');
+      document.getElementById('rc-prompt')?.focus();
+      return;
+    }
+    if (!_rcSelectedColor && !fieldHasColor) {
+      showToast('Pick a colour below (or type one)', 'error');
+      return;
+    }
   }
-  // "Recolor all" → the whole image. A free-text style prompt ("sunset
-  // gradient", "cyberpunk neon") routes to the ControlNet-Tile AI render; a
-  // plain colour word / swatch goes through the fast HSV shift. Otherwise:
-  // part (field) + colour (swatch or typed).
-  const rawPrompt = recolorAll
-    ? (stylePrompt || _rcSelectedColor)
-    : (_rcSelectedColor ? (part + ' ' + _rcSelectedColor) : fieldRaw);
+  // Build the backend prompt per mode:
+  //   general     → the swatch colour word alone (whole image → HSV shift)
+  //   whole-style → the free-text style prompt (whole image → ControlNet AI render)
+  //   zone        → part + colour (CLIPSeg detect + recolour)
+  const rawPrompt =
+    mode === 'general'     ? _rcSelectedColor :
+    mode === 'whole-style' ? stylePrompt :
+    (_rcSelectedColor ? (part + ' ' + _rcSelectedColor) : fieldRaw);
   const strength = (parseInt(document.getElementById('rc-strength').value) || 100) / 100;
   const dilate = parseInt(document.getElementById('rc-dilate').value) || 15;
   document.getElementById('modal-recolor').classList.add('hidden');
