@@ -4962,10 +4962,21 @@ document.addEventListener('click', (e) => {
   if (ta) ta.focus();
 });
 
+// Category PREFIXES — lead the prompt with the category so a dominant noun in
+// the user's text (e.g. "robot house") doesn't win the early, higher-weighted
+// SDXL tokens and get rendered as a FIGURE (a robot) instead of the building.
+// Only for inanimate categories that get mistaken for a character. The subject
+// then reads as a modifier ("…building…, robot house, …"). Stripped on re-edit.
+const ASSET_TYPE_PREFIXES = {
+  building:    'an architectural building, a complete standalone structure',
+  environment: 'an architectural structure',
+};
+
 function buildFullPrompt(userPrompt, assetType, assetStyle) {
+  const typePrefix = ASSET_TYPE_PREFIXES[assetType] || '';
   const typeSuffix = ASSET_TYPE_PROMPTS[assetType] || '';
   const stylePrefix = ASSET_STYLE_PROMPTS[assetStyle] || '';
-  const parts = [stylePrefix, userPrompt, typeSuffix].filter(Boolean);
+  const parts = [stylePrefix, typePrefix, userPrompt, typeSuffix].filter(Boolean);
   return parts.join(', ');
 }
 
@@ -4979,6 +4990,7 @@ function stripKnownPromptSuffixes(raw) {
   let txt = raw;
   const allSuffixes = [
     ...Object.values(ASSET_TYPE_PROMPTS),
+    ...Object.values(ASSET_TYPE_PREFIXES),
     ...Object.values(ASSET_STYLE_PROMPTS),
   ].filter(s => s && s.length > 10);
   // Multi-pass removal: each suffix may appear several times in legacy data.

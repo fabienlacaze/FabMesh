@@ -14,6 +14,14 @@
   les tokens de début) + retiré le « no characters » inefficace.
 - À TESTER : régénérer « robot house » en Building → doit sortir un bâtiment (maison robotisée), plus un robot. Si
   l'user voulait un robot → choisir le type Character. Syntaxe vérifiée (ast + node --check).
+- ESCALADE (le suffixe ne suffisait pas — « robot » trop dominant) : ajouté une map PRÉFIXE `ASSET_TYPE_PREFIXES`
+  (index2.js) qui MÈNE le prompt avec la catégorie AVANT le sujet — buildFullPrompt = `[stylePrefix, typePrefix,
+  userPrompt, typeSuffix]`. building → « an architectural building, a complete standalone structure », environment →
+  « an architectural structure ». Les tokens de début pèsent plus dans SDXL → la structure gagne, « robot house »
+  devient modifieur. Ajouté au strip (anti-accumulation). ⚠️ NÉCESSITE Ctrl+R (changement renderer) — la boîte de
+  prompt de l'user montrait encore l'ancien scaffolding = pas rechargé.
+- UI : bouton « Export logs » de la modale gén passait sur 2 lignes (plus haut que Close) → `white-space:nowrap` sur
+  les boutons + `flex-wrap` sur `.modal-actions`.
 
 ## 2026-07-04 (E2E restants — liens morts marketing + page compte + tableau prix honnête)
 
