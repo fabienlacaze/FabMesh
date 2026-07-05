@@ -212,6 +212,7 @@ def _run_skeleton(input_obj, work_dir, run_name):
     results_dir = os.path.join(work_dir, "results")
     os.makedirs(results_dir, exist_ok=True)
 
+    n_max_bones = os.environ.get("PUPPET_N_MAX_BONES")
     cmd = [
         VENV_PY, SKELETON_DEMO,
         "--input_dir", examples_dir.replace("\\", "/"),
@@ -224,6 +225,9 @@ def _run_skeleton(input_obj, work_dir, run_name):
         "--joint_token",
         "--seq_shuffle",
     ]
+    if n_max_bones:
+        cmd += ["--n_max_bones", str(n_max_bones)]
+        log(f"[bridge] n_max_bones override: {n_max_bones}")
     log(f"exec: {' '.join(cmd)}")
     proc = subprocess.Popen(
         cmd,

@@ -92,10 +92,41 @@ def parse_fbx(fbx_path: str, source_skel_hint: Optional[str] = None) -> dict:
     if not os.path.isfile(_WORKER_PATH):
         raise RuntimeError(f"bpy_worker.py missing at {_WORKER_PATH}")
 
-    cmd = [
-        sys.executable, _WORKER_PATH,
-        fbx_path, out_json, out_npz,
-    ]
+    # FabMesh (2026-06-08): if the current Python doesn't have `bpy`,
+    # spawn the worker via Blender 5.1's `blender.exe -b -P` so the
+    # GPL-isolated worker still runs. Override via env var FABMESH_BLENDER.
+    blender_exe = os.environ.get('FABMESH_BLENDER', '')
+    if not blender_exe:
+        for candidate in (
+            r"C:/Program Files/Blender Foundation/Blender 5.1/blender.exe",
+            r"C:/Program Files/Blender Foundation/Blender 4.2/blender.exe",
+            r"C:/Program Files/Blender Foundation/Blender 4.0/blender.exe",
+        ):
+            if os.path.isfile(candidate):
+                blender_exe = candidate
+                break
+    try:
+        import bpy  # noqa: F401
+        _have_bpy = True
+    except ImportError:
+        _have_bpy = False
+
+    if _have_bpy:
+        cmd = [
+            sys.executable, _WORKER_PATH,
+            fbx_path, out_json, out_npz,
+        ]
+    elif blender_exe and os.path.isfile(blender_exe):
+        # `blender -b -P script.py -- args` passes args after `--`
+        cmd = [
+            blender_exe, "-b", "--python", _WORKER_PATH, "--",
+            fbx_path, out_json, out_npz,
+        ]
+    else:
+        raise RuntimeError(
+            "Neither bpy nor blender.exe found. Install `bpy` in this venv "
+            "or set FABMESH_BLENDER=path/to/blender.exe."
+        )
     print(f"[fbx_motion] spawning bpy worker: {' '.join(cmd)}", flush=True)
     proc = subprocess.run(
         cmd,
