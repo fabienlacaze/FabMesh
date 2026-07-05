@@ -15763,6 +15763,29 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   if (API.openLogsFolder) await API.openLogsFolder();
 });
 
+// Export logs → one bundled .txt on the Desktop (same as the wizard + the
+// task modal), so users can grab diagnostics from Settings too.
+document.getElementById('set-export-logs')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const _orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Exporting…';
+  try {
+    const res = await window.meshyAPI.exportDiagnostics();
+    if (res && res.ok) {
+      btn.innerHTML = '✓ Saved to Desktop';
+      showToast && showToast('Logs saved: ' + (res.path || 'Desktop'), 'success');
+    } else {
+      btn.innerHTML = _orig;
+      showToast && showToast('Export failed: ' + ((res && res.error) || 'unknown'), 'error');
+    }
+  } catch (err) {
+    btn.innerHTML = _orig;
+    showToast && showToast('Export failed: ' + (err.message || err), 'error');
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = _orig; }, 2500);
+  }
+});
+
 // Reconfigure MyFabmesh.AI: relaunch the first-time setup wizard. Models on
 // disk and generated meshes are kept; only the "setup done" flag is
 // cleared so the wizard reopens at next launch.
