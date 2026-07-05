@@ -2188,6 +2188,7 @@
          ============================================================ -->
     <div id="modal-job-details" class="modal-overlay hidden">
       <div class="modal-card" style="max-width: 480px;">
+        <button class="settings-close-x" id="job-details-close-x" title="Close" style="position:absolute; top:14px; right:14px; z-index:11;">&#10005;</button>
         <div id="job-gpu-monitor" class="job-gpu-monitor">
           <div class="jgm-row"><span class="jgm-label">GPU</span><span class="jgm-val" id="jgm-util">--</span></div>
           <div class="jgm-row"><span class="jgm-label">TEMP</span><span class="jgm-val" id="jgm-temp">--</span></div>
@@ -2223,7 +2224,6 @@
         </div>
         <div id="jd-error-box" class="jd-error-box hidden"></div>
         <div class="modal-actions" style="flex-wrap:wrap;">
-          <button class="ghost-btn" id="job-details-close" style="white-space:nowrap;">Close</button>
           <button class="ghost-btn" id="job-details-export-logs" style="white-space:nowrap;" title="Save all logs to a text file on the Desktop (to send for support)">&#128203; Export logs</button>
           <button class="primary-btn" id="job-details-goto-step" style="display:none; white-space:nowrap; background:linear-gradient(135deg,#7c3aed,#a855f7);">&#8594; Go to step</button>
           <button class="primary-btn" id="job-details-open-settings" style="display:none; background:linear-gradient(135deg,#6a5acd,#9370db);">&#9881; Open Settings</button>

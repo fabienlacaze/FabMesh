@@ -14466,7 +14466,7 @@ async function refreshJobDetailsModal(id) {
     }
   }
 }
-document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
+document.getElementById('job-details-close-x')?.addEventListener('click', closeJobDetails);
 document.getElementById('job-details-export-logs')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const _orig = btn.innerHTML;
