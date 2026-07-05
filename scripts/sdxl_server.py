@@ -1278,22 +1278,45 @@ def do_segment(input_path, target_text, output_path, dilate=15, rel=0.5, binary=
             _dev = next(state.clipseg_model.parameters()).device
             img = Image.open(input_path).convert("RGB")
             img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
-            inputs = state.clipseg_processor(
-                text=[target_text.strip()], images=[img_work],
-                padding=True, return_tensors="pt")
-            inputs = {k: v.to(_dev) for k, v in inputs.items()}
-            with torch.inference_mode():
-                seg_out = state.clipseg_model(**inputs)
-            mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
-            mask_prob = 1 / (1 + np.exp(-mask_logits))  # sigmoid
-            mask_uint8 = (mask_prob * 255).astype(np.uint8)
-            # Upscale the low-res CLIPSeg mask with LANCZOS (BILINEAR was blocky).
-            mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.LANCZOS)
-            # Threshold RELATIVE to the per-image peak (rel*peak, floor 60) so the
-            # preview keys on the strongly-detected region, not weak spillover.
-            _arr = np.array(mask_img).astype(np.float32)
-            binary = (_arr > max(60.0, float(_arr.max()) * float(rel))).astype(np.uint8) * 255
-            mask_binary = Image.fromarray(binary, mode="L")
+            # Same multi-phrasing detection as do_recolor so the PREVIEW overlay
+            # matches exactly what Recolor/Auto-Inpaint will act on (CLIPSeg is
+            # weak on small/repeated parts like building windows). Floor 50.
+            def _seg_binary(_txt):
+                _in = state.clipseg_processor(
+                    text=[_txt], images=[img_work], padding=True, return_tensors="pt")
+                _in = {k: v.to(_dev) for k, v in _in.items()}
+                with torch.inference_mode():
+                    _out = state.clipseg_model(**_in)
+                _lg = _out.logits.squeeze().detach().cpu().numpy()
+                _pb = 1 / (1 + np.exp(-_lg))  # sigmoid
+                _u8 = (_pb * 255).astype(np.uint8)
+                _mi = Image.fromarray(_u8).resize((work_w, work_h), Image.LANCZOS)
+                _a = np.array(_mi).astype(np.float32)
+                return (_a > max(50.0, float(_a.max()) * float(rel))).astype(np.uint8) * 255
+            _base = target_text.strip()
+            _nl = _base.lower()
+            _variants = [_base]
+            if _nl.endswith('s') and len(_nl) > 3:
+                _variants.append(_base[:-1])          # windows -> window
+            else:
+                _variants.append(_base + 's')         # window  -> windows
+            _variants += ['the ' + _base, _base + ' area']
+            # NB: use mask_arr (NOT `binary`) — `binary` is the bool PARAM that
+            # selects B/W-mask vs red-overlay output below. Reassigning it to a
+            # numpy array (the old bug) made `if binary:` raise "ambiguous truth
+            # value", so the preview overlay silently failed and never showed.
+            mask_arr, _bestcov, _seen = None, -1.0, set()
+            for _vt in _variants:
+                if not _vt or _vt in _seen:
+                    continue
+                _seen.add(_vt)
+                _b = _seg_binary(_vt)
+                _c = float((_b > 128).mean())
+                if _c > _bestcov:
+                    mask_arr, _bestcov = _b, _c
+                if _bestcov * 100 >= 2.0:  # good enough — stop early
+                    break
+            mask_binary = Image.fromarray(mask_arr, mode="L")
             d = max(0, int(dilate))
             if d > 0:
                 mask_binary = mask_binary.filter(ImageFilter.MaxFilter(d * 2 + 1))
