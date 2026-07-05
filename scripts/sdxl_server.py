@@ -1204,20 +1204,36 @@ def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15, rel=0
             # the Strength slider: 20%→0.44, 100%→0.76. ControlNet still holds the
             # shape (lower cond so colours can actually change). Part material
             # recolor stays conservative (0.18) to preserve the detected region.
+            # Whole-image restyle = a real img2img RE-RENDER (like the Age tool),
+            # not a flat hue smear. Higher denoise so the model actually repaints
+            # (20%->0.57, 100%->0.85), lower ControlNet cond (0.45) so colours can
+            # change while the shape holds, and a COHERENCE-oriented prompt so the
+            # palette is applied realistically (lighting/shadows/materials kept).
             _s = max(0.2, min(1.0, float(strength)))
-            _denoise = (0.4 + _s * 0.36) if recolor_all else 0.18
-            _cn = 0.5 if recolor_all else 0.65
-            _prompt = (f"{full_prompt}, entire subject recoloured, keep the exact shape and structure, photorealistic"
-                       if recolor_all else
-                       f"{full_prompt}, same shape, preserve folds and details, photorealistic")
+            if recolor_all:
+                _denoise = 0.5 + _s * 0.35
+                _cn = 0.45
+                _prompt = (f"the whole subject repainted in a {full_prompt} colour scheme, "
+                           f"cohesive realistic {full_prompt} palette applied consistently to every surface, "
+                           f"natural studio lighting and soft shadows preserved, each material keeps its own "
+                           f"surface qualities (metal stays metallic, glass stays glass), same exact shape and "
+                           f"structure, photorealistic, highly detailed")
+                _neg = ("flat uniform tint, single flat colour smear, washed out, monochrome, posterised, "
+                        "unrealistic colours, oversaturated, deformed, distorted, blurry, low quality, "
+                        "changed shape, extra parts")
+            else:
+                _denoise = 0.18
+                _cn = 0.65
+                _prompt = f"{full_prompt}, same shape, preserve folds and details, photorealistic"
+                _neg = "deformed, distorted, blurry, low quality, changed shape, extra parts"
             with torch.inference_mode():
                 result = pipe(
                     prompt=_prompt,
-                    negative_prompt="deformed, distorted, blurry, low quality, changed shape, extra parts",
+                    negative_prompt=_neg,
                     image=img_work,
                     control_image=img_work,
                     strength=_denoise,
-                    num_inference_steps=(28 if recolor_all else 20),
+                    num_inference_steps=(30 if recolor_all else 20),
                     guidance_scale=(6.5 if recolor_all else 5.5),
                     controlnet_conditioning_scale=_cn,
                     generator=torch.Generator("cuda").manual_seed(42),
