@@ -165,7 +165,7 @@ function customError(message, title = 'Error') {
   okBtn.classList.remove('danger');
   cancelBtn.style.display = 'none';
   const _prevZ = modal.style.zIndex;
-  modal.style.zIndex = '10000';
+  modal.style.zIndex = '10200';  // above #modal-job-details (10000) so a confirm opened FROM it is reachable
   modal.classList.remove('hidden');
   return new Promise(resolve => {
     function cleanup() {
@@ -216,7 +216,7 @@ function customErrorWithAction(message, title, actionLabel) {
   cancelBtn.textContent = 'OK';
   cancelBtn.style.display = '';
   const _prevZ = modal.style.zIndex;
-  modal.style.zIndex = '10000';
+  modal.style.zIndex = '10200';  // above #modal-job-details (10000) so a confirm opened FROM it is reachable
   modal.classList.remove('hidden');
   return new Promise((resolve) => {
     function cleanup(result) {
@@ -349,7 +349,7 @@ function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
     // Bump above the landmarks fullscreen (9600) and 3D lightbox (9500).
     // Restored in cleanup() so we don't pollute unrelated modals.
     const _prevZ = modal.style.zIndex;
-    modal.style.zIndex = '10000';
+    modal.style.zIndex = '10200';  // above #modal-job-details (10000) so a confirm opened FROM it is reachable
     modal.classList.remove('hidden');
     function cleanup(result) {
       modal.classList.add('hidden');
