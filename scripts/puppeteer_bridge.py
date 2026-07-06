@@ -101,9 +101,14 @@ except Exception:
 
 HERE = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(HERE, ".."))
-PUP_DIR = os.path.join(PROJECT_ROOT, "external", "Puppeteer")
-VENV_PY = os.path.join(PUP_DIR, "venv", "Scripts", "python.exe")
-VENV_BIN = os.path.join(PUP_DIR, "venv", "Scripts")
+# Packaged app: Electron passes the provisioned tree + interpreter
+# (<HEAVY_DIR>/puppeteer + <HEAVY_DIR>/python-rig, cf. wizard:install-rig).
+# Dev: the external/Puppeteer checkout + its venv, as before.
+PUP_DIR = os.environ.get("FABMESH_PUPPETEER_ROOT") or os.path.join(
+    PROJECT_ROOT, "external", "Puppeteer")
+VENV_PY = os.environ.get("FABMESH_PUPPETEER_PYTHON") or os.path.join(
+    PUP_DIR, "venv", "Scripts", "python.exe")
+VENV_BIN = os.path.dirname(VENV_PY)
 
 SKELETON_DIR = os.path.join(PUP_DIR, "skeleton")
 SKINNING_DIR = os.path.join(PUP_DIR, "skinning")

@@ -72,6 +72,29 @@
         ]
       },
       {
+        "from": "external/Puppeteer",
+        "to": "Puppeteer",
+        "filter": [
+          "**/*",
+          "!venv/**",
+          "!animation/**",
+          "!examples/**",
+          "!inputs/**",
+          "!assets/**",
+          "!**/.git/**",
+          "!**/__pycache__/**",
+          "!**/.cache/**",
+          "!skeleton/skeleton_ckpts/**",
+          "!skinning/skinning_ckpts/**",
+          "!**/third_partys/Michelangelo/checkpoints/**",
+          "!**/third_partys/PartField/assets/**",
+          "!**/third_partys/PartField/applications/**",
+          "!skeleton/data_utils/examples/**",
+          "!demo_animation.sh",
+          "!demo_rigging.sh"
+        ]
+      },
+      {
         "from": "build/wheels",
         "to": "wheels",
         "filter": [

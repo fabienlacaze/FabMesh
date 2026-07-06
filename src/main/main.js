@@ -524,6 +524,10 @@ try {
 } catch (_) {}
 // Writable AI Python env (copy of python-embed + pip-installed torch).
 const AI_PYTHON_DIR = path.join(HEAVY_DIR, 'python');
+// Rig engine (Puppeteer) — SEPARATE env: torch 2.7.0+cu128, incompatible
+// with the AI env's torch 2.8. Provisioned by wizard:install-rig.
+const RIG_PYTHON_DIR = path.join(HEAVY_DIR, 'python-rig');
+const PUPPETEER_DIR  = path.join(HEAVY_DIR, 'puppeteer');
 // HuggingFace model cache (the big download); HF_HOME points here.
 const HF_CACHE_DIR  = path.join(HEAVY_DIR, 'hf_cache');
 
@@ -3190,7 +3194,14 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
     const swapScript = path.join(scriptsDir, 'swap_skeleton.py');
     const bakeAnimScript = path.join(scriptsDir, 'bake_procedural_anims.py');
     const orcBones = path.join(scriptsDir, 'rig_templates', 'skm', 'orc_m1.bones.json');
-    const puppeteerVenvPython = path.join(__dirname, '..', '..', 'external', 'Puppeteer', 'venv', 'Scripts', 'python.exe');
+    // Packaged: rig env + code tree provisioned by wizard:install-rig under
+    // HEAVY_DIR. Dev: the external/Puppeteer checkout + its venv, as before.
+    const puppeteerRoot = app.isPackaged
+      ? PUPPETEER_DIR
+      : path.join(__dirname, '..', '..', 'external', 'Puppeteer');
+    const puppeteerVenvPython = app.isPackaged
+      ? path.join(RIG_PYTHON_DIR, 'python.exe')
+      : path.join(puppeteerRoot, 'venv', 'Scripts', 'python.exe');
 
     // Resolve step-1 bridge + python interpreter based on selected engine
     let step1Script;
@@ -3211,7 +3222,12 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
         return { success: false, error: 'puppeteer_bridge.py not found' };
       }
       if (!fs.existsSync(puppeteerVenvPython)) {
-        return { success: false, error: 'Puppeteer venv not found at external/Puppeteer/venv. Please run the Puppeteer setup step.' };
+        return { success: false, error: app.isPackaged
+          ? 'Rig engine not installed yet. Open Settings → Reconfigure FabMesh and complete the "Rig engine" step of the setup wizard (~14 GB download).'
+          : 'Puppeteer venv not found at external/Puppeteer/venv (dev checkout missing).' };
+      }
+      if (app.isPackaged && !fs.existsSync(path.join(puppeteerRoot, 'skeleton', 'demo.py'))) {
+        return { success: false, error: 'Rig engine files missing. Open Settings → Reconfigure FabMesh and re-run the "Rig engine" setup step.' };
       }
       step1Script = puppeteerScript;
       step1Python = puppeteerVenvPython;
@@ -3229,11 +3245,12 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
     const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_${engineSuffix}_${rigTs}.glb`);
 
     // Helper: run a python script and stream progress
-    const runStep = (label, args, pythonBin) => new Promise((resolve) => {
+    const runStep = (label, args, pythonBin, extraEnv) => new Promise((resolve) => {
       safeSend('ai3d-progress', `[${label}] Starting...`);
       const proc = execFile(pythonBin || 'python', args, {
         timeout: 600000,
         maxBuffer: 50 * 1024 * 1024,
+        ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
       }, (error, stdout, stderr) => {
         resolve({ error, stdout, stderr });
       });
@@ -3242,8 +3259,16 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
       proc.on('error', e => resolve({ error: e, stdout: '', stderr: '' }));
     });
 
-    // Step 1: AI skeleton+skin prediction → temp GLB (engine-dependent)
-    const step1 = await runStep(step1Label, [step1Script, meshPath, tempUnirigGlb], step1Python);
+    // Step 1: AI skeleton+skin prediction → temp GLB (engine-dependent).
+    // Packaged Puppeteer: route the bridge onto the provisioned tree/venv
+    // + the shared HF cache (opt-350m config pre-seeded by install-rig).
+    const step1Env = (engineSuffix === 'puppeteer' && app.isPackaged) ? {
+      FABMESH_PUPPETEER_ROOT: puppeteerRoot,
+      FABMESH_PUPPETEER_PYTHON: puppeteerVenvPython,
+      HF_HOME: HF_CACHE_DIR,
+      HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub'),
+    } : undefined;
+    const step1 = await runStep(step1Label, [step1Script, meshPath, tempUnirigGlb], step1Python, step1Env);
     if (step1.error || !fs.existsSync(tempUnirigGlb)) {
       const dur = ((Date.now() - _t0) / 1000).toFixed(2);
       console.log(`[auto-rig-ai] Step 1 FAILED duration=${dur}s`);
@@ -7199,6 +7224,68 @@ ipcMain.handle('wizard:install-deps', async (event) => {
           const p = JSON.parse(line);
           if (p.step) log.info('main', 'install-deps step=' + p.step + ' pct=' + p.pct + (p.error ? ' ERROR=' + p.error : '') + (p.warn ? ' warn=' + p.warn : ''));
           event.sender.send('wizard:install-progress', p);
+        } catch (_) {}
+      }
+    });
+    proc.stderr?.on('data', (d) => { stderrBuf += d.toString(); if (stderrBuf.length > 200000) stderrBuf = stderrBuf.slice(-100000); });
+  });
+});
+
+// Provision the Puppeteer rig engine (Phase 3 of the wizard): copy the
+// embedded Python to a SECOND env (torch 2.7, incompatible with the AI
+// env's torch 2.8), pip the pinned rig stack, copy the Puppeteer code tree
+// from resources, download the 3 checkpoints (~9.6 GB) from HuggingFace.
+// Streams JSONL progress via wizard:rig-progress.
+ipcMain.handle('wizard:install-rig', async (event) => {
+  const destPy = path.join(RIG_PYTHON_DIR, 'python.exe');
+  log.info('main', 'install-rig: START. RIG_PYTHON_DIR=' + RIG_PYTHON_DIR + ' destPy exists=' + fs.existsSync(destPy));
+  if (!fs.existsSync(destPy)) {
+    const srcDir = path.dirname(_embeddedPython());
+    event.sender.send('wizard:rig-progress', { step: 'rig-copy-python', pct: 0, done: false });
+    try {
+      fs.cpSync(srcDir, RIG_PYTHON_DIR, { recursive: true });
+    } catch (e) {
+      log.error('main', 'install-rig: COPY FAILED: ' + (e && e.message));
+      return { ok: false, error: 'copy failed: ' + (e && e.message) };
+    }
+  }
+  const script = path.join(SCRIPTS_DIR, 'wizard_install_rig.py');
+  const codeSrc = app.isPackaged
+    ? path.join(process.resourcesPath, 'Puppeteer')
+    : path.join(__dirname, '..', '..', 'external', 'Puppeteer');
+  log.info('main', 'install-rig: spawning ' + destPy + ' ' + script);
+  return new Promise((resolve, reject) => {
+    let stderrBuf = '';
+    const proc = execFile(destPy, [script, '--python', destPy], {
+      timeout: 0, maxBuffer: 64 * 1024 * 1024,
+      env: {
+        ...process.env, PYTHONUNBUFFERED: '1',
+        HF_HOME: HF_CACHE_DIR,
+        HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub'),
+        FABMESH_PUPPETEER_CODE: codeSrc,
+        FABMESH_PUPPETEER_DIR: PUPPETEER_DIR,
+      },
+    }, (err) => {
+      if (err) {
+        log.error('main', 'install-rig: FAILED code=' + err.code + ' msg=' + err.message + ' | stderr tail: ' + stderrBuf.slice(-2000));
+        reject(new Error(err.message + (stderrBuf ? ' | ' + stderrBuf.slice(-400) : '')));
+      } else {
+        log.info('main', 'install-rig: SUCCESS. rigReady=' + fs.existsSync(path.join(PUPPETEER_DIR, 'skeleton', 'demo.py')));
+        resolve({ ok: true });
+      }
+    });
+    let buf = '';
+    proc.stdout?.on('data', (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const p = JSON.parse(line);
+          if (p.step) log.info('main', 'install-rig step=' + p.step + ' pct=' + p.pct + (p.error ? ' ERROR=' + p.error : '') + (p.warn ? ' warn=' + p.warn : ''));
+          event.sender.send('wizard:rig-progress', p);
         } catch (_) {}
       }
     });

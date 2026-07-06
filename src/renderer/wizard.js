@@ -271,7 +271,9 @@ async function startDownload() {
     const _plan0 = await window.wizardAPI.getDownloadPlan(chosenMode);
     const _fs0 = await window.wizardAPI.freeSpace();
     if (_fs0 && _fs0.ok && typeof _fs0.freeBytes === 'number') {
-      const neededGb = ((_plan0.total_mb || 0) / 1024) + 7;
+      // models (plan) + ~7 GB AI env + ~14 GB rig engine (torch 2.7 env
+      // 4 GB + Puppeteer checkpoints ~10 GB, Phase 3)
+      const neededGb = ((_plan0.total_mb || 0) / 1024) + 7 + 14;
       const freeGb = _fs0.freeBytes / (1024 ** 3);
       if (freeGb < neededGb) {
         list.innerHTML = `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Not enough free space on ${_fs0.drive || 'your data drive'}: about <b>${neededGb.toFixed(0)} GB</b> is needed but only <b>${freeGb.toFixed(1)} GB</b> is free.<br>Free up space (or change the data folder to a bigger drive), then <a href="#" id="retry-dl">Retry</a>.</span></div>`;
@@ -389,7 +391,6 @@ async function startDownload() {
   try {
     await window.wizardAPI.startDownload(chosenMode);
     console.log('[wizard] Phase 2: model download OK');
-    document.getElementById('btn-dl-next').disabled = false;
   } catch (e) {
     console.error('[wizard] Model download FAILED:', (e && e.message) || e);
     list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Download failed: ${e.message}. <a href="#" id="retry-dl">Retry</a></span></div>`;
@@ -397,7 +398,56 @@ async function startDownload() {
       initialized.delete('download');
       startDownload();
     });
+    return;
   }
+
+  // ---- Phase 3: rig engine (Puppeteer auto-rig). SEPARATE Python env
+  // (torch 2.7 — incompatible with the AI env's 2.8) + code tree + 3
+  // checkpoints (~9.6 GB, resumable). A failure here does NOT block the
+  // wizard: mesh generation works without rigging, so Continue stays
+  // available with a clear warning.
+  const _RIG_STEPS = {
+    'rig-copy-python': 'Preparing the rig Python environment…',
+    'rig-pip-bootstrap': 'Setting up the rig installer…',
+    'rig-torch': 'Downloading PyTorch for the rig engine (~3.3 GB)…',
+    'rig-scatter': 'Installing rig libraries (torch-scatter)…',
+    'rig-flash-attn': 'Installing rig libraries (flash-attention)…',
+    'rig-pypi': 'Installing rig libraries…',
+    'rig-code': 'Installing the rig engine code…',
+    'done': 'Rig engine ready ✓',
+  };
+  list.innerHTML += `
+    <div class="wiz-dl-row in-progress" data-id="__rigenv">
+      <span class="name" id="rigenv-name">Installing the rig engine (auto-rig)…</span>
+      <span class="size">~14 GB</span>
+      <div class="bar"><div class="bar-fill"></div></div>
+    </div>`;
+  window.wizardAPI.onRigProgress((p) => {
+    const fill = document.querySelector('.wiz-dl-row[data-id="__rigenv"] .bar-fill');
+    if (fill && typeof p.pct === 'number') fill.style.width = Math.max(3, p.pct) + '%';
+    const name = document.getElementById('rigenv-name');
+    if (name && p.step) {
+      if (_RIG_STEPS[p.step]) name.textContent = _RIG_STEPS[p.step];
+      else if (p.step.startsWith('rig-ckpt-')) name.textContent = `Downloading rig model ${p.step.slice(9)}…`;
+    }
+    if (p.done && !p.error) {
+      const row = document.querySelector('.wiz-dl-row[data-id="__rigenv"]');
+      if (row) { row.classList.add('done'); row.classList.remove('in-progress'); }
+    }
+  });
+  console.log('[wizard] Phase 3: installing rig engine (Puppeteer)…');
+  try {
+    await window.wizardAPI.installRig();
+    console.log('[wizard] Phase 3: rig engine install OK');
+  } catch (e) {
+    console.error('[wizard] Rig engine install FAILED:', (e && e.message) || e);
+    list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Rig engine install failed: ${e.message}.<br>You can continue — 3D generation works without it, but auto-rigging will be unavailable until you re-run setup (Settings → Reconfigure). <a href="#" id="retry-rig">Retry now</a></span></div>`;
+    document.getElementById('retry-rig')?.addEventListener('click', () => {
+      initialized.delete('download');
+      startDownload();
+    });
+  }
+  document.getElementById('btn-dl-next').disabled = false;
 }
 
 // ---------- STEP 5: final test ----------

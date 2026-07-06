@@ -1,5 +1,44 @@
 # FabMesh Agent Log
 
+## 2026-07-06 (feat — provisioning Puppeteer packagé : wizard Phase 3 « Rig engine »)
+
+Dernier gros blocker packaging de l'audit : l'auto-rig (feature n°3 du SPEC)
+exigeait external/Puppeteer (23 Go, dev-only). Investigation multi-agents
+(28 agents, tout contre-vérifié) puis implémentation :
+
+- **Fileset établi** : code ~1,1 Mo (185 fichiers, tree local AVEC ses 3
+  patches Windows indispensables : torch.load weights_only=False ×2, DDP
+  'gloo') + 3 checkpoints publics HF vérifiés byte-exacts (Seed3D/Puppeteer
+  skeleton 4,4 Go + skinning 1,7 Go, Maikou/Michelangelo shapevae 3,93 Go —
+  requis à DEUX chemins relatifs codés en dur → téléchargé 1× + hardlink).
+  animation/, examples/, venv : exclus. PartField : code seul (le ckpt
+  model_objaverse est absent ET inutile — poids embarqués dans le .pth skin).
+- **Nouveau `scripts/wizard_install_rig.py`** (Phase 3 du wizard, après les
+  modèles) : 2e env Python `<HEAVY_DIR>/python-rig` (copie python-embed +
+  torch 2.7.0+cu128 — INCOMPATIBLE avec le venv IA torch 2.8, d'où l'env
+  séparé), torch_scatter (index PyG), flash_attn (wheel kingbri1, URL du
+  direct_url.json du venv dev), lock PyPI extrait du venv qui marche
+  (PIÈGES évités : xformers==0.0.23 aurait downgradé torch → 2.1.1 ;
+  ptlflow = animation-only). Copie du code depuis resources/Puppeteer →
+  `<HEAVY_DIR>/puppeteer`, download HF resumable des ckpts, hardlink
+  shapevae, pré-seed du config facebook/opt-350m (dépendance réseau cachée
+  de skeletongen.py).
+- **main.js** : consts RIG_PYTHON_DIR/PUPPETEER_DIR, handler
+  `wizard:install-rig` (miroir install-deps, canal wizard:rig-progress),
+  routage packagé de puppeteerVenvPython + env FABMESH_PUPPETEER_ROOT/
+  PYTHON/HF_HOME passé au bridge, messages d'erreur réels (plus de « setup
+  step » fantôme). **preload.js** : installRig/onRigProgress. **wizard.js** :
+  Phase 3 non-bloquante (échec rig = warning + Continue possible, retry
+  proposé), préflight disque +14 Go. **puppeteer_bridge.py** : PUP_DIR/
+  VENV_PY surchargés par env. **package.json** : extraResources Puppeteer
+  (filtres vérifiés : shapevae-256.yaml/configs inclus, ckpts exclus).
+- **RISQUE LICENCE à trancher avant release** (vérifié 2×) : le ckpt
+  skinning Apache-2.0 EMBARQUE les poids PartField NVIDIA (LICENSE §3.3
+  non-commercial). Blocker commercial → options : contacter les auteurs
+  Seed3D, ré-entraîner sans PartField, ou moteur skinning alternatif.
+  flash_attn : risque SAC (.pyd non signé) à valider sur machine cliente.
+- Non testé end-to-end (nécessite le test d'install réel ~19 Go).
+
 ## 2026-07-06 (fixes canaux IPC morts — progression retarget + multiview)
 
 - `src/main/preload.js` : onAnimProgress écoutait 'anim-progress' (tiret)
