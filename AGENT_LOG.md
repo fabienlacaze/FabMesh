@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-06 (2 fixes triviaux de l'audit — tampon NSFW + notation marketplace)
+
+- `scripts/local_juggernaut_bridge.py:485` : NameError `Image` (seul l'alias
+  `_PImg` était importé) → le tampon rouge « NSFW » ne remplaçait JAMAIS les
+  pixels d'une image bloquée (l'except englobant avalait l'erreur en
+  « allowing image ») ; l'image NSFW brute était écrite sur disque, seul le
+  sidecar .nsfw permettait le floutage renderer. Fix : `from PIL import
+  Image, ImageDraw, ImageFont`. Chemin du tampon validé en isolation.
+- `cloud/src/app/market/page.tsx` : la notation marketplace échouait à 100 %
+  (front envoyait `{stars}`, worker lit `body.rating` → 400 systématique) et
+  même en passant, l'UI lisait `rating_avg/rating_count` alors que le worker
+  renvoie `{avg, count}`. Front aligné sur le contrat worker. tsc OK.
+  NB : nécessite `cd cloud && npm run build && npx wrangler deploy` pour
+  sortir en prod (non fait — deploy sur demande).
+
 ## 2026-07-06 (fix packaging suite — wheels custom hébergés + CI release réparé)
 
 - **Wheels TRELLIS-2 retrouvés et hébergés** : les 5 wheels custom (o_voxel,

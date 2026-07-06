@@ -480,7 +480,7 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                     except: pass
                     # Replace with a clear RED "NSFW" stamp so a blocked image is
                     # obviously a block (not a mysterious grey/failed render).
-                    from PIL import ImageDraw, ImageFont
+                    from PIL import Image, ImageDraw, ImageFont
                     W, H = gen_img.size
                     gen_img = Image.new('RGB', (W, H), (26, 20, 22))
                     draw = ImageDraw.Draw(gen_img)
