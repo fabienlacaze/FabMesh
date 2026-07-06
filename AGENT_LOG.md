@@ -1,5 +1,41 @@
 # FabMesh Agent Log
 
+## 2026-07-06 (fix CRITIQUE packaging — trellis2_native installable en packagé)
+
+Fix du finding n°1 de AUDIT_2026-07-06.md : l'app packagée ne pouvait pas
+générer de mesh (le moteur par défaut trellis2_native n'avait ni ses deps
+ni son code sur une machine cliente).
+
+- `scripts/wizard_install_deps.py` réécrit pour refléter EXACTEMENT le venv
+  dev qui marche (external/TRELLIS2_win/.venv, vérifié : torch 2.8.0+cu128,
+  torchvision 0.23.0, kaolin 0.18.0, PAS de xformers ni flash_attn) :
+  * torch 2.7.0→2.8.0, torchvision 0.22.0→0.23.0 (index cu128) ;
+  * kaolin 0.18.0 installé pour de vrai via --find-links sur l'index NVIDIA
+    torch-2.8.0_cu128 (wheel cp311 win_amd64 vérifié présent) — avant,
+    COMPILED_WHEELS_NVIDIA ne servait qu'au compteur de progression ;
+  * step xformers==0.0.30 SUPPRIMÉ (wheel compilé pour torch 2.7 → aurait
+    rétrogradé torch 2.8 silencieusement ; le dev venv tourne en SDPA sans) ;
+  * deps trellis2 ajoutées : easydict, einops, plyfile, zstandard, tqdm +
+    utils3d pinné par zip GitHub au commit exact du venv dev (9a4eb15e —
+    ATTENTION : le "utils3d" de PyPI est un projet homonyme différent) ;
+  * nouveau step REQUIS `trellis2-wheels-*` : o-voxel==0.0.1, cumesh==1.0,
+    flex-gemm==0.0.1, spconv-cu128==2.3.8, cumm-cu128==0.8.2 (extensions
+    CUDA custom, .pyd cp311 — spconv-cu128 N'EST PAS sur PyPI, 404 vérifié).
+    Source 1 = FABMESH_WHEELS_DIR (dir bundlé), source 2 = CDN
+    wheels.fabmesh.com. Échec des deux = erreur claire (moteur par défaut).
+    RESTE À FAIRE : builder/publier ces 5 wheels (cf. build/build_wheels.md,
+    doc périmée à mettre à jour — elle ignore o-voxel/cumesh/flex-gemm).
+- Le CODE TRELLIS-2 lui-même n'était pas packagé (sys.path pointait sur
+  external/, dev-only) : ajout extraResources `external/TRELLIS2_win/src/
+  trellis2` → `resources/TRELLIS2_win/src/trellis2` (1,4 Mo de .py purs,
+  pas les 20 Mo d'assets démo) + entrée `build/wheels` → `resources/wheels`.
+- `trellis2_native_full_pipeline.py` : TRELLIS2_SRC lit d'abord l'env
+  FABMESH_TRELLIS2_SRC ; `main.js` le passe en packagé
+  (process.resourcesPath/TRELLIS2_win/src) dans l'env image-to-3d, et passe
+  FABMESH_WHEELS_DIR au spawn wizard:install-deps.
+- Non couvert par ce commit : build des 5 wheels custom, provisioning venv
+  Puppeteer packagé, CI python-embed/vc_redist (items suivants de l'audit).
+
 ## 2026-07-06 (Veille moteurs motion — SATA sorti, Kimodo/Mesh2Motion OK commercial)
 
 - Re-sweep veille (24 agents, vérif licences à la source) suite au diagnostic AnyTop

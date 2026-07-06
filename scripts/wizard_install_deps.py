@@ -4,15 +4,22 @@ embedded Python interpreter shipped with FabMesh.
 Run between the wizard's "Mode" and "Download" steps. The flow is:
 
   1. Bootstrap pip into the embedded Python (only once).
-  2. Install heavy compiled wheels from FabMesh's CDN
-     (torch, flash-attn, kaolin, xformers — pre-built for Win+CUDA12+Py3.11).
-  3. Install lightweight pure-Python packages from PyPI
-     (diffusers, transformers, huggingface_hub, etc.).
+  2. Install torch 2.8 + torchvision (PyTorch cu128 official wheels).
+  3. Install kaolin (NVIDIA pre-built Win+cu128 wheels).
+  4. Install lightweight packages from PyPI (diffusers, transformers, …).
+  5. Install the TRELLIS-2 custom CUDA wheels (o-voxel, cumesh,
+     flex-gemm, spconv) from the local bundled wheels dir
+     (FABMESH_WHEELS_DIR) or the FabMesh CDN — see build/build_wheels.md.
+
+The target env MUST mirror external/TRELLIS2_win/.venv (the dev venv
+that runs trellis2_native on the RTX 5080): torch 2.8.0+cu128,
+kaolin 0.18.0, NO xformers, NO flash-attn (SDPA backend is
+authoritative — see the flash-attn note below).
 
 Streams JSONL progress on stdout so the Electron main process can
 forward updates to the wizard UI:
     {"step": "pip-bootstrap", "pct": 0, "done": false}
-    {"step": "wheels",        "pct": 35, "done": false, "current": "flash-attn"}
+    {"step": "torch",         "pct": 35, "done": false, "current": "..."}
     {"step": "pypi",          "pct": 90, "done": false, "current": "diffusers"}
     {"step": "done",          "pct": 100, "done": true}
 
@@ -28,36 +35,44 @@ import sys
 
 # PyTorch CUDA 12.8 official wheels (binary only, no compile needed).
 TORCH_INDEX = 'https://download.pytorch.org/whl/cu128'
-# NVIDIA kaolin pre-built wheels for Windows + CUDA.
-KAOLIN_INDEX = 'https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.7.0_cu128.html'
+# NVIDIA kaolin pre-built wheels for Windows + CUDA (must match torch).
+KAOLIN_INDEX = 'https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.8.0_cu128.html'
 # Standard PyPI for everything else.
 PYPI_INDEX = 'https://pypi.org/simple/'
-# Optional fallback mirror — gitignored token will be filled later.
+# FabMesh CDN for the custom-built TRELLIS-2 wheels (PEP 503 index).
 FABMESH_WHEELS_INDEX = 'https://wheels.fabmesh.com/simple/'
 
 # torch + torchvision: official PyTorch CUDA 12.8 binaries. ~2.5 GB total.
+# 2.8.0 is REQUIRED by TRELLIS-2 native (mirrors external/TRELLIS2_win/.venv).
 TORCH_PACKAGES = [
-    'torch==2.7.0',
-    'torchvision==0.22.0',
+    'torch==2.8.0',
+    'torchvision==0.23.0',
 ]
 
-# Compiled wheels available pre-built (no FabMesh R2 needed):
-#   flash-attn: Dao-AILab publishes Win+CUDA12 wheels on GitHub Releases
-#               (handled via a specific --find-links URL once we pick one).
-#   xformers:   PyPI ships Win+CUDA12 binaries directly.
-#   kaolin:     NVIDIA publishes Win+CUDA12 wheels (kaolin index above).
-COMPILED_WHEELS_NVIDIA = [
-    'xformers==0.0.30',  # ships as binary wheel for Win+cu128
-    'kaolin',            # picked up from the kaolin index
+# kaolin: NVIDIA publishes Win+cu128 cp311 wheels on the kaolin index above
+# (verified: kaolin-0.18.0-cp311-cp311-win_amd64.whl). Required by TRELLIS-2.
+KAOLIN_PACKAGES = [
+    'kaolin==0.18.0',
 ]
 
-# flash-attn Windows wheels: Dao-AILab uploads them to GitHub Releases,
-# not PyPI. We pin a specific known-good build via direct URL — pip
-# accepts a .whl URL as an argument.
-FLASH_ATTN_WHL = (
-    'https://github.com/Dao-AILab/flash-attention/releases/download/'
-    'v2.7.0/flash_attn-2.7.0-cp311-cp311-win_amd64.whl'
-)
+# TRELLIS-2 custom CUDA extensions. NOT on PyPI (spconv-cu128 included) —
+# they ship as pre-compiled cp311/win_amd64 wheels built by FabMesh
+# (build/build_wheels.md) and are served from FABMESH_WHEELS_INDEX, or from
+# a local dir passed via the FABMESH_WHEELS_DIR env (bundled installer case).
+# Their pure-Python deps (triton-windows, pccm, ccimport, …) resolve on PyPI.
+TRELLIS2_CUSTOM_WHEELS = [
+    'spconv-cu128==2.3.8',
+    'cumm-cu128==0.8.2',
+    'o-voxel==0.0.1',
+    'cumesh==1.0',
+    'flex-gemm==0.0.1',
+]
+
+# utils3d: the PyPI project named "utils3d" is a DIFFERENT homonym package.
+# TRELLIS-2 needs EasternJournalist/utils3d at this exact commit (same pin
+# as the dev venv). Zip archive URL = pip-installable without git.
+UTILS3D_ZIP = ('https://github.com/EasternJournalist/utils3d/archive/'
+               '9a4eb15e4021b67b12c460c7057d642626897ec8.zip')
 
 # Pure-Python or pip-managed binaries — small + safe to grab from PyPI.
 PYPI_PACKAGES = [
@@ -76,6 +91,13 @@ PYPI_PACKAGES = [
     'rembg>=2.0',
     'realesrgan>=0.3.0',
     'basicsr>=1.4',
+    # TRELLIS-2 runtime deps (inference path only, no training extras):
+    'easydict>=1.13',
+    'einops>=0.8',
+    'plyfile>=1.0',
+    'zstandard>=0.22',
+    'tqdm>=4.66',
+    UTILS3D_ZIP,
 ]
 
 
@@ -106,8 +128,8 @@ def _lower_priority():
         pass
 
 
-_TOTAL_STEPS = (len(TORCH_PACKAGES) + len(COMPILED_WHEELS_NVIDIA)
-                + 1  # flash_attn
+_TOTAL_STEPS = (len(TORCH_PACKAGES) + len(KAOLIN_PACKAGES)
+                + len(TRELLIS2_CUSTOM_WHEELS)
                 + len(PYPI_PACKAGES))
 
 
@@ -145,6 +167,40 @@ def _run(args, step):
                 'space (or move the data folder to a bigger drive in Settings) '
                 'and retry.\n\n' + ctx)
         raise RuntimeError(f'pip exited {proc.returncode} on step {step}:\n{ctx}')
+
+
+def _install_trellis2_wheels(py):
+    """Install the custom TRELLIS-2 CUDA wheels. Tries the local bundled
+    wheels dir first (FABMESH_WHEELS_DIR env, set by the Electron wizard when
+    the installer ships them), then the FabMesh CDN. These are REQUIRED for
+    the default mesh engine (trellis2_native) — a clear error beats a broken
+    install, so failure of both sources aborts the whole step."""
+    local_dir = os.environ.get('FABMESH_WHEELS_DIR', '')
+    attempts = []
+    if local_dir and os.path.isdir(local_dir):
+        attempts.append(('trellis2-wheels-local',
+                         [py, '-m', 'pip', 'install',
+                          '--find-links', local_dir,
+                          *TRELLIS2_CUSTOM_WHEELS]))
+    attempts.append(('trellis2-wheels-cdn',
+                     [py, '-m', 'pip', 'install',
+                      '--extra-index-url', FABMESH_WHEELS_INDEX,
+                      *TRELLIS2_CUSTOM_WHEELS]))
+    last_err = None
+    for step, args in attempts:
+        try:
+            _run(args, step=step)
+            return
+        except Exception as e:
+            last_err = e
+            emit({'step': step, 'pct': 0, 'done': False,
+                  'warn': f'{step} failed, trying next source'})
+    raise RuntimeError(
+        'Could not install the TRELLIS-2 engine wheels '
+        f'({", ".join(TRELLIS2_CUSTOM_WHEELS)}). The 3D mesh engine cannot '
+        'run without them. Check your internet connection and retry; if the '
+        'problem persists, report it — the FabMesh wheel CDN may be down.\n\n'
+        f'Last error: {last_err}')
 
 
 def main():
@@ -190,19 +246,26 @@ def main():
           '--index-url', TORCH_INDEX,
           *TORCH_PACKAGES], step='torch')
 
-    # Step 2b: REQUIRED — pure-Python / lightweight from PyPI
+    # Step 2b: REQUIRED — kaolin from NVIDIA's pre-built wheel index
+    # (its pure-Python deps resolve on PyPI via the default index).
+    _run([py, '-m', 'pip', 'install',
+          '--find-links', KAOLIN_INDEX,
+          *KAOLIN_PACKAGES], step='kaolin')
+
+    # Step 2c: REQUIRED — pure-Python / lightweight from PyPI
     _run([py, '-m', 'pip', 'install', *PYPI_PACKAGES], step='pypi')
 
-    # Step 2c: OPTIONAL — xformers (perf boost). If it fails, PyTorch SDPA
-    # is used as a slower fallback. Non-blocking.
-    try:
-        _run([py, '-m', 'pip', 'install', 'xformers==0.0.30'],
-             step='xformers-optional')
-    except Exception as e:
-        emit({'step': 'xformers-optional', 'pct': 99, 'done': False,
-              'warn': f'xformers install failed ({e}) — falling back to SDPA'})
+    # Step 2d: REQUIRED — TRELLIS-2 custom CUDA wheels (o-voxel, cumesh,
+    # flex-gemm, spconv). Local bundled dir first, FabMesh CDN fallback.
+    _install_trellis2_wheels(py)
 
-    # Step 2d: SKIPPED — flash-attn install disabled 2026-05-30.
+    # NOTE: NO xformers. The dev venv runs TRELLIS-2 on the SDPA backend
+    # without it, and xformers wheels pin their own torch build — installing
+    # one compiled for another torch would silently downgrade torch 2.8.0
+    # and break kaolin/spconv. Do not add it back without pinning a build
+    # that matches torch 2.8.0+cu128 exactly.
+
+    # Step 2e: SKIPPED — flash-attn install disabled 2026-05-30.
     # Windows Smart App Control (SAC) blocks flash_attn_2_cuda.dll on this
     # target hardware and the user formally prohibited disabling SAC. The
     # TRELLIS-2 codebase guards every `import flash_attn` behind
@@ -214,7 +277,9 @@ def main():
     # WIZARD_INSTALL_FLASH_ATTN=1 in the env before running this script.
     if os.environ.get('WIZARD_INSTALL_FLASH_ATTN') == '1':
         try:
-            _run([py, '-m', 'pip', 'install', FLASH_ATTN_WHL],
+            _run([py, '-m', 'pip', 'install',
+                  'https://github.com/Dao-AILab/flash-attention/releases/download/'
+                  'v2.7.0/flash_attn-2.7.0-cp311-cp311-win_amd64.whl'],
                  step='flash-attn-optional')
         except Exception as e:
             emit({'step': 'flash-attn-optional', 'pct': 99, 'done': False,

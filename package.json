@@ -64,6 +64,21 @@
         ]
       },
       {
+        "from": "external/TRELLIS2_win/src/trellis2",
+        "to": "TRELLIS2_win/src/trellis2",
+        "filter": [
+          "**/*.py",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "build/wheels",
+        "to": "wheels",
+        "filter": [
+          "*.whl"
+        ]
+      },
+      {
         "from": "build/python-embed",
         "to": "python-embed",
         "filter": [

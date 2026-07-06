@@ -5846,6 +5846,12 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       TORCHINDUCTOR_USE_TRITON: '0',
       TRANSFORMERS_ATTN_IMPLEMENTATION: 'eager',
       TRELLIS2_USE_KAOLIN_RASTER: '1',
+      // Packaged: the TRELLIS-2 source tree ships in extraResources
+      // (TRELLIS2_win/src). Dev: unset → the pipeline falls back to its
+      // relative external/TRELLIS2_win/src default.
+      ...(app.isPackaged
+        ? { FABMESH_TRELLIS2_SRC: path.join(process.resourcesPath, 'TRELLIS2_win', 'src') }
+        : {}),
       ..._ramLimitMB2 ? { FABMESH_RAM_LIMIT_MB: _ramLimitMB2 } : {},
       ..._gpuLimit2   ? { FABMESH_GPU_LIMIT:   _gpuLimit2   } : {},
       ..._tempLimit2  ? { FABMESH_TEMP_LIMIT:  _tempLimit2  } : {},
@@ -7140,7 +7146,16 @@ ipcMain.handle('wizard:install-deps', async (event) => {
     let stderrBuf = '';
     const proc = execFile(destPy, [script, '--python', destPy], {
       timeout: 0, maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
+      env: {
+        ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR,
+        HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub'),
+        // TRELLIS-2 custom wheels (o-voxel/cumesh/flex-gemm/spconv) bundled
+        // in extraResources — wizard_install_deps tries this dir before the
+        // FabMesh CDN. Absent in dev (CDN fallback applies).
+        ...(app.isPackaged
+          ? { FABMESH_WHEELS_DIR: path.join(process.resourcesPath, 'wheels') }
+          : {}),
+      },
     }, (err) => {
       if (err) {
         log.error('main', 'install-deps: FAILED code=' + err.code + ' msg=' + err.message + ' | stderr tail: ' + stderrBuf.slice(-2000));

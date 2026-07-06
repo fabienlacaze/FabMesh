@@ -81,8 +81,10 @@ import sys
 import time
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
-TRELLIS2_SRC = os.path.abspath(os.path.join(
-    SCRIPTS, '..', 'external', 'TRELLIS2_win', 'src'))
+# Packaged app: Electron passes FABMESH_TRELLIS2_SRC (extraResources copy).
+# Dev: fall back to the in-repo external/ checkout.
+TRELLIS2_SRC = os.environ.get('FABMESH_TRELLIS2_SRC') or os.path.abspath(
+    os.path.join(SCRIPTS, '..', 'external', 'TRELLIS2_win', 'src'))
 sys.path.insert(0, TRELLIS2_SRC)
 sys.path.insert(0, SCRIPTS)  # for add_ai_metadata
 
