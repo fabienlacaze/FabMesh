@@ -6357,12 +6357,11 @@ ipcMain.handle('generate-multiview', async (_event, opts) => {
         safeSend('multiview-progress', { progress: lastSub });
         // Remap lastSub (0..100) into overall 90..99
         const overall = Math.min(99, 90 + Math.round(lastSub * 9 / 100));
-        // Emit on stdout to the renderer scraper (which filters on
-        // LOCAL_*_PROGRESS lines in the mcp-job-progress channel)
-        if (mainWindow && mainWindow.webContents) {
-          mainWindow.webContents.send('mcp-job-progress',
-            `LOCAL_IMG_PROGRESS: ${overall}\n`);
-        }
+        // The renderer's LOCAL_*_PROGRESS scraper (index2.js PROG_RE)
+        // listens on 'ai3d-progress' (preload onAI3DProgress) — the old
+        // 'mcp-job-progress' channel had NO bridge nor listener, so the
+        // bar sat at 90% during the whole multiview phase.
+        safeSend('ai3d-progress', `LOCAL_IMG_PROGRESS: ${overall}\n`);
       }
     });
   });

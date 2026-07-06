@@ -236,5 +236,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   animExport: (opts) => ipcRenderer.invoke('anim:export', opts),
   animCancel: (opts) => ipcRenderer.invoke('anim:cancel', opts),
   animCostEstimate: (opts) => ipcRenderer.invoke('anim:cost-estimate', opts),
-  onAnimProgress: (cb) => ipcRenderer.on('anim-progress', (e, data) => cb(data)),
+  // Canal 'anim:progress' (colon) — c'est ce que src/main/animation.js émet
+  // (6 sites) ; l'ancien 'anim-progress' (tiret) n'était émis nulle part et
+  // laissait la barre de progression du retarget morte.
+  onAnimProgress: (cb) => ipcRenderer.on('anim:progress', (e, data) => cb(data)),
 });

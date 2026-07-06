@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-06 (fixes canaux IPC morts — progression retarget + multiview)
+
+- `src/main/preload.js` : onAnimProgress écoutait 'anim-progress' (tiret)
+  alors que animation.js émet 'anim:progress' (deux-points, 6 sites) → la
+  barre de progression du retarget d'animation était morte depuis toujours.
+  Aligné sur 'anim:progress'. RESTART ELECTRON COMPLET requis (preload).
+- `src/main/main.js` (generate-multiview) : le forwarder de progression
+  émettait `LOCAL_IMG_PROGRESS: 9x` sur 'mcp-job-progress', canal sans
+  bridge preload ni listener → la barre restait à 90 % pendant toute la
+  phase multiview (bug que le commentaire du code prétendait corriger).
+  Routé vers 'ai3d-progress', le canal que le scraper PROG_RE du renderer
+  (index2.js:13664) écoute réellement. Les émissions 'multiview-progress'
+  structurées restent (mortes mais inoffensives, à câbler si un jour l'UI
+  veut une barre dédiée multiview).
+
 ## 2026-07-06 (2 fixes « perte réelle » de l'audit — swap mesh atomique + refunds gardés)
 
 - `src/main/main.js` (image-to-3d, runStep ~l.6000) : le swap post-process
