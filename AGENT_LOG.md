@@ -1,5 +1,33 @@
 # FabMesh Agent Log
 
+## 2026-07-06 (fix packaging suite — wheels custom hébergés + CI release réparé)
+
+- **Wheels TRELLIS-2 retrouvés et hébergés** : les 5 wheels custom (o_voxel,
+  cumesh, flex_gemm — distribution ComfyUI-Trellis2 Torch280 ; spconv_cu128,
+  cumm_cu128 — builds locaux sm_120) existaient encore sur le disque
+  (C:/tmp/ComfyUI-Trellis2/wheels + C:/tmp/wheels_sm120, tracés via les
+  direct_url.json du venv dev). Copiés dans build/wheels/ (sha256 vérifiés
+  bit-identiques au venv qui marche) et publiés en PRERELEASE GitHub
+  `trellis2-wheels-v1` (prerelease exprès : invisible pour le lookup
+  /releases/latest d'electron-updater).
+- Nouveau `build/fetch_trellis2_wheels.py` (pattern fetch_python_embed) :
+  télécharge les 5 wheels depuis la prerelease avec sha256 pinnés. Testé
+  end-to-end (re-download o_voxel OK). `build/wheels/` gitignoré.
+- `wizard_install_deps.py` : fallback réseau = URLs directes de la
+  prerelease (le CDN wheels.fabmesh.com n'a jamais existé).
+- `build/fetch_python_embed.py` : copie des 7 DLL VC++ (msvcp140*,
+  concrt140, vcomp140, vcruntime140*) depuis System32 CODIFIÉE (le fix
+  critique du 2026-07-02 était resté manuel). Testé : re-download complet
+  + DLLs OK.
+- `.github/workflows/build-release.yml` : ajout setup-python 3.11 + step
+  « Provision bundled artifacts » (fetch_python_embed + fetch_vc_redist +
+  fetch_trellis2_wheels) avant electron-builder — un build CI sortait
+  jusqu'ici sans Python embarqué ni wheels (wizard mort au first-run).
+- `build/build_wheels.md` réécrit pour refléter la réalité (l'ancien doc
+  décrivait flash-attn/xformers/kaolin 0.16 et un CDN jamais déployé).
+- Reste sur le volet packaging : provisioning venv Puppeteer en packagé
+  (auto-rig), test d'install réel ~5 Go, risque SAC sur .pyd non signés.
+
 ## 2026-07-06 (fix CRITIQUE packaging — trellis2_native installable en packagé)
 
 Fix du finding n°1 de AUDIT_2026-07-06.md : l'app packagée ne pouvait pas

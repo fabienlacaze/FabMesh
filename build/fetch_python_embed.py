@@ -80,6 +80,32 @@ def main():
         print(f'[dl] {GETPIP_URL}')
         urllib.request.urlretrieve(GETPIP_URL, getpip)
 
+    # VC++ runtime DLLs. The embed zip does NOT ship the full set, and
+    # torch/numpy .pyds hard-fail with "DLL load failed" without them
+    # (fix CRITIQUE #1 du 2026-07-02, copie manuelle codifiée ici le
+    # 2026-07-06). Copied from System32 (present on any machine with VS
+    # Build Tools or the VC++ redist installed, GitHub runners included).
+    vc_dlls = ['msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
+               'concrt140.dll', 'vcomp140.dll',
+               'vcruntime140.dll', 'vcruntime140_1.dll']
+    sys32 = pathlib.Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
+    missing = []
+    for name in vc_dlls:
+        dest = OUT_DIR / name
+        if dest.exists():
+            print(f'[ok] {name} (already present)')
+            continue
+        src = sys32 / name
+        if src.exists():
+            shutil.copy2(src, dest)
+            print(f'[ok] {name} (copied from System32)')
+        else:
+            missing.append(name)
+    if missing:
+        sys.exit('VC++ DLLs not found in System32: ' + ', '.join(missing)
+                 + '\nInstall VS 2022 Build Tools or the VC++ 2022 redist, '
+                   'then re-run.')
+
     zip_path.unlink()
     print(f'\nReady: {OUT_DIR}')
     print(f'Size : ~{sum(p.stat().st_size for p in OUT_DIR.rglob("*") if p.is_file()) // (1024*1024)} MB')

@@ -116,3 +116,7 @@ external/Puppeteer/
 
 # Local-only security/legal audit reports (must NOT be published to the public repo)
 audit/
+
+# TRELLIS-2 custom wheels (fetched by build/fetch_trellis2_wheels.py from
+# the trellis2-wheels-v1 GitHub prerelease, or copied from local builds)
+build/wheels/

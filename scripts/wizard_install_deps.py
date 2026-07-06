@@ -9,7 +9,7 @@ Run between the wizard's "Mode" and "Download" steps. The flow is:
   4. Install lightweight packages from PyPI (diffusers, transformers, …).
   5. Install the TRELLIS-2 custom CUDA wheels (o-voxel, cumesh,
      flex-gemm, spconv) from the local bundled wheels dir
-     (FABMESH_WHEELS_DIR) or the FabMesh CDN — see build/build_wheels.md.
+     (FABMESH_WHEELS_DIR) or the GitHub prerelease — see build/build_wheels.md.
 
 The target env MUST mirror external/TRELLIS2_win/.venv (the dev venv
 that runs trellis2_native on the RTX 5080): torch 2.8.0+cu128,
@@ -39,8 +39,11 @@ TORCH_INDEX = 'https://download.pytorch.org/whl/cu128'
 KAOLIN_INDEX = 'https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.8.0_cu128.html'
 # Standard PyPI for everything else.
 PYPI_INDEX = 'https://pypi.org/simple/'
-# FabMesh CDN for the custom-built TRELLIS-2 wheels (PEP 503 index).
-FABMESH_WHEELS_INDEX = 'https://wheels.fabmesh.com/simple/'
+# GitHub prerelease hosting the custom-built TRELLIS-2 wheels
+# (direct .whl URLs — pip installs them without any index; sha256 of
+# each file is pinned in build/fetch_trellis2_wheels.py).
+TRELLIS2_WHEELS_BASE = ('https://github.com/fabienlacaze/MyFabmesh/releases/'
+                        'download/trellis2-wheels-v1/')
 
 # torch + torchvision: official PyTorch CUDA 12.8 binaries. ~2.5 GB total.
 # 2.8.0 is REQUIRED by TRELLIS-2 native (mirrors external/TRELLIS2_win/.venv).
@@ -56,16 +59,23 @@ KAOLIN_PACKAGES = [
 ]
 
 # TRELLIS-2 custom CUDA extensions. NOT on PyPI (spconv-cu128 included) —
-# they ship as pre-compiled cp311/win_amd64 wheels built by FabMesh
-# (build/build_wheels.md) and are served from FABMESH_WHEELS_INDEX, or from
-# a local dir passed via the FABMESH_WHEELS_DIR env (bundled installer case).
-# Their pure-Python deps (triton-windows, pccm, ccimport, …) resolve on PyPI.
+# they ship as pre-compiled cp311/win_amd64 wheels (build/build_wheels.md)
+# bundled in the installer (FABMESH_WHEELS_DIR env → resources/wheels) with
+# the GitHub prerelease as network fallback. Their pure-Python deps
+# (triton-windows, pccm, ccimport, …) resolve on PyPI.
 TRELLIS2_CUSTOM_WHEELS = [
     'spconv-cu128==2.3.8',
     'cumm-cu128==0.8.2',
     'o-voxel==0.0.1',
     'cumesh==1.0',
     'flex-gemm==0.0.1',
+]
+TRELLIS2_WHEEL_FILES = [
+    'spconv_cu128-2.3.8-cp311-cp311-win_amd64.whl',
+    'cumm_cu128-0.8.2-cp311-cp311-win_amd64.whl',
+    'o_voxel-0.0.1-cp311-cp311-win_amd64.whl',
+    'cumesh-1.0-cp311-cp311-win_amd64.whl',
+    'flex_gemm-0.0.1-cp311-cp311-win_amd64.whl',
 ]
 
 # utils3d: the PyPI project named "utils3d" is a DIFFERENT homonym package.
@@ -172,7 +182,7 @@ def _run(args, step):
 def _install_trellis2_wheels(py):
     """Install the custom TRELLIS-2 CUDA wheels. Tries the local bundled
     wheels dir first (FABMESH_WHEELS_DIR env, set by the Electron wizard when
-    the installer ships them), then the FabMesh CDN. These are REQUIRED for
+    the installer ships them), then the GitHub prerelease. REQUIRED for
     the default mesh engine (trellis2_native) — a clear error beats a broken
     install, so failure of both sources aborts the whole step."""
     local_dir = os.environ.get('FABMESH_WHEELS_DIR', '')
@@ -182,10 +192,10 @@ def _install_trellis2_wheels(py):
                          [py, '-m', 'pip', 'install',
                           '--find-links', local_dir,
                           *TRELLIS2_CUSTOM_WHEELS]))
-    attempts.append(('trellis2-wheels-cdn',
+    attempts.append(('trellis2-wheels-github',
                      [py, '-m', 'pip', 'install',
-                      '--extra-index-url', FABMESH_WHEELS_INDEX,
-                      *TRELLIS2_CUSTOM_WHEELS]))
+                      *(TRELLIS2_WHEELS_BASE + f
+                        for f in TRELLIS2_WHEEL_FILES)]))
     last_err = None
     for step, args in attempts:
         try:
@@ -256,7 +266,7 @@ def main():
     _run([py, '-m', 'pip', 'install', *PYPI_PACKAGES], step='pypi')
 
     # Step 2d: REQUIRED — TRELLIS-2 custom CUDA wheels (o-voxel, cumesh,
-    # flex-gemm, spconv). Local bundled dir first, FabMesh CDN fallback.
+    # flex-gemm, spconv). Local bundled dir first, GitHub release fallback.
     _install_trellis2_wheels(py)
 
     # NOTE: NO xformers. The dev venv runs TRELLIS-2 on the SDPA backend

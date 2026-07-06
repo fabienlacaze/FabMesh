@@ -63,6 +63,23 @@ jobs:
             "${{ secrets.HF_FALLBACK_TOKEN }}" | Out-File -FilePath build/hf_fallback_token.txt -Encoding utf8 -NoNewline
           }
 
+      - name: Setup Python 3.11 (fetch scripts)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Provision bundled artifacts (python-embed + VC++ DLLs, vc_redist, TRELLIS-2 wheels)
+        # These are gitignored (heavy binaries) and REQUIRED by
+        # extraResources — without them the installer ships without the
+        # embedded Python and the first-run wizard is dead on arrival.
+        # fetch_python_embed.py also copies the 7 VC++ runtime DLLs from
+        # the runner's System32 (VS Build Tools preinstalled on
+        # windows-latest), fixing the "DLL load failed" on torch import.
+        run: |
+          python build/fetch_python_embed.py
+          python build/fetch_vc_redist.py
+          python build/fetch_trellis2_wheels.py
+
       - name: Build NSIS installer
         # -p never: don't let electron-builder implicit-publish on tag (it throws
         # on the missing GH_TOKEN before organize_dist runs → empty release).
