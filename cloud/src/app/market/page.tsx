@@ -511,7 +511,9 @@ function MarketPageInner() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ stars }),
+        // Contrat worker (handleMarketRate): body { rating }, réponse
+        // { ok, my_rating, avg, count }.
+        body: JSON.stringify({ rating: stars }),
       });
       if (!r.ok) {
         if (r.status === 401) {
@@ -522,8 +524,8 @@ function MarketPageInner() {
         throw new Error(j?.error || `HTTP ${r.status}`);
       }
       const j = await r.json().catch(() => ({}));
-      const newAvg: number | undefined = j?.rating_avg;
-      const newCount: number | undefined = j?.rating_count;
+      const newAvg: number | undefined = j?.avg;
+      const newCount: number | undefined = j?.count;
       if (typeof newAvg === 'number' && typeof newCount === 'number') {
         setListings((prev) => prev.map((l) => l.id === listingId
           ? { ...l, rating_avg: newAvg, rating_count: newCount }
