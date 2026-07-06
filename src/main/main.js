@@ -5968,7 +5968,19 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         const postProcessErrors = [];
 
         const finishAndResolve = () => {
-          const stats = fs.statSync(meshPath);
+          // Guarded stat: if the mesh vanished (swap failure + antivirus
+          // lock, disk pulled, …) reject cleanly — an unguarded throw here
+          // happens inside the execFile callback and leaves the Promise
+          // pending FOREVER (renderer stuck on await, job frozen).
+          let stats;
+          try {
+            stats = fs.statSync(meshPath);
+          } catch (e) {
+            log.error('main', `image-to-3d: final mesh missing at resolve: ${e.message}`);
+            reject({ error: `final mesh missing after post-process: ${e.message}`,
+                     stdout: stdoutBuf, postProcessErrors });
+            return;
+          }
           try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
           let meshVerts = null, meshFaces = null;
           const statsMatch = stdoutBuf.match(/STATS:\s*verts=(\d+)\s*faces=(\d+)/);
@@ -5998,12 +6010,23 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
             env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
           }, (err) => {
             if (!err && fs.existsSync(tempOut)) {
+              // Safe swap: park the original as .bak BEFORE promoting the
+              // new mesh, so a rename failure (antivirus/indexer lock on
+              // Windows) can never destroy the freshly generated GLB —
+              // the old delete+rename lost it forever on that exact path.
+              const bak = meshPath + `.${label}.bak.glb`;
               try {
-                fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath);
+                fs.renameSync(meshPath, bak);
+                fs.renameSync(tempOut, meshPath);
+                try { fs.unlinkSync(bak); } catch (e) {}
                 log.info('main', `${label} done`);
               } catch (e) {
-                postProcessErrors.push(`${label}: rename failed (${e.message})`);
-                log.warn('main', `${label} rename failed: ${e.message}`);
+                try {
+                  if (!fs.existsSync(meshPath) && fs.existsSync(bak)) fs.renameSync(bak, meshPath);
+                } catch (e2) {}
+                try { fs.existsSync(tempOut) && fs.unlinkSync(tempOut); } catch (e2) {}
+                postProcessErrors.push(`${label}: swap failed (${e.message})`);
+                log.warn('main', `${label} swap failed: ${e.message}, original mesh kept`);
               }
             } else {
               const reason = err?.killed ? 'timeout/killed' : (err?.message || 'no output written');

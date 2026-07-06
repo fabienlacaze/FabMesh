@@ -1,5 +1,25 @@
 # FabMesh Agent Log
 
+## 2026-07-06 (2 fixes « perte réelle » de l'audit — swap mesh atomique + refunds gardés)
+
+- `src/main/main.js` (image-to-3d, runStep ~l.6000) : le swap post-process
+  était delete+rename — si le rename échouait (verrou antivirus/indexeur
+  Windows sur le .tmp.glb), le GLB fraîchement généré était DÉTRUIT. Nouveau
+  swap sûr : rename original → .bak, promote tempOut → meshPath, cleanup
+  .bak ; en cas d'échec, restauration du .bak. Validé par simulation node
+  (cas nominal + cas échec promote → original restauré).
+- `finishAndResolve` : fs.statSync(meshPath) était SANS guard dans le
+  callback execFile → un mesh manquant jetait hors Promise et laissait le
+  job GELÉ à jamais côté renderer. Maintenant : reject propre avec contexte.
+- `cloud/src/worker.ts` : les 3 refundOnFailure (auto-rig-status l.7691,
+  anim-status l.8754, fbx-retarget-status l.9018) avalaient l'échec du
+  remboursement (`addCredits(...).catch(() => {})`) PUIS supprimaient le
+  job record → perte de crédits définitive et silencieuse. Maintenant :
+  échec de refund = record CONSERVÉ (retry au prochain poll) + console.error
+  loggé (visible via le pipeline _logs R2). Risque résiduel accepté : double
+  refund si delete échoue après un refund réussi (déjà présent avant).
+  tsc OK. NB : deploy wrangler requis pour la prod (non fait).
+
 ## 2026-07-06 (2 fixes triviaux de l'audit — tampon NSFW + notation marketplace)
 
 - `scripts/local_juggernaut_bridge.py:485` : NameError `Image` (seul l'alias
