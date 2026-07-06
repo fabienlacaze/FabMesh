@@ -1,5 +1,26 @@
 # FabMesh Agent Log
 
+## 2026-07-06 (Veille moteurs motion — SATA sorti, Kimodo/Mesh2Motion OK commercial)
+
+- Re-sweep veille (24 agents, vérif licences à la source) suite au diagnostic AnyTop
+  (le choix walk/run de l'UI n'atteint jamais le sampling — conditionnement squelette
+  uniquement, texte = « future work » jamais implémenté, upstream inactif depuis
+  2026-04-11).
+- **SATA est sorti** (ICML 2026, code Apache-2.0 + poids HF) mais poids SANS licence
+  (NOTICE les exclut de l'Apache) + text-to-motion = downstream MDM/MoMask humanoïde
+  → pas commercialisable en l'état ; réentraînement possible (code Apache).
+- **Utilisables commercialement dès maintenant** : Kimodo NVIDIA (Apache-2.0 + NVIDIA
+  Open Model License « ready for commercial use », texte+kinématique, humanoïde only,
+  re-vérifié — corrige la veille de juin) ; Mesh2Motion (MIT + clips CC0 dragons/
+  araignées/kaiju/oiseaux — banque à retarger, étend Rokoko-first aux créatures).
+- Poids AnyTop : HF taggé MIT mais dataset Truebones « en clarification » selon le
+  README upstream → risque commercial à documenter. Parade : licence Truebones
+  commerciale (Gumroad royalty-free) + réentraînement = chaîne propre.
+- À surveiller : SkelMo/MotionDreamer (ECCV 2026, contrôle par clip vidéo, squelettes
+  arbitraires, code « coming soon ») ; Motion2Motion (retarget training-free dragons,
+  code publié sans licence → écrire aux auteurs).
+- Mémoire projet `project_motion_engine_research` mise à jour. Aucun code modifié.
+
 ## 2026-07-06 (Audit complet multi-agents — AUDIT_2026-07-06.md)
 
 - Audit 9 dimensions (stubs, IPC, endpoints cloud, parité desktop/cloud, Python, erreurs, UI,
