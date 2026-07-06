@@ -7687,11 +7687,23 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   }
 
   // Refund helper — called on terminal failure or upload error. Safe to
-  // call with no record (just becomes a no-op).
+  // call with no record (just becomes a no-op). If the credit refund
+  // itself fails, the job record is KEPT so a later status poll retries —
+  // deleting it regardless (ancien code) rendait la perte de crédits
+  // définitive et silencieuse.
   const refundOnFailure = async () => {
     if (!record) return;
-    await addCredits(env, user.id, record.credits).catch(() => {});
-    await refundModalSpend(env, record.modal_spend).catch(() => {});
+    try {
+      await addCredits(env, user.id, record.credits);
+    } catch (e) {
+      console.error(`[auto-rig-status] REFUND FAILED job=${jobId} user=${user.id} `
+        + `credits=${record.credits} — record kept for retry:`,
+        e instanceof Error ? e.message : String(e));
+      return;
+    }
+    await refundModalSpend(env, record.modal_spend).catch((e) =>
+      console.error(`[auto-rig-status] refundModalSpend failed job=${jobId}:`,
+        e instanceof Error ? e.message : String(e)));
     await deleteRigJobRecord(env, jobId).catch(() => {});
   };
 
@@ -8751,10 +8763,21 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
   const record = await getAnimJobRecord(env, jobId);
   if (record && record.user_id !== user.id) return err(403, 'forbidden');
 
+  // Refund échoué → on GARDE le record pour retry au prochain poll
+  // (le delete inconditionnel rendait la perte de crédits définitive).
   const refundOnFailure = async () => {
     if (!record) return;
-    await addCredits(env, user.id, record.credits).catch(() => {});
-    await refundModalSpend(env, record.modal_spend).catch(() => {});
+    try {
+      await addCredits(env, user.id, record.credits);
+    } catch (e) {
+      console.error(`[anim-status] REFUND FAILED job=${jobId} user=${user.id} `
+        + `credits=${record.credits} — record kept for retry:`,
+        e instanceof Error ? e.message : String(e));
+      return;
+    }
+    await refundModalSpend(env, record.modal_spend).catch((e) =>
+      console.error(`[anim-status] refundModalSpend failed job=${jobId}:`,
+        e instanceof Error ? e.message : String(e)));
     await deleteAnimJobRecord(env, jobId).catch(() => {});
   };
 
@@ -9015,10 +9038,21 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
   const record = await getAnimJobRecord(env, jobId);
   if (record && record.user_id !== user.id) return err(403, 'forbidden');
 
+  // Refund échoué → on GARDE le record pour retry au prochain poll
+  // (le delete inconditionnel rendait la perte de crédits définitive).
   const refundOnFailure = async () => {
     if (!record) return;
-    await addCredits(env, user.id, record.credits).catch(() => {});
-    await refundModalSpend(env, record.modal_spend).catch(() => {});
+    try {
+      await addCredits(env, user.id, record.credits);
+    } catch (e) {
+      console.error(`[fbx-retarget-status] REFUND FAILED job=${jobId} user=${user.id} `
+        + `credits=${record.credits} — record kept for retry:`,
+        e instanceof Error ? e.message : String(e));
+      return;
+    }
+    await refundModalSpend(env, record.modal_spend).catch((e) =>
+      console.error(`[fbx-retarget-status] refundModalSpend failed job=${jobId}:`,
+        e instanceof Error ? e.message : String(e)));
     await deleteAnimJobRecord(env, jobId).catch(() => {});
   };
 
