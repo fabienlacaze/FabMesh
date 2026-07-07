@@ -11176,9 +11176,14 @@ const meState = {
 
 function openMeshEdit(mode) {
   const p = state.currentProject;
-  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  // Edit the mesh the user is CURRENTLY PREVIEWING (previewMeshPath, the
+  // purple-bordered version), like every other Edit-selected tool — NOT the
+  // "used for rig" pick (selectedMeshPath, green check). Those can differ, so
+  // using selectedMeshPath opened the wrong version in the editor.
+  const editPath = (p && (p.previewMeshPath || p.selectedMeshPath)) || null;
+  if (!p || !editPath) { showToast('Pick a mesh first.', 'error'); return; }
   meState.mode = mode;
-  meState.meshPath = p.selectedMeshPath;
+  meState.meshPath = editPath;
 
   const modal = document.getElementById('modal-mesh-edit');
   const title = document.getElementById('mesh-edit-title');
@@ -11211,10 +11216,11 @@ function openMeshEdit(mode) {
   document.getElementById('me-sel-hide')?.classList.remove('tool-active');
   _meUpdateSelButtons();
 
-  // Wait for modal layout then init viewport
+  // Wait for modal layout then init viewport. Load the SAME path we resolved
+  // above (previewMeshPath), not selectedMeshPath.
   requestAnimationFrame(async () => {
     await _meInitViewport();
-    _meLoadMesh(p.selectedMeshPath);
+    _meLoadMesh(meState.meshPath);
   });
 }
 

@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (fix — Sculpt/Paint/Select ouvraient la mauvaise version du mesh)
+
+- `openMeshEdit` chargeait `p.selectedMeshPath` (la version « used for rig »,
+  check vert) au lieu de `p.previewMeshPath` (la version PRÉVISUALISÉE,
+  bordure violette, que l'utilisateur regarde). Quand les deux diffèrent
+  (ex. v0 prévisualisée, v1 sélectionnée-pour-rig), Select/Sculpt/Paint
+  éditaient la mauvaise. Aligné sur `previewMeshPath || selectedMeshPath`
+  comme tous les autres outils Edit-selected (+ `_meLoadMesh(meState.meshPath)`
+  au lieu de `p.selectedMeshPath`). La sauvegarde utilisait déjà
+  `meState.meshPath` → cohérent. Desktop + cloud.
+
 ## 2026-07-07 (fix — viewer 3D « Edit selected » : mesh fantôme superposé + Move gizmo rotation)
 
 - **Bug viewer** : un ancien mesh (ex. un wizard) restait affiché superposé au

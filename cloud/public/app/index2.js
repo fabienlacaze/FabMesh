@@ -12242,9 +12242,12 @@ const meState = {
 
 function openMeshEdit(mode) {
   const p = state.currentProject;
-  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  // Edit the mesh currently PREVIEWED (previewMeshPath), like the other
+  // Edit-selected tools — not the "used for rig" pick (selectedMeshPath).
+  const editPath = (p && (p.previewMeshPath || p.selectedMeshPath)) || null;
+  if (!p || !editPath) { showToast('Pick a mesh first.', 'error'); return; }
   meState.mode = mode;
-  meState.meshPath = p.selectedMeshPath;
+  meState.meshPath = editPath;
 
   const modal = document.getElementById('modal-mesh-edit');
   const title = document.getElementById('mesh-edit-title');
@@ -12261,7 +12264,7 @@ function openMeshEdit(mode) {
   // Wait for modal layout then init viewport
   requestAnimationFrame(async () => {
     await _meInitViewport();
-    _meLoadMesh(p.selectedMeshPath);
+    _meLoadMesh(meState.meshPath);
   });
 }
 
