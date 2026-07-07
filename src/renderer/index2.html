@@ -435,6 +435,7 @@
                         <button id="ws-clone-btn" class="ghost-btn tool-btn">&#128203; Clone Stamp</button>
                         <button id="ws-mask-btn" class="ghost-btn tool-btn">&#9999; Draw Mask</button>
                         <button id="ws-crop-btn" class="ghost-btn tool-btn">&#9986; Crop</button>
+                        <button id="ws-select-btn" class="ghost-btn tool-btn" title="Cut / copy a rectangular zone and move it elsewhere on the image (manual, no AI)">&#9635; Cut/Paste</button>
                         <button id="ws-extend-btn" class="ghost-btn tool-btn" title="Extend / outpaint — add margin around the image and fill it with AI">&#10696; Extend</button>
                         <button id="ws-brightness-btn" class="ghost-btn tool-btn">&#9728; Brightness</button>
                         <button id="ws-picker-btn" class="ghost-btn tool-btn">&#128167; Color Pick</button>
@@ -1302,6 +1303,7 @@
         <button class="lb-tool-btn" data-lb-tool="clone" title="Clone Stamp">&#128203; Clone Stamp</button>
         <button class="lb-tool-btn" data-lb-tool="paint" title="Paint">&#127912; Paint</button>
         <button class="lb-tool-btn" data-lb-tool="crop" title="Crop">&#9986;&#65039; Crop</button>
+        <button class="lb-tool-btn" data-lb-tool="select" title="Cut / copy a zone and move it">&#9635; Cut/Paste</button>
         <button class="lb-tool-btn" data-lb-tool="extend" title="Extend / outpaint">&#10696; Extend</button>
         <button class="lb-tool-btn" data-lb-tool="brightness" title="Brightness">&#9728;&#65039; Brightness</button>
         <button class="lb-tool-btn" data-lb-tool="picker" title="Color pick">&#128167; Color Pick</button>
@@ -2422,6 +2424,41 @@
           </div>
         </div>
         <div id="clone-error" style="display:none; padding: 8px 12px; background: rgba(255,68,68,0.15); border: 1px solid var(--error); border-radius: 4px; color: var(--error); font-size: 12px; font-weight: 600;"></div>
+      </div>
+    </div>
+
+    <!-- Selection / Cut-Paste modal (manual: rectangle select → cut/copy → move → drop) -->
+    <div id="select-modal" class="modal hidden">
+      <div class="modal-content" style="width:95vw; height:95vh; max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Selection — Cut / Copy / Paste</h3>
+          <button id="select-modal-close" class="settings-close-x">&#10005;</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          <strong>Drag</strong> a rectangle &nbsp;|&nbsp; <strong>Cut</strong> (leaves a transparent hole) or <strong>Copy</strong> &nbsp;|&nbsp;
+          drag the piece to move it &nbsp;|&nbsp; <strong>Drop</strong> (or Enter) to place &nbsp;|&nbsp; right-drag to pan, wheel to zoom
+        </div>
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+          <button id="select-cut" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Cut the selection (transparent hole left behind)" disabled>&#9986; Cut</button>
+          <button id="select-copy" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Copy the selection" disabled>&#128203; Copy</button>
+          <button id="select-drop" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Drop the floating piece here (Enter)" disabled>&#128204; Drop</button>
+          <button id="select-deselect" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Deselect / cancel move (Esc)" disabled>&#10006; Deselect</button>
+          <span style="flex:1;"></span>
+          <button id="select-recenter" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Recenter image (fit to view)">&#9678;</button>
+          <button id="select-undo" class="secondary-btn tool-btn" disabled title="Undo (Ctrl+Z)">&#8630;</button>
+          <button id="select-redo" class="secondary-btn tool-btn" disabled title="Redo (Ctrl+Y)">&#8631;</button>
+        </div>
+        <div id="select-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%; cursor: crosshair;">
+          <canvas id="select-canvas" style="position: absolute; left: 0; top: 0;"></canvas>
+          <canvas id="select-overlay" style="position: absolute; left: 0; top: 0; pointer-events: none;"></canvas>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span id="select-status" style="font-size:11px; color:var(--text-muted);">Drag to select a rectangle.</span>
+          <div style="display:flex; gap:8px;">
+            <button id="select-cancel" class="secondary-btn">Cancel</button>
+            <button id="select-save" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Save as new version</button>
+          </div>
+        </div>
       </div>
     </div>
 

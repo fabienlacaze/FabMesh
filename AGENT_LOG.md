@@ -1,5 +1,27 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat — nouvel outil manuel « Cut/Paste » : sélection rectangle + couper/coller)
+
+- Nouvel outil manuel d'édition image (demande user) : sélectionner une zone
+  RECTANGLE, la Couper (laisse un trou TRANSPARENT — « sans fond ») ou Copier,
+  déplacer la pièce flottante ailleurs sur la MÊME image, Drop, sauver une
+  nouvelle version. 100 % canvas, aucune IA (le remplissage IA du trou sera
+  un outil IA séparé plus tard). PNG → transparence préservée.
+- Implémenté dans `index2-edit-tools.js` (fichier partagé octet-identique
+  desktop/cloud) : `window.openSelectToolFor(imagePath, projectName, onSuccess)`,
+  CanvasManager pour zoom/pan/undo + listeners de sélection maison (retourner
+  false de onMouseDown tuerait onPaint/onMouseUp — cf. canvas-utils.js:277,
+  donc CanvasManager ne fait QUE zoom/pan ici). Cut = pushUndo + clearRect ;
+  Drop = drawImage ; Deselect sur un cut non-droppé = undo (restaure le trou).
+  Overlay frère auto-aligné par _applyTransform.
+- Sauvegarde via `meshyAPI.saveImageDataUrl({suffix:'edit'})` → même code
+  desktop (fs) et cloud (R2) sans branche, comme Paint/Clone.
+- Bouton « Cut/Paste » ajouté : grille Manual tools + toolbar lightbox
+  (TOOL_MAP/OPENS_MODAL 'select') + modal `#select-modal`, répliqués dans
+  index2.html + cloud/public/app/index.html + les 2 index2.js.
+- RESTART Electron requis (edit-tools.js). Deploy wrangler pour le cloud.
+- v1 : rectangle seul (cercle/baguette magique = itérations suivantes).
+
 ## 2026-07-07 (feat — Clone Stamp : toggle source image modifiée / originale)
 
 - Clone Stamp figeait `sourceImageData` une fois au chargement → la source

@@ -669,11 +669,239 @@
     });
   }
 
+  // ===========================================================
+  //          SELECTION / CUT-PASTE MODAL  (CanvasManager)
+  //   Manual tool: rectangle-select a zone, Cut (leaves a
+  //   transparent hole — "sans fond") or Copy, drag the floating
+  //   piece elsewhere on the SAME image, Drop, save a new version.
+  //   No AI — pure canvas compositing (PNG keeps transparency).
+  // ===========================================================
+  var selectModal = document.getElementById('select-modal');
+  var selectCanvas = document.getElementById('select-canvas');
+  var selectOverlay = document.getElementById('select-overlay');
+  var _selMgr = null;
+  var selCtx = { imagePath: null, projectName: null, onSuccess: null };
+  var selState = {
+    rect: null,          // {x1,y1,x2,y2} image px during/after a drag
+    dragging: false,     // drawing a new rectangle
+    float: null,         // { canvas, w, h, x, y } floating piece being moved
+    isCut: false,        // float came from a Cut (undo restores the hole)
+    floatDragging: false,
+    dragOff: null,       // {dx,dy} grab offset inside the float
+  };
+
+  function _selStatus(msg) {
+    var el = document.getElementById('select-status');
+    if (el) el.textContent = msg;
+  }
+  function _selRectNorm(r) {
+    return { x: Math.min(r.x1, r.x2), y: Math.min(r.y1, r.y2),
+             w: Math.abs(r.x2 - r.x1), h: Math.abs(r.y2 - r.y1) };
+  }
+  function _selHasRect() {
+    if (!selState.rect) return false;
+    var s = _selRectNorm(selState.rect);
+    return s.w >= 2 && s.h >= 2;
+  }
+  function _selUpdateButtons() {
+    var hasRect = _selHasRect(), hasFloat = !!selState.float;
+    var b;
+    if ((b = document.getElementById('select-cut'))) b.disabled = !hasRect || hasFloat;
+    if ((b = document.getElementById('select-copy'))) b.disabled = !hasRect || hasFloat;
+    if ((b = document.getElementById('select-drop'))) b.disabled = !hasFloat;
+    if ((b = document.getElementById('select-deselect'))) b.disabled = !hasRect && !hasFloat;
+  }
+  function _selDrawOverlay() {
+    if (!selectOverlay) return;
+    var octx = selectOverlay.getContext('2d');
+    octx.clearRect(0, 0, selectOverlay.width, selectOverlay.height);
+    if (selState.rect) {
+      var s = _selRectNorm(selState.rect);
+      octx.save();
+      octx.strokeStyle = '#22c55e'; octx.lineWidth = 2; octx.setLineDash([6, 4]);
+      octx.strokeRect(s.x + 0.5, s.y + 0.5, s.w, s.h);
+      octx.restore();
+    }
+    if (selState.float) {
+      var f = selState.float;
+      octx.drawImage(f.canvas, Math.round(f.x), Math.round(f.y));
+      octx.save();
+      octx.strokeStyle = '#f59e0b'; octx.lineWidth = 2; octx.setLineDash([5, 3]);
+      octx.strokeRect(Math.round(f.x) + 0.5, Math.round(f.y) + 0.5, f.w, f.h);
+      octx.restore();
+    }
+  }
+  function _selCapture(cut) {
+    if (!_selHasRect() || selState.float) return;
+    var s = _selRectNorm(selState.rect);
+    var rx = Math.round(s.x), ry = Math.round(s.y), rw = Math.round(s.w), rh = Math.round(s.h);
+    var fc = document.createElement('canvas');
+    fc.width = rw; fc.height = rh;
+    fc.getContext('2d').drawImage(selectCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
+    if (cut) {
+      _selMgr.pushUndo();                      // one undo reverts hole + paste
+      _selMgr.ctx.clearRect(rx, ry, rw, rh);   // transparent hole ("sans fond")
+    }
+    selState.float = { canvas: fc, w: rw, h: rh, x: rx, y: ry };
+    selState.isCut = !!cut;
+    selState.rect = null;
+    _selStatus(cut ? 'Cut — drag the piece where you want it, then Drop (or Save).'
+                   : 'Copied — drag the piece where you want it, then Drop (or Save).');
+    _selDrawOverlay(); _selUpdateButtons();
+  }
+  function _selDrop() {
+    if (!selState.float) return;
+    var f = selState.float;
+    if (!selState.isCut) _selMgr.pushUndo();   // cut already pushed at capture
+    _selMgr.ctx.drawImage(f.canvas, Math.round(f.x), Math.round(f.y));
+    selState.float = null; selState.isCut = false; selState.floatDragging = false;
+    _selStatus('Dropped. Select another zone, or Save as new version.');
+    _selDrawOverlay(); _selUpdateButtons();
+  }
+  function _selDeselect() {
+    if (selState.float && selState.isCut) _selMgr.undo();  // restore the cut hole
+    selState.float = null; selState.isCut = false; selState.floatDragging = false;
+    selState.rect = null; selState.dragging = false;
+    _selStatus('Drag to select a rectangle.');
+    _selDrawOverlay(); _selUpdateButtons();
+  }
+  function _selPointInFloat(x, y) {
+    var f = selState.float;
+    return !!f && x >= f.x && x <= f.x + f.w && y >= f.y && y <= f.y + f.h;
+  }
+  function _closeSelect() {
+    if (selectModal) selectModal.classList.add('hidden');
+  }
+
+  if (selectCanvas) {
+    _selMgr = new window.CanvasManager({
+      canvas: selectCanvas,
+      container: document.getElementById('select-canvas-container'),
+      undoBtn: document.getElementById('select-undo'),
+      redoBtn: document.getElementById('select-redo'),
+      rightClickPan: true,
+      // NB: no onMouseDown/onPaint — CanvasManager only does zoom/pan/undo
+      // here; selection uses our own left-button listeners below (returning
+      // false from onMouseDown would kill onPaint/onMouseUp anyway).
+    });
+
+    // --- our own selection interaction (left button) ---
+    selectCanvas.addEventListener('mousedown', function (e) {
+      if (selectModal.classList.contains('hidden')) return;
+      if (e.button !== 0 || e.altKey || e.ctrlKey) return;  // let CM pan
+      var p = _selMgr.getCanvasCoords(e);
+      if (_selPointInFloat(p.x, p.y)) {
+        selState.floatDragging = true;
+        selState.dragOff = { dx: p.x - selState.float.x, dy: p.y - selState.float.y };
+        return;
+      }
+      if (selState.float) _selDrop();          // auto-commit before a new selection
+      selState.rect = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+      selState.dragging = true;
+      _selDrawOverlay(); _selUpdateButtons();
+    });
+    window.addEventListener('mousemove', function (e) {
+      if (!selectModal || selectModal.classList.contains('hidden')) return;
+      if (!selState.dragging && !selState.floatDragging) return;
+      var p = _selMgr.getCanvasCoords(e);
+      if (selState.floatDragging && selState.float) {
+        selState.float.x = p.x - selState.dragOff.dx;
+        selState.float.y = p.y - selState.dragOff.dy;
+      } else if (selState.dragging && selState.rect) {
+        selState.rect.x2 = p.x; selState.rect.y2 = p.y;
+      }
+      _selDrawOverlay();
+    });
+    window.addEventListener('mouseup', function () {
+      if (selState.dragging) {
+        selState.dragging = false;
+        if (!_selHasRect()) selState.rect = null;
+        else _selStatus('Selected. Cut (transparent hole) or Copy the zone.');
+        _selDrawOverlay(); _selUpdateButtons();
+      }
+      if (selState.floatDragging) selState.floatDragging = false;
+    });
+
+    var b;
+    if ((b = document.getElementById('select-cut'))) b.addEventListener('click', function () { _selCapture(true); });
+    if ((b = document.getElementById('select-copy'))) b.addEventListener('click', function () { _selCapture(false); });
+    if ((b = document.getElementById('select-drop'))) b.addEventListener('click', function () { _selDrop(); });
+    if ((b = document.getElementById('select-deselect'))) b.addEventListener('click', function () { _selDeselect(); });
+    if ((b = document.getElementById('select-cancel'))) b.addEventListener('click', _closeSelect);
+    if ((b = document.getElementById('select-modal-close'))) b.addEventListener('click', _closeSelect);
+    if ((b = document.getElementById('select-recenter'))) b.onclick = function () { if (_selMgr.recenter) _selMgr.recenter(); };
+
+    document.addEventListener('keydown', function (e) {
+      if (!selectModal || selectModal.classList.contains('hidden')) return;
+      if (e.key === 'Escape') { if (selState.float || selState.rect) _selDeselect(); else _closeSelect(); }
+      else if (e.key === 'Enter' && selState.float) _selDrop();
+    });
+
+    var sSave = document.getElementById('select-save');
+    if (sSave) sSave.addEventListener('click', function () {
+      var imgPath = selCtx.imagePath;
+      if (!imgPath) return;
+      if (selState.float) _selDrop();            // commit any pending piece
+      var dataUrl = _selMgr.toDataURL();          // PNG — preserves transparency
+      var job = addJob('Selection edit save', 'select', imgPath);
+      job.progress = 50; renderJobs();
+      Promise.resolve()
+        .then(function () { return window.meshyAPI.saveImageDataUrl({ basePath: imgPath, dataUrl: dataUrl, suffix: 'edit' }); })
+        .then(function (result) {
+          if (result && result.success) {
+            completeJob(job.id, true);
+            showLog('Edited image saved: ' + result.filename, 'success');
+            _closeSelect();
+            if (selCtx.onSuccess) { try { selCtx.onSuccess(result.newPath || result.filename || null); } catch (e2) {} }
+          } else {
+            completeJob(job.id, false);
+            showLog('Save failed: ' + ((result && result.error) || 'unknown'), 'error');
+          }
+        })
+        .catch(function (e) { completeJob(job.id, false); showLog('Save error: ' + e.message, 'error'); });
+    });
+  }
+
+  function openSelectToolInternal(imagePath, projectName, onSuccess) {
+    if (!selectModal || !selectCanvas || !_selMgr) {
+      console.warn('[edit-tools] Select modal not present in DOM');
+      return;
+    }
+    selCtx.imagePath = imagePath;
+    selCtx.projectName = projectName || null;
+    selCtx.onSuccess = typeof onSuccess === 'function' ? onSuccess : null;
+    selState.rect = null; selState.float = null; selState.isCut = false;
+    selState.dragging = false; selState.floatDragging = false;
+    selectModal.classList.remove('hidden');
+    _selMgr.activate();
+    var rc = document.getElementById('select-recenter');
+    if (rc) rc.onclick = function () { if (_selMgr.recenter) _selMgr.recenter(); };
+    _selStatus('Drag to select a rectangle.');
+    _selUpdateButtons();
+    requestAnimationFrame(function () {
+      var srcUrl = /^(?:https?|blob|data|file):/i.test(imagePath)
+        ? imagePath : 'file:///' + imagePath.replace(/\\/g, '/');
+      if (/^(?:https?|file):/i.test(srcUrl)) {
+        srcUrl += (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+      }
+      _selMgr.loadImage(srcUrl).then(function () {
+        // CanvasManager auto-sizes + positions the sibling overlay via
+        // _applyTransform, so we just clear it and draw in image coords.
+        _selDrawOverlay();
+      }).catch(function (e) {
+        console.error('[select] image load failed:', e);
+      });
+    });
+  }
+
   // ----- Public API exposed on window -----
   window.openMaskToolFor = function (imagePath, projectName, onSuccess) {
     openMaskToolInternal(imagePath, projectName, onSuccess);
   };
   window.openCloneToolFor = function (imagePath, projectName, onSuccess) {
     openCloneStampInternal(imagePath, projectName, onSuccess);
+  };
+  window.openSelectToolFor = function (imagePath, projectName, onSuccess) {
+    openSelectToolInternal(imagePath, projectName, onSuccess);
   };
 })();

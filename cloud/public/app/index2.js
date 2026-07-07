@@ -4278,6 +4278,7 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     clone:       'ws-clone-btn',
     paint:       'ws-paint-btn',
     crop:        'ws-crop-btn',
+    select:      'ws-select-btn',
     extend:      'ws-extend-btn',
   };
   const box = document.getElementById('lb-toolbox');
@@ -4294,7 +4295,7 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     // open their own modal. The lightbox stays open in the background;
     // close it so the modal gets focus and isn't layered under.
     const OPENS_MODAL = ['modify', 'autoinpaint', 'mask', 'clone',
-                         'paint', 'crop', 'resolution'];
+                         'paint', 'crop', 'select', 'resolution'];
     if (OPENS_MODAL.includes(toolKey)) {
       closeLightbox();
     }
@@ -5215,6 +5216,14 @@ document.getElementById('ws-mask-btn').addEventListener('click', () => {
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
   window.openMaskToolFor(target, p.name, async () => {
+    await reloadCurrentProject();
+  });
+});
+document.getElementById('ws-select-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  window.openSelectToolFor(target, p.name, async () => {
     await reloadCurrentProject();
   });
 });
