@@ -14674,9 +14674,11 @@ async function refreshJobDetailsModal(id) {
   if (paramsBox) {
     if (j.params && Object.keys(j.params).length > 0) {
       const rows = Object.entries(j.params).map(([k, v]) => {
-        let val = String(v == null ? '--' : v);
-        if (val.length > 60) val = val.slice(0, 57) + '...';
-        return `<div class="jd-row"><span class="jd-label">${escapeHtml(k)}</span><span class="jd-value">${escapeHtml(val)}</span></div>`;
+        const full = String(v == null ? '--' : v);
+        // The value column now wraps (CSS overflow-wrap), so allow a longer
+        // filename before truncating; the full name is always in the tooltip.
+        const val = full.length > 120 ? full.slice(0, 117) + '...' : full;
+        return `<div class="jd-row"><span class="jd-label">${escapeHtml(k)}</span><span class="jd-value" title="${escapeHtml(full)}">${escapeHtml(val)}</span></div>`;
       }).join('');
       paramsBox.innerHTML = rows;
       paramsBox.classList.remove('hidden');

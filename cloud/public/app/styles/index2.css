@@ -2751,6 +2751,10 @@ details.stage-generating > summary .stage-icon-gear {
 }
 .job-details-head-text .modal-subtitle {
   margin-bottom: 0;
+  /* Long underscore filenames don't break with word-break; overflow-wrap:
+     anywhere forces them to wrap instead of overflowing / getting clipped. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 .job-details-stats {
@@ -2763,7 +2767,8 @@ details.stage-generating > summary .stage-icon-gear {
 .jd-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;   /* long values wrap under themselves, not clipped */
+  gap: 12px;
   padding: 6px 0;
   font-size: 12px;
   border-bottom: 1px solid var(--border);
@@ -2775,11 +2780,17 @@ details.stage-generating > summary .stage-icon-gear {
   letter-spacing: 0.5px;
   font-weight: 600;
   font-size: 10px;
+  flex: 0 0 auto;
+  padding-top: 1px;
 }
 .jd-value {
   color: var(--text-0);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 .jd-progress { margin-top: 8px; }
 .jd-progress-bar {
