@@ -12802,12 +12802,25 @@ document.getElementById('me-save')?.addEventListener('click', async () => {
   }
 });
 
+// Clean export base name: the PROJECT name (already engine-stripped) instead
+// of the raw internal filename — so a delivered file is never named
+// "tank_trellis2_native_..._rigged_puppeteer_...". Falls back to a stripped
+// basename if there's no project.
+function _cleanExportBase(m) {
+  const proj = state.currentProject?.name;
+  let base = (proj && proj.trim()) ? proj.trim()
+    : (m.filename || 'mesh').replace(/\.[^.]+$/, '')
+        .replace(/_rigged_.+$/i, '')
+        .replace(/_(trellis2_native|trellis2|sf3d|hunyuan|hi3dgen|triposg|triposr|puppeteer|unirig|local|ai)(?:_[A-Za-z0-9]{1,16})*$/i, '')
+        .replace(/_\d{10,}$/, '');
+  return base.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'mesh';
+}
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {
   const m = getCurrentMeshObj();
   if (!m) { showToast('Pick a mesh first.', 'error'); return; }
   const modal = document.getElementById('modal-export-mesh');
   document.getElementById('exp-path').value = '';
-  document.getElementById('exp-path').placeholder = '(default: meshes/' + m.filename.replace(/\.[^.]+$/, '') + '.<ext>)';
+  document.getElementById('exp-path').placeholder = '(default: meshes/' + _cleanExportBase(m) + '.<ext>)';
   modal.classList.remove('hidden');
 });
 document.getElementById('exp-cancel')?.addEventListener('click', () => {
@@ -12817,7 +12830,7 @@ document.getElementById('exp-browse')?.addEventListener('click', async () => {
   const m = getCurrentMeshObj();
   if (!m) return;
   const format = document.getElementById('exp-format').value;
-  const defaultName = m.filename.replace(/\.[^.]+$/, '');
+  const defaultName = _cleanExportBase(m);
   if (!API.pickExportPath) return;
   const picked = await API.pickExportPath({ defaultName, format });
   if (picked) document.getElementById('exp-path').value = picked;
@@ -12845,7 +12858,11 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
   }
   const job = pushJob(`Export ${format}: ${m.filename}`, null, null, undefined, { sourceImageUrl: sourcePath, projectName: state.currentProject?.name });
   try {
-    const r = await API.exportMesh({ sourcePath, targetFormat: format, outputPath });
+    // When the user didn't type an explicit path, pass a CLEAN customName
+    // (project name, engine-stripped) so the delivered file isn't named after
+    // the internal engine. main.js sanitizes + uses it as the output basename.
+    const customName = outputPath ? undefined : _cleanExportBase(m);
+    const r = await API.exportMesh({ sourcePath, targetFormat: format, outputPath, customName });
     const outPath = r?.outputPath || r?.path;
     if (outPath) {
       completeJob(job.id, true);
@@ -13416,7 +13433,9 @@ document.getElementById('ws-rig-unreal-btn')?.addEventListener('click', async ()
       customError('Unreal export not available', 'Unreal export');
       return;
     }
-    const result = await API.exportToUnreal({ sourcePath: r.path });
+    // Clean name (project, engine-stripped) so the delivered Unreal FBX isn't
+    // named after the internal rig engine (rigged_puppeteer / rigged_unirig).
+    const result = await API.exportToUnreal({ sourcePath: r.path, customName: _cleanExportBase(r) + '_unreal' });
     if (result?.success || result?.outputPath) {
       completeJob(job.id, true);
       try { await API.showInExplorer(result.outputPath || r.path); } catch (e) {}

@@ -1,5 +1,28 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (audit + fix — fuite de noms de moteurs internes dans les exports)
+
+Audit multi-agents (22 agents, vérifié sur de VRAIS fichiers exportés) : le
+nom des moteurs internes fuite vers les fichiers livrés au client sur 4
+surfaces (métadonnées asset.generator = PROPRES « FabMesh » ; os = PROPRES
+UE5/Mixamo) :
+1. NOM du fichier exporté (défaut = basename brut avec _trellis2_native /
+   _rigged_puppeteer / _sf3d…) — export-mesh main.js:8065 + export-to-unreal.
+2. NOM du mesh/node DANS le GLB (220/783 GLB, 68/71 FBX) : le script Blender
+   d'export réimporte/réexporte sans renommer → mesh nommé d'après le fichier
+   source chargé du moteur. Cause racine : main.js:5796 nomme les fichiers
+   internes `${safeName}_${engine}_${ts}`.
+3. Armature `orc_m1_Armature` (swap_skeleton.py:800) — chemin UniRig seulement.
+4. Matériaux triposg/triposr (moteurs désactivés).
+
+FIX appliqué (fuite #1, la plus visible) : `_cleanExportBase()` dans index2.js
+utilise `state.currentProject.name` (déjà engine-stripped) comme nom d'export
+par défaut + `customName` passé à exportMesh/exportToUnreal (placeholder +
+browse + go). Le fichier livré n'est plus nommé d'après le moteur.
+RESTE (testable, session future) : renommer node/mesh en neutre avant
+scene.export dans mesh_tools.py + script Blender export (fuite #2, la plus
+pervasive), et armature neutre (fuite #3, vérifier deps retarget).
+
 ## 2026-07-07 (fix — la sélection cyan restait cuite dans le mesh sauvegardé)
 
 - En sauvant depuis l'éditeur Select Faces, la surbrillance cyan de sélection
