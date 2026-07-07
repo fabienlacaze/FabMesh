@@ -66,6 +66,11 @@
   var cloneCanvas = document.getElementById('clone-canvas');
   // flipMode: 0=none, 1=horizontal, 2=vertical, 3=both
   var cloneFlipMode = 0;
+  // Source sampling mode: 'live' = clone from the CURRENT (modified) canvas,
+  // refreshed at the start of each stroke so previous edits are usable as
+  // source; 'original' = always clone from the image loaded at open.
+  // Default 'live' (modified) per user request.
+  var cloneSourceMode = 'live';
   var _cloneMgr = null;
 
   // Clone-stamp-specific state (NOT managed by CanvasManager)
@@ -168,6 +173,17 @@
     if (l) l.style.display = 'none';
   }
 
+  function _updateCloneSourceBtn() {
+    var b = document.getElementById('clone-source-toggle');
+    if (!b) return;
+    var live = (cloneSourceMode === 'live');
+    b.textContent = live ? 'Source: Modified' : 'Source: Original';
+    b.classList.toggle('tool-active', live);
+    b.title = live
+      ? 'Source = modified image (your edits are clonable). Click for Original.'
+      : 'Source = original image loaded at open. Click for Modified.';
+  }
+
   if (cloneCanvas) {
     _cloneMgr = new window.CanvasManager({
       canvas: cloneCanvas,
@@ -198,6 +214,13 @@
           dx: cloneState.sourcePoint.x - Math.round(x),
           dy: cloneState.sourcePoint.y - Math.round(y),
         };
+        // Refresh the source buffer at STROKE START per the source mode:
+        // 'live' snapshots the current (modified) canvas so prior edits are
+        // clonable, while staying stable within this stroke (no self-smear);
+        // 'original' uses the frozen image captured at open.
+        cloneState.sourceImageData = (cloneSourceMode === 'live')
+          ? ctx.getImageData(0, 0, mgr.w, mgr.h)
+          : cloneState.originalImageData;
         // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
         return undefined;
       },
@@ -244,6 +267,13 @@
       var labels = ['Flip: Off', 'Flip: H', 'Flip: V', 'Flip: HV'];
       cFlip.textContent = labels[cloneFlipMode];
       cFlip.classList.toggle('tool-active', cloneFlipMode > 0);
+    });
+
+    // Source toggle: modified (live) vs original image as clone source.
+    var cSrc = document.getElementById('clone-source-toggle');
+    if (cSrc) cSrc.addEventListener('click', function () {
+      cloneSourceMode = (cloneSourceMode === 'live') ? 'original' : 'live';
+      _updateCloneSourceBtn();
     });
 
     // Escape
@@ -312,6 +342,9 @@
     cloneFlipMode = 0;
     var flipBtn = document.getElementById('clone-flip-toggle');
     if (flipBtn) { flipBtn.textContent = 'Flip: Off'; flipBtn.classList.remove('tool-active'); }
+    // Default source mode = 'live' (modified image) per user request.
+    cloneSourceMode = 'live';
+    _updateCloneSourceBtn();
     var statusEl = document.getElementById('clone-status');
     if (statusEl) statusEl.textContent = 'No source point set - Ctrl+click to set source';
     var sm = document.getElementById('clone-source-marker');
@@ -332,7 +365,10 @@
         srcUrl += (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
       }
       _cloneMgr.loadImage(srcUrl).then(function () {
-        cloneState.sourceImageData = _cloneMgr.ctx.getImageData(0, 0, _cloneMgr.w, _cloneMgr.h);
+        // Frozen snapshot for 'original' source mode; also the initial
+        // 'live' source until the first stroke refreshes it.
+        cloneState.originalImageData = _cloneMgr.ctx.getImageData(0, 0, _cloneMgr.w, _cloneMgr.h);
+        cloneState.sourceImageData = cloneState.originalImageData;
       }).catch(function (e) {
         console.error('[clone] source image load failed:', e);
         if (typeof window.cloneShowError === 'function')

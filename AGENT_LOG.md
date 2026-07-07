@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat — Clone Stamp : toggle source image modifiée / originale)
+
+- Clone Stamp figeait `sourceImageData` une fois au chargement → la source
+  restait TOUJOURS l'image originale, impossible de cloner un patch qu'on
+  venait de peindre. Ajout d'un mode de source :
+  * `cloneSourceMode` 'live' (défaut) = snapshot du canvas COURANT rafraîchi
+    au début de chaque coup (edits précédents clonables, pas de self-smear
+    intra-coup) ; 'original' = image figée au chargement (`originalImageData`).
+  * Toggle `#clone-source-toggle` (« Source: Modified » / « Source: Original »),
+    défaut Modified/actif. Le snapshot de chargement devient `originalImageData`.
+- edit-tools.js modifié côté desktop puis copié vers cloud (byte-identique) ;
+  bouton ajouté dans index2.html + cloud/public/app/index.html. RESTART
+  Electron requis (edit-tools.js chargé avant index2.js). Deploy wrangler
+  pour le cloud.
+
 ## 2026-07-07 (fix — « Construction stages » ne faisait rien + centrage Export logs)
 
 - **Construction stages (3 progressive versions) silencieusement mort** : le
