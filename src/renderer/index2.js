@@ -2146,11 +2146,9 @@ function resetWorkspaceUI() {
   showRigSourceMesh(null);
   const meshExpandBtn = document.getElementById('ws-mesh-expand-btn');
   if (meshExpandBtn) meshExpandBtn.classList.add('hidden');
-  // Clear the three.js scene if it exists
-  if (wsModel && wsScene) {
-    wsScene.remove(wsModel);
-    wsModel = null;
-  }
+  // Clear the three.js scene if it exists (remove ALL tagged meshes, not just
+  // the tracked pointer, so nothing leaks across projects).
+  if (typeof _clearWsMeshes === 'function') _clearWsMeshes();
   const useRigBar = document.getElementById('ws-use-for-rig-bar');
   if (useRigBar) useRigBar.classList.add('hidden');
   const meshStrip = document.getElementById('ws-mesh-versions');
@@ -7680,6 +7678,26 @@ function initWsThree() {
   wsRafId = -1;  // (Viewer3D owns the RAF; kept for legacy shutdown code)
 }
 
+// Remove EVERY workspace mesh from the scene (tagged __wsMesh) + dispose its
+// geometries/materials. Defensive: never relies on the wsModel pointer being
+// in sync, so a lost pointer (rapid switch / project change) can't leave an
+// orphan mesh visible under the current one.
+function _clearWsMeshes() {
+  if (!wsScene) { wsModel = null; return; }
+  const stale = [];
+  wsScene.traverse(o => { if (o.userData && o.userData.__wsMesh) stale.push(o); });
+  for (const o of stale) {
+    wsScene.remove(o);
+    o.traverse(c => {
+      if (c.isMesh) {
+        c.geometry?.dispose?.();
+        const m = c.material;
+        if (Array.isArray(m)) m.forEach(mm => mm?.dispose?.()); else m?.dispose?.();
+      }
+    });
+  }
+  wsModel = null;
+}
 async function showStep2Preview(mesh) {
   initWsThree();
   setViewerFilename('ws-mesh-filename', mesh?.path || mesh?.filename);
@@ -7708,13 +7726,25 @@ async function showStep2Preview(mesh) {
       btn.textContent = isSelected ? '\u2713 Used for Rig generation \u2192' : 'Use this mesh for Rig \u2192';
     }
   }
+  // Clear any previously-loaded mesh SYNCHRONOUSLY (before the await) so a
+  // rapid version switch / project change can't leak a stale mesh into the
+  // scene (e.g. a wizard staying visible under a tank). _clearWsMeshes removes
+  // EVERY tagged mesh, not just the tracked pointer, so a lost pointer never
+  // leaves an orphan behind.
+  _clearWsMeshes();
   // Load the GLB
   const buffer = await API.readMeshFile(mesh.path);
   if (!buffer) return;
-  if (wsModel) { wsScene.remove(wsModel); wsModel = null; }
+  // Stale-request guard: if the user switched to another mesh while this one
+  // was loading, drop this result.
+  if (state.currentProject && state.currentProject.previewMeshPath !== mesh.path) return;
+  _clearWsMeshes();
   const loader = new GLTFLoader();
   loader.parse(buffer, '', (gltf) => {
+    if (state.currentProject && state.currentProject.previewMeshPath !== mesh.path) return;
+    _clearWsMeshes();   // last-moment cleanup for out-of-order parse callbacks
     wsModel = gltf.scene;
+    wsModel.userData.__wsMesh = true;
     wsScene.add(wsModel);
     _applyMeshTextureFilter(wsModel);
     fitWsCamera(wsModel);

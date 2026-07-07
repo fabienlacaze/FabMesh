@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (fix — viewer 3D « Edit selected » : mesh fantôme superposé + Move gizmo rotation)
+
+- **Bug viewer** : un ancien mesh (ex. un wizard) restait affiché superposé au
+  mesh sélectionné (tank/loup), même après changement de version OU de projet.
+  Cause : `showStep2Preview` retirait seulement le pointeur `wsModel` (unique)
+  APRÈS un `await readMeshFile` → un double-clic rapide entre versions ou un
+  switch de projet désynchronisait le pointeur → l'ancien mesh orphelin restait
+  dans `wsScene`. Fix robuste : helper `_clearWsMeshes()` qui retire TOUS les
+  meshs tagués `userData.__wsMesh` (+ dispose geo/mat), appelé (a) en synchrone
+  avant l'await, (b) après l'await, (c) dans le callback parse ; + garde
+  anti-stale (`previewMeshPath !== mesh.path` → drop). Le nouveau mesh est
+  tagué. Reset projet utilise aussi `_clearWsMeshes`. Desktop + cloud.
+- **Move gizmo rotation** (voir commit d5e2af6) : TransformControls
+  translate/rotate/scale, application snapshot-based, boutons + T/R/Y.
+
 ## 2026-07-07 (fix/diag — Fill Holes : détection robuste + auto-diagnostic + labels coupés)
 
 - **Labels Select Faces coupés** (« Cle », « Smootl ») : `.me-sel-panel .tool-btn`
