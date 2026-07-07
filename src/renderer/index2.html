@@ -856,7 +856,7 @@
                     <div class="step-tools-group">
                       <div class="step-tools-label">Manual tools</div>
                       <div class="step-tools-grid">
-                        <button id="ws-lm-manual" class="ghost-btn tool-btn rig-tool-btn">&#9999; Landmarks</button>
+                        <button id="ws-lm-manual" class="ghost-btn tool-btn rig-tool-btn" title="Open the bone editor: place a marker on every bone and drag to adjust each joint, then save the corrected rig">&#9999; Edit bones / Landmarks</button>
                         <!-- Test animation removed: Step 4 Animation now
                              handles playback / generation natively. -->
                         <button id="ws-rig-test-btn" class="ghost-btn tool-btn rig-tool-btn" style="display:none;">&#9654; Test animation</button>
@@ -1141,7 +1141,7 @@
           </div>
           <div class="lm-fs-pane-label" id="lm-fs-pane-label-b">RIGHT</div>
         </div>
-        <div id="lm-fs-instruction">Click a body part on the right, then click on either view to place its marker.</div>
+        <div id="lm-fs-instruction">Click <b>All bones</b> to show every joint, then drag a marker to adjust it (mesh stays put). Click <b>Save adjusted rig</b> when done. — Or place the 22 humanoid landmarks manually (click a body part → click a view).</div>
         <div id="lm-fs-undo-toolbar" class="lm-fs-undo-toolbar">
           <button id="lm-fs-undo" title="Undo (Ctrl+Z)">&#8630; Undo</button>
           <button id="lm-fs-redo" title="Redo (Ctrl+Y)">&#8631; Redo</button>
@@ -1151,8 +1151,9 @@
         <div class="lm-fs-side-header">
           <div class="lm-fs-title">Landmarks</div>
           <div class="lm-fs-actions">
-            <button id="lm-fs-auto" class="ghost-btn">Auto-detect</button>
-            <button id="lm-fs-from-rig" class="ghost-btn" title="Read bone positions from the currently selected rig">&#128205; From rig</button>
+            <button id="lm-fs-all-bones" class="ghost-btn" title="Place one draggable marker on EVERY bone of the rig (any shape — tank, creature, humanoid). Drag to adjust each joint.">&#129460; All bones</button>
+            <button id="lm-fs-auto" class="ghost-btn" title="Auto-place the 22 humanoid landmarks (characters only)">Auto-detect</button>
+            <button id="lm-fs-from-rig" class="ghost-btn" title="Match the rig's bones to the 22 humanoid landmarks (characters only)">&#128205; From rig</button>
             <button id="lm-fs-guided" class="ghost-btn">&#9758; Guided</button>
             <button id="lm-fs-clear" class="ghost-btn">Clear all</button>
           </div>
@@ -1163,6 +1164,7 @@
             <input type="checkbox" id="lm-fs-freeze-mesh" checked />
             <span>&#128274; Freeze mesh while dragging (align bone, don't deform)</span>
           </label>
+          <button id="lm-fs-save-rig" class="primary-btn lm-fs-regen-btn" title="Save the adjusted skeleton as a new rig version (keeps the mesh; only the bones are corrected)">&#128190; Save adjusted rig</button>
           <button id="lm-fs-regen-rig" class="primary-btn lm-fs-regen-btn">&#10227; Re-generate rig with these landmarks</button>
         </div>
         <div class="lm-fs-silhouettes">

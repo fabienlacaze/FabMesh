@@ -1,5 +1,26 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat — éditeur d'os terminé : marqueurs sur TOUS les os + save rig ajusté)
+
+Finalisation du travail landmarks/bones. L'infra existait à 90% (éditeur
+`lm-fullscreen` via bouton « Landmarks » des outils Rig ; drag→bone +
+« Freeze mesh » qui recompute les boneInverses live → corrige le squelette
+sans déformer le mesh, déjà codé dans _dragMove). Manquait : le support
+non-humanoïde et la sauvegarde. Ajouté :
+- `_lmPlaceAllBoneMarkers()` + bouton « 🧴 All bones » : place UN marqueur
+  draggable sur CHAQUE os du rig affiché (lmFsModel), quelle que soit la
+  topologie (tank/creature/humanoïde) — l'ancien « From rig » ne mappait que
+  22 os humanoïdes (rien pour tourelle/canon/roue) ET liait à un modèle temp
+  (drag inopérant). Les nouveaux marqueurs sont liés aux VRAIS os de lmFsModel
+  → drag+freeze fonctionnent.
+- `_lmSaveAdjustedRig()` + bouton « 💾 Save adjusted rig » : exporte lmFsModel
+  (squelette corrigé + boneInverses à jour) en nouvelle version de rig via
+  GLTFExporter → saveBuffer, ajoutée à project.rigs. Le mesh reste identique,
+  seul le squelette est corrigé.
+- Bouton outil renommé « Edit bones / Landmarks » + instruction mise à jour.
+- Landmarks déjà retirés du viewer Edit selected (d9273dc). Desktop ; cloud =
+  éditeur réduit (à reconcilier séparément).
+
 ## 2026-07-07 (audit + fix — fuite de noms de moteurs internes dans les exports)
 
 Audit multi-agents (22 agents, vérifié sur de VRAIS fichiers exportés) : le
