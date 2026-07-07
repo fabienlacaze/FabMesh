@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat — bouton Move + gizmo 3 axes pour déplacer les faces sélectionnées)
+
+- Bouton « Move (gizmo) » dans la section EDIT du mode Select Faces : affiche
+  un TransformControls 3 axes au centroïde de la sélection ; le drag translate
+  tous les vertices sélectionnés du même delta monde (converti en local
+  par mesh via l'inverse de matrixWorld). Re-clic = terminer.
+- Ajout de `three/addons/controls/TransformControls.js` copié depuis
+  node_modules (r170, self-contained, importe seulement 'three') dans
+  `src/renderer/lib/controls/` (résolu par l'importmap `three/addons/`→`./lib/`,
+  packagé par `src/**/*`). API r170 : `getHelper()` ajouté à la scène,
+  `dragging-changed` gère OrbitControls, `objectChange` applique la translation.
+- Guards `moveActive` dans _meMouseDown/Move/Up (le gizmo possède ses propres
+  listeners → le brush de sélection ne doit jamais peindre pendant le move).
+  Cleanup sur close modal + switch de mode + ré-ouverture. `_mePushUndo`
+  avant le move (annulable). Desktop only.
+
 ## 2026-07-07 (feat — outil Lasso dans Select Faces)
 
 - Outil « Lasso (draw region) » dans le mode Select Faces : tracé libre d'un

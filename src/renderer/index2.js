@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { Viewer3D } from './lib/Viewer3D.js';
@@ -11089,6 +11090,10 @@ const meState = {
   lassoing: false,       // a lasso stroke is in progress
   lassoPts: [],          // lasso path in canvas-pixel coords
   lassoAdditive: false,  // stroke started with Ctrl/Shift → union
+  moveActive: false,     // Move gizmo shown to translate the selection
+  moveProxy: null,       // Object3D the TransformControls is attached to
+  moveGizmo: null,       // TransformControls instance
+  moveLastWorld: null,   // proxy world position on the previous change tick
 };
 
 function openMeshEdit(mode) {
@@ -11112,6 +11117,7 @@ function openMeshEdit(mode) {
   // panel hidden until you clicked the Select button a second time.
   document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
   // Default the Select sub-mode to Add each time the panel opens.
+  if (meState.moveActive) _meEndMove();
   meState.selectErase = false;
   meState.selectWand = false;
   meState.selectLasso = false;
@@ -11389,6 +11395,9 @@ function _meDragPlaneAxis(e) {
 }
 function _meMouseDown(e) {
   if (e.button !== 0 || e.altKey) return;
+  // Move gizmo owns all pointer interaction (TransformControls has its own
+  // listeners) — never start a brush stroke while it's up.
+  if (meState.moveActive) return;
   // Grabbing a symmetry-plane gizmo handle starts a drag (not a paint stroke).
   const gAxis = _meRaycastHandles(e);
   if (gAxis) {
@@ -11445,6 +11454,8 @@ function _meMouseDown(e) {
 
 let _meLastBrushTime = 0;
 function _meMouseMove(e) {
+  // Move gizmo active: let TransformControls handle everything.
+  if (meState.moveActive) return;
   // Lasso stroke in progress: append points, don't touch brush/orbit.
   if (meState.lassoing) { _meLassoMove(e); return; }
   // Dragging a symmetry-plane gizmo handle takes priority over the brush.
@@ -11486,6 +11497,7 @@ function _meMouseMove(e) {
 }
 
 function _meMouseUp() {
+  if (meState.moveActive) return;
   if (meState.lassoing) { _meLassoFinish(); return; }
   if (meState.draggingPlane) {
     meState.draggingPlane = null;
@@ -11793,13 +11805,89 @@ function _meLassoSelect(poly, additive) {
   });
   _meUpdateSelButtons();
 }
+// --- Move gizmo: a 3-axis TransformControls attached to a proxy placed at
+// the selection centroid. Dragging it translates every selected vertex by
+// the same world delta (converted per-mesh to local space). ---
+const _moveNMat = new THREE.Matrix3(), _moveInv = new THREE.Matrix4(), _moveLD = new THREE.Vector3();
+function _meMoveApply() {
+  const proxy = meState.moveProxy;
+  if (!proxy || !meState.moveLastWorld) return;
+  _moveLD.copy(proxy.position).sub(meState.moveLastWorld);   // world delta this tick
+  if (_moveLD.lengthSq() === 0) return;
+  meState.moveLastWorld.copy(proxy.position);
+  const worldDelta = _moveLD.clone();
+  meState.mesh?.traverse(o => {
+    const sel = o.isMesh && o.geometry?._selSaved;
+    if (!sel || !sel.size) return;
+    const pos = o.geometry.attributes.position;
+    o.updateWorldMatrix(true, false);
+    _moveNMat.setFromMatrix4(_moveInv.copy(o.matrixWorld).invert());  // world→local linear part
+    const ld = worldDelta.clone().applyMatrix3(_moveNMat);
+    for (const i of sel.keys()) {
+      pos.setXYZ(i, pos.getX(i) + ld.x, pos.getY(i) + ld.y, pos.getZ(i) + ld.z);
+    }
+    pos.needsUpdate = true;
+    o.geometry._normsDirty = true;
+  });
+}
+function _meStartMove() {
+  if (meState.moveActive) { _meEndMove(); return; }   // toggle off
+  if (!_meHasSelection()) { showToast('Select faces first', 'info', 1400); return; }
+  _mePushUndo();
+  // Centroid of the selected vertices in world space.
+  const c = new THREE.Vector3(), vv = new THREE.Vector3(); let n = 0;
+  meState.mesh.traverse(o => {
+    const sel = o.isMesh && o.geometry?._selSaved;
+    if (!sel || !sel.size) return;
+    const pos = o.geometry.attributes.position;
+    o.updateWorldMatrix(true, false);
+    for (const i of sel.keys()) { vv.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); c.add(vv); n++; }
+  });
+  if (!n) return;
+  c.multiplyScalar(1 / n);
+  const proxy = new THREE.Object3D();
+  proxy.position.copy(c);
+  meState.scene.add(proxy);
+  const tc = new TransformControls(meState.camera, meState.renderer.domElement);
+  tc.setMode('translate');
+  tc.setSize(0.9);
+  tc.attach(proxy);
+  tc.addEventListener('dragging-changed', (ev) => { if (meState.controls) meState.controls.enabled = !ev.value; });
+  tc.addEventListener('objectChange', _meMoveApply);
+  // r170: add the gizmo's helper object to the scene (not the controls).
+  meState.scene.add(tc.getHelper ? tc.getHelper() : tc);
+  meState.moveProxy = proxy;
+  meState.moveGizmo = tc;
+  meState.moveLastWorld = c.clone();
+  meState.moveActive = true;
+  const _bc = document.getElementById('me-brush-cursor'); if (_bc) _bc.style.display = 'none';
+  document.getElementById('me-sel-move')?.classList.add('tool-active');
+  showToast('Drag the gizmo to move the selection. Click Move again to finish.', 'info', 2600);
+}
+function _meEndMove() {
+  const tc = meState.moveGizmo;
+  if (tc) {
+    try { tc.detach(); } catch (e) {}
+    try { meState.scene.remove(tc.getHelper ? tc.getHelper() : tc); } catch (e) {}
+    try { tc.dispose(); } catch (e) {}
+  }
+  if (meState.moveProxy) { try { meState.scene.remove(meState.moveProxy); } catch (e) {} }
+  meState.moveGizmo = null; meState.moveProxy = null; meState.moveLastWorld = null;
+  meState.moveActive = false;
+  if (meState.controls) meState.controls.enabled = true;
+  // Recompute normals on the meshes we moved.
+  meState.mesh?.traverse(c => {
+    if (c.isMesh && c.geometry?._normsDirty) { c.geometry.computeVertexNormals(); c.geometry._normsDirty = false; }
+  });
+  document.getElementById('me-sel-move')?.classList.remove('tool-active');
+}
 // Enable selection-dependent buttons only when something is selected.
 function _meUpdateSelButtons() {
   const has = _meHasSelection();
   // The "Garder le reste" row only makes sense alongside a usable Crop.
   const keepRestRow = document.getElementById('me-sel-crop-keeprest-row');
   if (keepRestRow) keepRestRow.style.display = has ? 'flex' : 'none';
-  for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete', 'me-sel-duplicate', 'me-sel-crop', 'me-sel-isolate', 'me-sel-hide', 'me-sel-flip', 'me-sel-smooth']) {
+  for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete', 'me-sel-duplicate', 'me-sel-move', 'me-sel-crop', 'me-sel-isolate', 'me-sel-hide', 'me-sel-flip', 'me-sel-smooth']) {
     const b = document.getElementById(id);
     if (!b) continue;
     b.disabled = !has;
@@ -11935,6 +12023,7 @@ function _meApplyBrush(hit) {
 
 // Close mesh edit
 function _closeMeshEdit() {
+  if (meState.moveActive) _meEndMove();
   _meRestoreView();
   document.getElementById('modal-mesh-edit')?.classList.add('hidden');
 }
@@ -11951,6 +12040,7 @@ document.getElementById('me-redo')?.addEventListener('click', _meRedo);
 // Mode switching
 ['sculpt', 'paint', 'select'].forEach(mode => {
   document.getElementById('me-tool-' + mode)?.addEventListener('click', () => {
+    if (meState.moveActive && mode !== 'select') _meEndMove();  // gizmo only makes sense in Select
     meState.mode = mode;
     ['sculpt', 'paint', 'select'].forEach(m => document.getElementById('me-tool-' + m)?.classList.toggle('tool-active', m === mode));
     document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
@@ -12078,6 +12168,7 @@ document.getElementById('me-sel-add')?.addEventListener('click', () => _meSetSel
 document.getElementById('me-sel-erase')?.addEventListener('click', () => _meSetSelTool('erase'));
 document.getElementById('me-sel-wand')?.addEventListener('click', () => _meSetSelTool('wand'));
 document.getElementById('me-sel-lasso')?.addEventListener('click', () => _meSetSelTool('lasso'));
+document.getElementById('me-sel-move')?.addEventListener('click', () => _meStartMove());
 document.getElementById('me-sel-wand-angle')?.addEventListener('input', (e) => {
   meState.wandAngle = parseInt(e.target.value) || 20;
   const v = document.getElementById('me-sel-wand-angle-val');
