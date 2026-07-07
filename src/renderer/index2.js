@@ -4249,6 +4249,19 @@ document.addEventListener('keydown', (e) => {
     _lb3dLoadAt(_lb3dPaths[_lb3dIndex]);
   }
 });
+// Mesh-edit modal: Delete / Backspace deletes the current face selection
+// (same as the Delete button). Only in Select mode, and never while typing
+// in an input (angle slider, etc.).
+document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('modal-mesh-edit');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+  if (meState.mode !== 'select') return;
+  e.preventDefault();
+  const btn = document.getElementById('me-sel-delete');
+  if (btn && !btn.disabled) btn.click();
+});
 window.addEventListener('resize', () => {
   if (!document.getElementById('lightbox-3d').classList.contains('hidden')) resize3DLightbox();
 });
@@ -11392,10 +11405,11 @@ function _meMouseDown(e) {
     return;
   }
   // Magic wand: a single click floods the connected flat region — not a
-  // brush stroke. Shift keeps the current selection (union of regions).
+  // brush stroke. HOLD CTRL (or Cmd/Shift) to ADD the region to the current
+  // selection; a plain click starts a fresh selection.
   if (meState.mode === 'select' && meState.selectWand) {
     _mePushUndo();
-    _meWandSelect(hit, e.shiftKey);
+    _meWandSelect(hit, e.ctrlKey || e.metaKey || e.shiftKey);
     return;  // keep orbit controls enabled; a click won't rotate the camera
   }
   meState.painting = true;

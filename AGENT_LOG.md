@@ -17,6 +17,10 @@
   'wand')` rend Add/Erase/Wand mutuellement exclusifs. Hook dans `_meMouseDown`
   (clic simple, pas de brush stroke, orbit conservé). Reset sur wand=off à
   l'ouverture du modal.
+- Raccourcis (ajout user) : **Ctrl+clic wand = AJOUTER** la région à la
+  sélection (avant Shift ; désormais Ctrl/Cmd/Shift), clic simple = nouvelle
+  sélection. **Touche Suppr/Delete** dans le modal mesh-edit (mode select,
+  hors champ de saisie) = supprimer la sélection (= bouton Delete).
 - DESKTOP ONLY : l'éditeur mesh select du cloud est une variante ancienne
   réduite (surbrillance orange, sans `_selSaved`/`_meSelMap`/Add-Erase) —
   y porter la wand impose d'abord de reconcilier tout le modèle de sélection
