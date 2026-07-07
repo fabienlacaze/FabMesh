@@ -5391,7 +5391,17 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 // WITHOUT any style/type decoration — this is what we persist to prompt.txt so
 // that re-opening the project rehydrates the textarea cleanly (no repeated
 // "single isolated 3D character, ..." suffixes each time).
-ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction, assetType }) => {
+// Construction-stage prompt modifiers, front-loaded (SDXL weights early
+// tokens more). Generic enough for buildings, vehicles, weapons, props,
+// environment — the checkbox is hidden for living subjects (see
+// _wireBuildStagesVisibility). Applied over the already-enriched prompt.
+const _BUILD_STAGE_MODIFIERS = [
+  'early construction stage, bare structural framework and skeleton, scaffolding, exposed frame, unfinished work-in-progress, incomplete',
+  'half-built, partially assembled, some sections finished and others still exposed, mid construction, work-in-progress',
+  'fully finished and complete, every detail present, clean polished final version',
+];
+
+ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction, assetType, buildStages }) => {
   try {
     // Parental control: check prompt for blocked content
     const safety = checkPromptSafety(prompt);
@@ -5451,14 +5461,14 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
       const turbo = engine === 'local-lightning';
       const bridgeScript = path.join(SCRIPTS_DIR, 'local_juggernaut_bridge.py');
       const stepsClamped = turbo ? 4 : Math.max(4, Math.min(60, parseInt(steps) || 30));
-      // Snapshot the dir BEFORE the run so we only return the new images.
-      const filesBefore = new Set(
-        fs.existsSync(imagesDir)
-          ? fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f))
-          : []
-      );
-      const result = await new Promise((resolve, reject) => {
-        const proc = execFile(_aiPython(), [bridgeScript, prompt, imagesDir, String(numImages || 4), String(stepsClamped)], {
+      // One bridge invocation → returns only the NEW png paths it produced.
+      const runBridge = (promptArg, n) => new Promise((resolve, reject) => {
+        const filesBefore = new Set(
+          fs.existsSync(imagesDir)
+            ? fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f))
+            : []
+        );
+        const proc = execFile(_aiPython(), [bridgeScript, promptArg, imagesDir, String(n), String(stepsClamped)], {
           timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
           env: turbo ? { ...childEnv, FABMESH_TURBO: '1' } : childEnv,
         }, (error, stdout, stderr) => {
@@ -5467,12 +5477,33 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
             .filter(f => /\.png$/i.test(f))
             .filter(f => !filesBefore.has(f))  // NEW files only
             .map(f => path.join(imagesDir, f));
-          resolve({ images: imgs, stdout });
+          resolve(imgs);
         });
         proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
         proc.stderr?.on('data', d => { safeSend('ai3d-progress', '[stderr] ' + d.toString()); });
       });
-      return { success: true, images: result.images };
+
+      // Construction stages: 3 images with 3 progressive build prompts
+      // (foundation → half-built → finished), same engine. One bridge call
+      // per stage so each stage gets its own prompt; ordered foundation-first.
+      if (buildStages) {
+        const staged = [];
+        for (let s = 0; s < _BUILD_STAGE_MODIFIERS.length; s++) {
+          safeSend('ai3d-progress', `[build-stages] Stage ${s + 1}/3…\n`);
+          const stagePrompt = `${_BUILD_STAGE_MODIFIERS[s]}, ${prompt}`;
+          try {
+            const imgs = await runBridge(stagePrompt, 1);
+            staged.push(...imgs);
+          } catch (e) {
+            safeSend('ai3d-progress', `[build-stages] Stage ${s + 1} failed: ${(e && e.error) || e}\n`);
+          }
+        }
+        if (!staged.length) return { success: false, error: 'Construction stages produced no images (see logs).' };
+        return { success: true, images: staged };
+      }
+
+      const images = await runBridge(prompt, numImages || 4);
+      return { success: true, images };
     }
 
     // LOCAL GPU: HiDream-O1 FP8 (second image engine). Runs from its OWN

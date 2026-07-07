@@ -1,5 +1,31 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (fix — « Construction stages » ne faisait rien + centrage Export logs)
+
+- **Construction stages (3 progressive versions) silencieusement mort** : le
+  handler `generate-images` (main.js) ne destructurait PAS `buildStages` que
+  le renderer lui passe → la case cochée générait juste N images normales.
+  Un handler `generate-build-stages` séparé existait mais n'était JAMAIS
+  appelé (et utilisait Pollinations, désactivé pour licence non-commerciale).
+  Fix desktop : `buildStages` destructuré + branche dans le moteur
+  commercial-safe (local-flux/local-lightning) → 3 images avec 3 prompts
+  progressifs (`_BUILD_STAGE_MODIFIERS` : framework nu → à moitié construit →
+  fini), front-loadés sur le prompt enrichi. Helper `runBridge()` extrait
+  (1 appel bridge/stage, images NEW-only, ordonnées fondation-first).
+  PERF : 3 chargements SDXL séquentiels (~7 Go chacun) car le bridge recharge
+  le modèle par process — acceptable pour une feature occasionnelle ;
+  optim possible = mode multi-prompt en 1 chargement (touche le bridge Python).
+- **Cloud (parité)** : `meshyAPI-cloud.js` generateImages ne destructurait
+  même pas `buildStages` (double drop). Refactor avec helper `_genOnce()` +
+  branche buildStages (3 appels /api/generate-image, modificateur injecté
+  dans prompt ET userPrompt car le worker re-enrichit depuis userPrompt).
+  `_CLOUD_BUILD_STAGE_MODIFIERS` byte-identique au desktop. NB : deploy
+  wrangler requis (cd cloud && npm run build && npx wrangler deploy).
+- **UI** : bouton « Export logs » du modal job-details flottait à droite
+  (`.modal-actions` justify-content flex-end + wrap) → règle scopée
+  `#modal-job-details .modal-actions { justify-content: center }`.
+- Non couvert : moteur hidream (dev-only d:/) ignore encore buildStages.
+
 ## 2026-07-06 (feat — provisioning Puppeteer packagé : wizard Phase 3 « Rig engine »)
 
 Dernier gros blocker packaging de l'audit : l'auto-rig (feature n°3 du SPEC)

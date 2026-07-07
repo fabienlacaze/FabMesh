@@ -19,6 +19,14 @@
 
   const log = (...args) => console.log('[meshyAPI-cloud]', ...args);
 
+  // Construction-stage prompt modifiers — kept byte-identical to desktop
+  // main.js _BUILD_STAGE_MODIFIERS (foundation → half-built → finished).
+  const _CLOUD_BUILD_STAGE_MODIFIERS = [
+    'early construction stage, bare structural framework and skeleton, scaffolding, exposed frame, unfinished work-in-progress, incomplete',
+    'half-built, partially assembled, some sections finished and others still exposed, mid construction, work-in-progress',
+    'fully finished and complete, every detail present, clean polished final version',
+  ];
+
   // Return shape per stub name. The desktop renderer often does
   // `for (const x of (await meshyAPI.listFoo()))` or
   // `(arr).find(...)` on the result, so a stub that returns
@@ -375,58 +383,80 @@
        Returns the EXACT shape the desktop IPC returns:
          { success: bool, images: [path, path, ...], error?: string }
        so the renderer's caller works unchanged. */
-    generateImages: async ({ prompt, userPrompt, projectName, numImages = 1, steps, jobId, engine } = {}) => {
-      console.log('[generateImages] ENTER projectName=', projectName, 'numImages=', numImages);
-      log(`generateImages via /api/generate-image (Cog myfabmesh-cloud) — ${numImages}× "${(userPrompt || prompt || '').slice(0, 60)}…"`);
-      window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
+    generateImages: async ({ prompt, userPrompt, projectName, numImages = 1, steps, jobId, engine, buildStages } = {}) => {
+      console.log('[generateImages] ENTER projectName=', projectName, 'numImages=', numImages, 'buildStages=', !!buildStages);
       // Read asset type / style from the workspace dropdowns so the
       // Worker can rebuild the enriched prompt server-side using the
       // exact tables from index2.js (cloud output matches desktop).
       const asset_type = document.getElementById('ws-asset-type')?.value || 'character';
       const asset_style = document.getElementById('ws-asset-style')?.value || 'realistic';
-      try {
+
+      // One /api/generate-image call → returns { paths } or throws.
+      const _genOnce = async (promptArg, userPromptArg, n) => {
         const r = await fetch('/api/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt,              // already-enriched fallback
-            userPrompt,          // raw user text (Worker re-enriches)
-            numImages, asset_type, asset_style, steps,
+            prompt: promptArg,        // already-enriched fallback
+            userPrompt: userPromptArg, // raw user text (Worker re-enriches)
+            numImages: n, asset_type, asset_style, steps,
             turbo: engine === 'local-lightning',  // SDXL-Lightning 4-step (Modal text2image)
             projectName,         // for user_assets row insertion
           }),
           credentials: 'include',
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          const msg = j?.error || `HTTP ${r.status}`;
-          log('generateImages FAILED:', msg, j);
-          return { success: false, images: [], error: msg };
-        }
+        if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
         if (!j?.success || !Array.isArray(j?.paths) || !j.paths.length) {
-          const msg = j?.error || 'no images returned';
-          log('generateImages EMPTY:', msg, j);
-          console.warn('[generateImages] EMPTY/FAIL', { success: j?.success, paths: j?.paths, msg });
-          return { success: false, images: [], error: msg };
+          throw new Error(j?.error || 'no images returned');
         }
+        return j.paths;
+      };
+
+      try {
+        // Construction stages: 3 progressive build prompts (foundation →
+        // half-built → finished), same engine, injected into BOTH prompt
+        // and userPrompt so the Worker's re-enrichment keeps the stage.
+        // Mirrors desktop main.js generate-images buildStages path.
+        if (buildStages) {
+          window.__meshyEmit('image-progress', { jobId, index: 0, total: 3, status: 'fetching' });
+          const staged = [];
+          for (let s = 0; s < _CLOUD_BUILD_STAGE_MODIFIERS.length; s++) {
+            const mod = _CLOUD_BUILD_STAGE_MODIFIERS[s];
+            try {
+              const paths = await _genOnce(`${mod}, ${prompt}`, `${mod}, ${userPrompt || prompt}`, 1);
+              staged.push(...paths);
+              window.__meshyEmit('image-progress', { jobId, index: s + 1, total: 3, status: 'fetching' });
+            } catch (e) {
+              log(`generateImages stage ${s + 1} failed:`, e instanceof Error ? e.message : String(e));
+            }
+          }
+          if (!staged.length) return { success: false, images: [], error: 'Construction stages produced no images.' };
+          window.__meshyEmit('image-progress', { jobId, index: 3, total: 3, status: 'done' });
+          _appendCloudImages(projectName, staged, 'front');
+          _savePrompt(projectName, userPrompt || prompt || '');
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: true, images: staged };
+        }
+
+        log(`generateImages via /api/generate-image (Cog myfabmesh-cloud) — ${numImages}× "${(userPrompt || prompt || '').slice(0, 60)}…"`);
+        window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
+        const paths = await _genOnce(prompt, userPrompt, numImages);
         window.__meshyEmit('image-progress', { jobId, index: numImages, total: numImages, status: 'done' });
         // C1: persist generated URLs in localStorage so listImageFolders
         // returns them on the next refresh (the Worker doesn't store rows
         // for individual PNGs).
-        console.log('[generateImages] success, about to _appendCloudImages name=', projectName, 'paths=', j.paths);
-        _appendCloudImages(projectName, j.paths, 'front');
+        console.log('[generateImages] success, about to _appendCloudImages name=', projectName, 'paths=', paths);
+        _appendCloudImages(projectName, paths, 'front');
         // Persist the prompt so the "Copy prompt" button (index2.js:1808-1830)
-        // can appear on the project after a reload. userPrompt is the user
-        // input; prompt is the enriched version (with style template). We
-        // prefer the raw user input — matches what desktop's main.js writes
-        // to `prompt.txt` next to the image folder.
+        // can appear on the project after a reload.
         _savePrompt(projectName, userPrompt || prompt || '');
         // Force credit pill refresh after successful spend.
         if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-        return { success: true, images: j.paths };
+        return { success: true, images: paths };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        log('generateImages THREW:', msg);
+        log('generateImages FAILED/THREW:', msg);
         return { success: false, images: [], error: msg };
       }
     },
