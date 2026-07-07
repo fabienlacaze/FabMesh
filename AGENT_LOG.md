@@ -1,5 +1,24 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat/ux — Select Faces : curseur crosshair wand/lasso + loupe + réorg panneau)
+
+- **Curseur** : wand/lasso n'utilisent plus le gros anneau de brush (curseur
+  rond) → `cursor: crosshair` sur le canvas (précis), anneau caché. Add/Erase
+  gardent l'anneau. Reset du curseur à la fermeture + changement de mode.
+- **Loupe** (demande user, comme le Clone Stamp) : bouton 🔍 `me-loupe-toggle`
+  dans le header. `preserveDrawingBuffer:true` sur le renderer mesh → la loupe
+  drawImage un crop magnifié (×3.2) du canvas WebGL autour du curseur dans
+  `#me-loupe-canvas` (150px, cercle, crosshair central), suit le curseur,
+  cachée hors canvas. `_meUpdateLoupe` appelé dans `_meMouseMove`.
+- **Réorganisation du panneau Select Faces** en 4 groupes numérotés clairs :
+  1·Selection tool (Add/Erase, Wand/Lasso en grille 2×2 + angle wand),
+  2·Modify selection (Grow/Shrink, All/Invert/Clear), 3·View (Isolate/Hide),
+  4·Edit selection (Move, Duplicate/Crop, Flip/Smooth, Delete). Classes CSS
+  `.me-sec-hdr`/`.me-sec-hint`/`.me-sel-panel .tool-btn` (index2.css).
+  Tous les ids conservés → JS inchangé.
+- Desktop only (éditeur mesh cloud = variante réduite, parité séparée).
+  RESTART/Ctrl+R requis (index2.html + index2.js + css).
+
 ## 2026-07-07 (fix — rig UnicodeDecodeError + nom d'image qui déborde dans les popups)
 
 - **Auto-rig failed: UnicodeDecodeError 'utf-8' byte 0x92** : puppeteer_bridge.py

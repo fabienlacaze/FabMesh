@@ -3706,3 +3706,43 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 .style-option:hover {
   background: #2a2a2a;
 }
+
+/* ── Select Faces panel: clearer grouped layout ── */
+.me-sel-panel .tool-btn {
+  padding: 5px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.me-sec-hdr {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, #333);
+}
+.me-sec-hdr--first {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.me-sec-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+/* Magnifier loupe for the mesh editor (Sculpt/Paint/Select) */
+#me-loupe {
+  position: fixed;
+  pointer-events: none;
+  display: none;
+  z-index: 99999;
+  width: 150px;
+  height: 150px;
+  border: 3px solid #f59e0b;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+}

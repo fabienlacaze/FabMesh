@@ -2814,6 +2814,7 @@
           <button id="me-tool-select" class="secondary-btn tool-btn" style="padding:6px 18px; font-size:12px;">&#9634; Select</button>
         </div>
         <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+          <button id="me-loupe-toggle" class="secondary-btn tool-btn" title="Magnifier: show a zoomed loupe under the cursor (toggle)">&#128269;</button>
           <button id="me-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
           <button id="me-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
           <button id="me-close-x" class="settings-close-x" style="margin-left:4px;">&#10005;</button>
@@ -2850,42 +2851,58 @@
             <button id="me-sculpt-inflate" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#8853; Inflate</button>
           </div>
           <!-- Select options -->
-          <div id="me-select-opts" style="display:none; flex-direction:column; gap:4px;">
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Selection</span>
-            <span style="font-size:9px; color:var(--text-muted);">Paint to add, erase to remove — or Wand-click a flat region (Ctrl = add, Del = delete):</span>
+          <div id="me-select-opts" class="me-sel-panel" style="display:none; flex-direction:column; gap:4px;">
+            <!-- ── 1. Selection tool (how you pick faces) ── -->
+            <span class="me-sec-hdr me-sec-hdr--first">1 · Selection tool</span>
             <div style="display:flex; gap:5px;">
-              <button id="me-sel-add" class="secondary-btn tool-btn tool-active" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#9998; Add</button>
-              <button id="me-sel-erase" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#129529; Erase</button>
+              <button id="me-sel-add" class="secondary-btn tool-btn tool-active" style="flex:1;" title="Brush: paint faces to select (drag).">&#9998; Add</button>
+              <button id="me-sel-erase" class="secondary-btn tool-btn" style="flex:1;" title="Brush: paint to deselect faces (drag).">&#129529; Erase</button>
             </div>
-            <button id="me-sel-wand" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%; white-space:nowrap;" title="Magic wand: click a face to select the connected flat region (within the angle below). Hold Ctrl to ADD the region to the current selection. Press Delete to remove the selection.">&#10024; Wand (select region)</button>
-            <button id="me-sel-lasso" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%; white-space:nowrap;" title="Lasso: draw a freehand loop to select every face inside it. Hold Ctrl to ADD to the current selection.">&#10057; Lasso (draw region)</button>
+            <div style="display:flex; gap:5px;">
+              <button id="me-sel-wand" class="secondary-btn tool-btn" style="flex:1;" title="Magic wand: click a face to select the whole connected flat region (within the Angle below). Ctrl = add.">&#10024; Wand</button>
+              <button id="me-sel-lasso" class="secondary-btn tool-btn" style="flex:1;" title="Lasso: draw a freehand loop; every face inside is selected. Ctrl = add.">&#10057; Lasso</button>
+            </div>
             <label id="me-sel-wand-angle-row" style="display:none; align-items:center; gap:6px; font-size:10px; color:var(--text-muted); padding:1px 2px;">
-              <span style="white-space:nowrap;">Angle</span>
+              <span style="white-space:nowrap;">Wand angle</span>
               <input type="range" id="me-sel-wand-angle" min="1" max="80" value="20" style="flex:1; min-width:50px;" />
               <span id="me-sel-wand-angle-val" style="min-width:26px; text-align:right;">20&deg;</span>
             </label>
+            <span class="me-sec-hint">Ctrl = add to selection · Del = delete selected faces</span>
+
+            <!-- ── 2. Modify the current selection ── -->
+            <span class="me-sec-hdr">2 · Modify selection</span>
             <div style="display:flex; gap:5px;">
-              <button id="me-sel-grow" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#10133; Grow</button>
-              <button id="me-sel-shrink" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#10134; Shrink</button>
+              <button id="me-sel-grow" class="secondary-btn tool-btn" style="flex:1;" title="Expand the selection by one ring of faces">&#10133; Grow</button>
+              <button id="me-sel-shrink" class="secondary-btn tool-btn" style="flex:1;" title="Contract the selection by one ring of faces">&#10134; Shrink</button>
             </div>
-            <button id="me-sel-all" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;">&#9635; Select all</button>
-            <button id="me-sel-invert" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;">&#8634; Invert</button>
-            <button id="me-sel-clear" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;">&#10005; Clear</button>
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border, #333);">View</span>
             <div style="display:flex; gap:5px;">
-              <button id="me-sel-isolate" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;" title="Show only the selected faces (toggle)">&#9673; Isolate</button>
-              <button id="me-sel-hide" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;" title="Hide the selected faces (toggle)">&#128065; Hide</button>
+              <button id="me-sel-all" class="secondary-btn tool-btn" style="flex:1;" title="Select every face">&#9635; All</button>
+              <button id="me-sel-invert" class="secondary-btn tool-btn" style="flex:1;" title="Invert the selection">&#8634; Invert</button>
+              <button id="me-sel-clear" class="secondary-btn tool-btn" style="flex:1;" title="Deselect everything">&#10005; Clear</button>
             </div>
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border, #333);">Edit</span>
-            <button id="me-sel-move" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Show a 3-axis gizmo to move the selected faces. Click again to finish.">&#10021; Move (gizmo)</button>
-            <button id="me-sel-duplicate" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Duplicate the selected faces into a new layer">&#10697; Duplicate</button>
-            <button id="me-sel-crop" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Keep only the selection (delete the rest), or the opposite if 'Keep the rest' is on">&#9986; Crop</button>
+
+            <!-- ── 3. View ── -->
+            <span class="me-sec-hdr">3 · View</span>
+            <div style="display:flex; gap:5px;">
+              <button id="me-sel-isolate" class="secondary-btn tool-btn" style="flex:1;" title="Show only the selected faces (toggle)">&#9673; Isolate</button>
+              <button id="me-sel-hide" class="secondary-btn tool-btn" style="flex:1;" title="Hide the selected faces (toggle)">&#128065; Hide</button>
+            </div>
+
+            <!-- ── 4. Edit the selected faces ── -->
+            <span class="me-sec-hdr">4 · Edit selection</span>
+            <button id="me-sel-move" class="secondary-btn tool-btn" style="width:100%;" title="Show a 3-axis gizmo to move the selected faces. Click again to finish.">&#10021; Move (gizmo)</button>
+            <div style="display:flex; gap:5px;">
+              <button id="me-sel-duplicate" class="secondary-btn tool-btn" style="flex:1;" title="Duplicate the selected faces into a new layer">&#10697; Duplicate</button>
+              <button id="me-sel-crop" class="secondary-btn tool-btn" style="flex:1;" title="Keep only the selection (delete the rest), or the opposite if 'Keep the rest' is on">&#9986; Crop</button>
+            </div>
             <label id="me-sel-crop-keeprest-row" style="display:none; align-items:center; gap:7px; font-size:12px; color:var(--text-2, #aab); padding:3px 4px 4px 6px; cursor:pointer;" title="When on, Crop keeps the REST and deletes the selection instead">
               <input type="checkbox" id="me-sel-crop-keeprest" style="margin:0; cursor:pointer; width:15px; height:15px; flex-shrink:0;"> Garder le reste
             </label>
-            <button id="me-sel-flip" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Flip the normals / winding of the selected faces (fix inside-out patches)">&#8644; Flip normals</button>
-            <button id="me-sel-smooth" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Laplacian-smooth only the selected vertices">&#8767; Smooth</button>
-            <button id="me-sel-delete" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%; color:#ff8080; border-color:rgba(255,80,80,0.4);">&#128465; Delete</button>
+            <div style="display:flex; gap:5px;">
+              <button id="me-sel-flip" class="secondary-btn tool-btn" style="flex:1;" title="Flip the normals / winding of the selected faces (fix inside-out patches)">&#8644; Flip norm.</button>
+              <button id="me-sel-smooth" class="secondary-btn tool-btn" style="flex:1;" title="Laplacian-smooth only the selected vertices">&#8767; Smooth</button>
+            </div>
+            <button id="me-sel-delete" class="secondary-btn tool-btn" style="width:100%; color:#ff8080; border-color:rgba(255,80,80,0.4);" title="Delete the selected faces (Del)">&#128465; Delete</button>
           </div>
           <!-- Paint options -->
           <div id="me-paint-opts" style="display:none; flex-direction:column; gap:4px;">
@@ -2902,6 +2919,7 @@
           <canvas id="me-canvas" style="width:100%; height:100%; display:block;"></canvas>
           <canvas id="me-lasso-canvas" style="position:absolute; left:0; top:0; width:100%; height:100%; display:none; pointer-events:none; z-index:900;"></canvas>
           <div id="me-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid rgba(255,200,50,0.8); border-radius:50%; display:none; z-index:1000;"></div>
+          <div id="me-loupe"><canvas id="me-loupe-canvas" width="150" height="150" style="width:150px; height:150px;"></canvas></div>
         </div>
       </div>
       <div style="display:flex; justify-content:flex-end; gap:8px;">

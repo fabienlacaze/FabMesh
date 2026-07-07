@@ -11104,6 +11104,7 @@ const meState = {
   moveProxy: null,       // Object3D the TransformControls is attached to
   moveGizmo: null,       // TransformControls instance
   moveLastWorld: null,   // proxy world position on the previous change tick
+  loupeOn: false,        // magnifier loupe follows the cursor
 };
 
 function openMeshEdit(mode) {
@@ -11157,7 +11158,10 @@ async function _meInitViewport() {
   const w = container.clientWidth || 800;
   const h = container.clientHeight || 600;
 
-  meState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  // preserveDrawingBuffer: true so the magnifier loupe can drawImage() a
+  // magnified crop of the rendered WebGL canvas (otherwise the buffer is
+  // cleared after compositing and the loupe reads black).
+  meState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   meState.renderer.setSize(w, h, false);
   meState.renderer.setPixelRatio(window.devicePixelRatio);
   meState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -11462,8 +11466,45 @@ function _meMouseDown(e) {
   _meApplyBrush(hit);
 }
 
+// Magnifier loupe: draw a magnified crop of the rendered WebGL canvas
+// (preserveDrawingBuffer) around the cursor into #me-loupe-canvas.
+function _meUpdateLoupe(e) {
+  const box = document.getElementById('me-loupe');
+  if (!box) return;
+  if (!meState.loupeOn) { box.style.display = 'none'; return; }
+  const src = meState.renderer && meState.renderer.domElement;
+  const loupeCv = document.getElementById('me-loupe-canvas');
+  if (!src || !loupeCv) return;
+  const rect = src.getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+    box.style.display = 'none'; return;
+  }
+  const ix = (e.clientX - rect.left) * (src.width / rect.width);   // intrinsic px
+  const iy = (e.clientY - rect.top) * (src.height / rect.height);
+  const L = loupeCv.width;      // 150
+  const MAG = 3.2;
+  const crop = L / MAG;
+  const lctx = loupeCv.getContext('2d');
+  lctx.imageSmoothingEnabled = false;
+  lctx.clearRect(0, 0, L, L);
+  try { lctx.drawImage(src, ix - crop / 2, iy - crop / 2, crop, crop, 0, 0, L, L); } catch (_) {}
+  // center crosshair
+  lctx.strokeStyle = 'rgba(245,158,11,0.9)'; lctx.lineWidth = 1;
+  lctx.beginPath();
+  lctx.moveTo(L / 2 - 8, L / 2); lctx.lineTo(L / 2 + 8, L / 2);
+  lctx.moveTo(L / 2, L / 2 - 8); lctx.lineTo(L / 2, L / 2 + 8);
+  lctx.stroke();
+  const off = 26, size = 150;
+  let px = e.clientX + off, py = e.clientY - size - off;
+  if (px + size > window.innerWidth) px = e.clientX - size - off;
+  if (py < 0) py = e.clientY + off;
+  box.style.left = px + 'px'; box.style.top = py + 'px';
+  box.style.display = 'block';
+}
+
 let _meLastBrushTime = 0;
 function _meMouseMove(e) {
+  _meUpdateLoupe(e);   // magnifier tracks the cursor regardless of tool
   // Move gizmo active: let TransformControls handle everything.
   if (meState.moveActive) return;
   // Lasso stroke in progress: append points, don't touch brush/orbit.
@@ -12034,6 +12075,8 @@ function _meApplyBrush(hit) {
 // Close mesh edit
 function _closeMeshEdit() {
   if (meState.moveActive) _meEndMove();
+  const _lp = document.getElementById('me-loupe'); if (_lp) _lp.style.display = 'none';
+  const _dom = meState.renderer && meState.renderer.domElement; if (_dom) _dom.style.cursor = '';
   _meRestoreView();
   document.getElementById('modal-mesh-edit')?.classList.add('hidden');
 }
@@ -12051,6 +12094,9 @@ document.getElementById('me-redo')?.addEventListener('click', _meRedo);
 ['sculpt', 'paint', 'select'].forEach(mode => {
   document.getElementById('me-tool-' + mode)?.addEventListener('click', () => {
     if (meState.moveActive && mode !== 'select') _meEndMove();  // gizmo only makes sense in Select
+    // Reset the crosshair (wand/lasso) when leaving Select.
+    const _dom = meState.renderer && meState.renderer.domElement;
+    if (_dom && mode !== 'select') _dom.style.cursor = '';
     meState.mode = mode;
     ['sculpt', 'paint', 'select'].forEach(m => document.getElementById('me-tool-' + m)?.classList.toggle('tool-active', m === mode));
     document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
@@ -12170,15 +12216,24 @@ function _meSetSelTool(tool) {
   document.getElementById('me-sel-lasso')?.classList.toggle('tool-active', tool === 'lasso');
   const angleRow = document.getElementById('me-sel-wand-angle-row');
   if (angleRow) angleRow.style.display = (tool === 'wand') ? 'flex' : 'none';
-  // Wand/Lasso don't use the round brush → hide its cursor.
+  // Wand/Lasso are precise click/draw tools → hide the round brush ring and
+  // use a crosshair cursor instead of the big circle. Add/Erase keep the ring.
+  const precise = (tool === 'wand' || tool === 'lasso');
   const cursor = document.getElementById('me-brush-cursor');
-  if (cursor && (tool === 'wand' || tool === 'lasso')) cursor.style.display = 'none';
+  if (cursor && precise) cursor.style.display = 'none';
+  const dom = meState.renderer && meState.renderer.domElement;
+  if (dom) dom.style.cursor = precise ? 'crosshair' : '';
 }
 document.getElementById('me-sel-add')?.addEventListener('click', () => _meSetSelTool('add'));
 document.getElementById('me-sel-erase')?.addEventListener('click', () => _meSetSelTool('erase'));
 document.getElementById('me-sel-wand')?.addEventListener('click', () => _meSetSelTool('wand'));
 document.getElementById('me-sel-lasso')?.addEventListener('click', () => _meSetSelTool('lasso'));
 document.getElementById('me-sel-move')?.addEventListener('click', () => _meStartMove());
+document.getElementById('me-loupe-toggle')?.addEventListener('click', () => {
+  meState.loupeOn = !meState.loupeOn;
+  document.getElementById('me-loupe-toggle')?.classList.toggle('tool-active', meState.loupeOn);
+  if (!meState.loupeOn) { const b = document.getElementById('me-loupe'); if (b) b.style.display = 'none'; }
+});
 document.getElementById('me-sel-wand-angle')?.addEventListener('input', (e) => {
   meState.wandAngle = parseInt(e.target.value) || 20;
   const v = document.getElementById('me-sel-wand-angle-val');
