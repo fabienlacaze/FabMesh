@@ -18184,7 +18184,8 @@ function getActiveLandmarkModel() {
   const lmFsOpen = document.getElementById('lm-fullscreen') && !document.getElementById('lm-fullscreen').classList.contains('hidden');
   if (lmFsOpen && lmFsModel) return { model: lmFsModel, scene: lmFsScene };
   if (rigSrcModel) return { model: rigSrcModel, scene: rigSrcScene };
-  if (wsModel) return { model: wsModel, scene: wsScene };
+  // NOTE: no wsModel/wsScene fallback — landmarks must never render in the
+  // Edit-selected mesh viewer (that was the coloured-dots-on-the-tank bug).
   return null;
 }
 
@@ -18472,7 +18473,8 @@ function autoDetectLandmarks() {
 }
 
 function setupLandmarkRaycasting() {
-  bindLandmarkRaycaster(document.getElementById('ws-mesh-canvas'), () => wsModel, () => wsCamera, () => wsControls);
+  // No landmark raycaster on the Edit-selected mesh canvas — clicking the mesh
+  // there must NOT place landmarks (landmarks are a rig-only concern now).
   bindLandmarkRaycaster(document.getElementById('ws-rig-source-canvas'), () => rigSrcModel, () => rigSrcCamera, () => rigSrcControls);
   bindLandmarkRaycaster(document.getElementById('ws-rig-canvas'), () => rigVwModel, () => rigVwCamera, () => rigVwControls);
   // Note: the landmarks fullscreen modal has two canvases bound later in
@@ -19260,9 +19262,11 @@ document.getElementById('lm-fs-guided')?.addEventListener('click', () => runGuid
 let _lastWsModelRef = null;
 let _lastRigSrcModelRef = null;
 setInterval(() => {
+  // Landmarks are a RIG concern only — never load them into the Edit-selected
+  // mesh viewer (wsScene), where they cluttered the plain mesh preview with
+  // coloured dots. Only the rig source viewer gets them.
   if (wsModel !== _lastWsModelRef) {
-    _lastWsModelRef = wsModel;
-    if (wsModel) loadLandmarksForCurrentMesh();
+    _lastWsModelRef = wsModel;   // still track so we don't re-check every tick
   }
   if (rigSrcModel !== _lastRigSrcModelRef) {
     _lastRigSrcModelRef = rigSrcModel;
