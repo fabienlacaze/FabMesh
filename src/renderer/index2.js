@@ -12715,16 +12715,34 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); _meUndo(); }
   if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) { e.preventDefault(); _meRedo(); }
 });
+// Toggle the cyan selection tint on/off WITHOUT losing the selection data
+// (_selSaved is kept). Used to strip the highlight from the exported GLB and
+// restore it afterwards for continued editing.
+function _meSetSelectionTint(on) {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.color || !c.geometry._selSaved) return;
+    const color = c.geometry.attributes.color, sel = c.geometry._selSaved;
+    if (on) { for (const i of sel.keys()) color.setXYZ(i, 0, 1, 1); }
+    else { for (const [i, o] of sel) color.setXYZ(i, o[0], o[1], o[2]); }
+    color.needsUpdate = true;
+  });
+}
 // Save
 document.getElementById('me-save')?.addEventListener('click', async () => {
   if (!meState.mesh || !meState.meshPath) return;
   _meRestoreView();   // never bake an isolated/hidden view into the saved GLB
+  // Strip the cyan selection highlight so it isn't baked into the exported
+  // vertex colours (the blue barrel bug). Re-applied after export below.
+  _meSetSelectionTint(false);
+  let _tintRestored = false;
+  const _restoreTint = () => { if (!_tintRestored) { _tintRestored = true; _meSetSelectionTint(true); } };
   const projName = state.currentProject?.name || '';
   const job = pushJob(`Save mesh edit: ${projName}`, null, null, 8000, { sourceImageUrl: meState.meshPath, projectName: projName });
   try {
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
     const exporter = new GLTFExporter();
     exporter.parse(meState.mesh, async (result) => {
+      _restoreTint();   // buffer is built — put the highlight back for editing
       try {
         const buf = result instanceof ArrayBuffer ? new Uint8Array(result) : new Uint8Array(result);
         // Build path: same directory as original mesh, with _edited_ suffix
@@ -12773,10 +12791,12 @@ document.getElementById('me-save')?.addEventListener('click', async () => {
         showToast('Save error: ' + err.message, 'error', 3000);
       }
     }, (err) => {
+      _restoreTint();
       completeJob(job.id, false, String(err));
       showToast('Export error: ' + err, 'error', 3000);
     }, { binary: true });
   } catch (err) {
+    _restoreTint();
     completeJob(job.id, false, err.message);
     showToast('Export failed: ' + err.message, 'error', 3000);
   }

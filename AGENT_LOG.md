@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (fix — la sélection cyan restait cuite dans le mesh sauvegardé)
+
+- En sauvant depuis l'éditeur Select Faces, la surbrillance cyan de sélection
+  (vertex colors 0,1,1) était exportée dans le GLB → zone sélectionnée en bleu
+  dans le mesh final (canon du tank). Fix : helper `_meSetSelectionTint(on)`
+  qui retire le cyan (restaure les couleurs sous la sélection via `_selSaved`,
+  SANS perdre la sélection) avant `exporter.parse`, puis le remet dans les
+  callbacks onDone/onError (highlight conservé pour continuer à éditer).
+- Desktop only : l'éditeur select cloud est la variante réduite (surbrillance
+  ORANGE sans `_selSaved`) → même classe de bug mais nécessite la reconciliation
+  de l'éditeur cloud (chantier séparé déjà noté), pas un fix mal-assorti.
+
 ## 2026-07-07 (fix — Sculpt/Paint/Select ouvraient la mauvaise version du mesh)
 
 - `openMeshEdit` chargeait `p.selectedMeshPath` (la version « used for rig »,
