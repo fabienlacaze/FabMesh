@@ -15664,6 +15664,8 @@ function _jobStepIndex(j) {
   // fell to 0 → no Go-to button, no per-step widget.
   if (/^(generate images?|generating (back|6) views|generate back views|multi[- ]?views|auto[- ]?inpaint|modify|inpaint|face[- ]?fix|remove[- ]?bg|rectif|upscal|back[- ]?view|t[- ]?pose|re[- ]?roll|variant|img2img|sdxl|flux)/i.test(n)) return 1;
   if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr)/i.test(n)) return 2;
+  // Mesh-editor saves + manual mesh tools produce a new mesh version → step 2.
+  if (/(retex|re-?texture|mesh edit|save mesh|sculpt|watertight|decimate|set[- ]?pivot|fix[- ]?normals)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;
   return 0;

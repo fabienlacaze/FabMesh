@@ -14444,6 +14444,10 @@ function _jobStepIndex(j) {
   // Mesh texture ops can carry a prefix (e.g. "trellis2 retex: …", "Region re-texture: …")
   // so the anchored test above misses them — match the texture keywords anywhere.
   if (/(retex|re-?texture|texture variation|enhance texture|détail\+\+|detail\+\+|detail synth)/i.test(n)) return 2;
+  // Mesh-editor saves ("Save mesh edit: …" from Sculpt/Paint/Select) + manual
+  // mesh tools — they produce a new mesh version, so the "Go to generated
+  // item" button must appear and jump to the mesh step.
+  if (/(mesh edit|save mesh|sculpt|watertight|decimate|set[- ]?pivot|fix[- ]?normals)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;
   return 0;
