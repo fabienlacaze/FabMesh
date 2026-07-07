@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (fix — rig UnicodeDecodeError + nom d'image qui déborde dans les popups)
+
+- **Auto-rig failed: UnicodeDecodeError 'utf-8' byte 0x92** : puppeteer_bridge.py
+  lançait les sous-process (skeleton/skinning/export) avec `text=True` sans
+  `errors=` → sous l'env forcé UTF-8, un octet 0x92 (guillemet cp1252 émis par
+  un sous-process, ex. dans un chemin/log) faisait planter `_stream` au
+  décodage → rig KO. Ajout `encoding="utf-8", errors="replace"` aux 4 Popen.
+  Idem `puppeteer_to_orc_m1.py:82` (décodage du chunk JSON GLB → errors=replace,
+  cas d'un nom de matériau avec guillemet courbe). Desktop only (rig cloud=Modal).
+- **Nom d'image coupé/débordant dans les popups job-details** (génération image
+  + mesh) : `.jd-value` (SOURCE IMAGE) et `.modal-subtitle` n'avaient pas de
+  wrap fiable → un nom en underscores (insécable) débordait. Ajout
+  `overflow-wrap: anywhere` + `.jd-row` align flex-start + gap + `.jd-value`
+  min-width:0/text-align:right. Cap de troncature 60→120 + `title` tooltip
+  avec le nom complet. Desktop + cloud (styles/index2.css + index2.js).
+
 ## 2026-07-07 (fix — Fill Holes ne détectait/remplissait rien : weld trop grossier)
 
 Diagnostic workflow (17 agents, causes contre-vérifiées) : Fill Holes ne

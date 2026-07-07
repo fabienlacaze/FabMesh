@@ -241,6 +241,8 @@ def _run_skeleton(input_obj, work_dir, run_name):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     rc = _stream(proc)
@@ -280,6 +282,8 @@ def _run_skinning(skel_results_dir, mesh_examples_dir, work_dir):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     rc = _stream(proc)
@@ -302,6 +306,8 @@ def _run_export(mesh_obj, rig_txt, out_fbx):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     rc = _stream(proc)
@@ -345,6 +351,8 @@ def _fbx_to_glb(fbx_path, glb_path):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     rc = _stream(proc)

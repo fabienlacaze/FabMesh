@@ -79,7 +79,10 @@ def _read_glb(path):
     if json_type != JSON_CHUNK_TYPE:
         raise ValueError(f"first chunk not JSON: {json_type!r}")
     json_blob = data[20:20 + json_len]
-    gltf = json.loads(json_blob.decode("utf-8"))
+    # errors="replace": a stray cp1252 byte (e.g. 0x92 smart-quote in a
+    # material/node name from the source) must not crash the whole rig with
+    # a UnicodeDecodeError — replace it and keep going.
+    gltf = json.loads(json_blob.decode("utf-8", errors="replace"))
 
     # BIN chunk (optional, but Puppeteer always has one)
     cursor = 20 + json_len
