@@ -1,5 +1,51 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat WIP — SAMPart3D sur Modal : app écrite, câblage à finir)
+
+Intégration de **SAMPart3D** comme outil universel de découpe sémantique de
+mesh en parties (tête/buste/bras/jambes ; roue/châssis/cabine). Choix validé
+par la veille [[project_mesh_part_segmentation_research]] : MIT (code+poids),
+mesh-in, multi-granularité, marche sur TOUT mesh (riggé ou non).
+
+**Fait critique (recherche pipeline)** : SAMPart3D N'EST PAS feedforward.
+Pour CHAQUE mesh il entraîne un MLP grouping-field from-scratch (5000 iters,
+~5 min) par-dessus un backbone PTv3 GELÉ (ptv3-object.pth, 452 Mo). Coût :
+rendu Blender 16 vues + SAM ViT-H (~1 min) + optim (~5 min) + HDBSCAN + vote
+par-face ≈ **6-10 min GPU/mesh** → architecturé en JOB ASYNCHRONE.
+
+Écrit ce soir (autonome, PC éteint cette nuit) :
+- `modal_app/_sampart3d.py` — app Modal `myfabmesh-segment`, calquée sur
+  `_puppeteer_rig.py` : image cu121+torch2.1 + pointops/tiny-cuda-nn compilés
+  + Blender 4.0 baké + ckpts ptv3-object.pth & sam-vit-huge bakés. Fonction
+  GPU `segment_mesh(glb, scales, job_id)` → labels int PAR-FACE (.npz), Volume
+  `myfabmesh-segment-output`, router `segment_router` (/segment-start,
+  /segment-status, /segment-fetch, auth SHARED_SECRET). Allègements validés :
+  sklearn au lieu de RAPIDS (HDBSCAN CPU sur 15k pts), `enable_flash=False`
+  (drop flash-attn). GPU A100, timeout 25 min.
+- `modal_app/_patch_sampart3d.py` — patch build-time du repo cloné
+  (enable_flash=False + import cuml→sklearn), par balayage, non-bloquant.
+
+**⚠ RESTE À FAIRE demain (rien de cassé, code nouveau isolé)** :
+1. `modal deploy modal_app/_sampart3d.py` + debug 1er déploiement — points
+   `# DEPLOY-VERIFY` dans le code : noms de clés du config Pointcept
+   (mesh_root/data_root/backbone_weight_path), signature de
+   blender_render_16views.py (ordre args + valeur TYPES), chemin de sortie
+   results/{weight}/mesh_{scale}.npy. Ces 3 dépendent des internes du repo
+   upstream (non vérifiables sans le repo sous la main / un GPU).
+2. Worker : route `/api/mesh-segment` + `/api/mesh-segment-status` +
+   `MODAL_SEGMENT_URL` (miroir 1:1 de handleAutoRig/handleAutoRigStatus,
+   pattern rig-start/rig-status/rig-fetch → segment-*). Débit crédits + refund.
+3. Desktop : IPC `mesh:segment` dans main.js + preload + un script Python
+   `scripts/apply_part_labels.py` qui re-projette les labels par-face en
+   sous-meshes coloriés / séparables (vertex-colors par partie, comme la
+   sélection cyan mais N couleurs).
+4. UI (desktop + cloud) : bouton « ✂ Segment parts (AI) » dans les outils
+   Mesh + slider de granularité (échelle 0.0→2.0). Parité 2 plateformes.
+5. Décision de nommage des parties : SAMPart3D sort des parties NON nommées
+   (part 0/1/2…). Passe de nommage optionnelle (VLM/CLIP sur rendus) à voir
+   plus tard, OU voie skinning-derived pour les persos riggés (gratuit, os
+   déjà nommés — cf veille, priorité 1 alternative).
+
 ## 2026-07-07 (feat — éditeur d'os terminé : marqueurs sur TOUS les os + save rig ajusté)
 
 Finalisation du travail landmarks/bones. L'infra existait à 90% (éditeur
