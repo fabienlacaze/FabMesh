@@ -8807,8 +8807,15 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
     indices.push(i0, i1, i2);
   }
   const triCount = Math.floor(indices.length / 3);
-  // Weld by quantized position (tol = bbDiag*1e-3, matching the Python fill).
-  const Q = 1 / (bbDiag * 1e-3);
+  // Weld by quantized position. tol = bbDiag*1e-4 (matching the Python fill).
+  // 2026-07-07 fix: was 1e-3, ~= the edge length of a dense TRELLIS voxel-1024
+  // mesh, so ADJACENT DISTINCT boundary verts collapsed into one group → their
+  // boundary edge became degenerate or counted as interior (cnt=2) → the loop
+  // detector returned ~0 holes → NO green preview AND nothing to fill.
+  // 1e-4 is the value the cloud _jsFillHoles converged on empirically (it
+  // found 1e-5 too STRICT — duplicate seam verts then failed to merge and
+  // holes were missed the other way). 1e-4 = the tested sweet spot.
+  const Q = 1 / (bbDiag * 1e-4);
   const keyToId = new Map(); const groupOf = new Int32Array(n); let G = 0;
   for (let v = 0; v < n; v++) {
     const k = Math.round(arr[v * 3] * Q) + ',' + Math.round(arr[v * 3 + 1] * Q) + ',' + Math.round(arr[v * 3 + 2] * Q);
@@ -8832,7 +8839,10 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
     while ((succ.get(start) || []).length) {
       const loop = []; let g = start;
       for (let s = 0; s < 100000; s++) { loop.push(g); const nx = popNext(g); if (nx == null) break; if (nx === start) break; g = nx; }
-      if (loop.length >= 3) loops.push(loop); else break;
+      // A short chain (<3) is a dead-end, not a real loop — skip it but keep
+      // draining this start's remaining successors (was `break`, which threw
+      // away every other loop sharing this start node).
+      if (loop.length >= 3) loops.push(loop);
     }
   }
   const greenFaces = [], green = [], grey = [], red = [];

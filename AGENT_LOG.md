@@ -1,5 +1,31 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (fix — Fill Holes ne détectait/remplissait rien : weld trop grossier)
+
+Diagnostic workflow (17 agents, causes contre-vérifiées) : Fill Holes ne
+montrait AUCUN trou en vert ET ne remplissait rien = MÊME cause (preview JS
+`_jsHoleFillPreview` et fill Python `_grouped_boundary_loops` partagent le
+détecteur de boucles de bord).
+
+- **Cause racine** : tolérance de weld `bbDiag*1e-3` (index2.js:8811 +
+  mesh_tools.py:297) ~= la longueur d'arête d'un mesh TRELLIS voxel-1024 dense
+  → des sommets de bord DISTINCTS mais voisins fusionnaient dans le même
+  groupe → l'arête de bord devenait dégénérée (a===b, ignorée) ou comptée
+  comme intérieure (cnt=2) → 0 boucle détectée → pas de vert + rien à remplir.
+- **Fix** : `bbDiag*1e-3` → `bbDiag*1e-4` des DEUX côtés (JS + Python, gardés
+  synchro). 1e-4 = la valeur que le cloud `_jsFillHoles` avait déjà convergée
+  empiriquement (il avait trouvé 1e-5 TROP strict : les doublons de couture ne
+  fusionnaient plus, trous ratés dans l'autre sens). 1e-4 = le point d'équilibre.
+- **Aggravant corrigé** : `else break` (index2.js:8835 + mesh_tools.py:330)
+  qui avortait TOUTES les boucles restantes d'un nœud dès qu'une chaîne < 3
+  sommets → remplacé par un skip (chaque itération while consomme ≥1
+  successeur de `start`, donc pas de boucle infinie).
+- Écartés par la vérif : sliders/défauts OK, passage args Min/Max OK, pas de
+  régression récente (bug date du 2026-06-15), divergence cloud réelle mais
+  non causale. NON traité : les faux-trous « slivers » (fentes collinéaires,
+  fan d'aire nulle) → ressort de Watertight/Fix Normals.
+- À TESTER sur un vrai mesh (je ne peux pas vérifier le rendu vert moi-même).
+
 ## 2026-07-07 (feat — bouton Move + gizmo 3 axes pour déplacer les faces sélectionnées)
 
 - Bouton « Move (gizmo) » dans la section EDIT du mode Select Faces : affiche

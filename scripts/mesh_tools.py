@@ -294,7 +294,13 @@ def _grouped_boundary_loops(verts, faces, bb_diag, cap=200000):
         faces = faces[keep]
     if not len(faces):
         return []
-    Q = 1.0 / (bb_diag * 1e-3)
+    # tol = bb_diag*1e-4 (kept in sync with the JS preview _jsHoleFillPreview).
+    # 2026-07-07 fix: was 1e-3 ~= a dense voxel-1024 edge length, so adjacent
+    # DISTINCT boundary verts welded together and the loop detector found ~0
+    # holes (no green preview + nothing filled). 1e-4 = the value the cloud
+    # _jsFillHoles converged on empirically (1e-5 was too strict: duplicate
+    # seam verts then failed to merge, missing holes the other way).
+    Q = 1.0 / (bb_diag * 1e-4)
     keys = np.round(verts * Q).astype(np.int64)
     uniq, first_idx, inv = np.unique(keys, axis=0, return_index=True, return_inverse=True)
     group = inv.astype(np.int64)
@@ -326,8 +332,9 @@ def _grouped_boundary_loops(verts, faces, bb_diag, cap=200000):
                 g = nx
             if len(loop) >= 3:
                 loops.append([int(rep[x]) for x in loop])
-            else:
-                break
+            # A short chain (<3) is a dead-end, not a loop — skip it but keep
+            # draining this start's remaining successors (was `else: break`,
+            # which threw away every other loop sharing this start node).
             if len(loops) >= cap:
                 return loops
     return loops
