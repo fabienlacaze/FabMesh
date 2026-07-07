@@ -1778,6 +1778,11 @@ button.tool-active {
   align-items: center;
   margin-top: 24px;
 }
+/* Job-details actions wrap (Export logs / Go to generated item / Cancel) —
+   center each wrapped row instead of pinning "Export logs" to the right. */
+#modal-job-details .modal-actions {
+  justify-content: center;
+}
 .modal-actions .ghost-btn,
 .modal-actions .primary-btn {
   min-width: 120px;

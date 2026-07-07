@@ -14471,8 +14471,10 @@ async function refreshJobDetailsModal(id) {
     const stepIdx = _jobStepIndex(j);
     gotoBtn.style.display = stepIdx > 0 ? '' : 'none';
     if (stepIdx > 0) {
-      // Unified label (was "Go to Image / 3D Mesh / Rig / Animation").
-      gotoBtn.textContent = '→ Go to generation';
+      // On success, point at the RESULT ("generated item"); while running or
+      // on error, point at the generation step (to watch / retry). Unified
+      // label (was "Go to Image / 3D Mesh / Rig / Animation").
+      gotoBtn.textContent = j.status === 'done' ? '→ Go to generated item' : '→ Go to generation';
     }
   }
 }

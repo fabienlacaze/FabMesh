@@ -16220,8 +16220,9 @@ async function refreshJobDetailsModal(id) {
     const stepIdx = _jobStepIndex(j);
     gotoBtn.style.display = stepIdx > 0 ? '' : 'none';
     if (stepIdx > 0) {
-      // Unified label (ported from desktop).
-      gotoBtn.textContent = '→ Go to generation';
+      // On success point at the RESULT; while running/error point at the
+      // generation step. Unified label (ported from desktop).
+      gotoBtn.textContent = j.status === 'done' ? '→ Go to generated item' : '→ Go to generation';
     }
   }
 }
