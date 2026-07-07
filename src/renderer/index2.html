@@ -2890,7 +2890,12 @@
 
             <!-- ── 4. Edit the selected faces ── -->
             <span class="me-sec-hdr">4 · Edit selection</span>
-            <button id="me-sel-move" class="secondary-btn tool-btn" style="width:100%;" title="Show a 3-axis gizmo to move the selected faces. Click again to finish.">&#10021; Move (gizmo)</button>
+            <button id="me-sel-move" class="secondary-btn tool-btn" style="width:100%;" title="Show a gizmo to move / rotate / scale the selected faces. Click again to finish. (T=move, R=rotate, Y=scale)">&#10021; Move (gizmo)</button>
+            <div id="me-move-mode-row" style="display:none; gap:5px;">
+              <button id="me-move-translate" class="secondary-btn tool-btn" style="flex:1;" title="Translate (T)">&#10021; Move</button>
+              <button id="me-move-rotate" class="secondary-btn tool-btn" style="flex:1;" title="Rotate (R)">&#8635; Rotate</button>
+              <button id="me-move-scale" class="secondary-btn tool-btn" style="flex:1;" title="Scale (Y)">&#8690; Scale</button>
+            </div>
             <div style="display:flex; gap:5px;">
               <button id="me-sel-duplicate" class="secondary-btn tool-btn" style="flex:1;" title="Duplicate the selected faces into a new layer">&#10697; Duplicate</button>
               <button id="me-sel-crop" class="secondary-btn tool-btn" style="flex:1;" title="Keep only the selection (delete the rest), or the opposite if 'Keep the rest' is on">&#9986; Crop</button>

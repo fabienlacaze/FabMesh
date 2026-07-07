@@ -4256,8 +4256,15 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keydown', (e) => {
   const modal = document.getElementById('modal-mesh-edit');
   if (!modal || modal.classList.contains('hidden')) return;
-  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+  // Move gizmo mode shortcuts (T=translate, R=rotate, Y=scale).
+  if (meState.moveActive) {
+    const k = e.key.toLowerCase();
+    if (k === 't') { e.preventDefault(); _meSetMoveMode('translate'); return; }
+    if (k === 'r') { e.preventDefault(); _meSetMoveMode('rotate'); return; }
+    if (k === 'y') { e.preventDefault(); _meSetMoveMode('scale'); return; }
+  }
+  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
   if (meState.mode !== 'select') return;
   e.preventDefault();
   const btn = document.getElementById('me-sel-delete');
@@ -11886,51 +11893,67 @@ function _meLassoSelect(poly, additive) {
   });
   _meUpdateSelButtons();
 }
-// --- Move gizmo: a 3-axis TransformControls attached to a proxy placed at
-// the selection centroid. Dragging it translates every selected vertex by
-// the same world delta (converted per-mesh to local space). ---
-const _moveNMat = new THREE.Matrix3(), _moveInv = new THREE.Matrix4(), _moveLD = new THREE.Vector3();
+// --- Move gizmo: a TransformControls attached to a proxy at the selection
+// centroid, supporting TRANSLATE / ROTATE / SCALE. Each change re-derives the
+// selected vertices ABSOLUTELY from a snapshot taken at gizmo-attach time
+// (worldPos0 → proxyDelta → back to mesh-local), so rotation/scale pivot
+// cleanly around the centroid with no drift. ---
+const _moveDelta = new THREE.Matrix4(), _moveP = new THREE.Vector3();
 function _meMoveApply() {
   const proxy = meState.moveProxy;
-  if (!proxy || !meState.moveLastWorld) return;
-  _moveLD.copy(proxy.position).sub(meState.moveLastWorld);   // world delta this tick
-  if (_moveLD.lengthSq() === 0) return;
-  meState.moveLastWorld.copy(proxy.position);
-  const worldDelta = _moveLD.clone();
-  meState.mesh?.traverse(o => {
-    const sel = o.isMesh && o.geometry?._selSaved;
-    if (!sel || !sel.size) return;
-    const pos = o.geometry.attributes.position;
-    o.updateWorldMatrix(true, false);
-    _moveNMat.setFromMatrix4(_moveInv.copy(o.matrixWorld).invert());  // world→local linear part
-    const ld = worldDelta.clone().applyMatrix3(_moveNMat);
-    for (const i of sel.keys()) {
-      pos.setXYZ(i, pos.getX(i) + ld.x, pos.getY(i) + ld.y, pos.getZ(i) + ld.z);
+  if (!proxy || !meState.moveInitInv || !meState.moveSnap) return;
+  proxy.updateMatrixWorld(true);
+  // Transform applied by the gizmo since attach: current * initial⁻¹ (world).
+  _moveDelta.multiplyMatrices(proxy.matrixWorld, meState.moveInitInv);
+  for (const s of meState.moveSnap) {
+    const pos = s.obj.geometry.attributes.position;
+    const w0 = s.w0, idxs = s.idxs;
+    for (let j = 0; j < idxs.length; j++) {
+      _moveP.set(w0[j * 3], w0[j * 3 + 1], w0[j * 3 + 2]).applyMatrix4(_moveDelta).applyMatrix4(s.invMesh);
+      pos.setXYZ(idxs[j], _moveP.x, _moveP.y, _moveP.z);
     }
     pos.needsUpdate = true;
-    o.geometry._normsDirty = true;
-  });
+    s.obj.geometry._normsDirty = true;
+  }
+}
+function _meSetMoveMode(mode) {
+  // mode: 'translate' | 'rotate' | 'scale'
+  if (meState.moveGizmo && meState.moveGizmo.setMode) meState.moveGizmo.setMode(mode);
+  meState.moveMode = mode;
+  for (const m of ['translate', 'rotate', 'scale']) {
+    document.getElementById('me-move-' + m)?.classList.toggle('tool-active', m === mode);
+  }
 }
 function _meStartMove() {
   if (meState.moveActive) { _meEndMove(); return; }   // toggle off
   if (!_meHasSelection()) { showToast('Select faces first', 'info', 1400); return; }
   _mePushUndo();
-  // Centroid of the selected vertices in world space.
+  // Centroid of the selected vertices in world space + per-mesh snapshots.
   const c = new THREE.Vector3(), vv = new THREE.Vector3(); let n = 0;
+  const snap = [];
   meState.mesh.traverse(o => {
     const sel = o.isMesh && o.geometry?._selSaved;
     if (!sel || !sel.size) return;
     const pos = o.geometry.attributes.position;
     o.updateWorldMatrix(true, false);
-    for (const i of sel.keys()) { vv.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); c.add(vv); n++; }
+    const idxs = Array.from(sel.keys());
+    const w0 = new Float32Array(idxs.length * 3);
+    for (let j = 0; j < idxs.length; j++) {
+      vv.fromBufferAttribute(pos, idxs[j]).applyMatrix4(o.matrixWorld);
+      w0[j * 3] = vv.x; w0[j * 3 + 1] = vv.y; w0[j * 3 + 2] = vv.z;
+      c.add(vv); n++;
+    }
+    snap.push({ obj: o, idxs, w0, invMesh: o.matrixWorld.clone().invert() });
   });
   if (!n) return;
   c.multiplyScalar(1 / n);
   const proxy = new THREE.Object3D();
   proxy.position.copy(c);
   meState.scene.add(proxy);
+  proxy.updateMatrixWorld(true);
+  meState.moveInitInv = proxy.matrixWorld.clone().invert();
+  meState.moveSnap = snap;
   const tc = new TransformControls(meState.camera, meState.renderer.domElement);
-  tc.setMode('translate');
   tc.setSize(0.9);
   tc.attach(proxy);
   tc.addEventListener('dragging-changed', (ev) => { if (meState.controls) meState.controls.enabled = !ev.value; });
@@ -11939,11 +11962,12 @@ function _meStartMove() {
   meState.scene.add(tc.getHelper ? tc.getHelper() : tc);
   meState.moveProxy = proxy;
   meState.moveGizmo = tc;
-  meState.moveLastWorld = c.clone();
   meState.moveActive = true;
   const _bc = document.getElementById('me-brush-cursor'); if (_bc) _bc.style.display = 'none';
   document.getElementById('me-sel-move')?.classList.add('tool-active');
-  showToast('Drag the gizmo to move the selection. Click Move again to finish.', 'info', 2600);
+  const modeRow = document.getElementById('me-move-mode-row'); if (modeRow) modeRow.style.display = 'flex';
+  _meSetMoveMode('translate');
+  showToast('Gizmo: T=move · R=rotate · Y=scale. Click Move again to finish.', 'info', 3000);
 }
 function _meEndMove() {
   const tc = meState.moveGizmo;
@@ -11953,7 +11977,8 @@ function _meEndMove() {
     try { tc.dispose(); } catch (e) {}
   }
   if (meState.moveProxy) { try { meState.scene.remove(meState.moveProxy); } catch (e) {} }
-  meState.moveGizmo = null; meState.moveProxy = null; meState.moveLastWorld = null;
+  meState.moveGizmo = null; meState.moveProxy = null;
+  meState.moveInitInv = null; meState.moveSnap = null;
   meState.moveActive = false;
   if (meState.controls) meState.controls.enabled = true;
   // Recompute normals on the meshes we moved.
@@ -11961,6 +11986,7 @@ function _meEndMove() {
     if (c.isMesh && c.geometry?._normsDirty) { c.geometry.computeVertexNormals(); c.geometry._normsDirty = false; }
   });
   document.getElementById('me-sel-move')?.classList.remove('tool-active');
+  const modeRow = document.getElementById('me-move-mode-row'); if (modeRow) modeRow.style.display = 'none';
 }
 // Enable selection-dependent buttons only when something is selected.
 function _meUpdateSelButtons() {
@@ -12259,6 +12285,9 @@ document.getElementById('me-sel-erase')?.addEventListener('click', () => _meSetS
 document.getElementById('me-sel-wand')?.addEventListener('click', () => _meSetSelTool('wand'));
 document.getElementById('me-sel-lasso')?.addEventListener('click', () => _meSetSelTool('lasso'));
 document.getElementById('me-sel-move')?.addEventListener('click', () => _meStartMove());
+document.getElementById('me-move-translate')?.addEventListener('click', () => _meSetMoveMode('translate'));
+document.getElementById('me-move-rotate')?.addEventListener('click', () => _meSetMoveMode('rotate'));
+document.getElementById('me-move-scale')?.addEventListener('click', () => _meSetMoveMode('scale'));
 document.getElementById('me-loupe-toggle')?.addEventListener('click', () => {
   meState.loupeOn = !meState.loupeOn;
   document.getElementById('me-loupe-toggle')?.classList.toggle('tool-active', meState.loupeOn);
