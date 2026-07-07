@@ -3709,9 +3709,16 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 
 /* ── Select Faces panel: clearer grouped layout ── */
 .me-sel-panel .tool-btn {
-  padding: 5px 8px;
+  padding: 5px 4px;
   font-size: 11px;
-  white-space: nowrap;
+  /* Let tight labels (Invert / Clear / Smooth, 2-3 per row) wrap instead of
+     getting clipped to "Cle" / "Smootl". */
+  white-space: normal;
+  line-height: 1.15;
+  text-align: center;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
 }
 .me-sec-hdr {
   font-size: 10px;

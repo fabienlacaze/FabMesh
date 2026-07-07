@@ -8780,11 +8780,15 @@ function _jsFixNormalsWelded(geom) {
 // vertices (green=will fill, grey=too small, red=too big) + stats. Adapted
 // from the cloud _jsFillHoles.
 function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
-  const empty = { greenFaces: [], green: [], grey: [], red: [], stats: { loops: 0, filled: 0, tooBig: 0, tooSmall: 0 } };
-  if (!geom.index || !geom.attributes.position) return empty;
+  const empty = { greenFaces: [], green: [], grey: [], red: [], stats: { loops: 0, filled: 0, tooBig: 0, tooSmall: 0, boundaryEdges: 0, indexed: false } };
+  if (!geom.attributes || !geom.attributes.position) return empty;
   const arr = geom.attributes.position.array;
   const n = geom.attributes.position.count;
-  const rawIndices = geom.index.array;
+  // Non-indexed geometry: build a sequential index (every 3 verts = 1 tri)
+  // so triangle soups (some GLTF exports) still get a hole preview instead
+  // of silently returning nothing.
+  const indexed = !!geom.index;
+  const rawIndices = indexed ? geom.index.array : (() => { const a = new Uint32Array(n); for (let i = 0; i < n; i++) a[i] = i; return a; })();
   const rawTriCount = Math.floor(rawIndices.length / 3);
   let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
   for (let i = 0; i < n; i++) {
@@ -8794,9 +8798,13 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
     if (z < mnz) mnz = z; if (z > mxz) mxz = z;
   }
   const bbDiag = Math.hypot(mxx - mnx, mxy - mny, mxz - mnz) || 1;
-  // Strip degenerate triangles (TRELLIS marching cubes emits many).
+  // Strip degenerate triangles (TRELLIS marching cubes emits many) and, in the
+  // same pass, sample edge lengths so we can weld RELATIVE to the actual mesh
+  // resolution instead of a fixed fraction of the bbox (which is a knife-edge
+  // on dense meshes).
   const indices = [];
   const areaEps = bbDiag * 1e-12;
+  let edgeSum = 0, edgeCnt = 0;
   for (let t = 0; t < rawTriCount; t++) {
     const i0 = rawIndices[t * 3], i1 = rawIndices[t * 3 + 1], i2 = rawIndices[t * 3 + 2];
     if (i0 === i1 || i1 === i2 || i2 === i0) continue;
@@ -8805,46 +8813,60 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
     const fx = arr[i2 * 3] - ax, fy = arr[i2 * 3 + 1] - ay, fz = arr[i2 * 3 + 2] - az;
     if (Math.hypot(ey * fz - ez * fy, ez * fx - ex * fz, ex * fy - ey * fx) * 0.5 < areaEps) continue;
     indices.push(i0, i1, i2);
+    if ((edgeCnt & 7) === 0) { edgeSum += Math.hypot(ex, ey, ez); }  // sample 1/8 of edges
+    edgeCnt++;
   }
   const triCount = Math.floor(indices.length / 3);
-  // Weld by quantized position. tol = bbDiag*1e-4 (matching the Python fill).
-  // 2026-07-07 fix: was 1e-3, ~= the edge length of a dense TRELLIS voxel-1024
-  // mesh, so ADJACENT DISTINCT boundary verts collapsed into one group → their
-  // boundary edge became degenerate or counted as interior (cnt=2) → the loop
-  // detector returned ~0 holes → NO green preview AND nothing to fill.
-  // 1e-4 is the value the cloud _jsFillHoles converged on empirically (it
-  // found 1e-5 too STRICT — duplicate seam verts then failed to merge and
-  // holes were missed the other way). 1e-4 = the tested sweet spot.
-  const Q = 1 / (bbDiag * 1e-4);
-  const keyToId = new Map(); const groupOf = new Int32Array(n); let G = 0;
-  for (let v = 0; v < n; v++) {
-    const k = Math.round(arr[v * 3] * Q) + ',' + Math.round(arr[v * 3 + 1] * Q) + ',' + Math.round(arr[v * 3 + 2] * Q);
-    let gid = keyToId.get(k); if (gid === undefined) { gid = G++; keyToId.set(k, gid); } groupOf[v] = gid;
-  }
-  const repOf = new Int32Array(G).fill(-1);
-  for (let v = 0; v < n; v++) { const g = groupOf[v]; if (repOf[g] === -1) repOf[g] = v; }
-  const cnt = new Map();
-  for (let t = 0; t < triCount; t++) {
-    const g0 = groupOf[indices[t * 3]], g1 = groupOf[indices[t * 3 + 1]], g2 = groupOf[indices[t * 3 + 2]];
-    for (const [a, b] of [[g0, g1], [g1, g2], [g2, g0]]) { if (a === b) continue; const k = a < b ? a + ',' + b : b + ',' + a; cnt.set(k, (cnt.get(k) || 0) + 1); }
-  }
-  const succ = new Map();
-  for (let t = 0; t < triCount; t++) {
-    const g0 = groupOf[indices[t * 3]], g1 = groupOf[indices[t * 3 + 1]], g2 = groupOf[indices[t * 3 + 2]];
-    for (const [a, b] of [[g0, g1], [g1, g2], [g2, g0]]) { if (a === b) continue; const k = a < b ? a + ',' + b : b + ',' + a; if (cnt.get(k) !== 1) continue; if (!succ.has(a)) succ.set(a, []); succ.get(a).push(b); }
-  }
-  const loops = [];
-  const popNext = (g) => { const a = succ.get(g); return a && a.length ? a.pop() : null; };
-  for (const start of succ.keys()) {
-    while ((succ.get(start) || []).length) {
-      const loop = []; let g = start;
-      for (let s = 0; s < 100000; s++) { loop.push(g); const nx = popNext(g); if (nx == null) break; if (nx === start) break; g = nx; }
-      // A short chain (<3) is a dead-end, not a real loop — skip it but keep
-      // draining this start's remaining successors (was `break`, which threw
-      // away every other loop sharing this start node).
-      if (loop.length >= 3) loops.push(loop);
+  const meanEdge = edgeCnt ? (edgeSum / Math.max(1, (edgeCnt >> 3))) : bbDiag * 1e-3;
+  // Detect boundary loops for a given weld tolerance. Returns { loops, boundaryEdges, groupOf, repOf }.
+  const detect = (tol) => {
+    const Qd = 1 / Math.max(tol, 1e-12);
+    const keyToId = new Map(); const groupOf = new Int32Array(n); let G = 0;
+    for (let v = 0; v < n; v++) {
+      const k = Math.round(arr[v * 3] * Qd) + ',' + Math.round(arr[v * 3 + 1] * Qd) + ',' + Math.round(arr[v * 3 + 2] * Qd);
+      let gid = keyToId.get(k); if (gid === undefined) { gid = G++; keyToId.set(k, gid); } groupOf[v] = gid;
     }
+    const repOf = new Int32Array(G).fill(-1);
+    for (let v = 0; v < n; v++) { const g = groupOf[v]; if (repOf[g] === -1) repOf[g] = v; }
+    const cnt = new Map();
+    for (let t = 0; t < triCount; t++) {
+      const g0 = groupOf[indices[t * 3]], g1 = groupOf[indices[t * 3 + 1]], g2 = groupOf[indices[t * 3 + 2]];
+      for (const [a, b] of [[g0, g1], [g1, g2], [g2, g0]]) { if (a === b) continue; const k = a < b ? a + ',' + b : b + ',' + a; cnt.set(k, (cnt.get(k) || 0) + 1); }
+    }
+    let boundaryEdges = 0;
+    const succ = new Map();
+    for (let t = 0; t < triCount; t++) {
+      const g0 = groupOf[indices[t * 3]], g1 = groupOf[indices[t * 3 + 1]], g2 = groupOf[indices[t * 3 + 2]];
+      for (const [a, b] of [[g0, g1], [g1, g2], [g2, g0]]) { if (a === b) continue; const k = a < b ? a + ',' + b : b + ',' + a; if (cnt.get(k) !== 1) continue; if (!succ.has(a)) succ.set(a, []); succ.get(a).push(b); }
+    }
+    for (const v of cnt.values()) if (v === 1) boundaryEdges++;
+    const lps = [];
+    const popNext = (g) => { const a = succ.get(g); return a && a.length ? a.pop() : null; };
+    for (const start of succ.keys()) {
+      while ((succ.get(start) || []).length) {
+        const loop = []; let g = start;
+        for (let s = 0; s < 100000; s++) { loop.push(g); const nx = popNext(g); if (nx == null) break; if (nx === start) break; g = nx; }
+        if (loop.length >= 3) lps.push(loop);
+      }
+    }
+    return { loops: lps, boundaryEdges, groupOf, repOf };
+  };
+  // Weld tolerance = a fraction of the mean edge length: fine enough to keep
+  // adjacent distinct boundary verts apart, coarse enough to merge duplicate
+  // seam verts (drift << one edge). Try a small ladder and keep the result
+  // that finds the MOST boundary loops but is NOT the finest (finest leaves
+  // seams unwelded → false loops). We take the coarsest tol that still yields
+  // near-max loops.
+  const tols = [meanEdge * 0.1, meanEdge * 0.25, meanEdge * 0.45, meanEdge * 0.7];
+  let best = null, bestTol = tols[1];
+  for (const tol of tols) {
+    const r = detect(tol);
+    if (!best || r.loops.length > best.loops.length) { best = r; bestTol = tol; }
   }
+  const { loops, boundaryEdges, repOf } = best;
+  try {
+    console.log(`[fill-holes] indexed=${indexed} verts=${n} tris=${triCount} bbDiag=${bbDiag.toFixed(4)} meanEdge=${meanEdge.toExponential(2)} weldTol=${bestTol.toExponential(2)} boundaryEdges=${boundaryEdges} loops=${loops.length} (min=${minHoleSize} max=${maxHoleSize})`);
+  } catch (_) {}
   const greenFaces = [], green = [], grey = [], red = [];
   let filled = 0, tooBig = 0, tooSmall = 0;
   for (const loop of loops) {
@@ -8865,7 +8887,7 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
       greenFaces.push(arr[va * 3], arr[va * 3 + 1], arr[va * 3 + 2], arr[vb * 3], arr[vb * 3 + 1], arr[vb * 3 + 2], cx, cy, cz);
     }
   }
-  return { greenFaces, green, grey, red, stats: { loops: loops.length, filled, tooBig, tooSmall } };
+  return { greenFaces, green, grey, red, stats: { loops: loops.length, filled, tooBig, tooSmall, boundaryEdges, indexed } };
 }
 
 // Remove the Fill-holes preview overlays (green fills + coloured outlines).
@@ -8936,7 +8958,7 @@ function _mtBuildFillOverlays(vals) {
   _mtClearOverlays();
   const minE = Math.max(3, Number(vals.min_hole_size) || 3);
   const maxE = Math.max(minE, Number(vals.max_hole_size) || 2000);
-  let loops = 0, filled = 0, tooSmall = 0, tooBig = 0;
+  let loops = 0, filled = 0, tooSmall = 0, tooBig = 0, boundaryEdges = 0;
   const addLines = (mesh, verts, color, opacity) => {
     if (!verts.length) return;
     const g = new THREE.BufferGeometry();
@@ -8947,6 +8969,7 @@ function _mtBuildFillOverlays(vals) {
   for (const e of mtState.origGeoms) {
     const r = _jsHoleFillPreview(e.originalGeom, minE, maxE);
     loops += r.stats.loops; filled += r.stats.filled; tooSmall += r.stats.tooSmall; tooBig += r.stats.tooBig;
+    boundaryEdges += (r.stats.boundaryEdges || 0);
     if (r.greenFaces.length) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(r.greenFaces, 3));
@@ -8958,7 +8981,7 @@ function _mtBuildFillOverlays(vals) {
     addLines(e.mesh, r.grey, 0x888888, 0.6);
     addLines(e.mesh, r.red, 0xff4455, 0.9);
   }
-  return { loops, filled, tooSmall, tooBig };
+  return { loops, filled, tooSmall, tooBig, boundaryEdges };
 }
 
 const MESH_TOOL_SCHEMAS = {
@@ -9247,9 +9270,16 @@ function _mtRunPreview() {
     } else if (mtState.schema.overlayPreview) {
       const st = _mtBuildFillOverlays(vals);
       if (status) {
-        status.textContent = st.loops
-          ? `Trous : ${st.filled} à remplir (vert) · ${st.tooSmall} trop petits (gris) · ${st.tooBig} trop grands (rouge)`
-          : 'Aucun trou à bord simple détecté (mesh déjà fermé ou non-manifold).';
+        if (st.loops) {
+          status.textContent = `Trous : ${st.filled} à remplir (vert) · ${st.tooSmall} trop petits (gris) · ${st.tooBig} trop grands (rouge)`;
+        } else if ((st.boundaryEdges || 0) < 3) {
+          // No open boundary edges at all → the black speckles are NOT holes
+          // but reversed-normal / double-sided faces. Fill Holes can't help;
+          // Fix normals (or Watertight remesh) is the tool.
+          status.textContent = 'Aucun bord ouvert : les taches noires sont des faces à normale inversée (pas des trous). → Utilise « Fix normals » ou « Watertight ».';
+        } else {
+          status.textContent = `Bords ouverts détectés (${st.boundaryEdges} arêtes) mais 0 boucle fermée traçable — géométrie non-manifold. Essaie « Watertight ».`;
+        }
       }
     } else if (status) {
       status.textContent = fn

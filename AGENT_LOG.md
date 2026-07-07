@@ -1,5 +1,27 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (fix/diag — Fill Holes : détection robuste + auto-diagnostic + labels coupés)
+
+- **Labels Select Faces coupés** (« Cle », « Smootl ») : `.me-sel-panel .tool-btn`
+  passait `white-space:nowrap` → clip. Passé en `white-space:normal` +
+  wrap/line-height + padding réduit → les labels serrés (Invert/Clear/Smooth)
+  s'affichent en entier.
+- **Fill Holes toujours 0 vert** malgré le weld 1e-4 : refonte de
+  `_jsHoleFillPreview` pour (a) gérer les mesh NON-INDEXÉS (index séquentiel
+  construit — avant : court-circuit → 0 vert) ; (b) weld tolérance ADAPTATIVE
+  = fraction de la longueur d'arête MOYENNE échantillonnée (ladder 0.1→0.7×,
+  on garde le plus de boucles) au lieu d'un bbDiag*1e-4 fixe (knife-edge) ;
+  (c) compter les arêtes de bord (cnt===1) + `console.log` diagnostic
+  (indexed/verts/tris/bbDiag/meanEdge/weldTol/boundaryEdges/loops → renderer.log).
+- **Statut de preview explicite** : si 0 boucle ET < 3 arêtes de bord → message
+  « les taches noires sont des faces à normale INVERSÉE (pas des trous) →
+  Fix normals / Watertight » (hypothèse forte sur les meshes TRELLIS : les
+  speckles noirs = winding inversé, pas des trous ouverts). Si arêtes de bord
+  mais 0 boucle traçable → non-manifold → Watertight.
+- À FAIRE selon le diag : si la preview trouve des boucles, aligner
+  mesh_tools.py (Python fill) sur la même tolérance adaptative.
+  Desktop only. Ctrl+R suffit.
+
 ## 2026-07-07 (feat/ux — Select Faces : curseur crosshair wand/lasso + loupe + réorg panneau)
 
 - **Curseur** : wand/lasso n'utilisent plus le gros anneau de brush (curseur
