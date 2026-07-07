@@ -11069,6 +11069,9 @@ const meState = {
   grabScreen: null,      // {x,y} screen coords captured on pointerdown
   grabMesh: null,        // mesh object the grab stroke is acting on
   grabLastDelta: null,   // last applied local-space translation (THREE.Vector3)
+  selectErase: false,    // Select mode: brush removes instead of adds
+  selectWand: false,     // Select mode: click floods a connected flat region
+  wandAngle: 20,         // wand tolerance in degrees (normal vs seed face)
 };
 
 function openMeshEdit(mode) {
@@ -11093,9 +11096,13 @@ function openMeshEdit(mode) {
   document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
   // Default the Select sub-mode to Add each time the panel opens.
   meState.selectErase = false;
+  meState.selectWand = false;
   meState.viewMode = 'none';
   document.getElementById('me-sel-add')?.classList.add('tool-active');
   document.getElementById('me-sel-erase')?.classList.remove('tool-active');
+  document.getElementById('me-sel-wand')?.classList.remove('tool-active');
+  const _wandRow = document.getElementById('me-sel-wand-angle-row');
+  if (_wandRow) _wandRow.style.display = 'none';
   document.getElementById('me-sel-isolate')?.classList.remove('tool-active');
   document.getElementById('me-sel-hide')?.classList.remove('tool-active');
   _meUpdateSelButtons();
@@ -11384,6 +11391,13 @@ function _meMouseDown(e) {
     document.getElementById('me-paint-pick')?.classList.remove('tool-active');
     return;
   }
+  // Magic wand: a single click floods the connected flat region — not a
+  // brush stroke. Shift keeps the current selection (union of regions).
+  if (meState.mode === 'select' && meState.selectWand) {
+    _mePushUndo();
+    _meWandSelect(hit, e.shiftKey);
+    return;  // keep orbit controls enabled; a click won't rotate the camera
+  }
   meState.painting = true;
   _mePushUndo();
   meState.controls.enabled = false;
@@ -11587,6 +11601,82 @@ function _meBuildPosAdj(geom) {
   }
   geom._posGroups = groups;
   geom._posKeyByIndex = keyByIndex;
+}
+// Local face normal (unnormalized cross → normalized) for a triangle `f`.
+const _wandA = new THREE.Vector3(), _wandB = new THREE.Vector3(), _wandC = new THREE.Vector3(),
+      _wandAB = new THREE.Vector3(), _wandAC = new THREE.Vector3();
+function _meFaceNormal(pos, idx, f, out) {
+  const a = idx[f * 3], b = idx[f * 3 + 1], c = idx[f * 3 + 2];
+  _wandA.fromBufferAttribute(pos, a);
+  _wandB.fromBufferAttribute(pos, b);
+  _wandC.fromBufferAttribute(pos, c);
+  _wandAB.subVectors(_wandB, _wandA);
+  _wandAC.subVectors(_wandC, _wandA);
+  return out.crossVectors(_wandAB, _wandAC).normalize();
+}
+// Magic wand: from the clicked face, flood-fill across position-welded
+// adjacency and select every face whose normal stays within `wandAngle`
+// of the SEED face normal — i.e. the connected flat region (a floor, a
+// wall of a scan). Shift-click keeps the existing selection; plain click
+// starts fresh. Face adjacency is rebuilt each call (cheap, always correct
+// even after a Crop/Delete changed the index).
+function _meWandSelect(hit, additive) {
+  const obj = hit.object, geom = obj.geometry;
+  if (!geom.index || !geom.attributes.position) return;
+  const seedFace = hit.faceIndex;
+  if (seedFace == null) return;
+  _meBuildPosAdj(geom);
+  const pos = geom.attributes.position, idx = geom.index.array;
+  const keyOf = geom._posKeyByIndex, groups = geom._posGroups;
+  const nFaces = idx.length / 3;
+
+  // Face adjacency via shared welded positions (built fresh, not cached).
+  const facesByKey = new Map();
+  for (let f = 0; f < nFaces; f++) {
+    for (let j = 0; j < 3; j++) {
+      const k = keyOf[idx[f * 3 + j]];
+      let arr = facesByKey.get(k); if (!arr) { arr = []; facesByKey.set(k, arr); }
+      arr.push(f);
+    }
+  }
+
+  const seedN = _meFaceNormal(pos, idx, seedFace, new THREE.Vector3());
+  const nbN = new THREE.Vector3();
+  const tolCos = Math.cos(THREE.MathUtils.degToRad(meState.wandAngle || 20));
+  const visited = new Uint8Array(nFaces);
+  const stack = [seedFace];
+  const accepted = [];
+  visited[seedFace] = 1; accepted.push(seedFace);
+  while (stack.length) {
+    const f = stack.pop();
+    for (let j = 0; j < 3; j++) {
+      const neighbors = facesByKey.get(keyOf[idx[f * 3 + j]]);
+      if (!neighbors) continue;
+      for (const nb of neighbors) {
+        if (visited[nb]) continue;
+        visited[nb] = 1;  // mark once; a rejected face bounds the region
+        _meFaceNormal(pos, idx, nb, nbN);
+        if (seedN.dot(nbN) >= tolCos) { stack.push(nb); accepted.push(nb); }
+      }
+    }
+  }
+
+  const color = _meEnsureColor(obj);
+  const sel = _meSelMap(geom);
+  if (!additive) {
+    // Fresh selection: restore paint under the old one first.
+    for (const [i, o] of sel) color.setXYZ(i, o[0], o[1], o[2]);
+    sel.clear();
+  }
+  const addKeys = new Set();
+  for (const f of accepted) {
+    addKeys.add(keyOf[idx[f * 3]]); addKeys.add(keyOf[idx[f * 3 + 1]]); addKeys.add(keyOf[idx[f * 3 + 2]]);
+  }
+  for (const k of addKeys) for (const v of groups.get(k)) {
+    if (!sel.has(v)) { sel.set(v, [color.getX(v), color.getY(v), color.getZ(v)]); color.setXYZ(v, 0, 1, 1); }
+  }
+  color.needsUpdate = true;
+  _meUpdateSelButtons();
 }
 // Enable selection-dependent buttons only when something is selected.
 function _meUpdateSelButtons() {
@@ -11854,15 +11944,26 @@ document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
   meState.color = e.target.value;
 });
 // Select sub-mode: paint to Add (cyan) vs Erase (back to unselected base).
-document.getElementById('me-sel-add')?.addEventListener('click', () => {
-  meState.selectErase = false;
-  document.getElementById('me-sel-add')?.classList.add('tool-active');
-  document.getElementById('me-sel-erase')?.classList.remove('tool-active');
-});
-document.getElementById('me-sel-erase')?.addEventListener('click', () => {
-  meState.selectErase = true;
-  document.getElementById('me-sel-erase')?.classList.add('tool-active');
-  document.getElementById('me-sel-add')?.classList.remove('tool-active');
+function _meSetSelTool(tool) {
+  // tool: 'add' | 'erase' | 'wand' — mutually exclusive.
+  meState.selectErase = (tool === 'erase');
+  meState.selectWand = (tool === 'wand');
+  document.getElementById('me-sel-add')?.classList.toggle('tool-active', tool === 'add');
+  document.getElementById('me-sel-erase')?.classList.toggle('tool-active', tool === 'erase');
+  document.getElementById('me-sel-wand')?.classList.toggle('tool-active', tool === 'wand');
+  const angleRow = document.getElementById('me-sel-wand-angle-row');
+  if (angleRow) angleRow.style.display = (tool === 'wand') ? 'flex' : 'none';
+  // Wand does single-click region selects → free the orbit brush cursor.
+  const cursor = document.getElementById('me-brush-cursor');
+  if (cursor && tool === 'wand') cursor.style.display = 'none';
+}
+document.getElementById('me-sel-add')?.addEventListener('click', () => _meSetSelTool('add'));
+document.getElementById('me-sel-erase')?.addEventListener('click', () => _meSetSelTool('erase'));
+document.getElementById('me-sel-wand')?.addEventListener('click', () => _meSetSelTool('wand'));
+document.getElementById('me-sel-wand-angle')?.addEventListener('input', (e) => {
+  meState.wandAngle = parseInt(e.target.value) || 20;
+  const v = document.getElementById('me-sel-wand-angle-val');
+  if (v) v.textContent = meState.wandAngle + '°';
 });
 // Select actions
 document.getElementById('me-sel-delete')?.addEventListener('click', () => {

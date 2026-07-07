@@ -1,5 +1,28 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat — baguette magique dans Select Faces, éditeur mesh 3D)
+
+- Nouvel outil « Wand (select region) » dans le mode Select Faces de l'éditeur
+  mesh (demande user, ex. isoler le sol/un mur d'un scan) : clic sur une face
+  → flood-fill de toute la région PLANE connexe (faces dont la normale reste
+  dans un angle donné de la face-graine). Shift-clic = union avec la sélection
+  existante ; clic simple = nouvelle sélection.
+- `_meWandSelect(hit, additive)` + `_meFaceNormal()` dans index2.js :
+  adjacence de faces via positions soudées (réutilise `_meBuildPosAdj`),
+  reconstruite à chaque clic (pas de cache → toujours correcte après
+  Crop/Delete). Sélection = mêmes vertices cyan + `_meSelMap` que Add/Grow,
+  donc Grow/Shrink/Crop/Delete/Isolate marchent dessus.
+- UI : bouton `me-sel-wand` + slider d'angle `me-sel-wand-angle` (1-80°,
+  défaut 20°, visible seulement en mode wand). `_meSetSelTool('add'|'erase'|
+  'wand')` rend Add/Erase/Wand mutuellement exclusifs. Hook dans `_meMouseDown`
+  (clic simple, pas de brush stroke, orbit conservé). Reset sur wand=off à
+  l'ouverture du modal.
+- DESKTOP ONLY : l'éditeur mesh select du cloud est une variante ancienne
+  réduite (surbrillance orange, sans `_selSaved`/`_meSelMap`/Add-Erase) —
+  y porter la wand impose d'abord de reconcilier tout le modèle de sélection
+  moderne (chantier de parité séparé, déjà noté dans l'audit). Non fait ici.
+- RESTART Electron requis (index2.js renderer → Ctrl+R suffit en fait).
+
 ## 2026-07-07 (feat — nouvel outil manuel « Cut/Paste » : sélection rectangle + couper/coller)
 
 - Nouvel outil manuel d'édition image (demande user) : sélectionner une zone

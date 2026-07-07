@@ -2852,11 +2852,17 @@
           <!-- Select options -->
           <div id="me-select-opts" style="display:none; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Selection</span>
-            <span style="font-size:9px; color:var(--text-muted);">Paint to add faces, erase to remove:</span>
+            <span style="font-size:9px; color:var(--text-muted);">Paint to add faces, erase to remove — or Wand-click a flat region:</span>
             <div style="display:flex; gap:5px;">
               <button id="me-sel-add" class="secondary-btn tool-btn tool-active" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#9998; Add</button>
               <button id="me-sel-erase" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#129529; Erase</button>
             </div>
+            <button id="me-sel-wand" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%; white-space:nowrap;" title="Magic wand: click a face to select the connected flat region (within the angle below). Shift-click adds to the current selection.">&#10024; Wand (select region)</button>
+            <label id="me-sel-wand-angle-row" style="display:none; align-items:center; gap:6px; font-size:10px; color:var(--text-muted); padding:1px 2px;">
+              <span style="white-space:nowrap;">Angle</span>
+              <input type="range" id="me-sel-wand-angle" min="1" max="80" value="20" style="flex:1; min-width:50px;" />
+              <span id="me-sel-wand-angle-val" style="min-width:26px; text-align:right;">20&deg;</span>
+            </label>
             <div style="display:flex; gap:5px;">
               <button id="me-sel-grow" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#10133; Grow</button>
               <button id="me-sel-shrink" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#10134; Shrink</button>
