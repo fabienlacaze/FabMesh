@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-07-07 (feat — outil Lasso dans Select Faces)
+
+- Outil « Lasso (draw region) » dans le mode Select Faces : tracé libre d'un
+  polygone à l'écran → sélectionne tout vertex dont la projection tombe dedans
+  (sélection à travers le mesh). Ctrl/Cmd/Shift = ajoute à la sélection.
+- Overlay 2D `#me-lasso-canvas` dans `#me-viewport` (dashed cyan). Hooks dans
+  `_meMouseDown`/`_meMouseMove`/`_meMouseUp` (+ fallback window mouseup si
+  relâché hors canvas). `_meLassoSelect` projette chaque vertex
+  (matrixWorld → project(cam) → pixels CSS) + point-in-polygon ray-casting.
+  Intégré à `_meSetSelTool` (add/erase/wand/lasso mutuellement exclusifs).
+  Desktop only (même raison que la wand : éditeur mesh cloud réduit).
+
 ## 2026-07-07 (feat — baguette magique dans Select Faces, éditeur mesh 3D)
 
 - Nouvel outil « Wand (select region) » dans le mode Select Faces de l'éditeur

@@ -11085,6 +11085,10 @@ const meState = {
   selectErase: false,    // Select mode: brush removes instead of adds
   selectWand: false,     // Select mode: click floods a connected flat region
   wandAngle: 20,         // wand tolerance in degrees (normal vs seed face)
+  selectLasso: false,    // Select mode: draw a freehand screen polygon
+  lassoing: false,       // a lasso stroke is in progress
+  lassoPts: [],          // lasso path in canvas-pixel coords
+  lassoAdditive: false,  // stroke started with Ctrl/Shift → union
 };
 
 function openMeshEdit(mode) {
@@ -11110,10 +11114,13 @@ function openMeshEdit(mode) {
   // Default the Select sub-mode to Add each time the panel opens.
   meState.selectErase = false;
   meState.selectWand = false;
+  meState.selectLasso = false;
+  meState.lassoing = false;
   meState.viewMode = 'none';
   document.getElementById('me-sel-add')?.classList.add('tool-active');
   document.getElementById('me-sel-erase')?.classList.remove('tool-active');
   document.getElementById('me-sel-wand')?.classList.remove('tool-active');
+  document.getElementById('me-sel-lasso')?.classList.remove('tool-active');
   const _wandRow = document.getElementById('me-sel-wand-angle-row');
   if (_wandRow) _wandRow.style.display = 'none';
   document.getElementById('me-sel-isolate')?.classList.remove('tool-active');
@@ -11206,6 +11213,8 @@ async function _meInitViewport() {
   canvas.addEventListener('mousedown', _meMouseDown);
   canvas.addEventListener('mousemove', _meMouseMove);
   canvas.addEventListener('mouseup', _meMouseUp);
+  // Finish a lasso even if the button is released OUTSIDE the canvas.
+  window.addEventListener('mouseup', () => { if (meState.lassoing) _meLassoFinish(); });
 }
 
 function _meLoadMesh(meshPath) {
@@ -11387,6 +11396,12 @@ function _meMouseDown(e) {
     if (meState.controls) meState.controls.enabled = false;
     return;
   }
+  // Lasso: start a freehand stroke even if the first click misses the mesh
+  // (so you can loop around the object from empty space).
+  if (meState.mode === 'select' && meState.selectLasso) {
+    _meLassoStart(e);
+    return;
+  }
   const hit = _meGetIntersection(e);
   if (!hit) return;
   // Eyedropper: sample the colour under the cursor instead of painting.
@@ -11430,6 +11445,8 @@ function _meMouseDown(e) {
 
 let _meLastBrushTime = 0;
 function _meMouseMove(e) {
+  // Lasso stroke in progress: append points, don't touch brush/orbit.
+  if (meState.lassoing) { _meLassoMove(e); return; }
   // Dragging a symmetry-plane gizmo handle takes priority over the brush.
   if (meState.draggingPlane) { _meDragPlaneAxis(e); return; }
   // Always update cursor position (cheap, no raycasting)
@@ -11469,6 +11486,7 @@ function _meMouseMove(e) {
 }
 
 function _meMouseUp() {
+  if (meState.lassoing) { _meLassoFinish(); return; }
   if (meState.draggingPlane) {
     meState.draggingPlane = null;
     if (meState.controls) meState.controls.enabled = true;
@@ -11690,6 +11708,89 @@ function _meWandSelect(hit, additive) {
     if (!sel.has(v)) { sel.set(v, [color.getX(v), color.getY(v), color.getZ(v)]); color.setXYZ(v, 0, 1, 1); }
   }
   color.needsUpdate = true;
+  _meUpdateSelButtons();
+}
+// --- Lasso: freehand screen polygon → select every vertex whose projection
+// falls inside it (selects through the mesh). Ctrl/Shift adds to the current
+// selection. Points are kept in canvas-pixel space (same as the projection). ---
+function _meCanvasPt(e) {
+  const rect = meState.renderer.domElement.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+function _meLassoDraw() {
+  const cv = document.getElementById('me-lasso-canvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const p = meState.lassoPts;
+  if (p.length < 2) return;
+  ctx.save();
+  ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = '#22d3ee';
+  ctx.beginPath();
+  ctx.moveTo(p[0].x, p[0].y);
+  for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+  ctx.lineTo(p[0].x, p[0].y);   // hint the closing edge
+  ctx.stroke();
+  ctx.restore();
+}
+function _meLassoStart(e) {
+  meState.lassoing = true;
+  meState.lassoAdditive = e.ctrlKey || e.metaKey || e.shiftKey;
+  meState.lassoPts = [_meCanvasPt(e)];
+  if (meState.controls) meState.controls.enabled = false;
+  const cv = document.getElementById('me-lasso-canvas');
+  const src = meState.renderer.domElement;
+  if (cv) { cv.width = src.clientWidth; cv.height = src.clientHeight; cv.style.display = 'block'; }
+  _meLassoDraw();
+}
+function _meLassoMove(e) {
+  const pt = _meCanvasPt(e);
+  const last = meState.lassoPts[meState.lassoPts.length - 1];
+  if (last && Math.abs(pt.x - last.x) < 2 && Math.abs(pt.y - last.y) < 2) return;  // decimate
+  meState.lassoPts.push(pt);
+  _meLassoDraw();
+}
+function _meLassoFinish() {
+  if (!meState.lassoing) return;
+  meState.lassoing = false;
+  if (meState.controls) meState.controls.enabled = true;
+  const cv = document.getElementById('me-lasso-canvas');
+  if (cv) { cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); cv.style.display = 'none'; }
+  const poly = meState.lassoPts;
+  meState.lassoPts = [];
+  if (poly.length >= 3) { _mePushUndo(); _meLassoSelect(poly, meState.lassoAdditive); }
+}
+function _mePointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+const _lassoV = new THREE.Vector3();
+function _meLassoSelect(poly, additive) {
+  const cam = meState.camera, dom = meState.renderer.domElement;
+  const W = dom.clientWidth, H = dom.clientHeight;
+  meState.mesh?.traverse(obj => {
+    if (!obj.isMesh || !obj.geometry?.attributes?.position) return;
+    const geom = obj.geometry, pos = geom.attributes.position;
+    const color = _meEnsureColor(obj), sel = _meSelMap(geom);
+    if (!additive) { for (const [i, o] of sel) color.setXYZ(i, o[0], o[1], o[2]); sel.clear(); }
+    obj.updateWorldMatrix(true, false);
+    const mat = obj.matrixWorld;
+    for (let i = 0; i < pos.count; i++) {
+      _lassoV.fromBufferAttribute(pos, i).applyMatrix4(mat).project(cam);
+      if (_lassoV.z < -1 || _lassoV.z > 1) continue;   // behind camera / clipped
+      const sx = (_lassoV.x * 0.5 + 0.5) * W, sy = (-_lassoV.y * 0.5 + 0.5) * H;
+      if (_mePointInPoly(sx, sy, poly) && !sel.has(i)) {
+        sel.set(i, [color.getX(i), color.getY(i), color.getZ(i)]);
+        color.setXYZ(i, 0, 1, 1);
+      }
+    }
+    color.needsUpdate = true;
+  });
   _meUpdateSelButtons();
 }
 // Enable selection-dependent buttons only when something is selected.
@@ -11959,21 +12060,24 @@ document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
 });
 // Select sub-mode: paint to Add (cyan) vs Erase (back to unselected base).
 function _meSetSelTool(tool) {
-  // tool: 'add' | 'erase' | 'wand' — mutually exclusive.
+  // tool: 'add' | 'erase' | 'wand' | 'lasso' — mutually exclusive.
   meState.selectErase = (tool === 'erase');
   meState.selectWand = (tool === 'wand');
+  meState.selectLasso = (tool === 'lasso');
   document.getElementById('me-sel-add')?.classList.toggle('tool-active', tool === 'add');
   document.getElementById('me-sel-erase')?.classList.toggle('tool-active', tool === 'erase');
   document.getElementById('me-sel-wand')?.classList.toggle('tool-active', tool === 'wand');
+  document.getElementById('me-sel-lasso')?.classList.toggle('tool-active', tool === 'lasso');
   const angleRow = document.getElementById('me-sel-wand-angle-row');
   if (angleRow) angleRow.style.display = (tool === 'wand') ? 'flex' : 'none';
-  // Wand does single-click region selects → free the orbit brush cursor.
+  // Wand/Lasso don't use the round brush → hide its cursor.
   const cursor = document.getElementById('me-brush-cursor');
-  if (cursor && tool === 'wand') cursor.style.display = 'none';
+  if (cursor && (tool === 'wand' || tool === 'lasso')) cursor.style.display = 'none';
 }
 document.getElementById('me-sel-add')?.addEventListener('click', () => _meSetSelTool('add'));
 document.getElementById('me-sel-erase')?.addEventListener('click', () => _meSetSelTool('erase'));
 document.getElementById('me-sel-wand')?.addEventListener('click', () => _meSetSelTool('wand'));
+document.getElementById('me-sel-lasso')?.addEventListener('click', () => _meSetSelTool('lasso'));
 document.getElementById('me-sel-wand-angle')?.addEventListener('input', (e) => {
   meState.wandAngle = parseInt(e.target.value) || 20;
   const v = document.getElementById('me-sel-wand-angle-val');

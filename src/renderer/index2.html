@@ -2858,6 +2858,7 @@
               <button id="me-sel-erase" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#129529; Erase</button>
             </div>
             <button id="me-sel-wand" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%; white-space:nowrap;" title="Magic wand: click a face to select the connected flat region (within the angle below). Hold Ctrl to ADD the region to the current selection. Press Delete to remove the selection.">&#10024; Wand (select region)</button>
+            <button id="me-sel-lasso" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%; white-space:nowrap;" title="Lasso: draw a freehand loop to select every face inside it. Hold Ctrl to ADD to the current selection.">&#10057; Lasso (draw region)</button>
             <label id="me-sel-wand-angle-row" style="display:none; align-items:center; gap:6px; font-size:10px; color:var(--text-muted); padding:1px 2px;">
               <span style="white-space:nowrap;">Angle</span>
               <input type="range" id="me-sel-wand-angle" min="1" max="80" value="20" style="flex:1; min-width:50px;" />
@@ -2898,6 +2899,7 @@
         <!-- Right: 3D viewport -->
         <div id="me-viewport" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
           <canvas id="me-canvas" style="width:100%; height:100%; display:block;"></canvas>
+          <canvas id="me-lasso-canvas" style="position:absolute; left:0; top:0; width:100%; height:100%; display:none; pointer-events:none; z-index:900;"></canvas>
           <div id="me-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid rgba(255,200,50,0.8); border-radius:50%; display:none; z-index:1000;"></div>
         </div>
       </div>
