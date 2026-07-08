@@ -6589,9 +6589,16 @@ ipcMain.handle('mesh-segment', async (_event, { meshPath, scale }) => {
     }
     const ckpt = path.join(segRepo, 'ckpts', 'ptv3-object.pth');
     if (!fs.existsSync(ckpt)) return { success: false, error: 'SAMPart3D checkpoint (ptv3-object.pth) missing — re-run the setup step.' };
-    const blender = String((loadConfig().blenderPath || '')).trim();
+    // Blender 4.0/4.1 REQUIS : blender_render_16views.py hardcode le moteur
+    // BLENDER_EEVEE, RETIRÉ dans Blender 4.2 (renommé EEVEE-Next). Le Blender
+    // du user (config.blenderPath) est souvent 4.2+ → casserait le rendu. On
+    // utilise donc le Blender 4.0 provisionné par le wizard sous <repo>/blender.
+    const bundledBlender = path.join(segRepo, 'blender', 'blender.exe');
+    const blender = fs.existsSync(bundledBlender)
+      ? bundledBlender
+      : String((loadConfig().blenderPath || '')).trim();
     if (!blender || !fs.existsSync(blender)) {
-      return { success: false, error: 'Blender path not set — configure Blender (≥4.0) in Settings; it is required for part segmentation (16-view render).' };
+      return { success: false, error: 'Blender 4.0 not installed for part segmentation (its render script needs the EEVEE engine removed in Blender 4.2+). Re-run the "Part segmentation (SAMPart3D)" setup step to install it.' };
     }
     const bridge = path.join(SCRIPTS_DIR, 'sampart3d_bridge.py');
     if (!fs.existsSync(bridge)) return { success: false, error: 'sampart3d_bridge.py not found' };

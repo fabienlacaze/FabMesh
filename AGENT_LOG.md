@@ -1,5 +1,29 @@
 # FabMesh Agent Log
 
+## 2026-07-08 (recherche build sm_120 + patchs tcnn/Blender + Modal simplifié)
+
+Recherche « recette build SAMPart3D sm_120 local » (agent, 40 outils, sources
+vérifiées). **Verdict : FAISABLE, un seul point dur = spconv.**
+- **pointops** : compile OK sm_120 (`TORCH_CUDA_ARCH_LIST="8.9;12.0"`), kernels
+  simples. Windows : torch pip (pas conda), VS Build Tools MSVC + CUDA 12.8.
+- **tiny-cuda-nn** : fragile Windows/cu128 MAIS SAMPart3D ne l'utilise que
+  comme 2 MLP denses (CutlassMLP 384, 6/4 couches, PAS de hashgrid) →
+  **REMPLACÉ par un shim pur-torch** dans `_patch_sampart3d.py`. Élimine la
+  compile tcnn (Modal ET local). tiny-cuda-nn retiré de l'image Modal.
+- **spconv** : REQUIS à l'inférence (PTv3 CPE+stem SubMConv3d). 🔴 pas de wheel
+  Windows natif sm_120. Solutions : WSL2 + wheels prébuilt (RayYoh/Pointcept
+  forks cp312 torch2.7+cu128) OU build source Windows (Pointcept/cumm +
+  Pointcept/spconv, `CUMM_CUDA_ARCH_LIST=12.0 CUMM_DISABLE_JIT=1`, fragile).
+  Modal N'est PAS concerné (A100 sm_80 + spconv-cu120 OK).
+- **flash-attn** : `enable_flash=False` (déjà patché).
+- **torch-scatter** : wheels cu128 (data.pyg.org). **cuml/cudf** → sklearn.
+- **Blender** : DOIT être 4.0/4.1 — `blender_render_16views.py` hardcode
+  `BLENDER_EEVEE`, RETIRÉ en 4.2. → le wizard doit BUNDLER Blender 4.0, et le
+  handler main.js utilise `<repo>/blender/blender.exe` (pas config.blenderPath
+  du user, souvent 4.2+). Corrigé.
+- Résidu : instabilité spconv-Blackwell documentée sur PTv3 (« can't find
+  suitable algorithm » / crashes kernel intermittents) — risque, pas mur.
+
 ## 2026-07-08 (feat — SAMPart3D DESKTOP LOCAL : bridge + IPC + UI, câblage complet)
 
 Suite au choix user (SAMPart3D doit tourner en LOCAL sur RTX 5080, pas

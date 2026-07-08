@@ -1,6 +1,6 @@
 """Patches build-time du repo SAMPart3D pour l'image Modal (_sampart3d.py).
 
-Deux allègements validés par la recherche pipeline 2026-07-07 :
+Trois allègements validés par la recherche (2026-07-07 / 2026-07-08) :
 
   1. flash-attn → OFF : PTv3 tourne avec `enable_flash=False`. On évite ainsi
      de compiler flash-attn (enfer notoire) — le config upstream le met à True.
@@ -9,6 +9,12 @@ Deux allègements validés par la recherche pipeline 2026-07-07 :
      tourne sur ~15k points, le CPU suffit largement, et on retire tout le
      stack RAPIDS glibc/CUDA-pointilleux de l'image. Upstream a d'ailleurs
      la ligne sklearn en commentaire juste à côté de l'import cuml.
+
+  3. tiny-cuda-nn → MLP pur-torch : SAMPart3D n'utilise tcnn QUE comme deux
+     MLP denses (CutlassMLP 384 neurones, ReLU — PAS de hashgrid/encoding).
+     On remplace `import tinycudann as tcnn` par un shim pur-torch : les
+     appels `tcnn.Network(...)` marchent inchangés, et on élimine toute
+     compilation tiny-cuda-nn (fragile sur Blackwell sm_120 et Windows).
 
 Le script marche par balayage du repo (on ne présume pas des chemins exacts)
 et LOG chaque modification. Il n'échoue jamais le build s'il ne trouve rien
@@ -19,6 +25,13 @@ Usage: python _patch_sampart3d.py /SAMPart3D
 import os
 import re
 import sys
+
+# Console Windows en cp1252 par défaut → force UTF-8 pour les logs (le wizard
+# peut appeler ce script sans PYTHONUTF8/PYTHONIOENCODING).
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 
 def _iter_py(root):
@@ -31,12 +44,43 @@ def _iter_py(root):
                 yield os.path.join(dirpath, fn)
 
 
+# Shim pur-torch injecté à la place de `import tinycudann as tcnn`.
+# `tcnn.Network(n_input_dims, n_output_dims, network_config={...})` construit
+# un MLP dense équivalent (n_neurons de large, n_hidden_layers couches, ReLU,
+# sortie linéaire) — identique à ce que fait le CutlassMLP tcnn dans SAMPart3D.
+_TCNN_SHIM = '''# import tinycudann as tcnn  # FabMesh: remplacé par un MLP pur-torch (sm_120, pas de build tcnn)
+import torch.nn as _fab_nn
+
+
+class _FabTcnn:
+    class Network(_fab_nn.Module):
+        """Remplacement pur-torch du CutlassMLP tcnn (MLP dense uniquement)."""
+        def __init__(self, n_input_dims, n_output_dims, network_config=None, **_kw):
+            super().__init__()
+            cfg = network_config or {}
+            w = int(cfg.get("n_neurons", 128))
+            h = int(cfg.get("n_hidden_layers", 2))
+            layers = [_fab_nn.Linear(n_input_dims, w), _fab_nn.ReLU()]
+            for _ in range(max(0, h - 1)):
+                layers += [_fab_nn.Linear(w, w), _fab_nn.ReLU()]
+            layers.append(_fab_nn.Linear(w, n_output_dims))
+            self.net = _fab_nn.Sequential(*layers)
+
+        def forward(self, x):
+            return self.net(x.float())
+
+
+tcnn = _FabTcnn'''
+
+
 def patch_repo(root):
     n_flash = 0
     n_hdbscan = 0
+    n_tcnn = 0
 
     # Patterns de remplacement (regex, remplacement).
     flash_pat = re.compile(r"enable_flash\s*=\s*True")
+    tcnn_pat = re.compile(r"^import\s+tinycudann\s+as\s+tcnn\s*$", re.MULTILINE)
     # cuml → sklearn : plusieurs formes d'import possibles.
     cuml_imports = [
         re.compile(r"from\s+cuml\.cluster\.hdbscan\s+import\s+HDBSCAN"),
@@ -62,6 +106,10 @@ def patch_repo(root):
             src, c = pat.subn(sklearn_import, src)
             n_hdbscan += c
 
+        # 3. import tinycudann as tcnn → shim pur-torch
+        src, c = tcnn_pat.subn(lambda _m: _TCNN_SHIM, src)
+        n_tcnn += c
+
         # 2b. si une ligne `import cuml` isolée traîne pour HDBSCAN,
         #     on la neutralise (best-effort, ne casse rien si absente).
         src = re.sub(
@@ -78,7 +126,7 @@ def patch_repo(root):
 
     print(
         f"[patch] enable_flash=False x{n_flash}, "
-        f"cuml→sklearn HDBSCAN x{n_hdbscan}",
+        f"cuml->sklearn HDBSCAN x{n_hdbscan}, tcnn->pytorch x{n_tcnn}",
         flush=True,
     )
     if n_flash == 0:
@@ -88,6 +136,10 @@ def patch_repo(root):
     if n_hdbscan == 0:
         print("[patch] WARN: aucun import cuml HDBSCAN trouvé "
               "(DEPLOY-VERIFY: eval.py utilise peut-être un autre import)",
+              flush=True)
+    if n_tcnn == 0:
+        print("[patch] WARN: aucun 'import tinycudann as tcnn' trouvé "
+              "(DEPLOY-VERIFY: SAMPart3D.py utilise peut-être un autre import)",
               flush=True)
 
 

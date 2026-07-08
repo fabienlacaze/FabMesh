@@ -142,16 +142,12 @@ image = (
         # sm_80 (A100) + sm_89 (A10G/L4) + sm_90 (H100) — l'éventail Modal
         # compatible cu121. PAS de 120 (torch 2.1 ne l'a pas de toute façon).
         "TORCH_CUDA_ARCH_LIST": "8.0;8.6;8.9;9.0+PTX",
-        "TCNN_CUDA_ARCHITECTURES": "80;86;89;90",
         "FORCE_CUDA": "1",
         "HF_HOME": "/root/.cache/huggingface",
     })
-    # ---- tiny-cuda-nn (encodage positionnel du grouping-field MLP) ----
-    # Compile depuis git NVlabs contre notre torch + nvcc. ~5-10 min.
-    .run_commands(
-        "pip install --no-build-isolation "
-        "'git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch'",
-    )
+    # NB : tiny-cuda-nn n'est PAS installé — `_patch_sampart3d.py` remplace
+    # `import tinycudann as tcnn` par un MLP pur-torch équivalent (SAMPart3D
+    # ne s'en sert que comme 2 MLP denses). Évite une compile fragile.
     # ---- Blender 4.0.0 (binaire headless pour le rendu 16 vues) ----
     .run_commands(
         f"wget -q -O /tmp/blender.tar.xz {BLENDER_URL}",
