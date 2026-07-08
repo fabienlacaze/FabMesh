@@ -14,9 +14,9 @@ CONTRAT CLI (appelé par main.js `ipcMain.handle('mesh-segment')`) :
 ENVIRONNEMENT (posé par le wizard d'install / main.js) :
   - FABMESH_SAMPART3D_DIR   : racine du repo SAMPart3D cloné localement
   - FABMESH_SAMPART3D_CKPT  : chemin de ptv3-object.pth (défaut <repo>/ckpts/…)
-  - FABMESH_BLENDER         : exécutable Blender (≥4.0) pour le rendu 16 vues
   - (le python courant = env dédié SAMPart3D : torch cu128 sm_120 + pointops
-    + tiny-cuda-nn + trimesh + transformers, provisionné par le wizard)
+    + spconv-cu126 + torch_scatter + trimesh + embreex + transformers,
+    provisionné par le wizard — AUCUN Blender requis, rendu pur-Python)
 
 Différence clé avec la version Modal : au lieu de `sh scripts/train.sh`,
 on appelle DIRECTEMENT `python launch/train.py` / `python launch/eval.py`
@@ -35,9 +35,17 @@ import sys
 import time
 import traceback
 
+# Windows : forcer UTF-8 pour éviter les UnicodeEncodeError (cp1252) en
+# relayant la sortie des sous-process.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 DATASET = "sampart3d"
 CONFIG_NAME = "sampart3d-trainmlp-render16views"
-WEIGHT = "5000"                      # itération finale de l'optim MLP
+WEIGHT = "last"                      # train.py écrit results/last/ (self.cfg.weight -> "last")
 
 # Palette de couleurs distinctes (RGB 0-255) — une par partie (cyclée).
 _PART_PALETTE = [
@@ -69,15 +77,6 @@ def _ckpt(repo):
     return c
 
 
-def _blender():
-    b = os.environ.get("FABMESH_BLENDER")
-    if not b or not os.path.isfile(b):
-        raise RuntimeError(
-            "FABMESH_BLENDER non défini ou introuvable — Blender (≥4.0) "
-            "est requis pour le rendu 16 vues.")
-    return b
-
-
 def _run(cmd, cwd, env=None, label=""):
     log(f"{label}: {' '.join(str(c) for c in cmd)}")
     proc = subprocess.Popen(
@@ -98,6 +97,21 @@ def _safe_listdir(p):
         return os.listdir(p)
     except Exception:
         return []
+
+
+def _py_launch(repo, script_rel, extra_args):
+    """Commande pour lancer un script du repo avec `repo` injecté dans
+    sys.path. Le Python embeddable ignore PYTHONPATH (à cause du ._pth) ;
+    on passe donc par un bootstrap runpy qui insère le repo explicitement
+    (indépendant du layout des dossiers)."""
+    script_abs = os.path.join(repo, script_rel).replace("\\", "/")
+    boot = (
+        "import sys, runpy; "
+        f"sys.path.insert(0, r'{repo}'); "
+        f"sys.argv = [r'{script_abs}'] + {list(extra_args)!r}; "
+        f"runpy.run_path(r'{script_abs}', run_name='__main__')"
+    )
+    return [sys.executable, "-c", boot]
 
 
 def _patch_config(repo, mesh_root, render_root, ckpt):
@@ -124,20 +138,6 @@ def _patch_config(repo, mesh_root, render_root, ckpt):
             log(f"WARN config: clé '{key}' introuvable")
     with open(cfg, "w", encoding="utf-8") as f:
         f.write(src)
-
-
-def _render_blender(blender, script, mesh_glb, out_dir):
-    """blender -b -P blender_render_16views.py <MESH> glb <OUT> (sans '--')."""
-    os.makedirs(out_dir, exist_ok=True)
-    tools_dir = os.path.dirname(script)
-    cmd = [blender, "-b", "-P", script, mesh_glb, "glb", out_dir]
-    rc = _run(cmd, cwd=tools_dir, label="blender")
-    produced = any(fn.startswith("render_") for fn in _safe_listdir(out_dir))
-    if rc != 0 or not produced:
-        log("blender: retry avec séparateur '--'")
-        cmd = [blender, "-b", "-P", script, "--", mesh_glb, "glb", out_dir]
-        rc = _run(cmd, cwd=tools_dir, label="blender(--)")
-    return rc
 
 
 def _pick_nearest_labels(exp_root, exp_name, weight, scale):
@@ -231,8 +231,7 @@ def main():
     t_total = time.time()
     repo = _repo()
     ckpt = _ckpt(repo)
-    blender = _blender()
-    render_script = os.path.join(repo, "tools", "blender_render_16views.py")
+    render_script = os.path.join(repo, "tools", "render_16views_local.py")
 
     # oid unique (évite les collisions dans exp/ entre 2 runs).
     import uuid
@@ -256,54 +255,48 @@ def main():
     env = dict(os.environ)
     env["PYTHONPATH"] = repo + os.pathsep + env.get("PYTHONPATH", "")
     env.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    env["PYTHONIOENCODING"] = "utf-8"   # sous-process en UTF-8 (Windows cp1252)
 
     try:
         # ── 0. patch config chemins ──
         _patch_config(repo, mesh_root, render_root, ckpt)
 
-        # ── 1. rendu Blender 16 vues ──
-        log("== Étape 1/4 : rendu Blender 16 vues ==")
+        # ── 1. rendu 16 vues (pur-Python, ray-cast — plus de Blender) ──
+        log("== Étape 1/4 : rendu 16 vues (ray-cast, sans Blender) ==")
         t0 = time.time()
-        rc = _render_blender(blender, render_script, mesh_glb,
-                             os.path.join(render_root, oid))
-        n_views = sum(1 for fn in _safe_listdir(os.path.join(render_root, oid))
+        render_out = os.path.join(render_root, oid)
+        rc = _run(
+            [sys.executable, render_script, mesh_glb, render_out],
+            cwd=repo, env=env, label="render",
+        )
+        n_views = sum(1 for fn in _safe_listdir(render_out)
                       if fn.startswith("render_"))
-        if n_views == 0:
-            raise RuntimeError(f"rendu Blender: 0 vue produite (rc={rc})")
+        if rc != 0 or n_views == 0:
+            raise RuntimeError(f"rendu 16 vues: {n_views} vue(s) produite(s) (rc={rc})")
         log(f"étape 1 ok en {time.time()-t0:.1f}s ({n_views} vues)")
 
         cfg_file = os.path.join(repo, "configs", DATASET, f"{CONFIG_NAME}.py")
         save_path = f"exp/{DATASET}/{oid}"
 
-        # ── 2. optim MLP (launch/train.py, ~5 min) ──
-        log("== Étape 2/4 : optim grouping-field MLP (~5 min) ==")
+        # ── 2. optim MLP + eval interne (launch/train.py) ──
+        # train.py entraîne PUIS lance self.eval() au dernier epoch (HDBSCAN +
+        # vote par-face) et écrit results/last/mesh_{scale}.npy avec le modèle
+        # en mémoire — pas besoin d'un eval.py séparé (qui rechargerait un poids).
+        log("== Étape 2/3 : optim grouping-field MLP + eval ==")
         t0 = time.time()
         rc = _run(
-            [sys.executable, os.path.join("launch", "train.py"),
-             "--config-file", cfg_file, "--num-gpus", "1",
-             "--options", f"save_path={save_path}", f"oid={oid}", "label="],
+            _py_launch(repo, os.path.join("launch", "train.py"),
+                       ["--config-file", cfg_file, "--num-gpus", "1",
+                        "--options", f"save_path={save_path}",
+                        f"oid={oid}", "label="]),
             cwd=repo, env=env, label="train",
         )
         if rc != 0:
             raise RuntimeError(f"train.py a échoué (rc={rc})")
         log(f"étape 2 ok en {time.time()-t0:.1f}s")
 
-        # ── 3. cluster + vote par-face (launch/eval.py) ──
-        log("== Étape 3/4 : HDBSCAN + vote par-face ==")
-        t0 = time.time()
-        weight_path = f"{save_path}/model/{WEIGHT}.pth"
-        rc = _run(
-            [sys.executable, os.path.join("launch", "eval.py"),
-             "--config-file", cfg_file, "--num-gpus", "1",
-             "--options", f"save_path={save_path}", f"weight={weight_path}"],
-            cwd=repo, env=env, label="eval",
-        )
-        if rc != 0:
-            raise RuntimeError(f"eval.py a échoué (rc={rc})")
-        log(f"étape 3 ok en {time.time()-t0:.1f}s")
-
-        # ── 4. labels échelle proche → GLB segmenté ──
-        log("== Étape 4/4 : construction du GLB segmenté ==")
+        # ── 3. labels échelle proche → GLB segmenté ──
+        log("== Étape 3/3 : construction du GLB segmenté ==")
         npy, actual = _pick_nearest_labels(exp_root, oid, WEIGHT, scale)
         if npy is None:
             raise RuntimeError("aucun mesh_{scale}.npy produit par eval")

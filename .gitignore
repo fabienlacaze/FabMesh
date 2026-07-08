@@ -120,3 +120,14 @@ audit/
 # TRELLIS-2 custom wheels (fetched by build/fetch_trellis2_wheels.py from
 # the trellis2-wheels-v1 GitHub prerelease, or copied from local builds)
 build/wheels/
+
+# SAMPart3D part-segmentation engine — cloned repo + local Python env,
+# both fetched/built by the wizard, never committed (like external/Puppeteer/).
+SAMPart3D/
+python-segment/
+external/MaterialAnything/
+hf_cache/
+
+# Junk temp files accidentally written to the repo root with a bad
+# 'c:tmp<name>' relative path (the ':' is the U+F03A private-use glyph).
+c?tmp*

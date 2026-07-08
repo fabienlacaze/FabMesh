@@ -1,5 +1,81 @@
 # FabMesh Agent Log
 
+## 2026-07-08 (PIVOT #2 : PartSAM feedforward VALIDÉ local sm_120 — remplace SAMPart3D)
+
+Workflow de recherche (26 candidats) → **PartSAM** (MIT, feedforward ~40 s,
++16 mIoU vs SAMPart3D). User a validé visuellement (« on valide PartSAM »).
+**Tourne EN LOCAL sur RTX 5080** dans l'env `python-segment` :
+- torkit3d compilé sm_120 (FPS/chamfer ; même harnais vcvars+CUDA12.8+arch12.0).
+- apex CONTOURNÉ : `PartSAM/model/build.py` + `utils/torch_utils.py`
+  (replace_with_fused_layernorm) → try/except → `nn.LayerNorm` standard.
+- PartField backbone = PVCNN **pur torch** (pas de spconv/natten).
+- deps pip : hydra-core omegaconf loguru igraph open3d boto3 h5py scikit-image
+  simple_parsing arrgh. PAS lignthing (jupyter long-path Windows), PAS
+  polyscope/potpourri3d/libigl (scikit-build-core échoue, inutiles inférence).
+- patch FabMesh `evaluation/eval_everypart.py` : sauve `results/{id}_labels.npy`.
+- run : `eval_everypart.py dataset.root_dir=<dir> eval_params.use_graph_cut=False
+  eval_params.batch_size=4 eval_params.iou_threshold=X eval_params.nms_threshold=Y`.
+  batch=4 OBLIGATOIRE sur 16 Go (torch.cdist mask_decoder OOM à 16 sur gros mesh) ;
+  graph_cut=False si faces>50k. ~40 s/mesh (tank 488k faces).
+- **granularité = iou (bas=+) & nms (haut=+)** : 0.65/0.3 → 10 parties propres ;
+  0.5/0.6 → 46 parties (plus complet). Comparatif tank vs SAMPart3D (24p/4min) :
+  PartSAM plus fin/réglable ET 6× plus rapide.
+
+`scripts/partsam_bridge.py` (NEW) : contrat identique à sampart3d_bridge —
+`<mesh> <out.glb> [granularity 0-1]` → GLB sous-meshes part_XX. Mappe
+granularity→(iou,nms), lance eval en subprocess sur dossier temp, relit labels,
+reconstruit le GLB (mêmes palette + sous-meshes que la voie SAMPart3D → viewer
+explode + add-version inchangés). Env : FABMESH_PARTSAM_DIR.
+
+RESTE : wiring desktop (IPC mesh-segment → partsam_bridge + slider granularité UI)
++ Modal cloud PartSAM + wizard install env PartSAM (+ wheels torkit3d/pointops) +
+viewer explode in-app three.js. SAMPart3D reste en fallback puis retiré.
+
+## 2026-07-08 (PIVOT SAMPart3D desktop : ZÉRO build + ZÉRO Blender chez le client)
+
+Objectif user : install desktop rapide (« personne n'attendra 40 min ») et
+SANS Blender (« les users ne l'auront pas »). Le build 40 min + les exigences
+Visual Studio/CUDA Toolkit/Blender tombent grâce à deux percées validées sur
+la RTX 5080 (sm_120, torch 2.7.0+cu128) :
+
+1. **spconv-cu126 (wheel PyPI) TOURNE sur sm_120** via JIT du PTX embarqué —
+   `SubMConv3d`/`SparseConv3d` OK sur RTX 5080. Plus AUCUN build source de
+   spconv+cumm (c'était LE point fragile). torch_scatter = wheel prête
+   `2.1.2+pt27cu128` (data.pyg.org). Seul CUDA-compile restant = **pointops**
+   (~1 min, ici seulement ; la .pyd part dans l'archive gelée).
+   Gotcha embeddable Python : pas de `include/Python.h` → copié depuis le
+   Python 3.11.9 système. Et `setup.py` pointops : `get_config_vars("OPT")`
+   renvoie None sur Windows → guardé.
+
+2. **Rendu 16 vues PUR-PYTHON (ray-cast embree) — plus de Blender.**
+   `SAMPart3D/tools/render_16views_local.py` reproduit EXACTEMENT le modèle
+   caméra de `sampart3d_util.gen_pcd` (repère normalisé coord@R·scale+offset,
+   16 poses sphère élév±25/±40, PERSP 50/36, depth perpendiculaire caméra-Z).
+   Sortie : render_XXXX.webp (RGBA) + depth_XXXX.**npy** (opencv 5.0 n'écrit
+   pas l'EXR) + meta.json. Validé : reprojection gen_pcd vs surface mean
+   0.0046 / p99 0.010 (< seuil kNN 0.03). 16 vues en ~4 s (embreex).
+
+Patchs repo (à intégrer dans la version freeze/cloud) :
+- `dataset_render_16views.py` : depth .exr→.npy ; glob depth_*.npy ; SAM model
+  configurable `FABMESH_SAM_MODEL` défaut **vit-large** (~1.2 Go vs 2.5) ;
+  masques SAM transformers 5.x = Tensor → conversion robuste.
+- `sampart3d_util.py`/`engines/train.py`/`engines/eval.py`/`utils/visualization.py`
+  : `import open3d` rendu optionnel (dumps PLY debug seulement) → −400 Mo.
+- `scripts/sampart3d_bridge.py` : appelle le renderer local (fini `_blender`) ;
+  lance train/eval via bootstrap `runpy` qui injecte le repo dans sys.path
+  (le ._pth de l'embeddable ignore PYTHONPATH) ; UTF-8 forcé + PYTHONIOENCODING.
+- deps env : + matplotlib, embreex ; PAS open3d, PAS Blender, PAS tcnn.
+
+**Livraison décidée (user)** : geler l'env `python-segment` (torch+spconv+
+pointops+deps, tout précompilé) en **archive hébergée** → le client télécharge
++ extrait, ZÉRO build, ZÉRO Visual Studio, ZÉRO Blender. Wizard à réécrire en
+mode download-only. Le renderer local remplacera aussi Blender côté cloud
+(`modal_app/_sampart3d.py`) pour unifier.
+
+**RESTE** : valider train→eval→GLB end-to-end (en cours) ; viewer « explode »
+(part list + slider d'éclatement, façon Tripo) desktop+cloud ; freeze+fetch ;
+wizard download-only ; MAJ cloud renderer ; deploy Modal+wrangler.
+
 ## 2026-07-08 (feat — SAMPart3D desktop : wizard d'installation env sm_120)
 
 `scripts/wizard_install_segment.py` — provisionne l'env local SAMPart3D
