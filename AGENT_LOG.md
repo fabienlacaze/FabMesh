@@ -1,5 +1,35 @@
 # FabMesh Agent Log
 
+## 2026-07-08 (feat — SAMPart3D DESKTOP LOCAL : bridge + IPC + UI, câblage complet)
+
+Suite au choix user (SAMPart3D doit tourner en LOCAL sur RTX 5080, pas
+cloud-only). Câblage desktop complet, tout sauf l'installeur d'env :
+- `scripts/sampart3d_bridge.py` — pipeline LOCAL (port de `_sampart3d.py`
+  sans Modal). Contrat CLI `<mesh_in.glb> <out.glb> [scale]`, progress→stdout,
+  écrit un GLB segmenté (sous-meshes nommés + couleur/partie). Appelle
+  DIRECTEMENT `python launch/train.py` / `launch/eval.py` (PAS de bash —
+  indispensable Windows), args reproduits exactement depuis train.sh/eval.sh
+  officiels. Env via FABMESH_SAMPART3D_DIR / _CKPT / FABMESH_BLENDER.
+- `main.js` : constantes `SEGMENT_PYTHON_DIR` (HEAVY/python-segment) +
+  `SAMPART3D_DIR` (HEAVY/SAMPart3D) ; handler `ipcMain.handle('mesh-segment')`
+  (validation path, résolution interpréteur packaged/dev, Blender depuis
+  config.blenderPath, subprocess GPU streamé sur 'ai3d-progress', timeout
+  25 min, retour {success,newPath,filename,size} comme mesh-tool). 'segment'
+  ajouté à l'OP_SUFFIX de mesh-tool.
+- `preload.js` : `meshSegment` exposé.
+- `index2.html` + `index2.js` desktop : bouton « ✂ Segment parts (AI) » +
+  `_openSegmentGranularityModal` (slider 0 fin→2 grossier) + `runMeshSegment`
+  (pushJob → API.meshSegment → add-version p.meshes.unshift + selected +
+  populateWorkspace). 'segment' ajouté à meshProject POST_SUFFIX (grouping) et
+  à _jobStepIndex (bouton « Go to generated item »).
+
+**RESTE desktop** : `wizard_install_segment.py` (provisionne l'env sm_120 :
+torch cu128 + pointops/tiny-cuda-nn recompilés + clone repo + ptv3-object.pth
++ SAM ViT-H). En attente de la recherche « recette build sm_120 » (agent en
+cours) pour ne pas écrire un installeur cassé. Sans lui, le bouton renvoie
+« engine not installed ». Aussi : brancher le wizard dans le flow d'install +
+extraResources package.json.
+
 ## 2026-07-08 (feat — SAMPart3D : contrat GLB segmenté + câblage CLOUD complet)
 
 Suite de l'intégration SAMPart3D (découpe mesh en parties). Cartographie

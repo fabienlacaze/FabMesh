@@ -137,6 +137,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   getFileInfo: (filePath) => ipcRenderer.invoke('get-file-info', filePath),
   importMesh: () => ipcRenderer.invoke('import-mesh'),
   meshTool: (opts) => ipcRenderer.invoke('mesh-tool', opts),
+  meshSegment: (opts) => ipcRenderer.invoke('mesh-segment', opts),
   materialAdjust: (opts) => ipcRenderer.invoke('material-adjust', opts),
   alignTexture: (opts) => ipcRenderer.invoke('mesh:align-texture', opts),
   renderMeshFront: (opts) => ipcRenderer.invoke('mesh:render-front', opts),

@@ -528,6 +528,12 @@ const AI_PYTHON_DIR = path.join(HEAVY_DIR, 'python');
 // with the AI env's torch 2.8. Provisioned by wizard:install-rig.
 const RIG_PYTHON_DIR = path.join(HEAVY_DIR, 'python-rig');
 const PUPPETEER_DIR  = path.join(HEAVY_DIR, 'puppeteer');
+// Part segmentation (SAMPart3D) — SEPARATE env: torch cu128 sm_120 +
+// pointops + tiny-cuda-nn (incompatible with the AI + rig envs' torch
+// pins). Provisioned by wizard:install-segment. Runs LOCALLY on the
+// user's GPU. The SAMPart3D repo clone + ptv3-object.pth live under HEAVY.
+const SEGMENT_PYTHON_DIR = path.join(HEAVY_DIR, 'python-segment');
+const SAMPART3D_DIR      = path.join(HEAVY_DIR, 'SAMPart3D');
 // HuggingFace model cache (the big download); HF_HOME points here.
 const HF_CACHE_DIR  = path.join(HEAVY_DIR, 'hf_cache');
 
@@ -6525,7 +6531,7 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   // Windows MAX_PATH (260) after repeated ops (e.g. _smooth_…_fill_holes_…_
   // watertight_… → FileNotFoundError on export). Versions still group: the
   // renderer derives the project from the stripped root either way.
-  const OP_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|edited|upscale|refine|augment|vc)(?:_\d{6,})?$/i;
+  const OP_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i;
   let _prev;
   do { _prev = base; base = base.replace(OP_SUFFIX, ''); } while (base !== _prev);
   if (base.length > 90) base = base.slice(0, 90);  // hard cap, belt-and-braces
@@ -6555,6 +6561,83 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
       }
     });
   });
+});
+
+// ── SAMPart3D part segmentation (LOCAL, RTX 5080) ──────────────────────
+// Splits the mesh into named, colored parts. Long GPU job (~6-10 min):
+// streams progress on 'ai3d-progress' and returns a new MESH version
+// (a segmented GLB) — same {success,newPath,filename,size} contract as
+// mesh-tool, so runMeshSegment in the renderer reuses the add-version +
+// go-to machinery. Runs in the dedicated SAMPart3D env (torch cu128 sm_120
+// + pointops + tiny-cuda-nn), provisioned by wizard:install-segment.
+ipcMain.handle('mesh-segment', async (_event, { meshPath, scale }) => {
+  const _t0 = Date.now();
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
+    if (!isPathAllowed(meshPath)) return { success: false, error: 'Mesh path not allowed' };
+
+    const segPython = app.isPackaged
+      ? path.join(SEGMENT_PYTHON_DIR, 'python.exe')
+      : path.join(__dirname, '..', '..', 'external', 'SAMPart3D', 'venv', 'Scripts', 'python.exe');
+    const segRepo = app.isPackaged
+      ? SAMPART3D_DIR
+      : path.join(__dirname, '..', '..', 'external', 'SAMPart3D');
+    if (!fs.existsSync(segPython) || !fs.existsSync(path.join(segRepo, 'launch', 'train.py'))) {
+      return { success: false, error: app.isPackaged
+        ? 'Part-segmentation engine not installed yet. Open Settings → Reconfigure FabMesh and complete the "Part segmentation (SAMPart3D)" setup step.'
+        : 'SAMPart3D not found at external/SAMPart3D (dev checkout missing).' };
+    }
+    const ckpt = path.join(segRepo, 'ckpts', 'ptv3-object.pth');
+    if (!fs.existsSync(ckpt)) return { success: false, error: 'SAMPart3D checkpoint (ptv3-object.pth) missing — re-run the setup step.' };
+    const blender = String((loadConfig().blenderPath || '')).trim();
+    if (!blender || !fs.existsSync(blender)) {
+      return { success: false, error: 'Blender path not set — configure Blender (≥4.0) in Settings; it is required for part segmentation (16-view render).' };
+    }
+    const bridge = path.join(SCRIPTS_DIR, 'sampart3d_bridge.py');
+    if (!fs.existsSync(bridge)) return { success: false, error: 'sampart3d_bridge.py not found' };
+
+    const ts = Date.now();
+    const ext = path.extname(meshPath);
+    let base = path.basename(meshPath, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const OP_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i;
+    let _p; do { _p = base; base = base.replace(OP_SUFFIX, ''); } while (base !== _p);
+    if (base.length > 90) base = base.slice(0, 90);
+    // Output is always a GLB scene (multiple named submeshes). MUST NOT
+    // contain `_rigged_`/`_anim_` or it lands in the rigs/anims bucket.
+    const outPath = path.join(path.dirname(meshPath), `${base}_segment_${ts}.glb`);
+
+    const sc = Math.max(0, Math.min(2, Number.isFinite(+scale) ? +scale : 1.0));
+    const args = [bridge, meshPath, outPath, String(sc)];
+    const env = {
+      ...process.env,
+      PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8',
+      FABMESH_SAMPART3D_DIR: segRepo,
+      FABMESH_SAMPART3D_CKPT: ckpt,
+      FABMESH_BLENDER: blender,
+      HF_HOME: HF_CACHE_DIR,
+    };
+    safeSend('ai3d-progress', '[Segment] Starting part segmentation (SAMPart3D)… this takes several minutes.');
+    return await new Promise((resolve) => {
+      const proc = execFile(segPython, args, { timeout: 1500000, maxBuffer: 50 * 1024 * 1024, env }, (error, _stdout, stderr) => {
+        if (error) {
+          log.error('mesh-segment', error.message + ' :: ' + String(stderr || '').slice(-600));
+          resolve({ success: false, error: String(stderr || error.message || 'segmentation failed').slice(-500) });
+        } else if (!fs.existsSync(outPath)) {
+          resolve({ success: false, error: 'Segmented mesh not created' });
+        } else {
+          const stats = fs.statSync(outPath);
+          console.log(`[mesh-segment] DONE in ${((Date.now() - _t0) / 1000).toFixed(0)}s → ${outPath}`);
+          resolve({ success: true, newPath: outPath, filename: path.basename(outPath), size: stats.size, operation: 'segment' });
+        }
+      });
+      proc.stdout?.on('data', d => safeSend('ai3d-progress', `[Segment] ${d.toString()}`));
+      proc.stderr?.on('data', d => safeSend('ai3d-progress', `[Segment] ${d.toString()}`));
+      proc.on('error', e => resolve({ success: false, error: e.message }));
+    });
+  } catch (e) {
+    log.error('mesh-segment', e && e.message);
+    return { success: false, error: e && e.message };
+  }
 });
 
 // Material adjust: wraps scripts/mesh_material_adjust.py for the

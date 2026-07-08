@@ -508,7 +508,7 @@ async function refreshProjectsPage() {
     // Known suffixes: cntile, retexture, decimate, smooth, fill_holes,
     // fix_normals, center, upscale, refine, augment, vc (vertex color).
     // Optionally followed by a timestamp OR a short tag (_v2, _test, etc.).
-    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
+    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc|segment)(?:_[A-Za-z0-9]{1,16})*$/i;
     let prev;
     do {
       prev = base;
@@ -8645,6 +8645,89 @@ async function runMeshTool(operation, params = []) {
   }
 }
 
+// ── Segment parts (AI) — SAMPart3D LOCAL sur la RTX 5080 ──────────────
+// Long GPU job (~6-10 min) via API.meshSegment (main.js 'mesh-segment' →
+// scripts/sampart3d_bridge.py). Sortie = version MESH segmentée (sous-meshes
+// nommés + couleurs par partie). Réutilise le popup pushJob + l'add-version +
+// « Go to generated item » (grâce au nom 'segment: …' matché par _jobStepIndex).
+function _openSegmentGranularityModal() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1b1d22;color:#eee;border:1px solid #3a3d44;border-radius:12px;padding:20px 22px;max-width:430px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:inherit;';
+    box.innerHTML =
+      '<div style="font-size:16px;font-weight:600;margin-bottom:6px;">&#9986; Segment parts (AI)</div>' +
+      '<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:16px;">' +
+        'Split the mesh into semantic parts (head / torso / arms / legs — wheel / chassis / cabin). ' +
+        'Runs locally on your GPU (SAMPart3D), ~6-10&nbsp;min. Adds a new colored, separable mesh version.</div>' +
+      '<label style="font-size:13px;font-weight:500;">Granularity: <span id="seg-gran-label"></span></label>' +
+      '<input id="seg-gran" type="range" min="0" max="2" step="0.5" value="1" style="width:100%;margin:8px 0 4px;">' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;opacity:.65;margin-bottom:18px;">' +
+        '<span>Fine (more parts)</span><span>Coarse (fewer parts)</span></div>' +
+      '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+        '<button id="seg-cancel" class="ghost-btn" style="padding:8px 16px;">Cancel</button>' +
+        '<button id="seg-go" class="primary-btn" style="padding:8px 16px;">Segment</button></div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const slider = box.querySelector('#seg-gran');
+    const label = box.querySelector('#seg-gran-label');
+    const names = { '0': 'Very fine', '0.5': 'Fine', '1': 'Medium', '1.5': 'Coarse', '2': 'Very coarse' };
+    const sync = () => { label.textContent = names[slider.value] || slider.value; };
+    slider.addEventListener('input', sync); sync();
+    function cleanup(v) { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); }
+    function onKey(e) { if (e.key === 'Escape') cleanup(null); }
+    box.querySelector('#seg-cancel').addEventListener('click', () => cleanup(null));
+    box.querySelector('#seg-go').addEventListener('click', () => cleanup(parseFloat(slider.value)));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+async function runMeshSegment() {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  if (!API.meshSegment) { showToast('Segmentation engine not available.', 'error'); return; }
+  const scale = await _openSegmentGranularityModal();
+  if (scale == null) return;  // cancelled
+  const meshPath = p.selectedMeshPath;
+  const meshName = meshPath.split(/[\\/]/).pop();
+  const expectedMs = 480000;  // ~8 min (Blender render + SAM + 5000-iter MLP)
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`segment: ${p.name}`, null, {
+        Tool: 'Segment parts (AI)',
+        Mesh: meshName,
+        Granularity: scale.toFixed(1),
+      }, expectedMs, { sourceImageUrl: meshPath, projectName: p.name })
+    : null;
+  try {
+    const result = await API.meshSegment({ meshPath, scale });
+    if (result && result.success) {
+      showToast('Segmentation done — parts version added.', 'success');
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
+      const newPath = result.newPath || result.path;
+      if (newPath) {
+        p.meshes = p.meshes || [];
+        const filename = result.filename || newPath.replace(/\\/g, '/').split('/').pop();
+        p.meshes.unshift({ path: newPath, filename, size: result.size || 0, mtime: Date.now() });
+        p.selectedMeshPath = newPath;
+      }
+      populateWorkspace(p);
+    } else {
+      const msg = [
+        (result && result.error) || 'unknown',
+        result && result.stderr ? String(result.stderr).slice(-400) : '',
+      ].filter(Boolean).join(' — ');
+      showToast(`Segmentation failed: ${msg}`, 'error', 6000);
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+    }
+  } catch (e) {
+    showToast(`Segmentation error: ${e.message}`, 'error', 5000);
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
+  }
+}
+document.getElementById('ws-mesh-segment-btn')?.addEventListener('click', runMeshSegment);
+
 // ============================================================
 // AI Tools — generic params popup with live 3D preview
 // Each tool declares: params schema + optional `preview(origGeom, vals)`
@@ -14447,7 +14530,7 @@ function _jobStepIndex(j) {
   // Mesh-editor saves ("Save mesh edit: …" from Sculpt/Paint/Select) + manual
   // mesh tools — they produce a new mesh version, so the "Go to generated
   // item" button must appear and jump to the mesh step.
-  if (/(mesh edit|save mesh|sculpt|watertight|decimate|set[- ]?pivot|fix[- ]?normals)/i.test(n)) return 2;
+  if (/(mesh edit|save mesh|sculpt|watertight|decimate|set[- ]?pivot|fix[- ]?normals|segment)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;
   return 0;
