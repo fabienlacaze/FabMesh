@@ -116,12 +116,32 @@ def _which(name):
     return which(name)
 
 
+def _cuda_home(prefer='12.8'):
+    """torch 2.7+cu128 est compilé pour CUDA 12.8 : les extensions (pointops,
+    spconv) DOIVENT être compilées avec un nvcc de MÊME version majeure (12),
+    sinon PyTorch cpp_extension refuse (« detected CUDA version mismatches »).
+    On force donc CUDA 12.8 même si un CUDA 13.x est premier sur le PATH."""
+    import glob
+    base = r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA'
+    cand = os.path.join(base, 'v' + prefer)
+    if os.path.isdir(cand):
+        return cand
+    for pat in (os.path.join(base, 'v12.*'), os.path.join(base, 'v*')):
+        hits = sorted(glob.glob(pat))
+        if hits:
+            return hits[-1]
+    return None
+
+
 def _check_build_toolchain():
     """pointops + spconv are source-compiled → need nvcc (CUDA Toolkit) and
     MSVC (cl.exe). Fail early + clearly rather than deep inside a pip build."""
     missing = []
-    if not _which('nvcc'):
-        missing.append('CUDA Toolkit 12.8 (nvcc not on PATH)')
+    # Require a CUDA 12.x install specifically (torch cu128 needs major 12) —
+    # NOT just any nvcc on PATH (a CUDA 13.x could be first and would mismatch).
+    if not _cuda_home('12.8'):
+        missing.append('CUDA Toolkit 12.8 (not found under '
+                       'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8)')
     # cl.exe is only on PATH inside a VS dev shell; also probe common installs.
     has_cl = bool(_which('cl'))
     if not has_cl:
@@ -282,6 +302,18 @@ def main():
     # Apply the 3 patches (flash/hdbscan/tcnn) BEFORE any import of the model.
     _patch_repo(dest_repo)
 
+    # CUDA 12.8 env for ALL source builds (must match torch cu128, not the
+    # CUDA 13.x that may be first on the PATH).
+    cuda_home = _cuda_home('12.8')
+    cuda_env = {}
+    if cuda_home:
+        cuda_env = {
+            'CUDA_HOME': cuda_home,
+            'CUDA_PATH': cuda_home,
+            'PATH': os.path.join(cuda_home, 'bin') + os.pathsep + os.environ.get('PATH', ''),
+        }
+        emit({'step': 'seg-cuda', 'pct': 8, 'done': False, 'msg': f'building against {cuda_home}'})
+
     if not args.skip_deps:
         # Step 3: torch 2.7.0 + cu128 (Blackwell-native)
         _run([py, '-m', 'pip', 'install', '--index-url', TORCH_INDEX, *TORCH_PACKAGES], step='seg-torch')
@@ -291,6 +323,7 @@ def main():
         _run([py, '-m', 'pip', 'install', *PYPI_PACKAGES], step='seg-pypi')
         # Step 6: cumm + spconv for sm_120 — THE FRAGILE STEP (source build).
         build_env = {
+            **cuda_env,
             'CUMM_CUDA_VERSION': '128',
             'CUMM_CUDA_ARCH_LIST': '12.0',
             'CUMM_DISABLE_JIT': '1',
@@ -300,7 +333,7 @@ def main():
         _run([py, '-m', 'pip', 'install', CUMM_GIT], step='seg-cumm', env=build_env)
         _run([py, '-m', 'pip', 'install', SPCONV_GIT], step='seg-spconv', env=build_env)
         # Step 7: pointops (compiled inside the repo, cwd=libs/pointops)
-        _build_pointops(py, dest_repo)
+        _build_pointops(py, dest_repo, cuda_env)
 
     # Step 8: Blender 4.0.0 (bundled — newer Blenders break the render script)
     _download_blender(dest_repo)
@@ -311,7 +344,7 @@ def main():
     emit({'step': 'done', 'pct': 100, 'done': True})
 
 
-def _build_pointops(py, dest_repo):
+def _build_pointops(py, dest_repo, cuda_env=None):
     """pointops setup.py must run with cwd=libs/pointops."""
     pointops = os.path.join(dest_repo, 'libs', 'pointops')
     emit({'step': 'seg-pointops', 'pct': 75, 'done': False, 'msg': 'compiling knn kernels'})
@@ -319,7 +352,8 @@ def _build_pointops(py, dest_repo):
         [py, 'setup.py', 'install'], cwd=pointops,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         encoding='utf-8', errors='replace',
-        env={**os.environ, 'TORCH_CUDA_ARCH_LIST': '8.9;12.0', 'DISTUTILS_USE_SDK': '1'})
+        env={**os.environ, **(cuda_env or {}),
+             'TORCH_CUDA_ARCH_LIST': '8.9;12.0', 'DISTUTILS_USE_SDK': '1'})
     tail = []
     for line in proc.stdout:
         tail.append(line.rstrip())

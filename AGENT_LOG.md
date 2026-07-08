@@ -19,6 +19,15 @@ main.js : handler `wizard:install-segment` (copie python-embed → 3e env +
 invoque le wizard, stream 'wizard:segment-progress'). preload : installSegment
 + onSegmentProgress.
 
+MAJ après 1er test sur la machine (RTX 5080) :
+- FIX : installSegment/onSegmentProgress sont dans `wizardAPI` (pas `meshyAPI`)
+  → le renderer les appelait via `API.*` (undefined, « Installer not
+  available »). Corrigé en `window.wizardAPI.*`. meshSegment reste sur API.
+- FIX wizard : la machine a CUDA 13.2 ET 12.8 ; nvcc 13.2 premier sur le PATH
+  → torch cu128 (majeur 12) refuserait le build. Le wizard force désormais
+  CUDA 12.8 (`_cuda_home('12.8')` → CUDA_HOME/CUDA_PATH/PATH sur les builds
+  cumm/spconv/pointops). Toolchain confirmé présent : CUDA 12.8 + MSVC VS2022.
+
 **RESTE (intégration desktop)** : (1) une étape « Part segmentation » dans
 l'UI du wizard/Reconfigure branchée sur API.installSegment() + barre de
 progression (onSegmentProgress) ; ou un prompt « installer maintenant » quand
