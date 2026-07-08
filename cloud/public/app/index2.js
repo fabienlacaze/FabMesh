@@ -9922,6 +9922,100 @@ document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => o
 document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => openMeshToolModal('retexture'));
 document.getElementById('ws-mesh-trellis2-btn')?.addEventListener('click', () => openMeshToolModal('trellis2_retex'));
 
+// ── Segment parts (AI) — SAMPart3D part-segmentation on cloud GPU ──
+// Async spawn+poll (like auto-rig). Output = a segmented GLB (named,
+// colored per-part submeshes) added as a new MESH version.
+function openSegmentModal() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1b1d22;color:#eee;border:1px solid #3a3d44;border-radius:12px;padding:20px 22px;max-width:430px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:inherit;';
+    box.innerHTML =
+      '<div style="font-size:16px;font-weight:600;margin-bottom:6px;">✂ ' + FabI18n.t('Segment parts (AI)') + '</div>' +
+      '<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:16px;">' +
+        FabI18n.t('Split the mesh into semantic parts (head / torso / arms / legs — wheel / chassis / cabin). Runs on cloud GPU (SAMPart3D), ~8 min. The result is added as a new colored mesh version.') +
+      '</div>' +
+      '<label style="font-size:13px;font-weight:500;">' + FabI18n.t('Granularity') + ': <span id="seg-gran-label"></span></label>' +
+      '<input id="seg-gran" type="range" min="0" max="2" step="0.5" value="1" style="width:100%;margin:8px 0 4px;">' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;opacity:.65;margin-bottom:18px;">' +
+        '<span>' + FabI18n.t('Fine (more parts)') + '</span><span>' + FabI18n.t('Coarse (fewer parts)') + '</span></div>' +
+      '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+        '<button id="seg-cancel" class="ghost-btn" style="padding:8px 16px;">' + FabI18n.t('Cancel') + '</button>' +
+        '<button id="seg-go" class="primary-btn" style="padding:8px 16px;">' + FabI18n.t('Segment') + '</button></div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const slider = box.querySelector('#seg-gran');
+    const label = box.querySelector('#seg-gran-label');
+    const names = { '0': FabI18n.t('Very fine'), '0.5': FabI18n.t('Fine'), '1': FabI18n.t('Medium'), '1.5': FabI18n.t('Coarse'), '2': FabI18n.t('Very coarse') };
+    const sync = () => { label.textContent = names[slider.value] || slider.value; };
+    slider.addEventListener('input', sync); sync();
+    function cleanup(val) { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); }
+    function onKey(e) { if (e.key === 'Escape') cleanup(null); }
+    box.querySelector('#seg-cancel').addEventListener('click', () => cleanup(null));
+    box.querySelector('#seg-go').addEventListener('click', () => cleanup(parseFloat(slider.value)));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+document.getElementById('ws-mesh-segment-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p) return;
+  const meshPathToUse = p.selectedMeshPath
+    || (p.meshes && p.meshes[0] && p.meshes[0].path);
+  if (!meshPathToUse) { showToast(FabI18n.t('Pick or generate a mesh first.'), 'error'); return; }
+  if (!API.meshSegmentAI) { showToast('Segmentation backend not available.', 'error'); return; }
+  const scale = await openSegmentModal();
+  if (scale == null) return;  // cancelled
+  const expectedMs = 480000;  // ~8 min A100 (train 5000 iters + render + SAM)
+  gatedRun('mesh', `Segment parts: ${p.name}`, async () => {
+    const job = pushJob(`Segment parts (AI): ${p.name}`, null, {
+      Granularity: scale.toFixed(1),
+      'Source mesh': String(meshPathToUse).split(/[/\\]/).pop(),
+    }, expectedMs);
+    try {
+      const r = await API.meshSegmentAI({
+        meshPath: meshPathToUse,
+        scale,
+        projectName: p.name,
+        onProgress: ({ polls, elapsedMs, lastWarn }) => {
+          const j = state.jobs.find(x => x.id === job.id);
+          if (!j || j.status !== 'running') return;
+          j.bridgeReporting = true;
+          const overTime = Math.max(0, elapsedMs - expectedMs);
+          const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
+          if (target > (j.progress || 0)) j.progress = target;
+          j.subtitle = (elapsedMs > expectedMs)
+            ? `Still segmenting... ${Math.floor(elapsedMs / 60000)}m ${Math.floor((elapsedMs % 60000) / 1000)}s (Modal cold start probable)`
+            : `Polling Modal (${polls} polls)`;
+          if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
+          renderJobs();
+        },
+      });
+      if (r?.success) {
+        completeJob(job.id, true);
+        const newUrl = r.mesh_url || r.glb_url || r.path;
+        if (newUrl) {
+          const filename = String(newUrl).split('/').pop() || 'segmented.glb';
+          p.meshes = p.meshes || [];
+          p.meshes.unshift({ path: newUrl, filename, size: 0, mtime: Date.now() });
+          p.selectedMeshPath = newUrl;
+          p.previewMeshPath = newUrl;
+        }
+        populateWorkspace(p);
+        showToast(FabI18n.t('Segmentation done — parts version added.'), 'success');
+      } else {
+        completeJob(job.id, false, r?.error || 'unknown');
+        if (!job.cancelled) reportPipelineError(r?.error, 'Segmentation failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false, e?.error || e?.message || String(e));
+      if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), 'Segmentation error');
+    }
+  });
+});
+
 // ============================================================
 // ALIGN TEXTURE TOOL — manual position/scale/rotation of source
 // photos onto the mesh (texture_project re-projection with sliders).

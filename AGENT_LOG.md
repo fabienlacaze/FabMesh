@@ -1,5 +1,56 @@
 # FabMesh Agent Log
 
+## 2026-07-08 (feat — SAMPart3D : contrat GLB segmenté + câblage CLOUD complet)
+
+Suite de l'intégration SAMPart3D (découpe mesh en parties). Cartographie
+multi-agents (5 lecteurs) du flux auto-rig = miroir exact à cloner + faits
+officiels SAMPart3D vérifiés à la source.
+
+**Corrections app Modal `_sampart3d.py`** (d'après doc/config officiels) :
+- Blender : `blender -b -P blender_render_16views.py <MESH> glb <OUT>` — TYPES
+  = "glb" (pas "object"), SANS séparateur `--` (corrige un DEPLOY-VERIFY).
+- Sortie eval : `exp/sampart3d/{name}/results/{weight}/mesh_{scale}.npy`
+  RELATIF au cwd `/SAMPart3D` — on lit là (oid unique/appel anti-collision).
+- Clés config confirmées : mesh_root / data_root / backbone_weight_path.
+- **Nouveau contrat de sortie** : au lieu de labels bruts `.npz`, l'app
+  renvoie désormais un **GLB SEGMENTÉ** (sous-meshes nommés part_00… +
+  couleur pleine par partie, COLOR_0). Verdict de la carto : les 2 viewers
+  three.js l'affichent nativement (GLTFLoader auto-active les vertex-colors,
+  pas de texture → pas de multiplication boueuse). `scale` = granularité
+  (0 fin → 2 grossier). Contrat identique à l'auto-rig (GLB in → GLB out).
+
+**Worker Cloudflare (`cloud/src/worker.ts`)** — routes async miroir 1:1 de
+handleAutoRig/handleAutoRigStatus (typecheck OK) :
+- `MODAL_SEGMENT_URL` (Env) ; `SEGMENT_COST=15` / `ESTIMATED_USD_SEGMENT=0.60`
+  (A100 ~8-10 min ≈ 10-15× le rig). `SegmentJobRecord` (R2 `_meta/segment_jobs/`).
+- `handleMeshSegment` (POST /api/mesh-segment) : 3-gate débit + refund, spawn
+  `/segment-start` avec `scale`. `handleMeshSegmentStatus` : poll
+  `/segment-status`, sur done STREAM `/segment-fetch` → R2 sous
+  `${uid}/mesh-op/${slug}/${ts}_segment.glb` (auto-listé comme version MESH
+  par handleListMeshes, ZÉRO merge-block). Refund-on-failure identique au rig.
+- Routes enregistrées + ajoutées à l'allowlist maintenance MODAL_PATHS.
+
+**UI cloud (`cloud/public/app/`)** :
+- `index.html` : bouton « ✂ Segment parts (AI) » dans la grille AI tools.
+- `meshyAPI-cloud.js` : `meshSegmentAI` (clone d'autoRigAI, endpoints
+  /api/mesh-segment[-status], stash localStorage `fabmesh_pending_segments`,
+  cap 15 min). Sortie = version MESH (pas rigs).
+- `index2.js` : `openSegmentModal()` (slider granularité) + handler
+  gatedRun('mesh') → pushJob/onProgress/completeJob → add-version
+  (p.meshes.unshift + selected/preview + populateWorkspace).
+- `cloud-overrides.js` : badge crédit `ws-mesh-segment-btn: 15`.
+
+**Déploiement (à faire côté user)** : `wrangler secret put MODAL_SEGMENT_URL`
+(URL du router segment_router après `modal deploy modal_app/_sampart3d.py`) +
+`cd cloud && npm run build && npx wrangler deploy`. Cap budget par défaut
+MAX_DAILY_MODAL_SPEND_USD $2 → ~3 jobs/j à $0.60 (à relever si besoin).
+
+**DÉCISION desktop (user 2026-07-08)** : SAMPart3D doit AUSSI tourner en
+**LOCAL sur la RTX 5080** (pas cloud-only). Chantier suivant = portage local
+sm_120 : bridge `scripts/sampart3d_bridge.py` + env dédié (torch cu128 +
+recompilation pointops/tiny-cuda-nn/spconv pour sm_120) + IPC + UI desktop.
+Précédent [[project_pixal3d_cloud_only]] NE s'applique plus.
+
 ## 2026-07-07 (feat WIP — SAMPart3D sur Modal : app écrite, câblage à finir)
 
 Intégration de **SAMPart3D** comme outil universel de découpe sémantique de

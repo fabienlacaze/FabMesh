@@ -610,6 +610,7 @@
     'ws-mesh-aligntex-btn':     1,   // Wave 4.2 (no-op for now)
     'ws-mesh-material-btn':     1,   // Wave 4.2 (PBR normalize)
     'ws-mesh-retexture-btn':    1,   // Wave 4.2 (atlas swap)
+    'ws-mesh-segment-btn':      15,  // SAMPart3D part-seg — A100 ~8 min/mesh
   };
 
   // Buttons we hide on cloud. Note: `ws-mesh-sculpt-btn` is now ENABLED

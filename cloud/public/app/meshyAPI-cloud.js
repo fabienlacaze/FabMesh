@@ -1869,6 +1869,145 @@
         error: `auto-rig timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — the rig may have completed; refresh Projects to check.`,
       };
     },
+    // SAMPart3D part-segmentation on Modal — async spawn + poll. Mirrors
+    // autoRigAI but the output is a MESH version (a segmented GLB), so the
+    // caller adds it to p.meshes (NOT p.rigs). SAMPart3D trains a per-mesh
+    // MLP (~8-10 min GPU) → same 15 min poll cap as rig.
+    //   1. POST /api/mesh-segment → { job_id } in <2 s.
+    //   2. Poll GET /api/mesh-segment-status?job_id=… every 5 s.
+    // Return contract: { success, ok, mesh_url, glb_url, path, error? }.
+    meshSegmentAI: async ({ meshPath, meshUrl, scale, projectName, onProgress } = {}) => {
+      const url = meshUrl || meshPath;
+      if (!url) return { success: false, ok: false, error: 'meshPath or meshUrl required' };
+      const proj = projectName || window.state?.currentProject?.name || '';
+
+      // ── 1. Spawn ──
+      let jobId;
+      try {
+        const spawn = await postJSON('/api/mesh-segment', {
+          mesh_url: url,
+          scale: (typeof scale === 'number' && isFinite(scale)) ? scale : 1.0,
+          projectName: proj,
+        });
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        if (!spawn?.success || !spawn?.job_id) {
+          return { success: false, ok: false, error: spawn?.error || 'mesh-segment spawn failed' };
+        }
+        jobId = String(spawn.job_id);
+      } catch (e) {
+        return { success: false, ok: false, error: e?.message || String(e) };
+      }
+
+      // Stash for page-reload resume (parallel to fabmesh_pending_rigs).
+      try {
+        const pending = JSON.parse(localStorage.getItem('fabmesh_pending_segments') || '[]');
+        const projectId = window.state?.currentProject?.id || null;
+        pending.push({ jobId, projectId, projectName: proj, meshUrl: url, createdAt: Date.now() });
+        localStorage.setItem('fabmesh_pending_segments', JSON.stringify(pending.slice(-10)));
+      } catch (e) { /* localStorage may be disabled */ }
+      const clearPending = () => {
+        try {
+          const pending = JSON.parse(localStorage.getItem('fabmesh_pending_segments') || '[]');
+          localStorage.setItem('fabmesh_pending_segments',
+            JSON.stringify(pending.filter(p => p.jobId !== jobId)));
+        } catch (e) { /* ignore */ }
+      };
+
+      // ── 2. Poll ──
+      const POLL_INTERVAL_MS = 5000;
+      const MAX_POLLS = 180;                    // 15 min hard cap
+      const MAX_CONSECUTIVE_AUTH_ERRORS = 3;
+      const SOFT_WARN_SERVER_ERRORS = 6;
+      const MAX_CONSECUTIVE_SERVER_ERRORS = 30;
+      const t0 = Date.now();
+      let consecutiveAuthErrors = 0;
+      let consecutiveServerErrors = 0;
+      let lastWarn = null;
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        let st;
+        try {
+          const resp = await fetch(
+            `/api/mesh-segment-status?job_id=${encodeURIComponent(jobId)}`,
+            { method: 'GET', credentials: 'same-origin' },
+          );
+          if (!resp.ok) {
+            console.warn(`[mesh-segment] status HTTP ${resp.status} poll=${i + 1}`);
+            lastWarn = `HTTP ${resp.status}`;
+            if (resp.status === 401 || resp.status === 403) {
+              consecutiveAuthErrors++;
+              if (consecutiveAuthErrors >= MAX_CONSECUTIVE_AUTH_ERRORS) {
+                clearPending();
+                return {
+                  success: false, ok: false,
+                  error: 'session expired during segmentation — please log in and check Projects (the parts may have completed and be visible there)',
+                  authLost: true,
+                };
+              }
+            } else if (resp.status >= 500) {
+              consecutiveServerErrors++;
+              if (consecutiveServerErrors === SOFT_WARN_SERVER_ERRORS) {
+                lastWarn = `Cloud backend returned ${resp.status} for ${SOFT_WARN_SERVER_ERRORS} polls — still trying (segmentation may be running on Modal).`;
+              }
+              if (consecutiveServerErrors >= MAX_CONSECUTIVE_SERVER_ERRORS) {
+                clearPending();
+                return {
+                  success: false, ok: false,
+                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls — backend unreachable. The segmentation may still complete on Modal; check Projects.`,
+                };
+              }
+            }
+            if (typeof onProgress === 'function') {
+              try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+            }
+            continue;
+          }
+          consecutiveAuthErrors = 0;
+          consecutiveServerErrors = 0;
+          st = await resp.json();
+        } catch (e) {
+          console.warn(`[mesh-segment] status fetch threw poll=${i + 1}`, e);
+          lastWarn = e?.message || String(e);
+          if (typeof onProgress === 'function') {
+            try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+          }
+          continue;
+        }
+
+        if (st?.status === 'pending') {
+          if (st.warn || st.last_error) lastWarn = st.warn || st.last_error;
+          if (typeof onProgress === 'function') {
+            try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+          }
+          continue;
+        }
+        if (st?.status === 'failed') {
+          clearPending();
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: false, ok: false, error: st.error || 'mesh-segment failed' };
+        }
+        if (st?.status === 'done') {
+          clearPending();
+          const glbUrl = st.mesh_url || st.url || st.path || null;
+          if (!glbUrl) {
+            return { success: false, ok: false, error: 'mesh-segment done but no URL returned' };
+          }
+          // MESH version — the caller pushes into p.meshes (not p.rigs).
+          return { success: true, ok: true, mesh_url: glbUrl, glb_url: glbUrl, path: glbUrl };
+        }
+        console.warn(`[mesh-segment] unexpected status poll=${i + 1}`, st);
+        lastWarn = `unexpected status: ${JSON.stringify(st).slice(0, 80)}`;
+        if (typeof onProgress === 'function') {
+          try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+        }
+      }
+
+      clearPending();
+      return {
+        success: false, ok: false,
+        error: `mesh-segment timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — the segmentation may have completed; refresh Projects to check.`,
+      };
+    },
     // AnyTop animation on a rigged GLB via Modal — async spawn + poll.
     // Mirrors autoRigAI: spawn /api/animate, poll /api/animate-status
     // every 5s. Worker uploads the animated GLB to R2 on done; we push

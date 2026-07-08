@@ -1,10 +1,12 @@
 """SAMPart3D — segmentation sémantique de mesh en parties (cloud / Modal).
 
 Reçoit les bytes d'un GLB, découpe le mesh en parties (tête / buste / bras
-/ jambes ; roue / châssis / cabine ; etc.) et renvoie des **labels entiers
-par-face** (un `.npy` d'entiers de longueur = nombre de faces). Le desktop
-et le worker re-projettent ensuite ces labels en sous-meshes coloriés /
-séparables.
+/ jambes ; roue / châssis / cabine ; etc.) et renvoie **un GLB SEGMENTÉ** :
+chaque partie est un sous-mesh NOMMÉ (`part_00`, `part_01`, …) d'une couleur
+pleine distincte. Contrat identique à l'auto-rig (GLB in → GLB out) : le
+worker le stocke en R2, le viewer le charge comme nouvelle version de mesh
+(aucun parsing côté client). En interne SAMPart3D produit des labels par-face
+(vote depuis un nuage de points) qu'on re-projette en sous-meshes via trimesh.
 
 ────────────────────────────────────────────────────────────────────────
 POINT CRITIQUE (dicté par la recherche pipeline du 2026-07-07) :
@@ -46,13 +48,18 @@ Le worker pointe MODAL_SEGMENT_URL sur l'URL du router `segment_router`.
 License: SAMPart3D = MIT (code + poids). SAM ViT-H = Apache-2.0.
 Blender = GPL (utilisé comme binaire externe headless, pas linké).
 ────────────────────────────────────────────────────────────────────────
-⚠ À VÉRIFIER AU 1er DÉPLOIEMENT (marqués `# DEPLOY-VERIFY` dans le code) :
-- noms exacts des clés de chemins dans le config Pointcept
-  (mesh_root / data_root / backbone_weight_path) — `_patch_config()` les
-  réécrit par regex et LOG un warning si une clé n'est pas trouvée.
-- signature exacte de tools/blender_render_16views.py (ordre des args).
-- emplacement de sortie `results/{weight}/mesh_{scale}.npy`.
-Le build de l'image (deps + compiles + checkpoints) est, lui, déterministe.
+CONFIRMÉ depuis les sources officielles (2026-07-08) :
+- repo GitHub Pointcept/SAMPart3D (MIT), config sampart3d-trainmlp-render16views ;
+- clés config = mesh_root / data_root / backbone_weight_path (toutes "") ;
+  val_scales_list = [0.0, 0.5, 1.0, 1.5, 2.0] ;
+- Blender : `blender -b -P blender_render_16views.py <MESH> glb <OUT>` (TYPES="glb",
+  pas de séparateur '--') ;
+- sortie : exp/sampart3d/{name}/results/{weight}/mesh_{scale}.npy, RELATIF au cwd.
+
+⚠ Restant runtime (géré défensivement, non bloquant) : le formatage exact du
+float dans `mesh_{scale}.npy` (0.0 vs 0 vs 0.00) → `_find_labels_npy()` teste
+plusieurs variantes + fallback récursif. Le build de l'image (deps + compiles
++ checkpoints) est déterministe.
 """
 import base64
 import io
@@ -239,24 +246,25 @@ def _run(cmd, cwd, env=None, label=""):
     return rc
 
 
-def _patch_config(mesh_root: str, render_root: str, exp_root: str) -> None:
+def _patch_config(mesh_root: str, render_root: str) -> None:
     """Réécrit les chemins de données dans le config Pointcept vers nos
-    répertoires de job. DEPLOY-VERIFY : les noms de clés (`mesh_root`,
-    `data_root`, `backbone_weight_path`) proviennent de la recherche ; si
-    une clé n'existe pas telle quelle dans le config upstream, on LOG un
-    warning explicite (le 1er déploiement révèle le nom exact)."""
+    répertoires de job. Clés CONFIRMÉES depuis le config upstream
+    (sampart3d-trainmlp-render16views.py, toutes = "" par défaut) :
+    `mesh_root`, `data_root`, `backbone_weight_path`. Le save_path n'est
+    PAS dans ce config : il est fixé par scripts/train.sh (=exp/{dataset}/
+    {name}, relatif au cwd), donc on ne le patche pas ici."""
     if not os.path.isfile(CONFIG_PATH):
         _log(f"WARN config introuvable: {CONFIG_PATH} — skip patch")
         return
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         src = f.read()
 
-    # (clé_config, nouvelle_valeur). On matche `key = "..."` ou `key = '...'`.
+    # (clé_config, nouvelle_valeur). On matche `key = "..."` ou `key = '...'`
+    # (y compris la valeur vide `key = ""` du config upstream).
     replacements = {
         "mesh_root": mesh_root,
         "data_root": render_root,
         "backbone_weight_path": PTV3_CKPT,
-        "save_path": exp_root,
     }
     for key, val in replacements.items():
         pat = re.compile(
@@ -275,31 +283,27 @@ def _patch_config(mesh_root: str, render_root: str, exp_root: str) -> None:
 
 def _render_blender(mesh_glb: str, out_dir: str) -> int:
     """Rendu 16 vues RGB + depth via Blender headless.
-    DEPLOY-VERIFY signature: `blender -b -P tools/blender_render_16views.py
-    <MESH_PATH> <TYPES> <OUTPUT_PATH>` (ordre des args upstream)."""
+    Signature OFFICIELLE (README SAMPart3D) :
+      blender -b -P blender_render_16views.py <MESH_PATH> <TYPES> <OUTPUT_PATH>
+    où TYPES = le TYPE DE FICHIER du mesh ("glb"), et SANS séparateur '--'
+    (leur script lit sys.argv directement). Ex. upstream :
+      blender -b -P blender_render_16views.py mesh_root/knight.glb glb data_root/knight
+    """
     os.makedirs(out_dir, exist_ok=True)
     script = f"{SAMPART3D_DIR}/tools/blender_render_16views.py"
-    cmd = [
-        f"{BLENDER_DIR}/blender", "-b",
-        "-P", script,
-        "--",                       # sépare les args Blender des args script
-        mesh_glb,
-        "object",                   # TYPES (DEPLOY-VERIFY: valeur attendue)
-        out_dir,
-    ]
-    # Certains scripts Blender ne veulent PAS le `--` (parsing sys.argv brut).
-    # On tente d'abord avec `--`; si rc!=0 et aucune vue produite, retry sans.
-    rc = _run(cmd, cwd=f"{SAMPART3D_DIR}/tools", label="blender(--)")
-    produced = any(
-        fn.startswith("render_") for fn in _safe_listdir(out_dir)
-    )
+    tools_dir = f"{SAMPART3D_DIR}/tools"
+    # Forme documentée : pas de '--', TYPES="glb".
+    cmd = [f"{BLENDER_DIR}/blender", "-b", "-P", script, mesh_glb, "glb", out_dir]
+    rc = _run(cmd, cwd=tools_dir, label="blender")
+    produced = any(fn.startswith("render_") for fn in _safe_listdir(out_dir))
     if rc != 0 or not produced:
-        _log("blender: retry sans séparateur '--'")
-        cmd_no_sep = [
+        # Fallback défensif : si un fork lit sys.argv APRÈS '--'.
+        _log("blender: retry avec séparateur '--'")
+        cmd_sep = [
             f"{BLENDER_DIR}/blender", "-b", "-P", script,
-            mesh_glb, "object", out_dir,
+            "--", mesh_glb, "glb", out_dir,
         ]
-        rc = _run(cmd_no_sep, cwd=f"{SAMPART3D_DIR}/tools", label="blender")
+        rc = _run(cmd_sep, cwd=tools_dir, label="blender(--)")
     return rc
 
 
@@ -310,42 +314,109 @@ def _safe_listdir(p):
         return []
 
 
-def _find_labels_npy(exp_root: str, exp_name: str, weight: str,
-                     scale: float):
-    """Localise le .npy de labels par-face pour une échelle donnée.
-    Sortie upstream: exp/sampart3d/{name}/results/{weight}/mesh_{scale}.npy
-    (DEPLOY-VERIFY chemin). On tente plusieurs variantes de nom de fichier
-    car le formatage du float (0.0 vs 0 vs 0.00) peut varier."""
-    results_dir = os.path.join(
-        exp_root, "sampart3d", exp_name, "results", str(weight),
-    )
-    if not os.path.isdir(results_dir):
-        # fallback: cherche récursivement un results/ sous exp_root
-        for root, dirs, files in os.walk(exp_root):
-            if os.path.basename(root) == str(weight) and "results" in root:
-                results_dir = root
-                break
-    candidates = [
-        f"mesh_{scale}.npy",
-        f"mesh_{scale:.1f}.npy",
-        f"mesh_{scale:.2f}.npy",
-        f"mesh_{int(scale)}.npy" if float(scale).is_integer() else None,
-    ]
-    for name in filter(None, candidates):
-        p = os.path.join(results_dir, name)
-        if os.path.isfile(p):
-            return p
-    # dernier recours : n'importe quel mesh_*.npy présent
+def _results_dir(exp_root: str, exp_name: str, weight: str):
+    """Répertoire des labels par-face : exp/sampart3d/{name}/results/{weight}/,
+    avec fallback récursif si l'arborescence diffère."""
+    d = os.path.join(exp_root, "sampart3d", exp_name, "results", str(weight))
+    if os.path.isdir(d):
+        return d
+    for root, _dirs, _files in os.walk(exp_root):
+        if os.path.basename(root) == str(weight) and "results" in root:
+            return root
+    return d
+
+
+def _pick_nearest_labels(exp_root: str, exp_name: str, weight: str,
+                         scale: float):
+    """Choisit le mesh_{s}.npy dont l'échelle {s} est la PLUS PROCHE de
+    `scale`. Le formatage du float dans le nom pouvant varier (0.0 / 0 /
+    0.00), on parse l'échelle depuis chaque nom `mesh_<s>.npy`. Renvoie
+    (chemin, echelle_reelle) ou (None, None)."""
+    results_dir = _results_dir(exp_root, exp_name, weight)
+    found = []  # (echelle, chemin)
     for fn in _safe_listdir(results_dir):
         if fn.startswith("mesh_") and fn.endswith(".npy"):
-            _log(f"labels: fallback sur {fn} (scale demandé {scale} absent)")
-            return os.path.join(results_dir, fn)
-    return None
+            token = fn[len("mesh_"):-len(".npy")]
+            try:
+                found.append((float(token), os.path.join(results_dir, fn)))
+            except ValueError:
+                found.append((None, os.path.join(results_dir, fn)))
+    if not found:
+        return None, None
+    parsable = [(s, p) for s, p in found if s is not None]
+    if parsable:
+        s, p = min(parsable, key=lambda sp: abs(sp[0] - scale))
+        return p, s
+    # aucun nom parsable → prend le premier
+    return found[0][1], None
+
+
+# Palette de couleurs distinctes (RGB 0-255) — une par partie. Cyclée si le
+# nombre de parties dépasse la taille (rare : au-delà de ~16 parties la
+# distinction visuelle sature de toute façon).
+_PART_PALETTE = [
+    (228, 26, 28), (55, 126, 184), (77, 175, 74), (152, 78, 163),
+    (255, 127, 0), (255, 214, 0), (166, 86, 40), (247, 129, 191),
+    (0, 206, 209), (128, 0, 128), (0, 128, 128), (190, 190, 60),
+    (0, 90, 181), (220, 90, 90), (120, 200, 120), (150, 150, 150),
+]
+
+
+def _build_segmented_glb(src_mesh, labels, out_path: str) -> int:
+    """Construit un GLB où CHAQUE partie (label distinct) devient un sous-mesh
+    NOMMÉ `part_00`, `part_01`, … avec une COULEUR PLEINE distincte (couleurs
+    de faces → COLOR_0 ; aucune texture). C'est le rendu « carte des parties »
+    clair et séparable que les 2 viewers three.js (desktop + cloud) affichent
+    nativement — GLTFLoader auto-active les vertex-colors, et sans texture il
+    n'y a pas de multiplication « boueuse ». Chaque partie garde le winding
+    d'origine (les viewers forcent FrontSide). Renvoie le nombre de parties."""
+    import numpy as np
+    import trimesh
+
+    faces = np.asarray(src_mesh.faces)
+    n_faces = len(faces)
+    labels = np.asarray(labels).reshape(-1).astype(np.int64)
+    # Aligne défensivement la longueur des labels sur le nombre de faces.
+    if labels.shape[0] != n_faces:
+        if labels.shape[0] > n_faces:
+            labels = labels[:n_faces]
+        else:
+            pad = labels[-1] if labels.size else 0
+            labels = np.pad(labels, (0, n_faces - labels.shape[0]),
+                            constant_values=pad)
+
+    scene = trimesh.Scene()
+    uniq = sorted(set(int(x) for x in labels.tolist()))
+    n_parts = 0
+    for i, lab in enumerate(uniq):
+        face_idx = np.where(labels == lab)[0]
+        if face_idx.size == 0:
+            continue
+        # submesh([indices], append=True) → un Trimesh des faces de la partie.
+        part = src_mesh.submesh([face_idx], append=True)
+        if part is None or len(part.faces) == 0:
+            continue
+        color = _PART_PALETTE[i % len(_PART_PALETTE)]
+        rgba = np.array([color[0], color[1], color[2], 255], dtype=np.uint8)
+        # Couleur pleine par face → COLOR_0 à l'export (pas de texture).
+        part.visual = trimesh.visual.ColorVisuals(
+            mesh=part, face_colors=np.tile(rgba, (len(part.faces), 1)))
+        name = f"part_{n_parts:02d}"
+        scene.add_geometry(part, geom_name=name, node_name=name)
+        n_parts += 1
+
+    if n_parts == 0:
+        # Aucun découpage : exporte le mesh source tel quel (une seule partie).
+        src_mesh.export(out_path)
+        return 1
+    scene.export(out_path)
+    return n_parts
 
 
 # ---------------------------------------------------------------------------
-# Fonction GPU — segmente `glb_bytes`, renvoie un dict de labels par-face
-# (numpy encodé) pour chaque échelle. Persiste sur le Volume si job_id fourni.
+# Fonction GPU — segmente `glb_bytes` et renvoie un GLB SEGMENTÉ (sous-meshes
+# nommés + couleurs par partie) pour la granularité demandée. Persiste sur le
+# Volume si job_id fourni. Mirroir du contrat rig_mesh (GLB in → GLB out).
 # ---------------------------------------------------------------------------
 @app.function(
     image=image,
@@ -358,32 +429,31 @@ def _find_labels_npy(exp_root: str, exp_name: str, weight: str,
 )
 def segment_mesh(
     glb_bytes: bytes,
-    scales=None,
+    scale: float = 1.0,
     job_id: str | None = None,
 ) -> bytes:
-    """Segmente le GLB en parties → labels entiers PAR-FACE.
+    """Segmente le GLB en parties → renvoie les bytes d'un GLB SEGMENTÉ.
 
-    Renvoie (et persiste sur le Volume si `job_id`) un `.npz` numpy
-    contenant :
-      - `scales`     : liste des échelles calculées
-      - `labels_<s>` : array int32 de longueur = nb de faces, pour chaque
-                       échelle `s` (un label = un id de partie, 0..K-1)
-      - `n_faces`    : nombre de faces du mesh d'entrée
-    Le caller (worker/desktop) choisit l'échelle et re-projette en
-    sous-meshes coloriés.
+    `scale` = granularité SAMPart3D (0.0 = fin/beaucoup de parties → 2.0 =
+    grossier/peu de parties). L'optim MLP est entraînée UNE fois puis eval
+    produit toutes les échelles ; on construit le GLB de l'échelle la plus
+    proche de `scale`. Le GLB contient un sous-mesh nommé par partie, chacun
+    d'une couleur pleine distincte → chargé directement comme nouvelle version
+    de mesh par les viewers (aucun parsing côté client).
 
-    Sur `job_id`, écrit /seg_data/<job_id>.npz (succès) ou <job_id>.err
+    Sur `job_id`, écrit /seg_data/<job_id>.glb (succès) ou <job_id>.err
     (échec JSON) pour que segment_status/segment_fetch servent le résultat.
     """
-    import numpy as np
-
     t_total = time.time()
-    scales = list(scales) if scales else list(DEFAULT_SCALES)
+    try:
+        scale = float(scale)
+    except (TypeError, ValueError):
+        scale = 1.0
     tmp_dir = tempfile.mkdtemp(prefix="sampart3d_")
     try:
         try:
             out_bytes = _run_segment_pipeline(
-                glb_bytes, tmp_dir, scales, t_total)
+                glb_bytes, tmp_dir, scale, t_total)
         except Exception as e:
             if job_id:
                 try:
@@ -401,10 +471,10 @@ def segment_mesh(
 
         if job_id:
             try:
-                with open(f"/seg_data/{job_id}.npz", "wb") as f:
+                with open(f"/seg_data/{job_id}.glb", "wb") as f:
                     f.write(out_bytes)
                 seg_output_volume.commit()
-                _log(f"wrote /seg_data/{job_id}.npz ({len(out_bytes)} bytes)")
+                _log(f"wrote /seg_data/{job_id}.glb ({len(out_bytes)} bytes)")
             except Exception as e:
                 _log(f"WARN volume write failed for {job_id}: {e}")
         return out_bytes
@@ -412,20 +482,27 @@ def segment_mesh(
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _run_segment_pipeline(glb_bytes: bytes, tmp_dir: str, scales,
+def _run_segment_pipeline(glb_bytes: bytes, tmp_dir: str, scale: float,
                           t_total: float) -> bytes:
-    """Corps du pipeline (extrait pour l'enrobage async). Renvoie le `.npz`
-    (bytes) des labels par-face."""
+    """Corps du pipeline (extrait pour l'enrobage async). Renvoie les bytes
+    d'un GLB SEGMENTÉ pour la granularité `scale`."""
     import numpy as np
     import trimesh
 
-    oid = "fabmesh"
+    # oid UNIQUE par appel : le dossier de sortie exp/ est RELATIF au cwd
+    # (=/SAMPart3D) et partagé si Modal réutilise un container chaud → un
+    # nom unique évite toute collision avec un run précédent.
+    oid = "fabmesh_" + uuid.uuid4().hex[:8]
     # ── Layout de données attendu par les scripts upstream ──
     mesh_root = os.path.join(tmp_dir, "mesh")            # {mesh_root}/{oid}.glb
-    render_root = os.path.join(tmp_dir, "render")        # rendus 16 vues
-    exp_root = os.path.join(tmp_dir, "exp")              # exp/sampart3d/{oid}/…
-    for d in (mesh_root, render_root, exp_root):
+    render_root = os.path.join(tmp_dir, "render")        # rendus 16 vues → {oid}/
+    # SORTIE eval : train.sh/eval.sh écrivent dans exp/{dataset}/{name}/…
+    # RELATIF au cwd (=/SAMPart3D) — on ne choisit PAS ce chemin, on le LIT.
+    exp_root = os.path.join(SAMPART3D_DIR, "exp")
+    for d in (mesh_root, render_root):
         os.makedirs(d, exist_ok=True)
+    # Nettoie une éventuelle sortie d'un run homonyme (container réutilisé).
+    shutil.rmtree(os.path.join(exp_root, "sampart3d", oid), ignore_errors=True)
     mesh_glb = os.path.join(mesh_root, f"{oid}.glb")
     with open(mesh_glb, "wb") as f:
         f.write(glb_bytes)
@@ -436,7 +513,7 @@ def _run_segment_pipeline(glb_bytes: bytes, tmp_dir: str, scales,
     _log(f"mesh chargé: {n_faces} faces, {len(src_mesh.vertices)} vertices")
 
     # ── Étape 0 : patch config (chemins → nos dirs) ──
-    _patch_config(mesh_root, render_root, exp_root)
+    _patch_config(mesh_root, render_root)
 
     # ── Étape 1 : rendu Blender 16 vues ──
     _log("== Étape 1 : rendu Blender 16 vues ==")
@@ -480,33 +557,25 @@ def _run_segment_pipeline(glb_bytes: bytes, tmp_dir: str, scales,
         raise RuntimeError(f"eval.sh a échoué (rc={rc})")
     _log(f"étape 3 ok en {time.time()-t0:.1f}s")
 
-    # ── Étape 4 : collecte des labels par-face pour chaque échelle ──
-    _log("== Étape 4 : collecte des labels par-face ==")
-    payload = {"scales": [], "n_faces": n_faces}
-    for scale in scales:
-        npy = _find_labels_npy(exp_root, oid, weight, scale)
-        if npy is None:
-            _log(f"WARN: aucun mesh_{scale}.npy trouvé — échelle ignorée")
-            continue
-        labels = np.load(npy).astype(np.int32).reshape(-1)
-        if labels.shape[0] != n_faces:
-            _log(f"WARN: labels[{scale}] len={labels.shape[0]} != n_faces="
-                 f"{n_faces} — conservé tel quel (le caller remappe).")
-        n_parts = int(labels.max()) + 1 if labels.size else 0
-        payload["scales"].append(float(scale))
-        payload[f"labels_{scale}"] = labels
-        _log(f"échelle {scale}: {n_parts} parties, {labels.shape[0]} labels")
-
-    if not payload["scales"]:
+    # ── Étape 4 : labels par-face de l'échelle la plus proche → GLB segmenté ──
+    _log(f"== Étape 4 : labels (scale≈{scale}) + construction GLB segmenté ==")
+    npy, actual_scale = _pick_nearest_labels(exp_root, oid, weight, scale)
+    if npy is None:
         raise RuntimeError(
             "aucun fichier de labels produit par eval — "
             "vérifier le chemin results/{weight}/mesh_{scale}.npy")
+    labels = np.load(npy).astype(np.int64).reshape(-1)
+    n_parts_raw = int(labels.max()) + 1 if labels.size else 0
+    _log(f"labels: {os.path.basename(npy)} (scale réel={actual_scale}), "
+         f"{n_parts_raw} parties brutes, {labels.shape[0]} labels / "
+         f"{n_faces} faces")
 
-    buf = io.BytesIO()
-    np.savez_compressed(buf, **payload)
-    out_bytes = buf.getvalue()
-    _log(f"TOTAL dt={time.time()-t_total:.1f}s  npz={len(out_bytes)} bytes  "
-         f"scales={payload['scales']}")
+    out_glb = os.path.join(tmp_dir, "segmented.glb")
+    n_parts = _build_segmented_glb(src_mesh, labels, out_glb)
+    with open(out_glb, "rb") as f:
+        out_bytes = f.read()
+    _log(f"TOTAL dt={time.time()-t_total:.1f}s  glb={len(out_bytes)} bytes  "
+         f"parties={n_parts}  scale={actual_scale}")
     return out_bytes
 
 
@@ -553,7 +622,8 @@ def segment_router():
     @api.post("/segment-start")
     async def segment_start(request: Request):
         """Spawn async d'un job de segmentation.
-        Body: {"_auth","mesh_url", "scales"?:[..], "job_id"?}
+        Body: {"_auth","mesh_url", "scale"?:float, "job_id"?}
+              scale = granularité (0.0 fin → 2.0 grossier), défaut 1.0.
               op_type=="cancel" → annule un spawn en cours par job_id.
         Retour: {"job_id","status":"queued"}."""
         payload = await _read_json(request)
@@ -580,9 +650,11 @@ def segment_router():
         mesh_url = (payload.get("mesh_url") or "").strip()
         if not mesh_url:
             raise HTTPException(status_code=400, detail="mesh_url required")
-        scales = payload.get("scales")
-        if scales is not None and not isinstance(scales, list):
-            raise HTTPException(status_code=400, detail="scales must be a list")
+        try:
+            scale = float(payload.get("scale", 1.0))
+        except (TypeError, ValueError):
+            scale = 1.0
+        scale = max(0.0, min(2.0, scale))   # borne au domaine SAMPart3D
 
         # Télécharge le GLB ici (container CPU, cheap) plutôt que sur le GPU.
         try:
@@ -598,7 +670,7 @@ def segment_router():
                                 detail="mesh_url did not return a GLB")
 
         job_id = (payload.get("job_id") or "").strip() or uuid.uuid4().hex
-        call = segment_mesh.spawn(in_bytes, scales=scales, job_id=job_id)
+        call = segment_mesh.spawn(in_bytes, scale=scale, job_id=job_id)
         try:
             with open(f"/seg_data/{job_id}.call_id", "w") as f:
                 f.write(call.object_id)
@@ -618,7 +690,7 @@ def segment_router():
             raise HTTPException(status_code=400, detail="job_id required")
 
         seg_output_volume.reload()
-        out_path = f"/seg_data/{job_id}.npz"
+        out_path = f"/seg_data/{job_id}.glb"
         err_path = f"/seg_data/{job_id}.err"
         if os.path.isfile(err_path):
             with open(err_path) as f:
@@ -641,7 +713,7 @@ def segment_router():
 
     @api.post("/segment-fetch")
     async def segment_fetch(request: Request):
-        """Stream le .npz de labels pour job_id. 404 si pas prêt, 410 si .err."""
+        """Stream le GLB segmenté pour job_id. 404 si pas prêt, 410 si .err."""
         payload = await _read_json(request)
         _check_auth(payload)
         job_id = (payload.get("job_id") or "").strip()
@@ -651,7 +723,7 @@ def segment_router():
                 or not all(c in "0123456789abcdef" for c in job_id.lower())):
             raise HTTPException(status_code=400, detail="job_id must be hex")
         seg_output_volume.reload()
-        out_path = f"/seg_data/{job_id}.npz"
+        out_path = f"/seg_data/{job_id}.glb"
         err_path = f"/seg_data/{job_id}.err"
         if os.path.isfile(err_path):
             raise HTTPException(status_code=410, detail="segment failed")
@@ -659,8 +731,8 @@ def segment_router():
             raise HTTPException(status_code=404, detail="segment not ready")
         return FileResponse(
             out_path,
-            media_type="application/octet-stream",
-            filename=f"{job_id}.npz",
+            media_type="model/gltf-binary",
+            filename=f"{job_id}.glb",
         )
 
     return api

@@ -103,6 +103,12 @@ export interface Env {
   // `wrangler secret put MODAL_FBX_RETARGET_URL`; unset to disable
   // /api/animate-from-reference (503).
   MODAL_FBX_RETARGET_URL?: string;
+  // SAMPart3D mesh part-segmentation. BASE url of the `myfabmesh-segment`
+  // Modal app (segment_router); the worker appends /segment-start,
+  // /segment-status, /segment-fetch. Async spawn+poll+stream pattern
+  // identical to MODAL_PUPPETEER_RIG_URL. Set via `wrangler secret put
+  // MODAL_SEGMENT_URL`; unset to disable /api/mesh-segment (503).
+  MODAL_SEGMENT_URL?: string;
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
@@ -7464,6 +7470,58 @@ async function deleteRigJobRecord(env: Env, jobId: string): Promise<void> {
   try { await env.MESHES.delete(`_meta/rig_jobs/${jobId}.json`); } catch {}
 }
 
+/** SAMPart3D part-segmentation cost. SAMPart3D is NOT feedforward — it
+ *  trains a per-mesh MLP grouping field (5000 iters, ~5 min) on top of a
+ *  frozen PTv3 backbone, plus Blender 16-view render + SAM, on an A100.
+ *  ~8-10 min GPU/mesh ≈ 10-15x the rig's cost → 15 credits / ~$0.60.
+ *  Refunded on spawn failure OR when segment-status surfaces an error. */
+const SEGMENT_COST = 15;
+const ESTIMATED_USD_SEGMENT = 0.60;  // A100 ~$0.00125/s × ~480s + cold start/weights
+
+/** Job record persisted by /api/mesh-segment, read by /api/mesh-segment-status.
+ *  Same R2 pattern as RigJobRecord. Key: `_meta/segment_jobs/<job_id>.json`.
+ *  `project_name` is echoed so the status route can store the output under
+ *  the right `<uid>/mesh-op/<projectSlug>/` prefix (→ auto-listed as a mesh
+ *  version by handleListMeshes, no extra merge block needed). */
+interface SegmentJobRecord {
+  user_id: string;
+  modal_spend: number;
+  credits: number;
+  mesh_url: string;
+  project_name: string;
+  created_at: number;
+}
+
+async function putSegmentJobRecord(
+  env: Env, jobId: string, record: SegmentJobRecord,
+): Promise<void> {
+  if (!env.MESHES) return;
+  await env.MESHES.put(
+    `_meta/segment_jobs/${jobId}.json`,
+    JSON.stringify(record),
+    { httpMetadata: { contentType: 'application/json' } },
+  );
+}
+
+async function getSegmentJobRecord(
+  env: Env, jobId: string,
+): Promise<SegmentJobRecord | null> {
+  if (!env.MESHES) return null;
+  try {
+    const obj = await env.MESHES.get(`_meta/segment_jobs/${jobId}.json`);
+    if (!obj) return null;
+    const txt = await obj.text();
+    return JSON.parse(txt) as SegmentJobRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteSegmentJobRecord(env: Env, jobId: string): Promise<void> {
+  if (!env.MESHES) return;
+  try { await env.MESHES.delete(`_meta/segment_jobs/${jobId}.json`); } catch {}
+}
+
 /** Flat per-anim cost. Higher than rig because AnyTop generates motion
  *  from learned distribution + we do a BVH->glTF embed step. */
 const ANIM_COST = 5;
@@ -7839,6 +7897,267 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   // Surface the unexpected shape to the client so the UI can show
   // "Modal returned unknown shape" instead of an opaque pending.
   console.warn('[auto-rig-status] unexpected modal response', modalResp);
+  return json({
+    status: 'pending',
+    stage: 'unknown-response',
+    last_error: `Modal returned unexpected shape: ${JSON.stringify(modalResp).slice(0, 200)}`,
+  });
+}
+
+/** POST /api/mesh-segment — spawn a SAMPart3D part-segmentation job on Modal.
+ *
+ *  Body: { mesh_url: string, scale?: number, projectName?: string }
+ *    - mesh_url   : HTTPS URL of the source GLB (must pass isTrustedAssetHost).
+ *    - scale      : granularity 0.0 (fine/many parts) → 2.0 (coarse/few),
+ *                   default 1.0.
+ *    - projectName: used to store the output under the project's mesh-op
+ *                   prefix so it is auto-listed as a mesh version.
+ *
+ *  Mirror of handleAutoRig 1:1: debit up front, POST /segment-start (spawns
+ *  segment_mesh, returns {job_id} fast), persist a SegmentJobRecord so
+ *  /api/mesh-segment-status can refund + own the job. The renderer polls
+ *  /api/mesh-segment-status every 5 s until 'done' or 'failed'. */
+async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_SEGMENT_URL) return err(503, 'mesh-segment backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  let body: { mesh_url?: string; scale?: number; projectName?: string };
+  try {
+    body = await req.json() as { mesh_url?: string; scale?: number; projectName?: string };
+  } catch {
+    return err(400, 'invalid JSON body');
+  }
+  const meshUrl = body.mesh_url;
+  if (!meshUrl || typeof meshUrl !== 'string') return err(400, 'mesh_url required');
+  if (!isTrustedAssetHost(env, meshUrl)) {
+    return err(400, 'mesh_url host not allowed');
+  }
+  let scale = typeof body.scale === 'number' ? body.scale : 1.0;
+  if (!Number.isFinite(scale)) scale = 1.0;
+  scale = Math.max(0, Math.min(2, scale));
+  const projectName = typeof body.projectName === 'string' ? body.projectName : '';
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_SEGMENT);
+  if (remainingBudget == null) {
+    return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
+  }
+  const refundSegmentSpend = async () => {
+    await refundModalSpend(env, ESTIMATED_USD_SEGMENT);
+  };
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundSegmentSpend();
+    return err(429, 'you have reached the per-user daily generation limit.');
+  }
+  const remaining = await spendCredits(env, user.id, SEGMENT_COST);
+  if (remaining == null) {
+    await refundSegmentSpend();
+    return err(402, 'insufficient credits');
+  }
+
+  const baseUrl = env.MODAL_SEGMENT_URL.replace(/\/$/, '');
+  const startUrl = `${baseUrl}/segment-start`;
+  let jobId: string;
+  try {
+    const t0 = Date.now();
+    const r = await fetch(startUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: env.MODAL_SHARED_SECRET,
+        mesh_url: meshUrl,
+        scale,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!r.ok) {
+      throw new Error(`Modal segment-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    }
+    const j = await r.json() as { job_id?: string };
+    jobId = String(j?.job_id || '').trim();
+    if (!jobId) throw new Error('segment-start returned no job_id');
+    console.log(`[mesh-segment] spawn dt=${Date.now() - t0}ms job_id=${jobId} user=${user.id}`);
+  } catch (e: unknown) {
+    await addCredits(env, user.id, SEGMENT_COST);
+    await refundSegmentSpend();
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[mesh-segment.spawn]', msg, e);
+    return err(502, `mesh-segment spawn failed (credits refunded): ${msg.slice(0, 200)}`);
+  }
+
+  try {
+    await putSegmentJobRecord(env, jobId, {
+      user_id: user.id,
+      modal_spend: ESTIMATED_USD_SEGMENT,
+      credits: SEGMENT_COST,
+      mesh_url: meshUrl,
+      project_name: projectName,
+      created_at: Date.now(),
+    });
+  } catch (e) {
+    console.warn('[mesh-segment] could not persist job record', e);
+  }
+  try {
+    await supabaseAdmin(env).from('jobs').insert({
+      id: jobId, user_id: user.id,
+      asset_type: 'segment', mode: 'segment', seed: 0,
+      credit_cost: SEGMENT_COST, status: 'processing',
+      options: { operation_type: 'segment', sourceMesh: meshUrl, backend: 'modal', scale, project_name: projectName },
+      created_at: new Date().toISOString(),
+    });
+  } catch (e) { console.warn('[mesh-segment] jobs.insert failed', e); }
+
+  return json({
+    success: true,
+    job_id: jobId,
+    status: 'queued',
+    creditsRemaining: remaining,
+  });
+}
+
+/** POST/GET /api/mesh-segment-status?job_id=<id> — one poll tick.
+ *  Mirror of handleAutoRigStatus. On 'done' it STREAMS the segmented GLB
+ *  from Modal /segment-fetch straight into R2 under
+ *  `${user.id}/mesh-op/${projectSlug}/${ts}_segment.glb` — that prefix is
+ *  auto-listed as a MESH version by handleListMeshes (no merge block), and
+ *  the `_segment` name keeps it out of the rigs/animations buckets. */
+async function handleMeshSegmentStatus(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_SEGMENT_URL) return err(503, 'mesh-segment backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  let jobId = '';
+  try {
+    const u = new URL(req.url);
+    jobId = (u.searchParams.get('job_id') || '').trim();
+  } catch { /* keep empty */ }
+  if (!jobId && req.method === 'POST') {
+    try {
+      const b = await req.json() as { job_id?: string };
+      jobId = String(b?.job_id || '').trim();
+    } catch { /* keep empty */ }
+  }
+  if (!jobId) return err(400, 'job_id required');
+
+  const record = await getSegmentJobRecord(env, jobId);
+  if (record && record.user_id !== user.id) {
+    return err(403, 'forbidden');
+  }
+
+  const refundOnFailure = async () => {
+    if (!record) return;
+    try {
+      await addCredits(env, user.id, record.credits);
+    } catch (e) {
+      console.error(`[mesh-segment-status] REFUND FAILED job=${jobId} user=${user.id} `
+        + `credits=${record.credits} — record kept for retry:`,
+        e instanceof Error ? e.message : String(e));
+      return;
+    }
+    await refundModalSpend(env, record.modal_spend).catch((e) =>
+      console.error(`[mesh-segment-status] refundModalSpend failed job=${jobId}:`,
+        e instanceof Error ? e.message : String(e)));
+    await deleteSegmentJobRecord(env, jobId).catch(() => {});
+  };
+
+  const baseUrl = env.MODAL_SEGMENT_URL.replace(/\/$/, '');
+  const statusUrl = `${baseUrl}/segment-status`;
+  const fetchUrl = `${baseUrl}/segment-fetch`;
+  let modalResp: { ready?: boolean; error?: string; bytes?: number; fetch_endpoint?: string };
+  try {
+    const r = await fetch(statusUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) {
+      throw new Error(`Modal segment-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    }
+    modalResp = await r.json() as typeof modalResp;
+  } catch (e: unknown) {
+    console.warn('[mesh-segment-status] transient', e instanceof Error ? e.message : String(e));
+    return json({ status: 'pending', warn: e instanceof Error ? e.message : String(e) });
+  }
+
+  if (modalResp?.ready === false && !modalResp?.error) {
+    return json({ status: 'pending', stage: 'running' });
+  }
+  if (modalResp?.ready === false && modalResp?.error) {
+    await refundOnFailure();
+    console.log(`[mesh-segment-status] job_id=${jobId} FAILED: ${String(modalResp.error).slice(0, 200)}`);
+    return json({ status: 'failed', error: String(modalResp.error).slice(0, 500) });
+  }
+
+  if (modalResp?.ready === true) {
+    let fetchResp: Response;
+    try {
+      fetchResp = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e: unknown) {
+      console.warn('[mesh-segment-status.fetch] transient', e instanceof Error ? e.message : String(e));
+      return json({ status: 'pending', warn: 'segment-fetch transient: ' + (e instanceof Error ? e.message : String(e)) });
+    }
+    if (fetchResp.status === 404) {
+      return json({ status: 'pending', stage: 'race-volume-not-ready' });
+    }
+    if (fetchResp.status === 410) {
+      await refundOnFailure();
+      const txt = await fetchResp.text().catch(() => '');
+      return json({ status: 'failed', error: txt.slice(0, 500) || 'segment failed' });
+    }
+    if (!fetchResp.ok || !fetchResp.body) {
+      await refundOnFailure();
+      const txt = await fetchResp.text().catch(() => '');
+      console.error(`[mesh-segment-status.fetch] HTTP ${fetchResp.status} body=${txt.slice(0, 200)}`);
+      return json({ status: 'failed', error: `segment-fetch HTTP ${fetchResp.status}` });
+    }
+
+    // Store under the project's mesh-op prefix → auto-listed as a mesh
+    // version by handleListMeshes. `_segment` name keeps it out of the
+    // rigs/animations buckets on the client.
+    const projectSlug = ((record?.project_name || 'untitled')
+      .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)) || 'untitled';
+    const key = `${user.id}/mesh-op/${projectSlug}/${Date.now()}_segment.glb`;
+    const expectedBytes = modalResp?.bytes;
+    try {
+      await env.MESHES.put(key, fetchResp.body, {
+        httpMetadata: { contentType: 'model/gltf-binary' },
+      });
+    } catch (e) {
+      await refundOnFailure();
+      console.error('[mesh-segment-status.r2]', e instanceof Error ? e.message : String(e), e);
+      return json({ status: 'failed', error: 'mesh-segment storage failed (credits refunded)' });
+    }
+
+    await deleteSegmentJobRecord(env, jobId).catch(() => {});
+    const publicUrl = await signedR2Url(env, key, 'mesh');
+    console.log(`[mesh-segment-status] job_id=${jobId} DONE expected_bytes=${expectedBytes} url=${publicUrl}`);
+    try {
+      await supabaseAdmin(env).from('jobs')
+        .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
+        .eq('id', jobId).eq('user_id', user.id);
+    } catch (e) { console.warn('[mesh-segment-status] jobs.update failed', e); }
+    return json({
+      status: 'done',
+      success: true,
+      mesh_url: publicUrl,
+      url: publicUrl,
+      path: key,
+      bytes: expectedBytes ?? null,
+    });
+  }
+
+  console.warn('[mesh-segment-status] unexpected modal response', modalResp);
   return json({
     status: 'pending',
     stage: 'unknown-response',
@@ -11362,6 +11681,7 @@ export default {
         '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
         '/api/auto-rig', '/api/auto-rig-status',
+        '/api/mesh-segment', '/api/mesh-segment-status',
       ]);
       // /api/stripe-webhook MUST stay reachable even when Site is OFF.
       // Stripe has already charged the card by the time it calls us; a
@@ -11519,6 +11839,8 @@ export default {
         if (pathname === '/api/upload-mesh'           && method === 'POST') return await handleUploadMesh(req, env);
         if (pathname === '/api/auto-rig'              && method === 'POST') return await handleAutoRig(req, env);
         if (pathname === '/api/auto-rig-status'       && (method === 'GET' || method === 'POST')) return await handleAutoRigStatus(req, env);
+        if (pathname === '/api/mesh-segment'          && method === 'POST') return await handleMeshSegment(req, env);
+        if (pathname === '/api/mesh-segment-status'   && (method === 'GET' || method === 'POST')) return await handleMeshSegmentStatus(req, env);
         if (pathname === '/api/animate'               && method === 'POST') return await handleAutoAnim(req, env);
         if (pathname === '/api/animate-status'        && (method === 'GET' || method === 'POST')) return await handleAutoAnimStatus(req, env);
         if (pathname === '/api/animate-from-reference' && method === 'POST') return await handleAnimateFromReference(req, env);
