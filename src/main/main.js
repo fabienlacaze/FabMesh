@@ -7414,6 +7414,66 @@ ipcMain.handle('wizard:install-rig', async (event) => {
   });
 });
 
+// Provision the SAMPart3D part-segmentation engine (optional wizard phase):
+// copy embedded Python to a THIRD env (torch cu128 + source-built spconv/
+// pointops — incompatible with the AI + rig envs), clone+patch the repo,
+// build the CUDA deps, download ptv3-object.pth + SAM ViT-H + Blender 4.0.
+// Streams JSONL progress via wizard:segment-progress. NOTE: this env needs a
+// C++/CUDA build toolchain (VS Build Tools + CUDA Toolkit 12.8); the wizard
+// checks for it up front and fails clearly if missing.
+ipcMain.handle('wizard:install-segment', async (event) => {
+  const destPy = path.join(SEGMENT_PYTHON_DIR, 'python.exe');
+  log.info('main', 'install-segment: START. SEGMENT_PYTHON_DIR=' + SEGMENT_PYTHON_DIR + ' destPy exists=' + fs.existsSync(destPy));
+  if (!fs.existsSync(destPy)) {
+    const srcDir = path.dirname(_embeddedPython());
+    event.sender.send('wizard:segment-progress', { step: 'seg-copy-python', pct: 0, done: false });
+    try {
+      fs.cpSync(srcDir, SEGMENT_PYTHON_DIR, { recursive: true });
+    } catch (e) {
+      log.error('main', 'install-segment: COPY FAILED: ' + (e && e.message));
+      return { ok: false, error: 'copy failed: ' + (e && e.message) };
+    }
+  }
+  const script = path.join(SCRIPTS_DIR, 'wizard_install_segment.py');
+  log.info('main', 'install-segment: spawning ' + destPy + ' ' + script);
+  return new Promise((resolve, reject) => {
+    let stderrBuf = '';
+    const proc = execFile(destPy, [script, '--python', destPy], {
+      timeout: 0, maxBuffer: 64 * 1024 * 1024,
+      env: {
+        ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1',
+        HF_HOME: HF_CACHE_DIR,
+        HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub'),
+        FABMESH_SEGMENT_DIR: SAMPART3D_DIR,
+      },
+    }, (err) => {
+      if (err) {
+        log.error('main', 'install-segment: FAILED code=' + err.code + ' msg=' + err.message + ' | stderr tail: ' + stderrBuf.slice(-2000));
+        reject(new Error(err.message + (stderrBuf ? ' | ' + stderrBuf.slice(-400) : '')));
+      } else {
+        log.info('main', 'install-segment: SUCCESS. segReady=' + fs.existsSync(path.join(SAMPART3D_DIR, 'ckpts', 'ptv3-object.pth')));
+        resolve({ ok: true });
+      }
+    });
+    let buf = '';
+    proc.stdout?.on('data', (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const p = JSON.parse(line);
+          if (p.step) log.info('main', 'install-segment step=' + p.step + ' pct=' + p.pct + (p.error ? ' ERROR=' + p.error : '') + (p.warn ? ' warn=' + p.warn : ''));
+          event.sender.send('wizard:segment-progress', p);
+        } catch (_) {}
+      }
+    });
+    proc.stderr?.on('data', (d) => { stderrBuf += d.toString(); if (stderrBuf.length > 200000) stderrBuf = stderrBuf.slice(-100000); });
+  });
+});
+
 // Reconfigure FabMesh: wipe setup_state.json and reload the wizard.
 // Models cached on disk + user projects are kept (only the "setup
 // done" flag is reset), so the wizard reopens but the heavy assets

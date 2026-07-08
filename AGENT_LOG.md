@@ -1,5 +1,31 @@
 # FabMesh Agent Log
 
+## 2026-07-08 (feat — SAMPart3D desktop : wizard d'installation env sm_120)
+
+`scripts/wizard_install_segment.py` — provisionne l'env local SAMPart3D
+(3e env Python sous HEAVY/python-segment + repo sous HEAVY/SAMPart3D).
+Contrat JSONL identique à wizard_install_rig.py. Étapes :
+- check toolchain (nvcc + MSVC) — échoue tôt + clair si absent (pointops +
+  spconv sont compilés depuis la source).
+- clone SAMPart3D + patch (flash/hdbscan/tcnn, inline, en phase avec
+  _patch_sampart3d.py).
+- torch 2.7.0+cu128, torch-scatter (wheel cu128), deps PyPI.
+- **cumm + spconv depuis les forks Pointcept** (build source sm_120,
+  CUMM_CUDA_ARCH_LIST=12.0 / *_DISABLE_JIT=1) — LE point fragile.
+- pointops (compile, cwd=libs/pointops).
+- Blender 4.0.0 windows (bundlé sous <repo>/blender — 4.2+ casse le render).
+- ptv3-object.pth (452 Mo) + SAM ViT-H (~2.5 Go).
+main.js : handler `wizard:install-segment` (copie python-embed → 3e env +
+invoque le wizard, stream 'wizard:segment-progress'). preload : installSegment
++ onSegmentProgress.
+
+**RESTE (intégration desktop)** : (1) une étape « Part segmentation » dans
+l'UI du wizard/Reconfigure branchée sur API.installSegment() + barre de
+progression (onSegmentProgress) ; ou un prompt « installer maintenant » quand
+on clique Segment sans l'env. (2) VALIDER sur vraie install (le build spconv
+sm_120 Windows est le crux non testable ici — prérequis VS Build Tools + CUDA
+Toolkit 12.8 ; sinon repli WSL2). (3) i18n FR des libellés.
+
 ## 2026-07-08 (recherche build sm_120 + patchs tcnn/Blender + Modal simplifié)
 
 Recherche « recette build SAMPart3D sm_120 local » (agent, 40 outils, sources
