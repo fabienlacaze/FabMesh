@@ -8686,10 +8686,13 @@ function _openSegmentGranularityModal() {
 
 // One-time install of the local SAMPart3D engine (torch cu128 + spconv/
 // pointops build + Blender 4.0 + ckpts). Long + shows progress via a job
-// popup fed by API.onSegmentProgress.
+// popup fed by window.wizardAPI.onSegmentProgress.
+// NB: installSegment / onSegmentProgress vivent dans window.wizardAPI
+// (exposeInMainWorld 'wizardAPI', à côté de installRig), PAS dans API
+// (=window.meshyAPI). meshSegment, lui, est bien dans meshyAPI.
 let _segInstallJobId = null;
-if (window.API && typeof API.onSegmentProgress === 'function') {
-  API.onSegmentProgress((p) => {
+if (window.wizardAPI && typeof window.wizardAPI.onSegmentProgress === 'function') {
+  window.wizardAPI.onSegmentProgress((p) => {
     if (!_segInstallJobId) return;
     const j = state.jobs && state.jobs.find(x => x.id === _segInstallJobId);
     if (!j || j.status !== 'running') return;
@@ -8702,14 +8705,14 @@ if (window.API && typeof API.onSegmentProgress === 'function') {
 }
 
 async function _installSegmentEngine() {
-  if (!API.installSegment) { showToast('Installer not available.', 'error'); return false; }
+  if (!window.wizardAPI || !window.wizardAPI.installSegment) { showToast('Installer not available.', 'error'); return false; }
   const job = (typeof pushJob === 'function')
     ? pushJob('Installing part-segmentation engine', null,
         { Note: 'One-time: ~3 GB download + CUDA build (20-40 min)' }, 1800000)
     : null;
   _segInstallJobId = job ? job.id : null;
   try {
-    const r = await API.installSegment();
+    const r = await window.wizardAPI.installSegment();
     _segInstallJobId = null;
     if (r && r.ok) {
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
