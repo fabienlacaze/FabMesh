@@ -8684,20 +8684,58 @@ function _openSegmentGranularityModal() {
   });
 }
 
-async function runMeshSegment() {
+// One-time install of the local SAMPart3D engine (torch cu128 + spconv/
+// pointops build + Blender 4.0 + ckpts). Long + shows progress via a job
+// popup fed by API.onSegmentProgress.
+let _segInstallJobId = null;
+if (window.API && typeof API.onSegmentProgress === 'function') {
+  API.onSegmentProgress((p) => {
+    if (!_segInstallJobId) return;
+    const j = state.jobs && state.jobs.find(x => x.id === _segInstallJobId);
+    if (!j || j.status !== 'running') return;
+    if (typeof p.pct === 'number') j.progress = Math.max(j.progress || 0, Math.min(99, p.pct));
+    j.bridgeReporting = true;
+    const detail = p.msg || p.current || '';
+    if (p.step) j.subtitle = `${p.step}${detail ? ' — ' + detail : ''}`.slice(0, 130);
+    if (typeof renderJobs === 'function') renderJobs();
+  });
+}
+
+async function _installSegmentEngine() {
+  if (!API.installSegment) { showToast('Installer not available.', 'error'); return false; }
+  const job = (typeof pushJob === 'function')
+    ? pushJob('Installing part-segmentation engine', null,
+        { Note: 'One-time: ~3 GB download + CUDA build (20-40 min)' }, 1800000)
+    : null;
+  _segInstallJobId = job ? job.id : null;
+  try {
+    const r = await API.installSegment();
+    _segInstallJobId = null;
+    if (r && r.ok) {
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
+      showToast('Part-segmentation engine installed.', 'success');
+      return true;
+    }
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, (r && r.error) || 'install failed');
+    showToast(`Install failed: ${(r && r.error) || 'unknown'}`, 'error', 9000);
+    return false;
+  } catch (e) {
+    _segInstallJobId = null;
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
+    showToast(`Install error: ${e.message}`, 'error', 9000);
+    return false;
+  }
+}
+
+async function _runSegmentJob(scale, allowInstall) {
   const p = state.currentProject;
-  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
-  if (!API.meshSegment) { showToast('Segmentation engine not available.', 'error'); return; }
-  const scale = await _openSegmentGranularityModal();
-  if (scale == null) return;  // cancelled
+  if (!p || !p.selectedMeshPath) return;
   const meshPath = p.selectedMeshPath;
   const meshName = meshPath.split(/[\\/]/).pop();
   const expectedMs = 480000;  // ~8 min (Blender render + SAM + 5000-iter MLP)
   const job = (typeof pushJob === 'function')
     ? pushJob(`segment: ${p.name}`, null, {
-        Tool: 'Segment parts (AI)',
-        Mesh: meshName,
-        Granularity: scale.toFixed(1),
+        Tool: 'Segment parts (AI)', Mesh: meshName, Granularity: scale.toFixed(1),
       }, expectedMs, { sourceImageUrl: meshPath, projectName: p.name })
     : null;
   try {
@@ -8713,18 +8751,37 @@ async function runMeshSegment() {
         p.selectedMeshPath = newPath;
       }
       populateWorkspace(p);
-    } else {
-      const msg = [
-        (result && result.error) || 'unknown',
-        result && result.stderr ? String(result.stderr).slice(-400) : '',
-      ].filter(Boolean).join(' — ');
-      showToast(`Segmentation failed: ${msg}`, 'error', 6000);
-      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+      return;
     }
+    const err = (result && result.error) || 'unknown';
+    // Engine not provisioned yet → offer the one-time install, then retry.
+    if (allowInstall && /not installed|not found|Blender 4\.0 not installed/i.test(err)) {
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, 'engine not installed');
+      const ok = await customConfirm(
+        'The part-segmentation engine (SAMPart3D) is not installed yet.\n\n'
+        + 'Install it now? One-time ~3 GB download + a CUDA build — it needs '
+        + 'Visual Studio Build Tools + CUDA Toolkit 12.8, and can take 20-40 min.',
+        'Install part segmentation', 'Install');
+      if (ok && await _installSegmentEngine()) return _runSegmentJob(scale, false);
+      return;
+    }
+    const msg = [err, result && result.stderr ? String(result.stderr).slice(-400) : '']
+      .filter(Boolean).join(' — ');
+    showToast(`Segmentation failed: ${msg}`, 'error', 6000);
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
   } catch (e) {
     showToast(`Segmentation error: ${e.message}`, 'error', 5000);
     if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
   }
+}
+
+async function runMeshSegment() {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  if (!API.meshSegment) { showToast('Segmentation engine not available.', 'error'); return; }
+  const scale = await _openSegmentGranularityModal();
+  if (scale == null) return;  // cancelled
+  return _runSegmentJob(scale, true);
 }
 document.getElementById('ws-mesh-segment-btn')?.addEventListener('click', runMeshSegment);
 
