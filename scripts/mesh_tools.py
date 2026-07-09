@@ -478,7 +478,7 @@ def set_pivot(input_path, output_path, mode='bottom', ox=0.0, oy=0.0, oz=0.0):
     log(f'set_pivot ({mode}, offset {ox},{oy},{oz})')
 
 
-def watertight(input_path, output_path, resolution=128):
+def watertight(input_path, output_path, resolution=128, mode=''):
     """Rebuild a CLOSED, watertight shell via voxel remesh + marching cubes.
 
     Unlike fill_holes (which stitches existing boundary loops), this fuses
@@ -487,7 +487,17 @@ def watertight(input_path, output_path, resolution=128):
     texture (the surface is brand new), so re-texture afterwards. Higher
     `resolution` = finer detail but slower + heavier."""
     import trimesh
-    resolution = max(32, min(400, int(resolution)))
+    resolution = max(32, min(512, int(resolution)))
+    # Mode "seal" : garde le mesh ORIGINAL (qualité + texture) et l'adosse d'une
+    # coque voxel fermée scellante (rétrécie à l'intérieur) → étanche SANS
+    # dégrader le visible. Cf scripts/watertight_seal.py.
+    if str(mode).strip().lower() == 'seal':
+        import os as _os
+        import sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        from watertight_seal import seal as _seal
+        _seal(input_path, output_path, resolution)
+        return
     scene = trimesh.load(input_path)
     src = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
     geoms = [g for g in src if hasattr(g, 'vertices') and len(g.vertices) and hasattr(g, 'faces') and len(g.faces)]

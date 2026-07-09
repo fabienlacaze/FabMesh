@@ -9394,13 +9394,14 @@ const MESH_TOOL_SCHEMAS = {
   },
   watertight: {
     title: 'Watertight',
-    subtitle: 'Rebuild a CLOSED, watertight shell (voxel remesh). Fuses every disconnected part into one solid with no holes. The original texture is baked onto the new shell as vertex colours (run Re-Texture for crisp PBR). Higher resolution = more detail, slower & heavier.',
+    subtitle: 'Make the mesh watertight. Default (voxel remesh) rebuilds a closed shell but replaces the geometry (loses fine detail + UVs). Tick "Keep original detail" to instead KEEP your original mesh (quality + texture) and seal it from behind with a closed inner shell — no degradation.',
     needsImage: false,
-    confirm: 'Watertight rebuilds the mesh as a new closed shell (texture kept as vertex colours). Continue?',
+    confirm: 'Watertight will close the mesh. With "Keep original detail" your original geometry & texture are preserved (sealed by an inner shell). Continue?',
     params: [
       { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 512, step: 8, default: 192 },
+      { id: 'keepDetail', label: 'Keep original detail (seal, no remesh)', type: 'checkbox', default: false },
     ],
-    build: (vals) => [String(vals.resolution)],
+    build: (vals) => [String(vals.resolution), vals.keepDetail ? 'seal' : ''],
   },
   texture_var: {
     title: 'Texture variations',

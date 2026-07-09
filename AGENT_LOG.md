@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (watertight : mode SEAL — étanche SANS dégrader + résolution 512)
+
+Le voxel remesh classique dégrade (rééchantillonne géométrie + perd UV/texture).
+Idée user : garder l'original + l'adosser d'une coque fermée scellante.
+`scripts/watertight_seal.py` (NEW) : voxel remesh → coque FERMÉE → rétrécie vers
+l'intérieur (−normales × pitch·1.5) → décimée (fast-simplification, 225k→40k) +
+couleur neutre → merge avec l'ORIGINAL (texture/qualité intacts). Résultat :
+net dehors, scellé par-derrière = imprimable sans dégrader (~6 s, tank 43 Mo).
+Câblage : `mesh_tools.watertight(inp,out,res,mode)` délègue à watertight_seal
+si mode=='seal' (+ clamp résolution 400→512) ; UI modal watertight = checkbox
+« Keep original detail (seal) » → build passe le mode ; résolution slider max
+400/320→512 (desktop+cloud). Testé: dispatch seal + normal OK.
+NB prod: `pip install fast-simplification` dans l'env AI (HEAVY/python) pour la
+coque légère (sinon fallback coque pleine 225k, fonctionne quand même).
+Cloud: checkbox pas encore ajouté (mesh_op Modal doit supporter mode=seal).
+
 ## 2026-07-09 (segment : GLB segmenté conserve la TEXTURE + toggle couleurs↔texture)
 
 User veut que le mesh segmenté garde sa texture. `partsam_bridge._build_segmented_glb`
