@@ -9098,7 +9098,7 @@ const MESH_TOOL_SCHEMAS = {
     needsImage: false,
     confirm: 'Watertight rebuilds the mesh as a new closed shell and removes its texture (re-texture afterwards). Continue?',
     params: [
-      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 320, step: 8, default: 128 },
+      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 512, step: 8, default: 128 },
     ],
     build: (vals) => [String(vals.resolution)],
   },

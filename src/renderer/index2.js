@@ -9398,7 +9398,7 @@ const MESH_TOOL_SCHEMAS = {
     needsImage: false,
     confirm: 'Watertight rebuilds the mesh as a new closed shell (texture kept as vertex colours). Continue?',
     params: [
-      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 400, step: 8, default: 192 },
+      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 512, step: 8, default: 192 },
     ],
     build: (vals) => [String(vals.resolution)],
   },
