@@ -344,6 +344,13 @@ def _build_segmented_glb(src_mesh, labels, out_path: str) -> int:
 
     scene = trimesh.Scene()
     uniq = sorted(set(int(x) for x in labels.tolist()))
+    # Mesh TEXTURÉ : chaque partie GARDE la texture (submesh préserve UV) +
+    # matériau source PARTAGÉ (atlas non dupliqué). Le viewer applique les
+    # couleurs de parties (toggle couleurs ↔ texture). Sinon : couleur pleine.
+    src_vis = getattr(src_mesh, "visual", None)
+    src_uv = getattr(src_vis, "uv", None)
+    has_tex = src_uv is not None and len(src_uv) == len(src_mesh.vertices)
+    src_mat = getattr(src_vis, "material", None) if has_tex else None
     n_parts = 0
     for i, lab in enumerate(uniq):
         face_idx = np.where(labels == lab)[0]
@@ -352,10 +359,17 @@ def _build_segmented_glb(src_mesh, labels, out_path: str) -> int:
         part = src_mesh.submesh([face_idx], append=True)
         if part is None or len(part.faces) == 0:
             continue
-        color = _PART_PALETTE[i % len(_PART_PALETTE)]
-        rgba = np.array([color[0], color[1], color[2], 255], dtype=np.uint8)
-        part.visual = trimesh.visual.ColorVisuals(
-            mesh=part, face_colors=np.tile(rgba, (len(part.faces), 1)))
+        if has_tex:
+            try:
+                if src_mat is not None and hasattr(part.visual, "material"):
+                    part.visual.material = src_mat
+            except Exception:
+                pass
+        else:
+            color = _PART_PALETTE[i % len(_PART_PALETTE)]
+            rgba = np.array([color[0], color[1], color[2], 255], dtype=np.uint8)
+            part.visual = trimesh.visual.ColorVisuals(
+                mesh=part, face_colors=np.tile(rgba, (len(part.faces), 1)))
         name = f"part_{n_parts:02d}"
         scene.add_geometry(part, geom_name=name, node_name=name)
         n_parts += 1
