@@ -79,6 +79,41 @@ def _run(cmd, cwd, env):
     return proc.wait()
 
 
+def _clean_labels(mesh, labels, passes=3, k=16):
+    """Débruite les labels par-face par FILTRE MAJORITAIRE SPATIAL (kNN sur les
+    centres de faces) : chaque face prend le label majoritaire de ses k voisins
+    les plus proches. Absorbe les petits îlots parasites dans la partie qui les
+    entoure → « trop de petits morceaux » réglé. Robuste aux meshes fragmentés
+    (contrairement à un débruitage par connectivité, cassé si le mesh n'est pas
+    soudé). No-op si scipy absent."""
+    try:
+        import numpy as np
+        from scipy import stats
+        from scipy.spatial import cKDTree
+    except Exception:
+        return labels
+    labels = np.asarray(labels).reshape(-1).astype(np.int64)
+    faces = getattr(mesh, "faces", None)
+    if faces is None or len(labels) != len(faces) or len(labels) < 100:
+        return labels
+    try:
+        cent = mesh.triangles_center
+        _, idx = cKDTree(cent).query(cent, k=min(k, len(cent)))
+        out = labels.copy()
+        for _ in range(max(1, passes)):
+            m = stats.mode(out[idx], axis=1, keepdims=False).mode
+            if (m == out).all():
+                break
+            out = m
+        n0 = len(set(labels.tolist()))
+        n1 = len(set(out.tolist()))
+        log(f"denoise: bruit lissé (labels {n0}->{n1})")
+        return out
+    except Exception as e:
+        log(f"denoise indispo ({e}) — labels bruts")
+        return labels
+
+
 def _build_segmented_glb(src_mesh, labels, out_path):
     import numpy as np
     import trimesh
@@ -185,6 +220,7 @@ def main():
 
         labels = np.load(labels_npy).astype(np.int64).reshape(-1)
         src = trimesh.load(mesh_in, force="mesh")
+        labels = _clean_labels(src, labels)   # débruite les petits îlots parasites
         n_parts = _build_segmented_glb(src, labels, out_glb)
         if not os.path.isfile(out_glb) or os.path.getsize(out_glb) == 0:
             raise RuntimeError("export du GLB segmenté vide")

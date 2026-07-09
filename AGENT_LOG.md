@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (segment : denoise « trop de petits morceaux » + watertight seal opaque)
+
+- **Denoise** (`_clean_labels`, partsam_bridge + _partsam) : filtre majoritaire
+  SPATIAL (kNN k=16 sur triangles_center, scipy.stats.mode, 3 passes) sur les
+  labels par-face → absorbe les petits îlots parasites. Appliqué avant
+  _build_segmented_glb. Tank : faces bruit 9442→1259 (86%), 10 parties gardées.
+  NB: connectivité (face_adjacency) INEFFICACE — mesh TRELLIS2 non soudé =
+  40k composantes ; le spatial est robuste à la fragmentation.
+- **Watertight seal opaque** : la coque grise (ColorVisuals RGBA → COLOR_0 VEC4)
+  était flaggée transparent par GLTFLoader + sans normales → trous transparents.
+  Fix watertight_seal.py : PBRMaterial gris OPAQUE + force normales. Vérifié
+  alphaMode OPAQUE, NORMAL 2/2, COLOR_0 0/2.
+
 ## 2026-07-09 (segment fix : normales manquantes = PBR noir + couleurs vives)
 
 BUG racine : le GLB segmenté rendait NOIR (viewer couleurs + vignettes) car

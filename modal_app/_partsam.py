@@ -321,6 +321,37 @@ _PART_PALETTE = [
 ]
 
 
+def _clean_labels(mesh, labels, passes=3, k=16):
+    """Débruite les labels par-face (filtre majoritaire spatial kNN) : absorbe
+    les petits îlots parasites dans la partie qui les entoure. Robuste aux
+    meshes fragmentés. No-op si scipy absent. Mirroir de partsam_bridge."""
+    try:
+        import numpy as np
+        from scipy import stats
+        from scipy.spatial import cKDTree
+    except Exception:
+        return labels
+    labels = np.asarray(labels).reshape(-1).astype(np.int64)
+    faces = getattr(mesh, "faces", None)
+    if faces is None or len(labels) != len(faces) or len(labels) < 100:
+        return labels
+    try:
+        cent = mesh.triangles_center
+        _, idx = cKDTree(cent).query(cent, k=min(k, len(cent)))
+        out = labels.copy()
+        for _ in range(max(1, passes)):
+            m = stats.mode(out[idx], axis=1, keepdims=False).mode
+            if (m == out).all():
+                break
+            out = m
+        _log(f"denoise: bruit lissé (labels {len(set(labels.tolist()))}"
+             f"->{len(set(out.tolist()))})")
+        return out
+    except Exception as e:
+        _log(f"denoise indispo ({e}) — labels bruts")
+        return labels
+
+
 def _build_segmented_glb(src_mesh, labels, out_path: str) -> int:
     """Construit un GLB où CHAQUE partie (label distinct) devient un sous-mesh
     NOMMÉ `part_00`, `part_01`, … avec une COULEUR PLEINE distincte (couleurs
@@ -506,6 +537,7 @@ def _run_segment_pipeline(glb_bytes: bytes, tmp_dir: str, granularity: float,
         _log(f"labels: {os.path.basename(labels_npy)}, {n_parts_raw} parties "
              f"brutes, {labels.shape[0]} labels / {n_faces} faces")
 
+        labels = _clean_labels(src_mesh, labels)   # débruite les petits îlots
         out_glb = os.path.join(tmp_dir, "segmented.glb")
         n_parts = _build_segmented_glb(src_mesh, labels, out_glb)
         if not os.path.isfile(out_glb) or os.path.getsize(out_glb) == 0:
