@@ -3812,7 +3812,20 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     if (sl) { sl.value = 0; sl.style.setProperty('--val', '0%'); }
     const segBtn = wrap.querySelector('button[data-act="segcolors"]');
     if (segBtn) segBtn.classList.toggle('active', state.segColors !== false);
-    if (seg) { applyExplode(viewer, 0); applySegColors(viewer, state.segColors !== false); }
+    if (seg) {
+      // Mesh segmenté = carte de parties en couleur pleine. Le GLB (couleurs
+      // de faces RGBA → COLOR_0 VEC4) fait flaguer le matériau `transparent`
+      // par GLTFLoader → rendu translucide indésirable. On force opaque au
+      // chargement (X-Ray reste dispo à la demande via son bouton).
+      model.traverse(o => {
+        if (!o.isMesh || !o.material) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+          m.transparent = false; m.opacity = 1; m.depthWrite = true; m.needsUpdate = true;
+        });
+      });
+      applyExplode(viewer, 0);
+      applySegColors(viewer, state.segColors !== false);
+    }
   }
 
   // Event bindings on the toolbar
