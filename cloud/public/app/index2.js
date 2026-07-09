@@ -7702,6 +7702,180 @@ function _meshRootBase(filename) {
   return s;
 }
 
+// ═══════════════════ GENERATION HISTORY (popup ⏱) ═══════════════════
+// Miroir du desktop (src/renderer/index2.js). Sur cloud il n'y a pas (encore)
+// de sidecar .meta.json ni d'IPC getLineageMeta → getMeta renvoie null et la
+// timeline fonctionne en MODE DÉGRADÉ (déduction filename: dernière op,
+// parent par racine commune + timestamp, engine par token du nom).
+async function buildLineageTimeline(startPath, p) {
+  const steps = [];
+  const norm = (s) => String(s || '').replace(/\\/g, '/').toLowerCase();
+  const findIn = (arr, pth) => (arr || []).find((x) => x && norm(x.path) === norm(pth));
+  const getMeta = async (rec, pth) => {
+    if (rec && rec.meta) return rec.meta;
+    try { return (typeof API !== 'undefined' && API.getLineageMeta) ? await API.getLineageMeta(pth) : null; } catch (_) { return null; }
+  };
+  const tsOf = (rec, meta, pth) => {
+    if (meta && meta.ts) return meta.ts;
+    const all = String(pth || '').match(/\d{13}/g);
+    if (all && all.length) return +all[all.length - 1];
+    if (rec) { const t = new Date(rec.created || rec.mtime || 0).getTime(); if (Number.isFinite(t) && t) return t; }
+    return 0;
+  };
+  let curPath = startPath;
+  let guard = 0;
+  while (curPath && guard++ < 20) {
+    const anim = findIn(p.animations, curPath);
+    const rig = findIn(p.rigs, curPath);
+    const mesh = findIn(p.meshes, curPath);
+    const rec = anim || rig || mesh || null;
+    const fname = (rec && rec.filename) || String(curPath).split(/[\\/]/).pop();
+    const meta = await getMeta(rec, curPath);
+    let kind, engine = meta && meta.engine, opKey = (meta && meta.op) || null;
+    let parentPath = (meta && meta.parent) || null;
+    if (anim || /__/.test(fname) && /animated/i.test(String(curPath))) kind = 'anim';
+    else if (rig || /_rigged_/i.test(fname)) kind = 'rig';
+    else {
+      const vinfo = _meshVersionInfo(fname);
+      kind = ((meta && meta.kind === 'op') || vinfo.isVersion) ? 'op' : 'mesh';
+      if (!opKey && vinfo.isVersion) opKey = vinfo.opKey;
+    }
+    if (kind === 'rig' && !engine) {
+      const m2 = fname.match(/_rigged_([a-z0-9]+)_\d+/i); engine = m2 ? m2[1] : undefined;
+    }
+    if (kind === 'mesh' && !engine) {
+      const m3 = fname.match(/_(sf3d|hunyuan|trellis2_native|trellis2|trellis|triposg|hi3dgen|local|ai)_\d{10,}/i);
+      engine = m3 ? m3[1] : undefined;
+    }
+    steps.unshift({
+      kind, path: curPath, filename: fname,
+      thumb: (rec && rec.thumb) || null,
+      motionLabel: (anim && (anim.motionLabel || anim.id)) || null,
+      ts: tsOf(rec, meta, curPath), engine, opKey,
+      opLabel: opKey ? (_OP_LABEL[opKey] || opKey) : null,
+      params: (meta && meta.params) || null,
+      derived: !meta,
+      sourceImage: (rec && rec.sourceImage) || (meta && meta.source) || null,
+    });
+    if (!parentPath) {
+      if (kind === 'anim') parentPath = (anim && anim.rigPath) || null;
+      else if (kind === 'rig') {
+        try { parentPath = _resolveParentMeshPath(rec || { filename: fname }, p); } catch (_) { parentPath = null; }
+      } else if (kind === 'op') {
+        const root = _meshRootBase(fname);
+        const myTs = tsOf(rec, meta, curPath);
+        let best = null;
+        for (const mm of (p.meshes || [])) {
+          if (!mm || norm(mm.path) === norm(curPath)) continue;
+          if (_meshRootBase(mm.filename) !== root) continue;
+          if (/_rigged_/i.test(mm.filename)) continue;
+          const t = tsOf(mm, mm.meta, mm.path);
+          if (t < myTs && (!best || t > best.t)) best = { path: mm.path, t };
+        }
+        parentPath = best ? best.path : null;
+      }
+    }
+    if (kind === 'mesh') break;
+    if (parentPath && norm(parentPath) === norm(curPath)) break;
+    curPath = parentPath;
+  }
+  const srcImg = (steps.find((s) => s.sourceImage) || {}).sourceImage;
+  if (srcImg) {
+    const projPrompt = (p && typeof p.prompt === 'string' && p.prompt.trim()) ? p.prompt.trim() : null;
+    steps.unshift({
+      kind: 'image', path: srcImg,
+      filename: String(srcImg).split(/[\\/]/).pop(),
+      thumb: srcImg,
+      ts: 0, engine: undefined,
+      params: projPrompt ? { prompt: projPrompt } : null,
+      derived: true,
+    });
+  }
+  return steps;
+}
+
+async function showGenerationHistory(startPath) {
+  const p = state.currentProject;
+  if (!p || !startPath) return;
+  let steps = [];
+  try { steps = await buildLineageTimeline(startPath, p); } catch (e) { console.error('[gen-history]', e); }
+  if (!steps.length) { showToast(_i18nT('No history available for this item.'), 'info', 2200); return; }
+  const KIND_META = {
+    image: { ico: '🖼', title: 'Source image' },
+    mesh:  { ico: '🧊', title: 'Mesh generated' },
+    op:    { ico: '🛠', title: 'Modification' },
+    rig:   { ico: '🦴', title: 'Rig' },
+    anim:  { ico: '🎬', title: 'Animation' },
+  };
+  const fmtVal = (v) => {
+    if (v === true) return '✓';
+    if (typeof v === 'number') return String(Math.round(v * 1000) / 1000);
+    const s = String(v);
+    return s.length > 90 ? s.slice(0, 87) + '…' : s;
+  };
+  const paramRows = (params) => {
+    if (!params || typeof params !== 'object') return '';
+    const rows = [];
+    for (const k of Object.keys(params)) {
+      const v = params[k];
+      if (v === undefined || v === null || v === '' || v === false) continue;
+      if (typeof v === 'object') continue;
+      rows.push(`<div class="gh-row"><span class="gh-k">${escapeHtml(k)}</span><span class="gh-v">${escapeHtml(fmtVal(v))}</span></div>`);
+      if (rows.length >= 10) break;
+    }
+    return rows.join('');
+  };
+  const cards = steps.map((s) => {
+    const km = KIND_META[s.kind] || KIND_META.op;
+    let title = _i18nT(km.title);
+    if (s.kind === 'op' && s.opLabel) title = `${_i18nT('Modification')}: ${escapeHtml(_i18nT(s.opLabel))}`;
+    if (s.kind === 'anim' && s.motionLabel) title = `${_i18nT('Animation')}: ${escapeHtml(s.motionLabel)}`;
+    const engineTag = s.engine ? ` <span class="gh-engine">${escapeHtml(s.engine)}</span>` : '';
+    const when = s.ts ? new Date(s.ts).toLocaleString() : '';
+    const thumbSrc = s.thumb || '';
+    const thumb = thumbSrc
+      ? `<img class="gh-thumb" src="${escapeHtml(thumbSrc)}" alt="">`
+      : `<div class="gh-thumb gh-thumb-empty">${km.ico}</div>`;
+    const prows = paramRows(s.params);
+    const legacy = (!prows && s.derived)
+      ? `<div class="gh-legacy">${_i18nT('Parameters not tracked (generated before history tracing)')}</div>`
+      : '';
+    return `<div class="gh-step" data-kind="${s.kind}">
+      <div class="gh-dot">${km.ico}</div>
+      <div class="gh-card">
+        ${thumb}
+        <div class="gh-info">
+          <div class="gh-step-title">${title}${engineTag}</div>
+          <div class="gh-file" title="${escapeHtml(s.filename)}">${escapeHtml(s.filename)}</div>
+          ${prows ? `<div class="gh-params">${prows}</div>` : legacy}
+          ${when ? `<div class="gh-ts">${escapeHtml(when)}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  const ov = document.createElement('div');
+  ov.className = 'gh-overlay';
+  ov.innerHTML = `
+    <div class="gh-modal">
+      <div class="gh-head">
+        <span class="gh-head-ico">⏱</span>
+        <div class="gh-head-txt">
+          <div class="gh-title">${_i18nT('Generation history')}</div>
+          <div class="gh-sub" title="${escapeHtml(startPath)}">${escapeHtml(String(startPath).split(/[\\/]/).pop())}</div>
+        </div>
+        <button class="gh-close" title="${escapeHtml(_i18nT('Close'))}">&#10005;</button>
+      </div>
+      <div class="gh-body"><div class="gh-timeline">${cards}</div></div>
+    </div>`;
+  const close = () => { try { ov.remove(); } catch (_) {} };
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('.gh-close').addEventListener('click', close);
+  document.addEventListener('keydown', function _ghEsc(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', _ghEsc); }
+  });
+  document.body.appendChild(ov);
+}
+
 async function renderMeshVersions(p) {
   const strip = document.getElementById('ws-mesh-versions');
   strip.innerHTML = '';
@@ -7798,6 +7972,7 @@ async function renderMeshVersions(p) {
       <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
       ${meshSourceBtn}
+      <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
       ${meshEmissiveBadge}
     `;
     t.title = m.filename;
@@ -7813,6 +7988,10 @@ async function renderMeshVersions(p) {
         jumpToSourceImage(m.sourceImage);
       });
     }
+    t.querySelector('.version-history-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showGenerationHistory(m.path);
+    });
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!await customConfirm(`Delete mesh v${p.meshes.length - 1 - i}? This cannot be undone.`, 'Delete mesh version')) return;
@@ -14160,12 +14339,16 @@ function renderRigVersions(p) {
       <button class="version-delete-btn" title="Delete this rig">&#10005;</button>
       ${rigSrcBtn}
       ${rigMeshBtn}
+      <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
     `;
     t.title = r.filename;
     t.addEventListener('click', () => {
       strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected', 'used-for-3d'));
       t.classList.add('selected', 'used-for-3d');
       showStep3Preview(r);
+    });
+    t.querySelector('.version-history-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation(); showGenerationHistory(r.path);
     });
     if (_rigSourceImage) {
       t.querySelector('.version-source-btn')?.addEventListener('click', (e) => {
@@ -14579,6 +14762,7 @@ function renderAnimVersions(p) {
         <span class="v-label">v${vNum}</span>
         <button class="version-delete-btn" data-batch-id="${b.id}" title="Delete this version">&#10005;</button>
         ${imgBtn}${meshBtn}${rigBtn}
+        <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
       </div>`;
   }).join('');
   strip.querySelectorAll('.version-thumb').forEach(t => {
@@ -14615,6 +14799,12 @@ function renderAnimVersions(p) {
           if (src) jumpToSourceImage(src);
         }
       });
+    });
+    t.querySelector('.version-history-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const batch = batches.find(b => b.id === t.dataset.batchId);
+      const clip = batch && batch.clips && batch.clips[0];
+      if (clip && (clip.path || clip.url)) showGenerationHistory(clip.path || clip.url);
     });
   });
   strip.querySelectorAll('.version-delete-btn').forEach(btn => {

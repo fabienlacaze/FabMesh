@@ -20,6 +20,15 @@
 
   const I18N = {
     fr: {
+      // ---- Generation history popup ----
+      'Generation history': 'Historique de génération',
+      'View generation history': "Voir l'historique de génération",
+      'Source image': 'Image source',
+      'Mesh generated': 'Mesh généré',
+      'Modification': 'Modification',
+      'Parameters not tracked (generated before history tracing)':
+        "Paramètres non tracés (généré avant le traçage d'historique)",
+      'No history available for this item.': 'Aucun historique disponible pour cet élément.',
       // ---- Version lineage badge (mesh versions strip) ----
       'Version — from {x} after {y}': 'Version — issue de {x} après {y}',
       'Version — after {x}': 'Version — après {x}',

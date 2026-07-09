@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (Generation History 3/3 : port cloud, mode dégradé)
+
+Miroir cloud de buildLineageTimeline + showGenerationHistory + bouton ⏱ sur
+les 3 strips (mesh / rig / batches anim — clip[0] du batch) + CSS + i18n FR.
+Pas de sidecar .meta.json côté cloud (pas d'IPC getLineageMeta) → timeline en
+MODE DÉGRADÉ pur filename (dernière op, parent par racine+timestamp, engine
+par token du nom, prompt projet en fallback). Persistance D1 des params par
+asset = étape ultérieure (le worker a déjà asset_type/mode/seed dans jobs).
+Déploiement: cd cloud && npm run build && npx wrangler deploy (pas encore fait).
+
 ## 2026-07-09 (Generation History 2/3 : popup timeline + bouton ⏱)
 
 - **buildLineageTimeline(startPath, p)** (renderer) : remonte anim→rig→mesh→

@@ -1538,6 +1538,128 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .versions-strip .version-thumb:hover .version-verbadge {
   display: inline-flex;
 }
+/* Generation-history button ⏱ (hover-only) + popup timeline — miroir desktop. */
+.versions-strip .version-thumb .version-history-btn {
+  position: absolute;
+  top: 30px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #ddd;
+  font-size: 11px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  z-index: 2;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+#ws-mesh-versions .version-thumb .version-history-btn {
+  left: 30px;
+  right: auto;
+}
+.versions-strip .version-thumb:hover .version-history-btn {
+  display: inline-flex;
+}
+.versions-strip .version-thumb .version-history-btn:hover {
+  background: #3b6fd4;
+  border-color: #8ab4ff;
+  transform: scale(1.12);
+}
+.gh-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.62);
+  z-index: 10001;
+  display: flex; align-items: center; justify-content: center;
+}
+.gh-modal {
+  width: min(560px, 92vw);
+  max-height: 84vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-1, #15151d);
+  border: 1px solid var(--border, #3a3a4a);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.6);
+  overflow: hidden;
+}
+.gh-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, #3a3a4a);
+}
+.gh-head-ico { font-size: 18px; }
+.gh-head-txt { flex: 1; min-width: 0; }
+.gh-title { font-size: 14px; font-weight: 600; }
+.gh-sub {
+  font-size: 11px; color: var(--text-2, #9aa);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gh-close {
+  background: none; border: none; color: var(--text-2, #9aa);
+  font-size: 14px; cursor: pointer; padding: 4px 6px; border-radius: 6px;
+}
+.gh-close:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.gh-body { overflow-y: auto; padding: 14px 16px; }
+.gh-timeline {
+  position: relative; padding-left: 34px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.gh-timeline::before {
+  content: '';
+  position: absolute; left: 13px; top: 8px; bottom: 8px; width: 2px;
+  background: linear-gradient(180deg, #8b5cf6, #3b6fd4);
+  opacity: 0.55; border-radius: 1px;
+}
+.gh-step { position: relative; }
+.gh-dot {
+  position: absolute; left: -34px; top: 2px;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bg-2, #1a1a24);
+  border: 1px solid var(--border, #3a3a4a);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; z-index: 1;
+}
+.gh-card {
+  display: flex; gap: 10px;
+  background: var(--bg-2, #1a1a24);
+  border: 1px solid var(--border, #3a3a4a);
+  border-radius: 8px; padding: 10px;
+}
+.gh-thumb {
+  width: 64px; height: 64px; border-radius: 6px;
+  object-fit: cover; background: #0a0a0e; flex: none;
+}
+.gh-thumb-empty {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; opacity: 0.5;
+}
+.gh-info { flex: 1; min-width: 0; }
+.gh-step-title {
+  font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.gh-engine {
+  font-size: 10px; padding: 1px 7px; border-radius: 9px;
+  background: rgba(139,92,246,0.18);
+  border: 1px solid rgba(139,92,246,0.5);
+  color: #d4c4ff;
+}
+.gh-file {
+  font-size: 10px; color: var(--text-2, #9aa);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.gh-params { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.gh-row { display: flex; gap: 8px; font-size: 11px; }
+.gh-k { color: var(--text-2, #9aa); min-width: 110px; flex: none; }
+.gh-v { color: var(--text-0, #eee); word-break: break-word; }
+.gh-legacy { margin-top: 6px; font-size: 11px; color: #c9a44a; }
+.gh-ts { margin-top: 6px; font-size: 10px; color: var(--text-2, #9aa); }
 .versions-strip .version-thumb .version-mesh-btn,
 .versions-strip .version-thumb .version-rig-btn {
   position: absolute;
