@@ -7893,13 +7893,26 @@ async function showStep2Preview(mesh) {
       _fr++;
       if (_fr < 4) { requestAnimationFrame(_capture); return; }
       try {
+        // Vignette d'un mesh SEGMENTÉ : capturer la TEXTURE réelle (pas les
+        // couleurs de parties — le badge ✂ indique déjà que c'est segmenté).
+        // On bascule temporairement chaque partie sur son matériau texture.
+        const _segRestore = [];
+        if (wsModel && wsModel.userData && wsModel.userData._isSegmented) {
+          wsModel.traverse(o => {
+            if (o.isMesh && o.userData && o.userData._segTexMat && o.material !== o.userData._segTexMat) {
+              _segRestore.push([o, o.material]);
+              o.material = o.userData._segTexMat;
+            }
+          });
+        }
         const _origExposure = wsRenderer.toneMappingExposure;
         wsRenderer.toneMappingExposure = 1.0;
         wsRenderer.render(wsScene, wsCamera);
         const canvas = document.getElementById('ws-mesh-canvas');
         const dataUrl = canvas.toDataURL('image/png');
-        // Restore original exposure + render again so the live viewer
-        // doesn't flicker dim for a frame.
+        // Restore segmentation colours for the live view + original exposure,
+        // then re-render so the live viewer doesn't flicker.
+        for (const [o, m] of _segRestore) o.material = m;
         wsRenderer.toneMappingExposure = _origExposure;
         wsRenderer.render(wsScene, wsCamera);
         if (API.saveThumbnail) {
