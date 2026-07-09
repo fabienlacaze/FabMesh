@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (desktop : IPC mesh-segment → PartSAM + viewer explode + drafts infra cloud)
+
+- `src/main/main.js` : handler `mesh-segment` repointé SAMPart3D→**PartSAM**
+  (partsam_bridge.py, FABMESH_PARTSAM_DIR, poids model.safetensors, granularité
+  0-1, PLUS de Blender, timeout 600s, PYTORCH_CUDA_ALLOC_CONF). Const PARTSAM_DIR.
+  Dev path = ./PartSAM + ./python-segment.
+- `src/renderer/index2.js` + `index2.html` : modale granularité 0-1 (sens
+  correct grossier→fin, défaut 0.2, ~1 min), envoie `granularity` ; **viewer
+  EXPLODE** in-app (createMeshViewerControls : _explodeSetup/applyExplode/
+  refreshExplodeUI + slider `data-act="explode"` dans ws-mesh/ws-rig toolbars,
+  affiché seulement pour mesh multi-sous-meshes). À tester (Ctrl+R).
+- DRAFTS infra (compilent, NON testés) via workflow : `modal_app/_partsam.py`
+  (Modal cloud), `scripts/wizard_install_partsam.py` (install download-only),
+  `scripts/patch_partsam.py` (patch reproductible apex+eval).
+- Décision user : desktop+web À PARITÉ. Audit parité fait (workflow) →
+  ~34 écarts, blocker = anim cloud désactivée. Rapport dans scratchpad.
+
 ## 2026-07-08 (PIVOT #2 : PartSAM feedforward VALIDÉ local sm_120 — remplace SAMPart3D)
 
 Workflow de recherche (26 candidats) → **PartSAM** (MIT, feedforward ~40 s,

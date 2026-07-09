@@ -534,6 +534,7 @@ const PUPPETEER_DIR  = path.join(HEAVY_DIR, 'puppeteer');
 // user's GPU. The SAMPart3D repo clone + ptv3-object.pth live under HEAVY.
 const SEGMENT_PYTHON_DIR = path.join(HEAVY_DIR, 'python-segment');
 const SAMPART3D_DIR      = path.join(HEAVY_DIR, 'SAMPart3D');
+const PARTSAM_DIR        = path.join(HEAVY_DIR, 'PartSAM');   // moteur de découpe feedforward (remplace SAMPart3D)
 // HuggingFace model cache (the big download); HF_HOME points here.
 const HF_CACHE_DIR  = path.join(HEAVY_DIR, 'hf_cache');
 
@@ -6570,38 +6571,29 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
 // mesh-tool, so runMeshSegment in the renderer reuses the add-version +
 // go-to machinery. Runs in the dedicated SAMPart3D env (torch cu128 sm_120
 // + pointops + tiny-cuda-nn), provisioned by wizard:install-segment.
-ipcMain.handle('mesh-segment', async (_event, { meshPath, scale }) => {
+ipcMain.handle('mesh-segment', async (_event, { meshPath, granularity, scale }) => {
   const _t0 = Date.now();
   try {
     if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
     if (!isPathAllowed(meshPath)) return { success: false, error: 'Mesh path not allowed' };
 
+    // PartSAM (feedforward, ~40-90 s) — remplace SAMPart3D (optim ~4 min).
+    // Pas de Blender, pas de rendu multi-vues : natif 3D.
     const segPython = app.isPackaged
       ? path.join(SEGMENT_PYTHON_DIR, 'python.exe')
-      : path.join(__dirname, '..', '..', 'external', 'SAMPart3D', 'venv', 'Scripts', 'python.exe');
+      : path.join(__dirname, '..', '..', 'python-segment', 'python.exe');
     const segRepo = app.isPackaged
-      ? SAMPART3D_DIR
-      : path.join(__dirname, '..', '..', 'external', 'SAMPart3D');
-    if (!fs.existsSync(segPython) || !fs.existsSync(path.join(segRepo, 'launch', 'train.py'))) {
+      ? PARTSAM_DIR
+      : path.join(__dirname, '..', '..', 'PartSAM');
+    if (!fs.existsSync(segPython) || !fs.existsSync(path.join(segRepo, 'evaluation', 'eval_everypart.py'))) {
       return { success: false, error: app.isPackaged
-        ? 'Part-segmentation engine not installed yet. Open Settings → Reconfigure FabMesh and complete the "Part segmentation (SAMPart3D)" setup step.'
-        : 'SAMPart3D not found at external/SAMPart3D (dev checkout missing).' };
+        ? 'Part-segmentation engine (PartSAM) not installed yet. Open Settings → Reconfigure FabMesh and complete the "Part segmentation" setup step.'
+        : 'PartSAM not found at ./PartSAM (dev checkout missing).' };
     }
-    const ckpt = path.join(segRepo, 'ckpts', 'ptv3-object.pth');
-    if (!fs.existsSync(ckpt)) return { success: false, error: 'SAMPart3D checkpoint (ptv3-object.pth) missing — re-run the setup step.' };
-    // Blender 4.0/4.1 REQUIS : blender_render_16views.py hardcode le moteur
-    // BLENDER_EEVEE, RETIRÉ dans Blender 4.2 (renommé EEVEE-Next). Le Blender
-    // du user (config.blenderPath) est souvent 4.2+ → casserait le rendu. On
-    // utilise donc le Blender 4.0 provisionné par le wizard sous <repo>/blender.
-    const bundledBlender = path.join(segRepo, 'blender', 'blender.exe');
-    const blender = fs.existsSync(bundledBlender)
-      ? bundledBlender
-      : String((loadConfig().blenderPath || '')).trim();
-    if (!blender || !fs.existsSync(blender)) {
-      return { success: false, error: 'Blender 4.0 not installed for part segmentation (its render script needs the EEVEE engine removed in Blender 4.2+). Re-run the "Part segmentation (SAMPart3D)" setup step to install it.' };
-    }
-    const bridge = path.join(SCRIPTS_DIR, 'sampart3d_bridge.py');
-    if (!fs.existsSync(bridge)) return { success: false, error: 'sampart3d_bridge.py not found' };
+    const ckpt = path.join(segRepo, 'pretrained', 'model.safetensors');
+    if (!fs.existsSync(ckpt)) return { success: false, error: 'PartSAM weights (model.safetensors) missing — re-run the setup step.' };
+    const bridge = path.join(SCRIPTS_DIR, 'partsam_bridge.py');
+    if (!fs.existsSync(bridge)) return { success: false, error: 'partsam_bridge.py not found' };
 
     const ts = Date.now();
     const ext = path.extname(meshPath);
@@ -6613,19 +6605,22 @@ ipcMain.handle('mesh-segment', async (_event, { meshPath, scale }) => {
     // contain `_rigged_`/`_anim_` or it lands in the rigs/anims bucket.
     const outPath = path.join(path.dirname(meshPath), `${base}_segment_${ts}.glb`);
 
-    const sc = Math.max(0, Math.min(2, Number.isFinite(+scale) ? +scale : 1.0));
-    const args = [bridge, meshPath, outPath, String(sc)];
+    // granularité 0.0 (grossier, ~10 parties propres) → 1.0 (fin, ~45 parties).
+    // Rétro-compat : ancienne UI envoyait `scale` 0-2 → on le ramène en 0-1.
+    const g = Number.isFinite(+granularity)
+      ? Math.max(0, Math.min(1, +granularity))
+      : (Number.isFinite(+scale) ? Math.max(0, Math.min(1, +scale / 2)) : 0.2);
+    const args = [bridge, meshPath, outPath, String(g)];
     const env = {
       ...process.env,
       PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8',
-      FABMESH_SAMPART3D_DIR: segRepo,
-      FABMESH_SAMPART3D_CKPT: ckpt,
-      FABMESH_BLENDER: blender,
+      FABMESH_PARTSAM_DIR: segRepo,
       HF_HOME: HF_CACHE_DIR,
+      PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True',
     };
-    safeSend('ai3d-progress', '[Segment] Starting part segmentation (SAMPart3D)… this takes several minutes.');
+    safeSend('ai3d-progress', '[Segment] Starting part segmentation (PartSAM)…');
     return await new Promise((resolve) => {
-      const proc = execFile(segPython, args, { timeout: 1500000, maxBuffer: 50 * 1024 * 1024, env }, (error, _stdout, stderr) => {
+      const proc = execFile(segPython, args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, env }, (error, _stdout, stderr) => {
         if (error) {
           log.error('mesh-segment', error.message + ' :: ' + String(stderr || '').slice(-600));
           resolve({ success: false, error: String(stderr || error.message || 'segmentation failed').slice(-500) });

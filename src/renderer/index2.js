@@ -3744,6 +3744,57 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     viewer.controls.update();
   }
 
+  // ── Explode (maillages segmentés : sous-meshes nommés part_XX séparés) ──
+  // Écarte chaque partie du centre du modèle, façon « Explosion » de Tripo.
+  function _explodeSetup(model) {
+    if (!model) return null;
+    if (model.userData._explode) return model.userData._explode;
+    model.updateWorldMatrix(true, true);
+    const meshes = [];
+    model.traverse(o => { if (o.isMesh && o.geometry) meshes.push(o); });
+    if (meshes.length < 2) { model.userData._explode = { parts: [], spread: 0 }; return model.userData._explode; }
+    const gbox = new THREE.Box3().setFromObject(model);
+    const gc = gbox.getCenter(new THREE.Vector3());
+    const spread = gbox.getSize(new THREE.Vector3()).length() * 0.5;
+    const parts = [];
+    const tmp = new THREE.Box3(), pc = new THREE.Vector3();
+    for (const m of meshes) {
+      tmp.setFromObject(m); tmp.getCenter(pc);
+      const dir = pc.clone().sub(gc);
+      if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0); else dir.normalize();
+      // direction en espace local du parent (rotation) + compensation d'échelle
+      const parent = m.parent || model;
+      const q = new THREE.Quaternion(); parent.getWorldQuaternion(q).invert();
+      const s = new THREE.Vector3(); parent.getWorldScale(s);
+      const invScale = 1 / (Math.max(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z)) || 1);
+      parts.push({ mesh: m, base: m.position.clone(), dir: dir.applyQuaternion(q), invScale });
+    }
+    model.userData._explode = { parts, spread };
+    return model.userData._explode;
+  }
+  function applyExplode(viewer, factor01) {
+    const model = viewer && viewer.model;
+    const e = _explodeSetup(model);
+    if (!e || !e.parts.length) return;
+    const f = Math.max(0, Math.min(1, factor01));
+    for (const p of e.parts) {
+      p.mesh.position.copy(p.base).addScaledVector(p.dir, f * e.spread * p.invScale);
+    }
+  }
+  // N'affiche le slider explode que pour un modèle multi-sous-meshes (segmenté).
+  function refreshExplodeUI(viewer) {
+    const wrap = toolbarEl.querySelector('[data-explode-wrap]');
+    if (!wrap) return;
+    const model = viewer && viewer.model;
+    let nMeshes = 0;
+    if (model) model.traverse(o => { if (o.isMesh && o.geometry) nMeshes++; });
+    const seg = nMeshes >= 2;
+    wrap.style.display = seg ? 'inline-flex' : 'none';
+    const sl = wrap.querySelector('input[data-act="explode"]');
+    if (sl) { sl.value = 0; sl.style.setProperty('--val', '0%'); }
+    if (seg) applyExplode(viewer, 0);
+  }
+
   // Event bindings on the toolbar
   toolbarEl.querySelectorAll('button[data-act], select[data-act], input[data-act]').forEach(el => {
     const act = el.dataset.act;
@@ -3802,6 +3853,13 @@ function createMeshViewerControls(toolbarEl, getViewer) {
         state.light = parseInt(el.value) / 100;
         applyLight(viewer);
       });
+    } else if (el.type === 'range' && act === 'explode') {
+      el.addEventListener('input', () => {
+        el.style.setProperty('--val', (parseFloat(el.value) || 0) + '%');
+        const viewer = getViewer();
+        if (!viewer) return;
+        applyExplode(viewer, (parseFloat(el.value) || 0) / 100);
+      });
     }
   });
 
@@ -3820,6 +3878,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
       applyShadows(viewer);
       applyPivot(viewer);
       ensurePivotAxes(viewer);
+      refreshExplodeUI(viewer);
     }
   };
 }
@@ -8659,12 +8718,12 @@ function _openSegmentGranularityModal() {
     box.innerHTML =
       '<div style="font-size:16px;font-weight:600;margin-bottom:6px;">&#9986; Segment parts (AI)</div>' +
       '<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:16px;">' +
-        'Split the mesh into semantic parts (head / torso / arms / legs — wheel / chassis / cabin). ' +
-        'Runs locally on your GPU (SAMPart3D), ~6-10&nbsp;min. Adds a new colored, separable mesh version.</div>' +
+        'Split the mesh into semantic parts (head / torso / arms / legs — wheel / chassis / turret / barrel). ' +
+        'Runs locally on your GPU (PartSAM), ~1&nbsp;min. Adds a new colored, separable mesh version.</div>' +
       '<label style="font-size:13px;font-weight:500;">Granularity: <span id="seg-gran-label"></span></label>' +
-      '<input id="seg-gran" type="range" min="0" max="2" step="0.5" value="1" style="width:100%;margin:8px 0 4px;">' +
+      '<input id="seg-gran" type="range" min="0" max="1" step="0.1" value="0.2" style="width:100%;margin:8px 0 4px;">' +
       '<div style="display:flex;justify-content:space-between;font-size:11px;opacity:.65;margin-bottom:18px;">' +
-        '<span>Fine (more parts)</span><span>Coarse (fewer parts)</span></div>' +
+        '<span>Coarse (fewer, clean)</span><span>Fine (more parts)</span></div>' +
       '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
         '<button id="seg-cancel" class="ghost-btn" style="padding:8px 16px;">Cancel</button>' +
         '<button id="seg-go" class="primary-btn" style="padding:8px 16px;">Segment</button></div>';
@@ -8672,7 +8731,7 @@ function _openSegmentGranularityModal() {
     document.body.appendChild(overlay);
     const slider = box.querySelector('#seg-gran');
     const label = box.querySelector('#seg-gran-label');
-    const names = { '0': 'Very fine', '0.5': 'Fine', '1': 'Medium', '1.5': 'Coarse', '2': 'Very coarse' };
+    const names = { '0': 'Coarse', '0.1': 'Clean', '0.2': 'Clean+', '0.3': 'Balanced', '0.4': 'Balanced', '0.5': 'Detailed', '0.6': 'Detailed', '0.7': 'Fine', '0.8': 'Fine', '0.9': 'Very fine', '1': 'Very fine' };
     const sync = () => { label.textContent = names[slider.value] || slider.value; };
     slider.addEventListener('input', sync); sync();
     function cleanup(v) { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); }
@@ -8730,19 +8789,19 @@ async function _installSegmentEngine() {
   }
 }
 
-async function _runSegmentJob(scale, allowInstall) {
+async function _runSegmentJob(granularity, allowInstall) {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) return;
   const meshPath = p.selectedMeshPath;
   const meshName = meshPath.split(/[\\/]/).pop();
-  const expectedMs = 480000;  // ~8 min (Blender render + SAM + 5000-iter MLP)
+  const expectedMs = 120000;  // ~1-2 min (PartSAM feedforward)
   const job = (typeof pushJob === 'function')
     ? pushJob(`segment: ${p.name}`, null, {
-        Tool: 'Segment parts (AI)', Mesh: meshName, Granularity: scale.toFixed(1),
+        Tool: 'Segment parts (AI)', Mesh: meshName, Granularity: granularity.toFixed(1),
       }, expectedMs, { sourceImageUrl: meshPath, projectName: p.name })
     : null;
   try {
-    const result = await API.meshSegment({ meshPath, scale });
+    const result = await API.meshSegment({ meshPath, granularity });
     if (result && result.success) {
       showToast('Segmentation done — parts version added.', 'success');
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
@@ -8758,14 +8817,13 @@ async function _runSegmentJob(scale, allowInstall) {
     }
     const err = (result && result.error) || 'unknown';
     // Engine not provisioned yet → offer the one-time install, then retry.
-    if (allowInstall && /not installed|not found|Blender 4\.0 not installed/i.test(err)) {
+    if (allowInstall && /not installed|not found/i.test(err)) {
       if (job && typeof completeJob === 'function') completeJob(job.id, false, 'engine not installed');
       const ok = await customConfirm(
-        'The part-segmentation engine (SAMPart3D) is not installed yet.\n\n'
-        + 'Install it now? One-time ~3 GB download + a CUDA build — it needs '
-        + 'Visual Studio Build Tools + CUDA Toolkit 12.8, and can take 20-40 min.',
+        'The part-segmentation engine (PartSAM) is not installed yet.\n\n'
+        + 'Install it now? One-time download of the model + runtime.',
         'Install part segmentation', 'Install');
-      if (ok && await _installSegmentEngine()) return _runSegmentJob(scale, false);
+      if (ok && await _installSegmentEngine()) return _runSegmentJob(granularity, false);
       return;
     }
     const msg = [err, result && result.stderr ? String(result.stderr).slice(-400) : '']
@@ -8782,9 +8840,9 @@ async function runMeshSegment() {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
   if (!API.meshSegment) { showToast('Segmentation engine not available.', 'error'); return; }
-  const scale = await _openSegmentGranularityModal();
-  if (scale == null) return;  // cancelled
-  return _runSegmentJob(scale, true);
+  const granularity = await _openSegmentGranularityModal();
+  if (granularity == null) return;  // cancelled
+  return _runSegmentJob(granularity, true);
 }
 document.getElementById('ws-mesh-segment-btn')?.addEventListener('click', runMeshSegment);
 
