@@ -8779,7 +8779,7 @@ const MESH_TOOL_EXPECTED_MS = {
   trellis2_retex: 110000,
 };
 
-async function runMeshTool(operation, params = []) {
+async function runMeshTool(operation, params = [], namedParams = null) {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
   const meshPath = p.selectedMeshPath;
@@ -8796,7 +8796,9 @@ async function runMeshTool(operation, params = []) {
       }, expectedMs, { sourceImageUrl: meshPath, projectName: p.name })
     : null;
   try {
-    const result = await API.meshTool({ operation, meshPath, params });
+    // namedParams (id→valeur du modal) part dans le sidecar .meta.json de
+    // lignée — les params positionnels seuls sont illisibles a posteriori.
+    const result = await API.meshTool({ operation, meshPath, params, namedParams });
     if (result && result.success) {
       let newPath = result.newPath || result.path;
       // Ultra 8K preset: chain Real-ESRGAN x2 on the 4096 re-texture -> 8192 (an 8K bake
@@ -9929,12 +9931,12 @@ function openMeshToolModal(toolName) {
       const r = schema.resolveOp(vals, ctx);
       if (!r || !r.operation) { showToast('Cible ≈ compte actuel — rien à faire', 'info', 1800); return; }
       close();
-      runMeshTool(r.operation, r.params || []);
+      runMeshTool(r.operation, r.params || [], vals);
       return;
     }
     const params = schema.build(vals, ctx);
     close();
-    runMeshTool(toolName, params);
+    runMeshTool(toolName, params, vals);
   };
   modal.classList.remove('hidden');
 

@@ -29,6 +29,8 @@ const path     = require('path');
 const os       = require('os');
 const crypto   = require('crypto');
 const { spawn, execFile } = require('child_process');
+// Lineage sidecar <output>.meta.json (Generation History) — best-effort.
+const { writeMeta } = require('./meta');
 
 // -----------------------------------------------------------------------------
 // Paths / configuration
@@ -351,6 +353,12 @@ function register(deps) {
         : _spawnLocalRetarget;
       const { glbPath } = await runner({
         jobId, meshPath, motion, outGlb, BrowserWindow, trackProc,
+      });
+      // Lineage sidecar: clip + mode + rig parent explicite (l'objet riche
+      // du renderer était RAM-only, perdu au reload).
+      writeMeta(glbPath, {
+        kind: 'anim', engine: 'rokoko_retarget', parent: meshPath,
+        params: { motionId, motionLabel: motion.label || motion.id, mode: mode || 'local' },
       });
       _sendToAllWindows(BrowserWindow, 'anim:progress',
         { jobId, phase: 'done', pct: 100 });

@@ -1,5 +1,27 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (Generation History 1/3 : traçage lignée .meta.json)
+
+Feature user : bouton « Generation history » → popup avec la séquence complète
+image→mesh→modifs→rig→anim + les paramètres de chaque étape. Cartographie
+(workflow 8 agents) : AUCUN param n'était persisté (argv/env jetés), la chaîne
+d'ops est APLATIE dans le nom (OP_SUFFIX strip → seule la dernière op reste),
+aucun lien parent explicite. Couche 1 = TRAÇAGE :
+- **src/main/meta.js** (nouveau) : writeMeta/readMeta du sidecar uniforme
+  `<output>.meta.json` {schema,kind,op,engine,parent,source,params,ts}.
+  Best-effort, ne casse jamais une génération.
+- **Writers** : image-to-3d (2 sites de résolution, tous les params trellis2 +
+  voxelMode/maxTokens/seed), mesh-tool (op+namedParams+parent), mesh-segment
+  (granularité effective+parent), material-adjust (7 sliders), region-retex
+  (prompt/strength), auto-rig-ai (engine+skeleton+parent), anim:retarget
+  (motionId/label/mode+parent, animation.js).
+- **Lecture** : list-meshes renvoie `meta` (sidecar parsé) ; IPC
+  `get-lineage-meta` + preload `getLineageMeta`.
+- **Renderer** : runMeshTool passe `namedParams` (vals du modal) pour que les
+  params d'op soient nommés dans le sidecar.
+Anciens assets sans .meta.json : la popup dégradera sur la déduction filename.
+main.js/preload.js touchés → RESTART Electron requis.
+
 ## 2026-07-09 (badge « V » : i18n + cite le mesh PARENT + curseur normal)
 
 Retours user sur le badge « V » : (1) le texte doit suivre la langue de l'appli,

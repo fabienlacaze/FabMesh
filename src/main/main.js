@@ -76,6 +76,8 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+// Lineage sidecar <output>.meta.json (Generation History) — best-effort, never throws.
+const { writeMeta, readMeta } = require('./meta');
 
 // Force UTF-8 in EVERY spawned Python child. The embedded Windows python
 // defaults its stdout/file encoding to the console codepage (cp1252 on
@@ -3404,6 +3406,12 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
       return { success: false, error: errMsg, stdout: step3.stdout, stderr: step3.stderr };
     }
     const stats = fs.statSync(outputGlb);
+    // Lineage sidecar: engine + squelette cible + mesh parent explicite
+    // (le squelette/assetType n'étaient persistés nulle part).
+    writeMeta(outputGlb, {
+      kind: 'rig', engine: rigEngine, parent: meshPath,
+      params: { skeleton: rigSkeleton },
+    });
     return { success: true, path: outputGlb, filename: path.basename(outputGlb), size: stats.size };
   } catch (e) {
     return { success: false, error: e.message };
@@ -5972,6 +5980,24 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     if (mv2Dir) {
       log.info('main', '2-view env applied: AUGMENT mode (front=SF3D bake, back=additive blend)');
     }
+    // Lineage sidecar (Generation History): capture les params de génération
+    // qui étaient jetés après le subprocess (argv/env éphémères). Appelé aux
+    // DEUX sites de résolution (callback execFile + early-resolve).
+    const _writeMeshGenMeta = () => writeMeta(meshPath, {
+      kind: 'mesh', engine, source: imagePath,
+      params: {
+        textureSize: trellis2TexSize || textureSize || 2048,
+        targetFaces, effort, subdivide, assetType,
+        steps: trellis2Steps, imgRes: trellis2ImgRes, preset: trellis2Preset,
+        multiRef: trellis2MultiRef, refine: trellis2Refine,
+        rectifySource: trellis2RectifySource, smooth: trellis2Smooth,
+        qualityPlus: trellis2QualityPlus, ultraQ: trellis2UltraQ,
+        faceFix: trellis2FaceFix, ultraHD: trellis2UltraHD,
+        voxelMode: env.FABMESH_TRELLIS2_NATIVE_MODE || '1024',
+        maxTokens: env.FABMESH_TRELLIS2_MAX_TOKENS,
+        seed: 42,  // défaut du bridge (FABMESH_TRELLIS2_NATIVE_SEED jamais posé)
+      },
+    });
     log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
     // TRELLIS-2 native needs torch 2.8 + flash_attn + kaolin, which only
     // live in external/TRELLIS2_win/.venv. Other engines use the system
@@ -6001,6 +6027,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         const stats = fs.statSync(meshPath);
         // Save source image path for later display in viewer
         try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
+        _writeMeshGenMeta();
         // Parse mesh stats from bridge stdout (LOCAL_SF3D_STATS: verts=N faces=N tex=N)
         let meshVerts = null, meshFaces = null;
         const statsMatch = (stdout || '').match(/STATS:\s*verts=(\d+)\s*faces=(\d+)/);
@@ -6045,6 +6072,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
             return;
           }
           try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
+          _writeMeshGenMeta();
           let meshVerts = null, meshFaces = null;
           const statsMatch = stdoutBuf.match(/STATS:\s*verts=(\d+)\s*faces=(\d+)/);
           if (statsMatch) {
@@ -6518,12 +6546,17 @@ ipcMain.handle('mesh:region-retex', async (_e, { meshPath, maskDataUrl, prompt, 
       { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout) => {
         try { fs.unlinkSync(maskPath); } catch (_) {}
         if (error || !fs.existsSync(out)) { resolve({ ok: false, error: (error && error.message) || 'retex failed', stdout }); return; }
+        // Lineage sidecar: prompt + strength du retex masqué + parent explicite.
+        writeMeta(out, {
+          kind: 'op', op: 'retex', parent: meshPath,
+          params: { prompt: String(prompt || ''), strength: strength || 0.8, uvMask: !!uvMask },
+        });
         resolve({ ok: true, path: out });
       });
   });
 });
 
-ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
+ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params, namedParams }) => {
   const script = path.join(SCRIPTS_DIR, 'mesh_tools.py');
   const timestamp = Date.now();
   const ext = path.extname(meshPath);
@@ -6552,6 +6585,13 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
         resolve({ success: false, error: 'Output file not created' });
       } else {
         const stats = fs.statSync(outPath);
+        // Lineage sidecar: op + params (nommés si le renderer les fournit,
+        // sinon l'argv positionnel) + parent EXPLICITE (le nom de fichier est
+        // aplati par OP_SUFFIX — sans ce champ la chaîne d'ops est perdue).
+        writeMeta(outPath, {
+          kind: 'op', op: operation, parent: meshPath,
+          params: namedParams || { args: params || [] },
+        });
         resolve({
           success: true,
           newPath: outPath,
@@ -6629,6 +6669,11 @@ ipcMain.handle('mesh-segment', async (_event, { meshPath, granularity, scale }) 
         } else {
           const stats = fs.statSync(outPath);
           console.log(`[mesh-segment] DONE in ${((Date.now() - _t0) / 1000).toFixed(0)}s → ${outPath}`);
+          // Lineage sidecar: la granularité effective + le mesh parent explicite.
+          writeMeta(outPath, {
+            kind: 'op', op: 'segment', engine: 'partsam', parent: meshPath,
+            params: { granularity: g },
+          });
           resolve({ success: true, newPath: outPath, filename: path.basename(outPath), size: stats.size, operation: 'segment' });
         }
       });
@@ -6675,6 +6720,11 @@ ipcMain.handle('material-adjust', async (_event, {
         resolve({ success: false, error: 'Output file not created' });
       } else {
         const stats = fs.statSync(outPath);
+        // Lineage sidecar: réglages matériau + parent explicite.
+        writeMeta(outPath, {
+          kind: 'op', op: 'mat', parent: meshPath,
+          params: { brightness, saturation, contrast, emissive, metallic, roughness, hue_shift },
+        });
         resolve({
           success: true,
           newPath: outPath,
@@ -7833,6 +7883,15 @@ ipcMain.handle('run-blender-script', async (event, { scriptContent, outputName, 
   });
 });
 
+// Lineage sidecar reader (Generation History popup) — renvoie le .meta.json
+// parsé de n'importe quel artefact (image/mesh/rig/anim), ou null.
+ipcMain.handle('get-lineage-meta', async (_e, { filePath } = {}) => {
+  try {
+    if (!filePath || !isPathAllowed(filePath)) return null;
+    return readMeta(filePath);
+  } catch (_) { return null; }
+});
+
 ipcMain.handle('list-meshes', async () => {
   if (!fs.existsSync(MESHES_DIR)) return [];
   const fsp = fs.promises;
@@ -7847,9 +7906,12 @@ ipcMain.handle('list-meshes', async () => {
     try { stats = await fsp.stat(fullPath); } catch (e) { return null; }
     const thumbPath = path.join(MESHES_DIR, f.replace(/\.[^.]+$/, '_thumb.png'));
     const sourcePath = fullPath + '.source';
-    const [thumbExists, source] = await Promise.all([
+    const [thumbExists, source, lineage] = await Promise.all([
       fsp.access(thumbPath).then(() => true).catch(() => false),
       fsp.readFile(sourcePath, 'utf-8').then(s => s.trim()).catch(() => null),
+      // Lineage sidecar (Generation History): engine/op/parent/params.
+      fsp.readFile(fullPath + '.meta.json', 'utf-8')
+        .then(s => JSON.parse(s)).catch(() => null),
     ]);
     return {
       filename: f,
@@ -7858,7 +7920,8 @@ ipcMain.handle('list-meshes', async () => {
       created: stats.birthtime,
       format: path.extname(f).slice(1).toUpperCase(),
       thumb: thumbExists ? 'file:///' + thumbPath.replace(/\\/g, '/') : null,
-      sourceImage: source
+      sourceImage: source,
+      meta: lineage || null
     };
   }));
   const list = results.filter(Boolean);

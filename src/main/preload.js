@@ -140,6 +140,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   importMesh: () => ipcRenderer.invoke('import-mesh'),
   meshTool: (opts) => ipcRenderer.invoke('mesh-tool', opts),
   meshSegment: (opts) => ipcRenderer.invoke('mesh-segment', opts),
+  getLineageMeta: (filePath) => ipcRenderer.invoke('get-lineage-meta', { filePath }),
   materialAdjust: (opts) => ipcRenderer.invoke('material-adjust', opts),
   alignTexture: (opts) => ipcRenderer.invoke('mesh:align-texture', opts),
   renderMeshFront: (opts) => ipcRenderer.invoke('mesh:render-front', opts),
