@@ -3832,6 +3832,13 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     const segBtn = wrap.querySelector('button[data-act="segcolors"]');
     if (segBtn) segBtn.classList.toggle('active', state.segColors !== false);
     if (seg) {
+      // Le GLB segmenté (submesh trimesh) n'a pas toujours de normales → le PBR
+      // rend noir. On les calcule si absentes (ombrage correct couleurs ET texture).
+      model.traverse(o => {
+        if (o.isMesh && o.geometry && !o.geometry.getAttribute('normal')) {
+          o.geometry.computeVertexNormals();
+        }
+      });
       applyExplode(viewer, 0);
       applySegColors(viewer, state.segColors !== false);
     }
