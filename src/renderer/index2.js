@@ -929,6 +929,10 @@ function _mountMeshThumb(card, url) {
   const loader = new GLTFLoader();
   loader.load(url, (gltf) => {
     const root = gltf.scene;
+    // Les GLB segmentés (submesh) peuvent ne pas avoir de normales -> PBR noir.
+    root.traverse(o => {
+      if (o.isMesh && o.geometry && !o.geometry.getAttribute('normal')) o.geometry.computeVertexNormals();
+    });
     scene.add(root);
     // Frame the model — bbox center to origin, scale to unit, camera back.
     const bbox = new THREE.Box3().setFromObject(root);
@@ -3798,13 +3802,12 @@ function createMeshViewerControls(toolbarEl, getViewer) {
       if (mm) pi = parseInt(mm[1], 10);
       if (!o.userData._segTexMat) o.userData._segTexMat = o.material;   // texture/matériau d'origine
       if (!o.userData._segColorMat) {
-        const col = new THREE.Color().setHSL((pi * 0.61803398875) % 1, 0.65, 0.55);
-        // emissive = la couleur atténuée -> la partie reste visible même sous
-        // faible éclairage (sinon un matériau couleur-seule peut rendre noir),
-        // tout en gardant l'ombrage sous lumière.
+        const col = new THREE.Color().setHSL((pi * 0.61803398875) % 1, 0.85, 0.5);
+        // Couleurs VIVES : les normales sont recalculées (éclairage OK), donc un
+        // petit emissive suffit à éviter le noir en zone d'ombre sans délaver.
         o.userData._segColorMat = new THREE.MeshStandardMaterial({
-          color: col, roughness: 0.9, metalness: 0.0,
-          emissive: col.clone().multiplyScalar(0.45),
+          color: col, roughness: 0.85, metalness: 0.0,
+          emissive: col.clone().multiplyScalar(0.12),
         });
       }
       const target = show ? o.userData._segColorMat : o.userData._segTexMat;

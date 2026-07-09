@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (segment fix : normales manquantes = PBR noir + couleurs vives)
+
+BUG racine : le GLB segmenté rendait NOIR (viewer couleurs + vignettes) car
+0 NORMAL. Cause = **le partage de matériau** (`part.visual.material = src_mat`)
+fait DROPER les NORMAL à l'export trimesh (0/3 partagé vs 3/3 non-partagé — les
+images texture sont dédupliquées de toute façon, même taille). Fix builder
+(partsam_bridge + _partsam) : NE PLUS partager le matériau + `_ = part.vertex_normals`
+→ NORMAL 10/10, texture préservée. Viewer/vignette : computeVertexNormals() si
+absentes (robustesse anciens GLB). Couleurs de parties : emissive 0.45→0.12 +
+saturation 0.65→0.85 (n'étaient plus délavées une fois l'éclairage OK).
+(re-segmenter pour un GLB avec normales ; anciens = noirs jusqu'à re-segment.)
+
 ## 2026-07-09 (watertight : mode SEAL — étanche SANS dégrader + résolution 512)
 
 Le voxel remesh classique dégrade (rééchantillonne géométrie + perd UV/texture).

@@ -107,9 +107,13 @@ def _build_segmented_glb(src_mesh, labels, out_path):
         if part is None or len(part.faces) == 0:
             continue
         if has_tex:
+            # NE PAS partager le matériau source : trimesh droppe alors les
+            # NORMAL à l'export (→ rendu PBR noir). Le submesh garde sa
+            # TextureVisuals (UV) ; les images texture sont dédupliquées à
+            # l'export de toute façon (même taille). On force le calcul des
+            # normales pour qu'elles soient bien exportées.
             try:
-                if src_mat is not None and hasattr(part.visual, "material"):
-                    part.visual.material = src_mat
+                _ = part.vertex_normals
             except Exception:
                 pass
         else:
