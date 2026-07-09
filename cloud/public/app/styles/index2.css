@@ -1512,8 +1512,8 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   transform: scale(1.12);
 }
 /* Version badge "V": remplace le bouton 📷 sur les meshes DÉRIVÉS (issus d'une
-   op, pas d'une image). Indicateur pur (curseur help), hover-only, même place
-   que le bouton source. Le title décrit la lignée. */
+   op, pas d'une image). Indicateur pur, hover-only, même place que le bouton
+   source. Le title cite le mesh parent + la modif. */
 .versions-strip .version-thumb .version-verbadge {
   position: absolute;
   top: 30px;
@@ -1532,7 +1532,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   padding: 0;
   line-height: 1;
   z-index: 2;
-  cursor: help;
+  cursor: default;
   box-shadow: 0 2px 4px rgba(0,0,0,0.45);
 }
 .versions-strip .version-thumb:hover .version-verbadge {

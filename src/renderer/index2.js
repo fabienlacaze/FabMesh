@@ -8002,26 +8002,42 @@ function fitWsCamera(obj) {
   wsControls.update();
 }
 
-// Libellés FR des opérations mesh (suffixe de fichier → modif lisible). Doit
-// rester aligné sur OP_SUFFIX de main.js (le nom du dernier suffixe = la modif
-// qui a produit CETTE version).
-const _OP_FR = {
-  cntile: 'ControlNet Tile', retexture: 're-texture', trellis2_retex: 're-texture (TRELLIS-2)',
-  retex: 're-texture', decimate: 'décimation', subdivide: 'subdivision', smooth: 'lissage',
-  fill_holes: 'bouchage des trous', fix_normals: 'correction des normales', center: 'recentrage',
-  set_pivot: 'réglage du pivot', watertight: 'étanchéification', texture_var: 'variation de texture',
-  edited: 'édition', upscale: 'upscale', refine: 'affinage', augment: 'augmentation',
-  vc: 'couleurs de sommets', segment: 'segmentation en parties',
+// Libellés SOURCE (anglais) des opérations mesh — traduits à l'affichage via
+// FabI18n.t (voir i18n.js). Le nom du DERNIER suffixe = la modif qui a produit
+// cette version. Aligné sur OP_SUFFIX de main.js.
+const _OP_LABEL = {
+  cntile: 'ControlNet Tile', retexture: 're-texture', trellis2_retex: 're-texture',
+  retex: 're-texture', decimate: 'decimation', subdivide: 'subdivision', smooth: 'smoothing',
+  fill_holes: 'hole filling', fix_normals: 'normals fix', center: 'recentering',
+  set_pivot: 'pivot adjustment', watertight: 'watertight sealing', texture_var: 'texture variation',
+  edited: 'editing', upscale: 'upscale', refine: 'refinement', augment: 'augmentation',
+  vc: 'vertex colors', segment: 'part segmentation',
 };
+const _OP_RE = /_(cntile|retexture|trellis2_retex|retex|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i;
+// Helpers i18n gardés (FabI18n chargé avant index2.js, mais on dégrade proprement).
+function _i18nT(s) { return (window.FabI18n && FabI18n.t) ? FabI18n.t(s) : s; }
+function _i18nTf(s, ...a) {
+  if (window.FabI18n && FabI18n.tf) return FabI18n.tf(s, ...a);
+  let i = 0; return String(s).replace(/\{[xy]\}/g, () => (i < a.length ? String(a[i++]) : ''));
+}
 // Un mesh dérivé est nommé `${base}_${op}_${ts}.glb`. Renvoie l'op du DERNIER
 // suffixe (la modif qui a produit cette version), ou isVersion=false si le
 // fichier est un ORIGINAL (généré direct depuis une image, pas d'op).
 function _meshVersionInfo(filename) {
   const stem = String(filename || '').replace(/\.[^.]+$/, '');
-  const m = stem.match(/_(cntile|retexture|trellis2_retex|retex|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i);
+  const m = stem.match(_OP_RE);
   if (!m) return { isVersion: false, opKey: null, opLabel: null };
   const key = m[1].toLowerCase();
-  return { isVersion: true, opKey: key, opLabel: _OP_FR[key] || key };
+  return { isVersion: true, opKey: key, opLabel: _OP_LABEL[key] || key };
+}
+// Racine du nom (tous les suffixes d'op retirés) — pour retrouver les versions
+// d'une même lignée. main.js collapse la chaîne à `${racine}_${dernièreOp}_${ts}`
+// (le parent IMMÉDIAT n'est pas dans le nom) → on approxime le parent par la
+// version la PLUS RÉCENTE plus ANCIENNE partageant cette racine.
+function _meshRootBase(filename) {
+  let s = String(filename || '').replace(/\.[^.]+$/, '');
+  let prev; do { prev = s; s = s.replace(_OP_RE, ''); } while (s !== prev);
+  return s;
 }
 
 async function renderMeshVersions(p) {
@@ -8107,23 +8123,31 @@ async function renderMeshVersions(p) {
     const meshIsSegmented = /_segment_\d{6,}\.(glb|gltf)$/i.test(m.filename || '')
       || /_segment_/i.test(m.filename || '');
     const meshSegBadge = meshIsSegmented
-      ? '<span class="v-seg-badge" title="Mesh segmenté en parties (AI)">&#9986;</span>'
+      ? `<span class="v-seg-badge" title="${_escapeHtml(_i18nT('Segmented into parts (AI)'))}">&#9986;</span>`
       : '';
     // Coin haut-gauche : soit un JUMP vers l'image source (mesh ORIGINAL généré
     // direct depuis une photo), soit un INDICATEUR « V » de lignée (mesh DÉRIVÉ
     // par une op — segment / smooth / watertight / …). Sur un dérivé on ne
     // propose PAS de saut vers l'image (ce n'est qu'une version) : le « V »
-    // survolé affiche d'où vient la version et quelle modif l'a produite.
+    // survolé cite le MESH PARENT (version précédente) + la modif appliquée.
     const _vinfo = _meshVersionInfo(m.filename);
     let meshSourceBtn = '';
     if (_vinfo.isVersion) {
-      const _imgName = m.sourceImage ? String(m.sourceImage).split(/[\\/]/).pop() : '';
-      const _tip = _imgName
-        ? `Version — issue de « ${_imgName} » après ${_vinfo.opLabel}`
-        : `Version — après ${_vinfo.opLabel}`;
+      const _opTxt = _i18nT(_vinfo.opLabel);
+      // Parent = version la plus récente PLUS ANCIENNE de la même racine (le nom
+      // ne garde pas le parent immédiat — cf. _meshRootBase). meshes[] est trié
+      // du plus récent au plus ancien, donc on scanne vers la fin (plus vieux).
+      const _root = _meshRootBase(m.filename);
+      let _parentLabel = '';
+      for (let j = i + 1; j < meshes.length; j++) {
+        if (_meshRootBase(meshes[j].filename) === _root) { _parentLabel = 'v' + (meshes.length - 1 - j); break; }
+      }
+      const _tip = _parentLabel
+        ? _i18nTf('Version — from {x} after {y}', _parentLabel, _opTxt)
+        : _i18nTf('Version — after {x}', _opTxt);
       meshSourceBtn = `<span class="version-verbadge" title="${_escapeHtml(_tip)}">V</span>`;
     } else if (m.sourceImage) {
-      meshSourceBtn = '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh">&#128247;</button>';
+      meshSourceBtn = `<button class="version-source-btn" title="${_escapeHtml(_i18nT('View the source image that generated this mesh'))}">&#128247;</button>`;
     }
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}

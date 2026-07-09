@@ -20,6 +20,27 @@
 
   const I18N = {
     fr: {
+      // ---- Version lineage badge (mesh versions strip) ----
+      'Version — from {x} after {y}': 'Version — issue de {x} après {y}',
+      'Version — after {x}': 'Version — après {x}',
+      'View the source image that generated this mesh': "Voir l'image source qui a généré ce mesh",
+      'Segmented into parts (AI)': 'Segmenté en parties (IA)',
+      'part segmentation': 'segmentation en parties',
+      'smoothing': 'lissage',
+      'decimation': 'décimation',
+      'subdivision': 'subdivision',
+      'hole filling': 'bouchage des trous',
+      'normals fix': 'correction des normales',
+      'recentering': 'recentrage',
+      'pivot adjustment': 'réglage du pivot',
+      'watertight sealing': 'étanchéification',
+      'texture variation': 'variation de texture',
+      'editing': 'édition',
+      'upscale': 'upscale',
+      'refinement': 'affinage',
+      'augmentation': 'augmentation',
+      'vertex colors': 'couleurs de sommets',
+      're-texture': 're-texture',
       // ---- Top bar / nav ----
       'Projects': 'Projets',
       'New project': 'Nouveau projet',

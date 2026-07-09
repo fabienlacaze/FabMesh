@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (badge « V » : i18n + cite le mesh PARENT + curseur normal)
+
+Retours user sur le badge « V » : (1) le texte doit suivre la langue de l'appli,
+(2) enlever le curseur `?`, (3) citer le MESH PARENT au lieu de l'image source.
+- **i18n** : libellés ré-écrits en ANGLAIS SOURCE (`_OP_LABEL`) + passés par
+  `FabI18n.t`/`.tf` ; traductions FR ajoutées à i18n.js (desktop + cloud).
+  Langues : EN (source) + FR (curée) explicites ; ZH/HI/ES/AR n'ont AUCUN dico
+  statique → auto-traduites au runtime par argos (`meshyAPI.i18nAutoTranslate`,
+  `_translateAttrs` auto-queue les `title`) — le badge est donc couvert comme
+  tout le reste de l'app, sans travail par-langue.
+- **Parent** : le nom de sortie collapse la chaîne (`${racine}_${dernièreOp}_${ts}`,
+  main.js:6602) → le parent immédiat n'est pas dans le nom. Heuristique
+  `_meshRootBase` : parent = version la plus récente PLUS ANCIENNE de même racine,
+  citée « vN ». Tooltip : « Version — from vN after <op> ». Fallback sans parent :
+  « Version — after <op> ».
+- **Curseur** : `cursor: help` → `default` (desktop + cloud CSS).
+Renderer-only : Ctrl+R desktop, rebuild+deploy pour le cloud.
+
 ## 2026-07-09 (versions mesh : badge « V » de lignée au lieu du jump 📷 sur les dérivés)
 
 Sur un mesh DÉRIVÉ (segment / smooth / watertight / decimate / …), le bouton 📷
