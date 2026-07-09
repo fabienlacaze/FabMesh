@@ -90,12 +90,22 @@ def seal(mesh_in, out_path, resolution=192):
 
     # décimation (scellage caché → pas besoin de détail)
     shell = _decimate(shell, target_faces=min(len(shell.faces), 40000))
-    # couleur neutre (grise) — pas de texture sur la coque
+    # Matériau gris OPAQUE (PAS de couleurs de sommets RGBA : elles donnent un
+    # COLOR_0 VEC4 que GLTFLoader flague `transparent` → contenu des trous
+    # transparent). + normales forcées (sinon PBR noir).
     try:
-        grey = np.tile(np.array([120, 120, 128, 255], np.uint8), (len(shell.faces), 1))
-        shell.visual = trimesh.visual.ColorVisuals(mesh=shell, face_colors=grey)
+        from trimesh.visual.material import PBRMaterial
+        shell.visual = trimesh.visual.TextureVisuals(
+            material=PBRMaterial(name="seal",
+                                 baseColorFactor=[0.47, 0.47, 0.5, 1.0],
+                                 metallicFactor=0.0, roughnessFactor=0.9))
     except Exception as e:
-        log(f"colour warn: {e}")
+        log(f"material warn: {e}")
+    try:
+        _ = shell.vertex_normals
+        _ = src.vertex_normals
+    except Exception:
+        pass
 
     scene = trimesh.Scene()
     scene.add_geometry(src, geom_name="original", node_name="original")
