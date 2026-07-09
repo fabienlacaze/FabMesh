@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (cloud : interim deploy + worker PartSAM-ready)
+
+- **Interim deploy** (Version 0b7af39e) : `cloud/public/app/cloud-overrides.js`
+  masque `ws-mesh-segment-btn` (CLOUD_HIDE_BUTTONS) — le backend Modal segment
+  n'est pas déployé, le bouton échouerait. Rebuild + `wrangler deploy` → les
+  testeurs passent de la version 7 juil. → 9 juil. Align Texture déjà sécurisé
+  (bouton display:none + op retirée du worker, ligne 6964 — pas de facturation).
+- `cloud/src/worker.ts` `handleMeshSegment` : envoie désormais **`granularity`**
+  (0-1, PartSAM) à `/segment-start` au lieu de `scale` (défaut 0.2). Typecheck OK.
+  PAS déployé (attend le Modal PartSAM). Go-live cloud PartSAM = (1) `modal deploy
+  modal_app/_partsam.py`, (2) pointer MODAL_SEGMENT_URL sur le router PartSAM,
+  (3) dé-masquer le bouton + rewrite modale granularité 0-1 + port explode,
+  (4) build+deploy.
+
 ## 2026-07-09 (desktop : IPC mesh-segment → PartSAM + viewer explode + drafts infra cloud)
 
 - `src/main/main.js` : handler `mesh-segment` repointé SAMPart3D→**PartSAM**

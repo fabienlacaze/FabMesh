@@ -7924,9 +7924,9 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
   if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
   if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
 
-  let body: { mesh_url?: string; scale?: number; projectName?: string };
+  let body: { mesh_url?: string; granularity?: number; scale?: number; projectName?: string };
   try {
-    body = await req.json() as { mesh_url?: string; scale?: number; projectName?: string };
+    body = await req.json() as { mesh_url?: string; granularity?: number; scale?: number; projectName?: string };
   } catch {
     return err(400, 'invalid JSON body');
   }
@@ -7935,9 +7935,12 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
   if (!isTrustedAssetHost(env, meshUrl)) {
     return err(400, 'mesh_url host not allowed');
   }
-  let scale = typeof body.scale === 'number' ? body.scale : 1.0;
-  if (!Number.isFinite(scale)) scale = 1.0;
-  scale = Math.max(0, Math.min(2, scale));
+  // PartSAM granularity 0.0 (coarse, ~10 clean parts) → 1.0 (fine, ~45 parts).
+  // `scale` accepted as a legacy alias; default 0.2 (matches desktop default).
+  let granularity = typeof body.granularity === 'number' ? body.granularity
+    : (typeof body.scale === 'number' ? body.scale : 0.2);
+  if (!Number.isFinite(granularity)) granularity = 0.2;
+  granularity = Math.max(0, Math.min(1, granularity));
   const projectName = typeof body.projectName === 'string' ? body.projectName : '';
 
   const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_SEGMENT);
@@ -7969,7 +7972,7 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
       body: JSON.stringify({
         _auth: env.MODAL_SHARED_SECRET,
         mesh_url: meshUrl,
-        scale,
+        granularity,   // PartSAM 0-1 (coarse→fine). `scale` alias still read by the router.
       }),
       signal: AbortSignal.timeout(30_000),
     });
