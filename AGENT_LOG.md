@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (segment : GLB segmenté conserve la TEXTURE + toggle couleurs↔texture)
+
+User veut que le mesh segmenté garde sa texture. `partsam_bridge._build_segmented_glb`
+(+ à mirrorer sur _partsam.py cloud) : si le mesh source est TEXTURÉ, chaque
+partie `part_XX` GARDE la texture (submesh préserve UV) et PARTAGE le matériau
+source (l'atlas 4K n'est pas dupliqué → 1 material/2 images ; tank 40 Mo vs
+13 Mo color-map). Fallback couleur pleine si pas de texture. Viewer
+(`applySegColors`) : échange de matériau — ON = couleur solide HSL par partie
+(golden-angle), OFF = matériau d'origine (texture). Détection mesh segmenté =
+flag `model.userData._isSegmented` posé au chargement (regex `_segment_` sur le
+path, dans showStep2Preview + lightbox fitAndApply) OU ≥2 sous-meshes `part_XX`.
+Toujours forcé opaque (GLTFLoader flague les GLB texturés `transparent`).
+NB: re-segmenter pour obtenir la version texturée (anciennes = color-map).
+
 ## 2026-07-09 (cloud : interim deploy + worker PartSAM-ready)
 
 - **Interim deploy** (Version 0b7af39e) : `cloud/public/app/cloud-overrides.js`

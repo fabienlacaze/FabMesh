@@ -3782,47 +3782,50 @@ function createMeshViewerControls(toolbarEl, getViewer) {
       p.mesh.position.copy(p.base).addScaledVector(p.dir, f * e.spread * p.invScale);
     }
   }
-  // Affiche/masque les COULEURS de parties (segmentation) : bascule
-  // material.vertexColors sur les sous-meshes qui en ont. OFF => le mesh
-  // s'affiche en matériau uni (on voit la forme sans le code couleur).
+  // Affiche/masque les couleurs de segmentation par ÉCHANGE de matériau.
+  // ON  => chaque partie prend une couleur solide distincte (carte de parties,
+  //        façon Tripo).
+  // OFF => on restaure le matériau d'origine = la TEXTURE réelle du mesh (le
+  //        GLB segmenté conserve la texture ; couleurs appliquées à la volée).
   function applySegColors(viewer, show) {
     const model = viewer && viewer.model;
     if (!model) return;
+    let seq = 0;
     model.traverse(o => {
-      if (!o.isMesh || !o.material) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      for (const mat of mats) {
-        if (mat.userData._segBaseVC === undefined) mat.userData._segBaseVC = !!mat.vertexColors;
-        if (mat.userData._segBaseVC) { mat.vertexColors = !!show; mat.needsUpdate = true; }
+      if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+      let pi = seq++;
+      const mm = /part[_-]?(\d+)/i.exec(o.name || (o.parent && o.parent.name) || '');
+      if (mm) pi = parseInt(mm[1], 10);
+      if (!o.userData._segTexMat) o.userData._segTexMat = o.material;   // texture/matériau d'origine
+      if (!o.userData._segColorMat) {
+        const col = new THREE.Color().setHSL((pi * 0.61803398875) % 1, 0.62, 0.55);
+        o.userData._segColorMat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.85, metalness: 0.0 });
       }
+      const target = show ? o.userData._segColorMat : o.userData._segTexMat;
+      // Toujours opaque (GLTFLoader peut flaguer un GLB texturé `transparent`).
+      target.transparent = false; target.opacity = 1; target.depthWrite = true; target.needsUpdate = true;
+      o.material = target;
     });
   }
 
-  // N'affiche les outils segmentation (explode + toggle couleurs) que pour un
-  // modèle multi-sous-meshes (mesh segmenté). Reset à chaque nouveau modèle.
+  // N'affiche les outils segmentation (explode + toggle couleurs/texture) que
+  // pour un mesh SEGMENTÉ : flag _isSegmented posé au chargement (nom de
+  // fichier `_segment_`) OU ≥2 sous-meshes nommés part_XX. Reset à chaque modèle.
   function refreshExplodeUI(viewer) {
     const wrap = toolbarEl.querySelector('[data-explode-wrap]');
     if (!wrap) return;
     const model = viewer && viewer.model;
-    let nMeshes = 0;
-    if (model) model.traverse(o => { if (o.isMesh && o.geometry) nMeshes++; });
-    const seg = nMeshes >= 2;
+    let nParts = 0;
+    if (model) model.traverse(o => {
+      if (o.isMesh && o.geometry && /part[_-]?\d+/i.test(o.name || (o.parent && o.parent.name) || '')) nParts++;
+    });
+    const seg = !!(model && model.userData && model.userData._isSegmented) || nParts >= 2;
     wrap.style.display = seg ? 'inline-flex' : 'none';
     const sl = wrap.querySelector('input[data-act="explode"]');
     if (sl) { sl.value = 0; sl.style.setProperty('--val', '0%'); }
     const segBtn = wrap.querySelector('button[data-act="segcolors"]');
     if (segBtn) segBtn.classList.toggle('active', state.segColors !== false);
     if (seg) {
-      // Mesh segmenté = carte de parties en couleur pleine. Le GLB (couleurs
-      // de faces RGBA → COLOR_0 VEC4) fait flaguer le matériau `transparent`
-      // par GLTFLoader → rendu translucide indésirable. On force opaque au
-      // chargement (X-Ray reste dispo à la demande via son bouton).
-      model.traverse(o => {
-        if (!o.isMesh || !o.material) return;
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-          m.transparent = false; m.opacity = 1; m.depthWrite = true; m.needsUpdate = true;
-        });
-      });
       applyExplode(viewer, 0);
       applySegColors(viewer, state.segColors !== false);
     }
@@ -4136,6 +4139,7 @@ async function _lb3dLoadAt(meshPath) {
   function fitAndApply(obj) {
     console.log('[lb3d] fitAndApply, model:', obj);
     lb3dModel = obj;
+    lb3dModel.userData._isSegmented = /_segment_/i.test(meshPath || '');
     lb3dScene.add(lb3dModel);
     const box = new THREE.Box3().setFromObject(lb3dModel);
     const sizeVec = box.getSize(new THREE.Vector3());
@@ -7838,6 +7842,7 @@ async function showStep2Preview(mesh) {
     _clearWsMeshes();   // last-moment cleanup for out-of-order parse callbacks
     wsModel = gltf.scene;
     wsModel.userData.__wsMesh = true;
+    wsModel.userData._isSegmented = /_segment_/i.test(mesh.path || '');
     wsScene.add(wsModel);
     _applyMeshTextureFilter(wsModel);
     fitWsCamera(wsModel);
