@@ -1,5 +1,35 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (segment : denoise v4_combo — island absorption + mode kNN cutoff)
+
+Constat user : trop d'îlots parasites dans la segmentation PartSAM du tank
+(taches roses/violettes sur la caisse, mouchetis sur la tourelle). L'ancien
+denoise kNN (k=16 x3 scipy.stats.mode) est à échelle fixe → point fixe du
+filtre majoritaire sur les îlots 50-1500 faces, incapable de les résorber.
+4 variantes benchées sur le tank 488k tris à g=0.2 (métriques seg_metrics) :
+- v0 baseline iso-amont : 12 parties, 108 fragments excédentaires, 4.73 %
+  de faces parasites, 220 s.
+- v2 kNN musclé (k=32 x8) : cul-de-sac — 82 fragments, 4.28 % (gain -0.45 pt),
+  la dominante de part_00 RÉGRESSE (64→49 %).
+- v1 graph_cut : écarté sans run — labels.npy sauvé AVANT post_processing
+  (aucun effet sur le GLB) + coût prohibitif à 488k faces / 32k composantes.
+- v3 island absorption : 6 fragments, 1.73 % — LE levier.
+- v4 combo (RETENUE) : v3 + mode kNN tuné. Métriques fragments identiques à
+  v3 mais denoise ~4x plus rapide (1.5-2 s vs ~9 s), cutoff distance 3·h
+  anti-bleeding à travers les gaps d'air (mesh non soudé ~40k composantes)
+  et lissage des frontières crénelées. Un seul query cKDTree k=12 partagé.
+Implémenté dans `scripts/partsam_bridge.py` (remplace _clean_labels :
+_knn_mode_vote + _absorb_islands + pipeline 3 étapes ; protection de la
+composante dominante par label = anti-antenne, pas de split des pièces
+miroir >= size_thr, fallback gelé pour les floaters isolés) + miroir EXACT
+dans `modal_app/_partsam.py` (parité desktop/cloud). Contrat CLI inchangé.
+Vérif finale bridge réel, tank g=0.2 : 12 parties (cible 8-20), fragments
+excédentaires 459→6, faces parasites 12.83 %→1.73 %, 9/12 parties
+mono-composante, 60.5 s total (eval GPU ~47 s, denoise 1.5 s) ≪ 5 min.
+Résidu structurel : part_00 garde 4 comps non-dominantes >= size_thr
+(7 671 faces, 1.57 %) préservées comme pièces symétriques potentielles ;
+knob si jugées parasites au visuel = keep_abs plus haut à g<=0.3.
+
 ## 2026-07-09 (vignettes : rails de boutons à emplacements fixes + lisibilité popup)
 
 Retours user : texte popup peu lisible, bouton ⏱ écrasé par le badge ✂,
