@@ -622,6 +622,9 @@
     'ws-mesh-paintvert-btn',   // vertex paint — still WIP UX-wise
     'ws-mesh-selectface-btn',  // face selection is useless without delete-faces (not landed yet)
     'ws-mesh-trellis2-btn',    // desktop-only TRELLIS-2 retexture path
+    // Part segmentation: cloud backend (Modal PartSAM) not deployed yet —
+    // hide until the cloud PartSAM job is wired, else the button errors.
+    'ws-mesh-segment-btn',
     // "Open in Blender" / "Show in folder" only work on Desktop where
     // we can spawn `blender` and reveal the file on the user's FS.
     // Browser cannot do either; just hide them on cloud.
