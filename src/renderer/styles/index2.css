@@ -976,7 +976,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   font-size: 11px;
   color: var(--text-2);
   line-height: 1.55;
-  max-width: 320px;
+  max-width: 380px;
   pointer-events: none;
   user-select: text;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
@@ -990,8 +990,10 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   font-weight: 600;
   font-size: 12px;
   margin-bottom: 3px;
-  word-break: break-all;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 .viewer-info-overlay .vi-row {
   display: block;
@@ -1457,6 +1459,30 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: #3b6fd4;
   border-color: #8ab4ff;
   transform: scale(1.12);
+}
+/* Segmented-mesh badge (scissors): hover-only like the other overlay buttons,
+   bottom-left free corner, purple ring. Signals a part-segmentation version. */
+.versions-strip .version-thumb .v-seg-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(139,92,246,0.9);
+  color: #d4c4ff;
+  font-size: 11px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  z-index: 2;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.45);
+}
+.versions-strip .version-thumb:hover .v-seg-badge {
+  display: inline-flex;
 }
 /* Lineage jump buttons (mesh 🧊 / rig 🦴): hover-only, flow right of the source
    button (top-left), same blue highlight. Used on rig + animation vignettes. */

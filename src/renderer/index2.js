@@ -4016,7 +4016,7 @@ async function renderViewerInfo(targetEl, filePath, extras) {
         + `style="color:#8ab4ff;text-decoration:underline;cursor:pointer;pointer-events:auto;">`
         + `${_esc(_srcName)}</a></span>`;
     }
-    targetEl.innerHTML = `<span class="vi-title">${info.filename}</span>` + rows.join('') + sourceRow;
+    targetEl.innerHTML = `<span class="vi-title" title="${String(info.filename).replace(/"/g, '&quot;')}">${info.filename}</span>` + rows.join('') + sourceRow;
     if (info.sourceImage) {
       const _link = targetEl.querySelector('.vi-source-link');
       if (_link) _link.addEventListener('click', (e) => {
@@ -8051,7 +8051,7 @@ async function renderMeshVersions(p) {
     const meshIsSegmented = /_segment_\d{6,}\.(glb|gltf)$/i.test(m.filename || '')
       || /_segment_/i.test(m.filename || '');
     const meshSegBadge = meshIsSegmented
-      ? '<span class="v-seg-badge" title="Mesh segmenté en parties (AI)" style="position:absolute; bottom:2px; left:2px; background:rgba(0,0,0,0.72); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:10px; line-height:1; box-shadow:0 0 0 1px rgba(139,92,246,0.95);">&#9986;</span>'
+      ? '<span class="v-seg-badge" title="Mesh segmenté en parties (AI)">&#9986;</span>'
       : '';
     // Per-version "source image" button (top-left): jumps to the photo this
     // mesh was generated from. Only shown when the .source sidecar resolved.
