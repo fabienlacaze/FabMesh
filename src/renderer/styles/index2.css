@@ -1460,12 +1460,13 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border-color: #8ab4ff;
   transform: scale(1.12);
 }
-/* Segmented-mesh badge (scissors): hover-only like the other overlay buttons,
-   bottom-left free corner, purple ring. Signals a part-segmentation version. */
+/* Segmented-mesh badge (scissors): hover-only like the other overlay buttons.
+   Placed on the 2nd row, right side (below the delete button) — a free corner
+   that doesn't cover the v-label (bottom-left) or emissive badge (bottom-right). */
 .versions-strip .version-thumb .v-seg-badge {
   position: absolute;
-  bottom: 4px;
-  left: 4px;
+  top: 30px;
+  right: 4px;
   width: 22px;
   height: 22px;
   border-radius: 50%;
