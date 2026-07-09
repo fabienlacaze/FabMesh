@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (Generation History 2/3 : popup timeline + bouton ⏱)
+
+- **buildLineageTimeline(startPath, p)** (renderer) : remonte anim→rig→mesh→
+  image via meta.parent (sidecar) puis heuristiques de dégradation (anim.rigPath,
+  _resolveParentMeshPath, racine commune _meshRootBase + timestamp). Anti-boucle
+  guard 20. Étape image en tête (sourceImage du premier nœud) avec prompt projet
+  en fallback de params.
+- **showGenerationHistory(startPath)** : popup overlay auto-suffisante (pattern
+  customPrompt), timeline verticale, carte par étape {icône, titre traduit,
+  vignette, engine badge, params filtrés (max 10, skip null/false/objets),
+  date}. Note « paramètres non tracés » pour les assets antérieurs au sidecar.
+- **Bouton ⏱ (version-history-btn)** hover-only sur les vignettes des 3 strips
+  (mesh: 2e rangée col 2 — le ✂ occupe la droite ; rig/anim: 2e rangée droite).
+- i18n FR ajouté ; autres langues via auto-traduction runtime.
+
 ## 2026-07-09 (Generation History 1/3 : traçage lignée .meta.json)
 
 Feature user : bouton « Generation history » → popup avec la séquence complète
