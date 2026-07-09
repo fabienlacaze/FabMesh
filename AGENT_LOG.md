@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (vignettes : rails de boutons à emplacements fixes + lisibilité popup)
+
+Retours user : texte popup peu lisible, bouton ⏱ écrasé par le badge ✂,
+« les boutons doivent toujours avoir les mêmes places ».
+- **Rails de boutons** (desktop + cloud, 3 strips chacun) : chaque vignette a
+  2 conteneurs flex — `.v-rail-mid` (milieu-gauche, jumps de lignée 📷/V → 🧊 →
+  🦴, ordre fixe) et `.v-rail-bot` (bas-droite, ⏱ historique + badges d'état
+  💡/✂). Les enfants passent en `position:static !important` (neutralise les
+  positions absolues historiques) → AUCUN chevauchement possible, même bouton
+  toujours au même endroit. Coche verte haut-gauche, ✕ haut-droite, vN
+  bas-gauche inchangés. Badge 💡 : style inline → classe CSS.
+- **Lisibilité popup** : tailles +1-2px (rows 12px, titres 14-15px), couleurs
+  plus claires (#f4f6fa/#a8b3c5), scrollbar webkit visible dans .gh-body.
+
 ## 2026-07-09 (Generation History 3/3 : port cloud, mode dégradé)
 
 Miroir cloud de buildLineageTimeline + showGenerationHistory + bouton ⏱ sur

@@ -1572,9 +1572,9 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 }
 .gh-head-ico { font-size: 18px; }
 .gh-head-txt { flex: 1; min-width: 0; }
-.gh-title { font-size: 14px; font-weight: 600; }
+.gh-title { font-size: 15px; font-weight: 600; }
 .gh-sub {
-  font-size: 11px; color: var(--text-2, #9aa);
+  font-size: 12px; color: #a8b3c5;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .gh-close {
@@ -1618,7 +1618,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 }
 .gh-info { flex: 1; min-width: 0; }
 .gh-step-title {
-  font-size: 13px; font-weight: 600;
+  font-size: 14px; font-weight: 600;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .gh-engine {
@@ -1628,16 +1628,60 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   color: #d4c4ff;
 }
 .gh-file {
-  font-size: 10px; color: var(--text-2, #9aa);
+  font-size: 11px; color: #aeb6c4;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   margin-top: 2px;
 }
-.gh-params { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
-.gh-row { display: flex; gap: 8px; font-size: 11px; }
-.gh-k { color: var(--text-2, #9aa); min-width: 110px; flex: none; }
-.gh-v { color: var(--text-0, #eee); word-break: break-word; }
-.gh-legacy { margin-top: 6px; font-size: 11px; color: #c9a44a; }
-.gh-ts { margin-top: 6px; font-size: 10px; color: var(--text-2, #9aa); }
+.gh-params { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.gh-row { display: flex; gap: 8px; font-size: 12px; }
+.gh-k { color: #a8b3c5; min-width: 120px; flex: none; }
+.gh-v { color: #f4f6fa; word-break: break-word; }
+.gh-legacy { margin-top: 6px; font-size: 12px; color: #d8b355; }
+.gh-ts { margin-top: 6px; font-size: 11px; color: #a8b3c5; }
+/* Scrollbar visible dans la timeline (longues chaînes de modifs). */
+.gh-body::-webkit-scrollbar { width: 10px; }
+.gh-body::-webkit-scrollbar-track { background: transparent; }
+.gh-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 5px; }
+.gh-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.32); }
+
+/* ═══ Rails de boutons des vignettes: emplacements FIXES sur tous les types.
+   Rangée MILIEU (gauche) = jumps de lignée [📷/V][🧊 mesh][🦴 rig] ; rangée
+   BAS (droite) = [⏱ historique] + badges d'état [💡][✂]. Les enfants perdent
+   leur positionnement absolu historique (static !important) → plus AUCUN
+   chevauchement possible et le même bouton est toujours au même endroit.
+   Coche verte = haut-gauche, ✕ supprimer = haut-droite, vN = bas-gauche. */
+.versions-strip .version-thumb .v-rail-mid,
+.versions-strip .version-thumb .v-rail-bot {
+  position: absolute;
+  left: 4px; right: 4px;
+  display: flex; gap: 3px; align-items: center;
+  pointer-events: none;
+  z-index: 3;
+}
+.versions-strip .version-thumb .v-rail-mid { top: 27px; justify-content: flex-start; }
+.versions-strip .version-thumb .v-rail-bot { bottom: 3px; justify-content: flex-end; }
+.versions-strip .version-thumb .v-rail-mid > *,
+.versions-strip .version-thumb .v-rail-bot > * {
+  position: static !important;
+  top: auto !important; left: auto !important; right: auto !important; bottom: auto !important;
+  width: 20px !important; height: 20px !important;
+  font-size: 10px !important;
+  display: none;
+  align-items: center; justify-content: center;
+  padding: 0; line-height: 1;
+  pointer-events: auto;
+  flex: none;
+}
+.versions-strip .version-thumb:hover .v-rail-mid > *,
+.versions-strip .version-thumb:hover .v-rail-bot > * {
+  display: inline-flex !important;
+}
+/* Badge émissif: le style inline historique est remplacé par cette classe. */
+.versions-strip .version-thumb .v-emissive-badge {
+  background: rgba(0,0,0,0.75);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 224, 102, 0.85);
+}
 /* Lineage jump buttons (mesh 🧊 / rig 🦴): hover-only, flow right of the source
    button (top-left), same blue highlight. Used on rig + animation vignettes. */
 .versions-strip .version-thumb .version-mesh-btn,

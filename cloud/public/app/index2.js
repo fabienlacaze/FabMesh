@@ -7944,7 +7944,7 @@ async function renderMeshVersions(p) {
       || ((typeof _emissiveLayerHas === 'function')
         && m.sourceImage && _emissiveLayerHas(m.sourceImage));
     const meshEmissiveBadge = meshHasEmissive
-      ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
+      ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it">💡</span>'
       : '';
     // Coin haut-gauche : JUMP 📷 vers l'image source (mesh ORIGINAL) OU
     // indicateur « V » de lignée (mesh DÉRIVÉ par une op). Sur un dérivé, pas de
@@ -7971,9 +7971,11 @@ async function renderMeshVersions(p) {
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
       <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
-      ${meshSourceBtn}
-      <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
-      ${meshEmissiveBadge}
+      <div class="v-rail-mid">${meshSourceBtn}</div>
+      <div class="v-rail-bot">
+        <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
+        ${meshEmissiveBadge}
+      </div>
     `;
     t.title = m.filename;
     t.addEventListener('click', () => {
@@ -14337,9 +14339,10 @@ function renderRigVersions(p) {
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
       <span class="v-label">v${p.rigs.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this rig">&#10005;</button>
-      ${rigSrcBtn}
-      ${rigMeshBtn}
-      <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
+      <div class="v-rail-mid">${rigSrcBtn}${rigMeshBtn}</div>
+      <div class="v-rail-bot">
+        <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
+      </div>
     `;
     t.title = r.filename;
     t.addEventListener('click', () => {
@@ -14761,8 +14764,10 @@ function renderAnimVersions(p) {
         <span class="v-used-badge" title="Used for next step">&#10003;</span>
         <span class="v-label">v${vNum}</span>
         <button class="version-delete-btn" data-batch-id="${b.id}" title="Delete this version">&#10005;</button>
-        ${imgBtn}${meshBtn}${rigBtn}
-        <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
+        <div class="v-rail-mid">${imgBtn}${meshBtn}${rigBtn}</div>
+        <div class="v-rail-bot">
+          <button class="version-history-btn" title="${escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
+        </div>
       </div>`;
   }).join('');
   strip.querySelectorAll('.version-thumb').forEach(t => {
