@@ -664,6 +664,7 @@
                       <span class="light-label" title="Light intensity">&#9728;</span>
                       <input type="range" data-act="light" min="0" max="500" value="100" title="Light intensity" />
                       <span class="seg-explode-wrap" data-explode-wrap style="display:none;align-items:center;gap:5px;margin-left:6px;">
+                        <button data-act="segcolors" class="active" title="Afficher / masquer les couleurs de segmentation">&#128065;</button>
                         <span title="Explode parts (segmented mesh)">&#128165;</span>
                         <input type="range" data-act="explode" min="0" max="100" value="0" step="1" title="Explode parts" style="width:90px;" />
                       </span>
@@ -835,6 +836,7 @@
                       <span class="light-label" title="Light intensity">&#9728;</span>
                       <input type="range" data-act="light" min="0" max="500" value="100" title="Light intensity" />
                       <span class="seg-explode-wrap" data-explode-wrap style="display:none;align-items:center;gap:5px;margin-left:6px;">
+                        <button data-act="segcolors" class="active" title="Afficher / masquer les couleurs de segmentation">&#128065;</button>
                         <span title="Explode parts (segmented mesh)">&#128165;</span>
                         <input type="range" data-act="explode" min="0" max="100" value="0" step="1" title="Explode parts" style="width:90px;" />
                       </span>
@@ -2850,7 +2852,7 @@
       </div>
       <div style="display:flex; flex:1 1 0; gap:12px; min-height:400px;">
         <!-- Left panel: tools — scrolls vertically when controls (incl. Tolerance) overflow. -->
-        <div style="display:flex; flex-direction:column; gap:10px; width:160px; flex-shrink:0; padding:8px 4px 8px 0; overflow-y:auto;">
+        <div style="display:flex; flex-direction:column; gap:10px; width:200px; flex-shrink:0; padding:8px 4px 8px 0; overflow-y:auto;">
           <!-- Sculpt options -->
           <div id="me-sculpt-opts" style="display:flex; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Sculpt</span>

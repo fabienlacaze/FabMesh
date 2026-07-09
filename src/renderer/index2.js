@@ -3392,6 +3392,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     pivot: 'bottom', // 'bottom' | 'center' | 'top'
     showPivot: false,
     landmarksVisible: true, // toggled by the lm-show toolbar button
+    segColors: true, // segmented meshes: show per-part colors (toggle via 'segcolors')
   };
 
   const BG_COLORS = {
@@ -3781,7 +3782,24 @@ function createMeshViewerControls(toolbarEl, getViewer) {
       p.mesh.position.copy(p.base).addScaledVector(p.dir, f * e.spread * p.invScale);
     }
   }
-  // N'affiche le slider explode que pour un modèle multi-sous-meshes (segmenté).
+  // Affiche/masque les COULEURS de parties (segmentation) : bascule
+  // material.vertexColors sur les sous-meshes qui en ont. OFF => le mesh
+  // s'affiche en matériau uni (on voit la forme sans le code couleur).
+  function applySegColors(viewer, show) {
+    const model = viewer && viewer.model;
+    if (!model) return;
+    model.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const mat of mats) {
+        if (mat.userData._segBaseVC === undefined) mat.userData._segBaseVC = !!mat.vertexColors;
+        if (mat.userData._segBaseVC) { mat.vertexColors = !!show; mat.needsUpdate = true; }
+      }
+    });
+  }
+
+  // N'affiche les outils segmentation (explode + toggle couleurs) que pour un
+  // modèle multi-sous-meshes (mesh segmenté). Reset à chaque nouveau modèle.
   function refreshExplodeUI(viewer) {
     const wrap = toolbarEl.querySelector('[data-explode-wrap]');
     if (!wrap) return;
@@ -3792,7 +3810,9 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     wrap.style.display = seg ? 'inline-flex' : 'none';
     const sl = wrap.querySelector('input[data-act="explode"]');
     if (sl) { sl.value = 0; sl.style.setProperty('--val', '0%'); }
-    if (seg) applyExplode(viewer, 0);
+    const segBtn = wrap.querySelector('button[data-act="segcolors"]');
+    if (segBtn) segBtn.classList.toggle('active', state.segColors !== false);
+    if (seg) { applyExplode(viewer, 0); applySegColors(viewer, state.segColors !== false); }
   }
 
   // Event bindings on the toolbar
@@ -3807,6 +3827,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
         if (act === 'wire') { state.wireframe = !state.wireframe; el.classList.toggle('active', state.wireframe); applyWireframe(viewer); return; }
         if (act === 'pbr') { state.pbr = !state.pbr; el.classList.toggle('active', !state.pbr); applyPBR(viewer); return; }
         if (act === 'grid') { state.grid = !state.grid; el.classList.toggle('active', state.grid); ensureGrid(viewer); return; }
+        if (act === 'segcolors') { state.segColors = state.segColors === false ? true : false; el.classList.toggle('active', state.segColors); applySegColors(viewer, state.segColors); return; }
         if (act === 'bones') { state.bones = !state.bones; el.classList.toggle('active', state.bones); ensureSkeletonHelper(viewer); return; }
         if (act === 'shadows') { state.shadows = !state.shadows; el.classList.toggle('active', state.shadows); applyShadows(viewer); return; }
         if (act === 'xray') { state.xray = !state.xray; el.classList.toggle('active', state.xray); applyXray(viewer); return; }
@@ -8012,6 +8033,13 @@ async function renderMeshVersions(p) {
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
+    // Segmented-mesh badge: the part-segmentation output is named
+    // `${base}_segment_${ts}.glb` — flag it so the version is recognizable.
+    const meshIsSegmented = /_segment_\d{6,}\.(glb|gltf)$/i.test(m.filename || '')
+      || /_segment_/i.test(m.filename || '');
+    const meshSegBadge = meshIsSegmented
+      ? '<span class="v-seg-badge" title="Mesh segmenté en parties (AI)" style="position:absolute; bottom:2px; left:2px; background:rgba(0,0,0,0.72); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:10px; line-height:1; box-shadow:0 0 0 1px rgba(139,92,246,0.95);">&#9986;</span>'
+      : '';
     // Per-version "source image" button (top-left): jumps to the photo this
     // mesh was generated from. Only shown when the .source sidecar resolved.
     const meshSourceBtn = m.sourceImage
@@ -8023,6 +8051,7 @@ async function renderMeshVersions(p) {
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
       ${meshSourceBtn}
       ${meshEmissiveBadge}
+      ${meshSegBadge}
     `;
     t.title = m.filename;
     t.addEventListener('click', () => {
