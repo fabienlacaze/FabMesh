@@ -8002,6 +8002,28 @@ function fitWsCamera(obj) {
   wsControls.update();
 }
 
+// Libellés FR des opérations mesh (suffixe de fichier → modif lisible). Doit
+// rester aligné sur OP_SUFFIX de main.js (le nom du dernier suffixe = la modif
+// qui a produit CETTE version).
+const _OP_FR = {
+  cntile: 'ControlNet Tile', retexture: 're-texture', trellis2_retex: 're-texture (TRELLIS-2)',
+  retex: 're-texture', decimate: 'décimation', subdivide: 'subdivision', smooth: 'lissage',
+  fill_holes: 'bouchage des trous', fix_normals: 'correction des normales', center: 'recentrage',
+  set_pivot: 'réglage du pivot', watertight: 'étanchéification', texture_var: 'variation de texture',
+  edited: 'édition', upscale: 'upscale', refine: 'affinage', augment: 'augmentation',
+  vc: 'couleurs de sommets', segment: 'segmentation en parties',
+};
+// Un mesh dérivé est nommé `${base}_${op}_${ts}.glb`. Renvoie l'op du DERNIER
+// suffixe (la modif qui a produit cette version), ou isVersion=false si le
+// fichier est un ORIGINAL (généré direct depuis une image, pas d'op).
+function _meshVersionInfo(filename) {
+  const stem = String(filename || '').replace(/\.[^.]+$/, '');
+  const m = stem.match(/_(cntile|retexture|trellis2_retex|retex|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i);
+  if (!m) return { isVersion: false, opKey: null, opLabel: null };
+  const key = m[1].toLowerCase();
+  return { isVersion: true, opKey: key, opLabel: _OP_FR[key] || key };
+}
+
 async function renderMeshVersions(p) {
   const strip = document.getElementById('ws-mesh-versions');
   strip.innerHTML = '';
@@ -8087,11 +8109,22 @@ async function renderMeshVersions(p) {
     const meshSegBadge = meshIsSegmented
       ? '<span class="v-seg-badge" title="Mesh segmenté en parties (AI)">&#9986;</span>'
       : '';
-    // Per-version "source image" button (top-left): jumps to the photo this
-    // mesh was generated from. Only shown when the .source sidecar resolved.
-    const meshSourceBtn = m.sourceImage
-      ? '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh">&#128247;</button>'
-      : '';
+    // Coin haut-gauche : soit un JUMP vers l'image source (mesh ORIGINAL généré
+    // direct depuis une photo), soit un INDICATEUR « V » de lignée (mesh DÉRIVÉ
+    // par une op — segment / smooth / watertight / …). Sur un dérivé on ne
+    // propose PAS de saut vers l'image (ce n'est qu'une version) : le « V »
+    // survolé affiche d'où vient la version et quelle modif l'a produite.
+    const _vinfo = _meshVersionInfo(m.filename);
+    let meshSourceBtn = '';
+    if (_vinfo.isVersion) {
+      const _imgName = m.sourceImage ? String(m.sourceImage).split(/[\\/]/).pop() : '';
+      const _tip = _imgName
+        ? `Version — issue de « ${_imgName} » après ${_vinfo.opLabel}`
+        : `Version — après ${_vinfo.opLabel}`;
+      meshSourceBtn = `<span class="version-verbadge" title="${_escapeHtml(_tip)}">V</span>`;
+    } else if (m.sourceImage) {
+      meshSourceBtn = '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh">&#128247;</button>';
+    }
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-label">v${meshes.length - 1 - i}</span>

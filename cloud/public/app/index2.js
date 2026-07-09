@@ -7667,6 +7667,27 @@ function fitWsCamera(obj) {
   wsControls.update();
 }
 
+// Libellés FR des opérations mesh (suffixe de fichier → modif lisible). Aligné
+// sur OP_SUFFIX du worker (nom du dernier suffixe = la modif qui a produit
+// CETTE version). Cf. desktop index2.js.
+const _OP_FR = {
+  cntile: 'ControlNet Tile', retexture: 're-texture', trellis2_retex: 're-texture (TRELLIS-2)',
+  retex: 're-texture', decimate: 'décimation', subdivide: 'subdivision', smooth: 'lissage',
+  fill_holes: 'bouchage des trous', fix_normals: 'correction des normales', center: 'recentrage',
+  set_pivot: 'réglage du pivot', watertight: 'étanchéification', texture_var: 'variation de texture',
+  edited: 'édition', upscale: 'upscale', refine: 'affinage', augment: 'augmentation',
+  vc: 'couleurs de sommets', segment: 'segmentation en parties',
+};
+// Mesh dérivé `${base}_${op}_${ts}.glb` → op du DERNIER suffixe, ou
+// isVersion=false pour un ORIGINAL (généré direct depuis une image).
+function _meshVersionInfo(filename) {
+  const stem = String(filename || '').replace(/\.[^.]+$/, '');
+  const m = stem.match(/_(cntile|retexture|trellis2_retex|retex|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i);
+  if (!m) return { isVersion: false, opKey: null, opLabel: null };
+  const key = m[1].toLowerCase();
+  return { isVersion: true, opKey: key, opLabel: _OP_FR[key] || key };
+}
+
 async function renderMeshVersions(p) {
   const strip = document.getElementById('ws-mesh-versions');
   strip.innerHTML = '';
@@ -7737,11 +7758,21 @@ async function renderMeshVersions(p) {
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
-    // Lineage: 📷 jump to the source image that generated this mesh. Guarded —
-    // no button when the mesh carries no sourceImage (signed URL on cloud).
-    const meshSourceBtn = m.sourceImage
-      ? '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh">&#128247;</button>'
-      : '';
+    // Coin haut-gauche : JUMP 📷 vers l'image source (mesh ORIGINAL) OU
+    // indicateur « V » de lignée (mesh DÉRIVÉ par une op). Sur un dérivé, pas de
+    // saut vers l'image (ce n'est qu'une version) — le « V » survolé décrit d'où
+    // vient la version et quelle modif l'a produite. Cf. desktop index2.js.
+    const _vinfo = _meshVersionInfo(m.filename);
+    let meshSourceBtn = '';
+    if (_vinfo.isVersion) {
+      const _imgName = m.sourceImage ? String(m.sourceImage).split(/[\\/]/).pop() : '';
+      const _tip = _imgName
+        ? `Version — issue de « ${_imgName} » après ${_vinfo.opLabel}`
+        : `Version — après ${_vinfo.opLabel}`;
+      meshSourceBtn = `<span class="version-verbadge" title="${escapeHtml(_tip)}">V</span>`;
+    } else if (m.sourceImage) {
+      meshSourceBtn = '<button class="version-source-btn" title="Voir l\'image source qui a généré ce mesh">&#128247;</button>';
+    }
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-used-badge" title="Used for next step">&#10003;</span>

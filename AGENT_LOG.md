@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (versions mesh : badge « V » de lignée au lieu du jump 📷 sur les dérivés)
+
+Sur un mesh DÉRIVÉ (segment / smooth / watertight / decimate / …), le bouton 📷
+« image source » n'a plus de sens (c'est une version, pas un original) et
+n'apparaissait de toute façon pas tant que le `.source` n'était pas hérité.
+Remplacé par un indicateur **« V »** (coin haut-gauche, hover-only, curseur help,
+pas de jump) dont le title décrit la lignée : « Version — issue de « img » après
+<modif> ». Détection = suffixe d'op en fin de nom (`_meshVersionInfo`, aligné sur
+OP_SUFFIX de main.js) ; libellés FR via `_OP_FR`. Le 📷 reste sur les ORIGINAUX
+(nom sans suffixe d'op). Porté desktop (src/renderer index2.js + css) ET cloud
+(cloud/public/app index2.js + styles). Renderer-only : Ctrl+R desktop, rebuild
++ wrangler deploy pour le cloud.
+
 ## 2026-07-09 (segment : denoise « trop de petits morceaux » + watertight seal opaque)
 
 - **Denoise** (`_clean_labels`, partsam_bridge + _partsam) : filtre majoritaire
