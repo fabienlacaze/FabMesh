@@ -1,5 +1,13 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (fix : vignette cassée dans la popup de job des ops mesh)
+
+La popup « Running task » passait le chemin du .GLB comme `sourceImageUrl`
+(→ <img> cassée) pour 7 jobs : segment, runMeshTool, Enhance texture,
+Détail++, Refine mesh, et les 2 auto-rig. Nouveau helper `_meshJobThumb(path)`
+(renderer) : thumb PNG du mesh → image source → vignette projet → null.
+Cloud déjà correct (meshSourceImage). Renderer-only : Ctrl+R.
+
 ## 2026-07-09 (segment : denoise v4_combo — island absorption + mode kNN cutoff)
 
 Constat user : trop d'îlots parasites dans la segmentation PartSAM du tank

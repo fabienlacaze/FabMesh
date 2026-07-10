@@ -8863,7 +8863,7 @@ document.getElementById('ws-mesh-enhance-tex-btn')?.addEventListener('click', ()
     const job = pushJob(`Enhance texture: ${p.name}`, null, {
       Method: 'Real-ESRGAN x2',
       'Source mesh': m.filename,
-    }, 240000, { sourceImageUrl: m.path, projectName: p.name });
+    }, 240000, { sourceImageUrl: _meshJobThumb(m.path), projectName: p.name });
     try {
       const r = await API.enhanceMeshTexture({ meshPath: m.path, jobId: job.id });
       if (r?.success || r?.newPath) {
@@ -8893,7 +8893,7 @@ document.getElementById('ws-mesh-detail-synth-btn')?.addEventListener('click', (
       Method: 'render → SDXL tile → re-bake',
       'Asset type': assetType,
       'Source mesh': m.filename,
-    }, 240000, { sourceImageUrl: m.path, projectName: p.name });
+    }, 240000, { sourceImageUrl: _meshJobThumb(m.path), projectName: p.name });
     try {
       const r = await API.detailSynth({ meshPath: m.path, jobId: job.id, strength: 0.35, assetType, textureSize: 4096 });
       if (r?.success || r?.newPath) {
@@ -8938,7 +8938,7 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
       Format: format,
       'AI model': model,
       'Source mesh': m.filename,
-    }, undefined, { sourceImageUrl: m.path, projectName: p.name });
+    }, undefined, { sourceImageUrl: _meshJobThumb(m.path), projectName: p.name });
     try {
       const r = await API.refineMesh({ projectName: p.name, modification, format, model, jobId: job.id });
       if (r?.success || r?.meshPath) {
@@ -8973,6 +8973,18 @@ const MESH_TOOL_EXPECTED_MS = {
   trellis2_retex: 110000,
 };
 
+// Vignette AFFICHABLE pour la popup de job d'une op mesh : le chemin du .glb
+// n'est PAS une image (l'<img> de la popup restait cassée). Ordre de
+// résolution : thumb PNG du mesh → image source → vignette projet → null
+// (la popup gère null en masquant l'image).
+function _meshJobThumb(meshPath) {
+  const p = state.currentProject;
+  const m = ((p && p.meshes) || []).find((x) => x && x.path === meshPath);
+  const t = (m && (m.thumb || m.sourceImage)) || (p && p.thumb) || null;
+  if (!t) return null;
+  return String(t).startsWith('file:') ? t : 'file:///' + String(t).replace(/\\/g, '/');
+}
+
 async function runMeshTool(operation, params = [], namedParams = null) {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
@@ -8987,7 +8999,7 @@ async function runMeshTool(operation, params = [], namedParams = null) {
         Tool: operation,
         Mesh: meshName,
         Params: params.length ? params.join(', ') : '(none)',
-      }, expectedMs, { sourceImageUrl: meshPath, projectName: p.name })
+      }, expectedMs, { sourceImageUrl: _meshJobThumb(meshPath), projectName: p.name })
     : null;
   try {
     // namedParams (id→valeur du modal) part dans le sidecar .meta.json de
@@ -9127,7 +9139,7 @@ async function _runSegmentJob(granularity, allowInstall) {
   const job = (typeof pushJob === 'function')
     ? pushJob(`segment: ${p.name}`, null, {
         Tool: 'Segment parts (AI)', Mesh: meshName, Granularity: granularity.toFixed(1),
-      }, expectedMs, { sourceImageUrl: meshPath, projectName: p.name })
+      }, expectedMs, { sourceImageUrl: _meshJobThumb(meshPath), projectName: p.name })
     : null;
   try {
     const result = await API.meshSegment({ meshPath, granularity });
@@ -14076,7 +14088,7 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
       'Mirror X': mirrorX ? 'yes' : 'no',
       Landmarks: Object.keys(lmData).length > 0 ? `${Object.keys(lmData).length} placed` : 'auto',
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
-    }, rigExpected, { sourceImageUrl: meshPathToUse, projectName: p.name });
+    }, rigExpected, { sourceImageUrl: _meshJobThumb(meshPathToUse), projectName: p.name });
     try {
       const r = await API.autoRig({
         meshPath: meshPathToUse,
@@ -14133,7 +14145,7 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
     const job = pushJob(`Auto-rig AI (local): ${p.name}`, null, {
       Engine: engineLabel,
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
-    }, expectedMs, { sourceImageUrl: meshPathToUse, projectName: p.name });
+    }, expectedMs, { sourceImageUrl: _meshJobThumb(meshPathToUse), projectName: p.name });
     try {
       const skeleton = state.currentProject?.rigTarget
         || document.getElementById('ws-rig-skeleton')?.value
