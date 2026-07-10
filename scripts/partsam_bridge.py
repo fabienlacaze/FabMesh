@@ -71,11 +71,14 @@ def _repo():
 
 
 def _granularity_to_thresholds(g):
-    """g 0.0 (grossier) → 1.0 (fin). Interpole iou (0.65→0.5, plus bas = plus
-    de masques) et nms (0.3→0.65, plus haut = moins de suppression)."""
+    """g 0.0 (grossier) → 1.0 (fin). Interpole iou (0.65→0.55, plus bas = plus
+    de masques) et nms (0.3→0.55, plus haut = moins de suppression).
+    Mapping TEMPÉRÉ (mesuré, tank g=1.0) : l'ancien plafond (iou 0.5/nms 0.65)
+    acceptait 51 labels dont 21 minuscules → mosaïque ; 0.55/0.55 donne
+    ~27-29 parties fines mais propres."""
     g = max(0.0, min(1.0, g))
-    iou = 0.65 - 0.15 * g
-    nms = 0.30 + 0.35 * g
+    iou = 0.65 - 0.10 * g
+    nms = 0.30 + 0.25 * g
     return round(iou, 3), round(nms, 3)
 
 
@@ -258,6 +261,63 @@ def _absorb_islands(mesh, labels, k=12, r_mult=3.0,
         return labels
 
 
+def _absorb_scattered(labels, cent, dist, idx, r_max,
+                      dom_thr=0.45, dust=120):
+    """Absorbe les LABELS ÉPARPILLÉS entiers : un label dont la composante
+    connexe dominante représente < dom_thr de ses faces est du mouchetis
+    multi-fragments, pas une pièce (une vraie pièce est compacte ; les pièces
+    miroir ~2 composantes égales ont une dominance ~0.5 ≥ dom_thr). Idem les
+    labels-poussière < dust faces. Faces réassignées au plus proche label
+    conservé. No-op si scipy absent, en cas d'erreur, ou si tout est éparpillé."""
+    try:
+        import numpy as np
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import connected_components
+        from scipy.spatial import cKDTree
+    except Exception:
+        return labels
+    try:
+        labels = np.asarray(labels).reshape(-1).astype(np.int64)
+        uniq, lab = np.unique(labels, return_inverse=True)
+        lab = lab.astype(np.int64)
+        n_lab = len(uniq)
+        N = len(lab)
+        if n_lab < 2 or N < 100:
+            return labels
+        kq = idx.shape[1]
+        src = np.repeat(np.arange(N), kq - 1)
+        dst = idx[:, 1:].ravel()
+        near = dist[:, 1:].ravel() <= r_max
+        ok = near & (lab[src] == lab[dst])
+        adj = coo_matrix(
+            (np.ones(int(ok.sum()), np.int8), (src[ok], dst[ok])),
+            shape=(N, N))
+        n_comp, comp = connected_components(adj, directed=False)
+        comp_size = np.bincount(comp, minlength=n_comp)
+        comp_label = np.zeros(n_comp, np.int64)
+        comp_label[comp] = lab
+        label_total = np.bincount(lab, minlength=n_lab)
+        dom = np.zeros(n_lab)
+        np.maximum.at(dom, comp_label, comp_size.astype(np.float64))
+        dominance = dom / np.maximum(label_total, 1)
+        scattered = (dominance < dom_thr) | (label_total < dust)
+        if not scattered.any() or scattered.all():
+            return labels
+        kill = scattered[lab]
+        keep_idx = np.where(~kill)[0]
+        kf = np.where(kill)[0]
+        _, nn = cKDTree(cent[keep_idx]).query(cent[kf], k=1, workers=-1)
+        lab[kf] = lab[keep_idx[nn]]
+        out = uniq[lab]
+        log(f"scatter: {int(scattered.sum())} labels éparpillés/poussière "
+            f"absorbés (dominance<{dom_thr} ou <{dust} faces) "
+            f"{n_lab}->{len(np.unique(out))}")
+        return out
+    except Exception as e:
+        log(f"scatter indispo ({e}) — labels gardés")
+        return labels
+
+
 def _clean_labels(mesh, labels, gran=0.0):
     """Débruite les labels par-face — pipeline « v4_combo » complet, un seul
     query cKDTree k=12 partagé par les trois étapes :
@@ -300,6 +360,13 @@ def _clean_labels(mesh, labels, gran=0.0):
         labels2 = _absorb_islands(
             mesh, labels1, keep_frac=(0.001 if gran >= 0.7 else 0.002),
             _pre=(cent, area, h, dist, idx))
+        # --- 2bis) absorption des LABELS ÉPARPILLÉS : un label dont la
+        # composante dominante < 45 % de ses faces n'est pas une vraie pièce
+        # (une pièce est spatialement compacte ; les pièces MIROIR type
+        # chenilles ~50 % restent au-dessus du seuil), idem poussière
+        # < 120 faces. L'anti-antenne de l'étape 2 protège leur composante
+        # dominante — cette étape retire le label ENTIER. ---
+        labels2 = _absorb_scattered(labels2, cent, dist, idx, r_max)
         # --- 3) lissage frontière : mode k=8 sur faces à voisinage mixte ---
         uniq2, lab2 = np.unique(
             np.asarray(labels2).reshape(-1).astype(np.int64),
@@ -424,6 +491,11 @@ def main():
             "eval_params.batch_size=4",           # 16 Go: cdist OOM au-delà
             f"eval_params.iou_threshold={iou}",
             f"eval_params.nms_threshold={nms}",
+            # 2x le nuage de points (100k -> 200k) : les labels par-face sont
+            # peints par plus-proche-point → un nuage plus dense = frontières
+            # de coupe 2x plus fines (mesuré : parasites 1.73->1.34 %,
+            # fragments 6->4, +45 s de runtime, pas d'OOM à batch=4/16 Go).
+            "num_points=200000",
         ]
         rc = _run(cmd, cwd=repo, env=env)
         if rc != 0 or not os.path.isfile(labels_npy):

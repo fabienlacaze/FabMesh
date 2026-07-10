@@ -1,5 +1,25 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (segment v5 : mode fin utilisable + frontières 2x plus fines)
+
+User : « slider à fond = plein de segments » (51 labels mosaïque) + « le
+découpage est mal réalisé » (frontières crénelées). 4 expériences GPU
+mesurées (tank 488k tris, seg_metrics) :
+- **Mapping tempéré** : iou 0.65−0.10g / nms 0.30+0.25g (avant −0.15g/+0.35g).
+  À g=1.0 : 51→29 labels, minuscules 21→8.
+- **num_points=200000** (override hydra, avant 100k) : les labels par-face
+  sont peints par plus-proche-point → nuage 2x plus dense = frontières 2x
+  plus fines. À g=0.2 : parasites 1.73→1.34 %, fragments 6→4, +45 s runtime,
+  pas d'OOM (batch=4, 16 Go).
+- **_absorb_scattered** (nouvelle étape 2bis) : un label dont la composante
+  dominante < 45 % des faces = mouchetis multi-fragments (pas une pièce ;
+  les pièces miroir ~50 % passent le seuil), idem poussière < 120 faces →
+  label ENTIER réassigné au plus proche label conservé.
+Vérif finale bridge réel g=1.0 : 27 parties propres (vs 51), minuscules 6
+(vs 21), fragments 20 (vs 45), 78 s. Miroir exact dans modal_app/_partsam.py.
+Reste connu : les coupes suivent le Voronoï du nuage (200k) — pour du
+« snap aux plis » géométrique il faudrait une passe crease-aware (non fait).
+
 ## 2026-07-09 (fix : segment respecte les limites hardware + vignette job)
 
 User : « rien n'empêche de lancer des segmentations alors que la RAM est

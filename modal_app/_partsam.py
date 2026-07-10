@@ -300,16 +300,17 @@ def _run(cmd, cwd, env=None, label=""):
 
 
 def _granularity_to_thresholds(g):
-    """g 0.0 (grossier) → 1.0 (fin). Interpole iou (0.65→0.5, plus bas = plus
-    de masques) et nms (0.3→0.65, plus haut = moins de suppression). Mirroir
-    EXACT de scripts/partsam_bridge.py._granularity_to_thresholds."""
+    """g 0.0 (grossier) → 1.0 (fin). Interpole iou (0.65→0.55) et nms
+    (0.3→0.55) — mapping TEMPÉRÉ (l'ancien plafond 0.5/0.65 donnait 51 labels
+    mosaïque à g=1.0). Mirroir EXACT de
+    scripts/partsam_bridge.py._granularity_to_thresholds."""
     try:
         g = float(g)
     except (TypeError, ValueError):
         g = 0.0
     g = max(0.0, min(1.0, g))
-    iou = 0.65 - 0.15 * g
-    nms = 0.30 + 0.35 * g
+    iou = 0.65 - 0.10 * g
+    nms = 0.30 + 0.25 * g
     return round(iou, 3), round(nms, 3)
 
 
@@ -489,6 +490,60 @@ def _absorb_islands(mesh, labels, k=12, r_mult=3.0,
         return labels
 
 
+def _absorb_scattered(labels, cent, dist, idx, r_max,
+                      dom_thr=0.45, dust=120):
+    """Absorbe les LABELS ÉPARPILLÉS entiers (mouchetis multi-fragments dont
+    la composante dominante < dom_thr des faces, ou poussière < dust faces).
+    Mirroir EXACT de scripts/partsam_bridge.py._absorb_scattered."""
+    try:
+        import numpy as np
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import connected_components
+        from scipy.spatial import cKDTree
+    except Exception:
+        return labels
+    try:
+        labels = np.asarray(labels).reshape(-1).astype(np.int64)
+        uniq, lab = np.unique(labels, return_inverse=True)
+        lab = lab.astype(np.int64)
+        n_lab = len(uniq)
+        N = len(lab)
+        if n_lab < 2 or N < 100:
+            return labels
+        kq = idx.shape[1]
+        src = np.repeat(np.arange(N), kq - 1)
+        dst = idx[:, 1:].ravel()
+        near = dist[:, 1:].ravel() <= r_max
+        ok = near & (lab[src] == lab[dst])
+        adj = coo_matrix(
+            (np.ones(int(ok.sum()), np.int8), (src[ok], dst[ok])),
+            shape=(N, N))
+        n_comp, comp = connected_components(adj, directed=False)
+        comp_size = np.bincount(comp, minlength=n_comp)
+        comp_label = np.zeros(n_comp, np.int64)
+        comp_label[comp] = lab
+        label_total = np.bincount(lab, minlength=n_lab)
+        dom = np.zeros(n_lab)
+        np.maximum.at(dom, comp_label, comp_size.astype(np.float64))
+        dominance = dom / np.maximum(label_total, 1)
+        scattered = (dominance < dom_thr) | (label_total < dust)
+        if not scattered.any() or scattered.all():
+            return labels
+        kill = scattered[lab]
+        keep_idx = np.where(~kill)[0]
+        kf = np.where(kill)[0]
+        _, nn = cKDTree(cent[keep_idx]).query(cent[kf], k=1, workers=-1)
+        lab[kf] = lab[keep_idx[nn]]
+        out = uniq[lab]
+        _log(f"scatter: {int(scattered.sum())} labels éparpillés/poussière "
+             f"absorbés (dominance<{dom_thr} ou <{dust} faces) "
+             f"{n_lab}->{len(np.unique(out))}")
+        return out
+    except Exception as e:
+        _log(f"scatter indispo ({e}) — labels gardés")
+        return labels
+
+
 def _clean_labels(mesh, labels, gran=0.0):
     """Débruite les labels par-face — pipeline « v4_combo » complet, un seul
     query cKDTree k=12 partagé par les trois étapes :
@@ -532,6 +587,8 @@ def _clean_labels(mesh, labels, gran=0.0):
         labels2 = _absorb_islands(
             mesh, labels1, keep_frac=(0.001 if gran >= 0.7 else 0.002),
             _pre=(cent, area, h, dist, idx))
+        # --- 2bis) absorption des LABELS ÉPARPILLÉS (mirroir bridge) ---
+        labels2 = _absorb_scattered(labels2, cent, dist, idx, r_max)
         # --- 3) lissage frontière : mode k=8 sur faces à voisinage mixte ---
         uniq2, lab2 = np.unique(
             np.asarray(labels2).reshape(-1).astype(np.int64),
@@ -730,6 +787,10 @@ def _run_segment_pipeline(glb_bytes: bytes, tmp_dir: str, granularity: float,
             "eval_params.batch_size=4",           # borne OOM cdist mask_decoder
             f"eval_params.iou_threshold={iou}",
             f"eval_params.nms_threshold={nms}",
+            # Nuage 2x plus dense (100k -> 200k) : frontières de coupe 2x plus
+            # fines (labels par-face peints par plus-proche-point). Mirroir du
+            # bridge desktop ; l'A10G/A100 Modal a la marge VRAM à batch=4.
+            "num_points=200000",
         ]
         rc = _run(cmd, cwd=PARTSAM_DIR, env=env, label="eval")
         if rc != 0 or not os.path.isfile(labels_npy):
