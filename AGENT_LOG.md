@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-07-09 (fix : segment respecte les limites hardware + vignette job)
+
+User : « rien n'empêche de lancer des segmentations alors que la RAM est
+très/trop occupée ». Le job segment appelait API.meshSegment directement,
+sans passer par gatedRun/enqueueJob → il partait même RAM/VRAM dans le rouge.
+Fix : runMeshSegment enveloppe _runSegmentJob dans gatedRun('mesh', …) → mise
+en file tant que les curseurs Hardware ne sont pas respectés, auto-kill SDXL,
+reprise auto. Renderer-only (Ctrl+R).
+
 ## 2026-07-09 (fix : vignette cassée dans la popup de job des ops mesh)
 
 La popup « Running task » passait le chemin du .GLB comme `sourceImageUrl`

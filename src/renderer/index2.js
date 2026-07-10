@@ -9183,7 +9183,11 @@ async function runMeshSegment() {
   if (!API.meshSegment) { showToast('Segmentation engine not available.', 'error'); return; }
   const granularity = await _openSegmentGranularityModal();
   if (granularity == null) return;  // cancelled
-  return _runSegmentJob(granularity, true);
+  // Portail de limites hardware (comme la génération 3D) : PartSAM prend
+  // ~15 Go de VRAM + plusieurs Go de RAM — sans gate, un job partait même
+  // avec la RAM/VRAM dans le rouge et faisait tout ramer/OOM. Le job est mis
+  // en file tant que les limites (curseurs du panneau Hardware) sont dépassées.
+  gatedRun('mesh', `segment: ${p.name}`, () => _runSegmentJob(granularity, true));
 }
 document.getElementById('ws-mesh-segment-btn')?.addEventListener('click', runMeshSegment);
 
