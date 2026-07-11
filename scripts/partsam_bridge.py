@@ -25,20 +25,25 @@ graph_cut=False pour les gros meshes), puis on relit results/{id}_labels.npy et
 on reconstruit le GLB en sous-meshes.
 
 DÉBRUITAGE (validé sur le tank 488k tris, g=0.2 ET g=1.0 — voir AGENT_LOG) :
-pipeline « v6_snap » en 3 étapes, UN SEUL query cKDTree k=12 partagé :
+pipeline « v7_watershed » en 3 étapes, UN SEUL query cKDTree k=12 partagé :
   1) mode kNN 1 passe (k=12, cutoff distance 3·h, vote bincount vectorisé) —
      tue le speckle 1-10 faces sans bleeding à travers les gaps d'air ;
   2) ISLAND ABSORPTION — réassigne les composantes connexes spatiales
      parasites (îlots 50-1500 faces, point fixe du filtre majoritaire) au
      label majoritaire de leurs voisins externes, composante ENTIÈRE ;
      + 2bis) absorption des LABELS ÉPARPILLÉS entiers (dominance < 45 %) ;
-  3) SNAP CREASE-AWARE des frontières — relaxation itérée pondérée
-     exp(-(θ/σ)²)·aire restreinte à une bande autour des frontières : la
-     coupe MIGRE vers les plis géométriques (bord de tourelle, jupe de
-     caisse) au lieu de serpenter en Voronoï du nuage de points PartSAM.
-Résultat mesuré (g=0.2, 200k pts) : faces parasites 12.83 % → 1.31 %,
-fragments excédentaires 459 → 4, frontière-sur-pli (normales brutes)
-0.51 → 0.67 (angle frontière moyen 33.8° → 43.5°), ~1.6 s CPU total.
+  3) WATERSHED CREASE-AWARE — érosion d'une bande (3 anneaux kNN) autour des
+     frontières puis RE-CROISSANCE par immersion par niveaux d'angle sur des
+     normales ROBUSTES (plan PCA k=32 pondéré aire + lissage signe-aligné —
+     les normales brutes du mesh TRELLIS2 sont du bruit de marches voxel) :
+     les fronts se rencontrent sur les CRÊTES du champ de plis (bord de
+     tourelle, jupe de caisse) au lieu du minimum local du snap v6 ;
+     + 3bis) absorption anti-pincement des fragments créés par les fronts.
+     Repli automatique sur le snap v6 (_crease_snap) en cas d'exception.
+Résultat mesuré (g=0.2, 200k pts) : faces parasites 12.83 % → 1.23 %,
+fragments excédentaires 459 → 4, frontière-sur-pli ROBUSTE 0.327 → 0.458
+(g=1.0 : 0.357 → 0.518, parasites 3.52 → 2.46 %, fragments 19 → 15),
+étape 3 ~6-9 s CPU, débruitage total < 15 s.
 """
 import os
 import shutil
@@ -341,7 +346,7 @@ def _crease_snap(lab, n_lab, fn, cent, area, dist, idx, r_max,
     brutes) 0.51→0.67, angle frontière moyen 33.8°→43.5°, parasites
     1.34→1.31 %, fragments et n_parts strictement stables. Le cap `iters`
     borne un cycle limite 2-périodique résiduel (~0.5 % de la bande) —
-    le garder PAIR."""
+    le garder PAIR. Depuis v7 : REPLI de _crease_watershed (exception)."""
     import numpy as np
     t0 = time.time()
     validk = dist <= r_max
@@ -384,18 +389,162 @@ def _crease_snap(lab, n_lab, fn, cent, area, dist, idx, r_max,
     return lab, True
 
 
+def _robust_normals(cent, area, fn_raw, dist, idx, r_max, tree,
+                    pca_k=32, smooth_iters=2):
+    """Normales ROBUSTES par face — indispensables sur la soupe TRELLIS2
+    (les normales brutes sont du BRUIT : ~40k patchs non soudés, coques
+    doublées, marches de voxel — 76 % des paires voisines > 25° sur le tank,
+    aucun signal de pli exploitable). (1) plan PCA pondéré aire ajusté sur
+    les `pca_k` voisins spatiaux de chaque face ; (2) `smooth_iters`
+    itérations de lissage à signe aligné (le signe du vecteur propre PCA est
+    arbitraire → alignement local par sign(n_i·n_j) avant moyenne) ;
+    (3) RÉ-ORIENTATION en signe sur les normales brutes du mesh — permet un
+    dot ORIENTÉ en aval (les paires de coques doublées lisent ~180°, pas 0°).
+    ~2 s sur 488k faces (dominé par eigh batch). `tree` = cKDTree(cent)
+    partagé du pipeline (le query k=pca_k est refait ici)."""
+    import numpy as np
+    N = len(cent)
+    kp = min(pca_k, N)
+    dP, iP = tree.query(cent, k=kp, workers=-1)
+    w = area[iP]                                   # (N, kp) poids aire
+    P = cent[iP]                                   # (N, kp, 3)
+    mu = (w[..., None] * P).sum(1) / w.sum(1, keepdims=True)
+    D = P - mu[:, None, :]
+    C = np.einsum("nk,nki,nkj->nij", w, D, D)
+    nf = np.linalg.eigh(C)[1][:, :, 0]             # plus petit vecteur propre
+    for _ in range(smooth_iters):
+        nb = nf[idx]                               # (N, k, 3)
+        sgn = np.sign(np.einsum("ni,nki->nk", nf, nb))
+        sgn[sgn == 0] = 1.0
+        wk = (dist <= r_max) * area[idx] * sgn
+        m = np.einsum("nk,nki->ni", wk, nb)
+        nn = np.linalg.norm(m, axis=1, keepdims=True)
+        nn[nn < 1e-20] = 1.0
+        nf = m / nn
+    s = np.sign(np.einsum("ij,ij->i", nf, fn_raw))
+    s[s == 0] = 1.0
+    return nf * s[:, None]
+
+
+def _crease_watershed(lab, n_lab, fn_rob, cent, area, dist, idx, r_max,
+                      erosion_rings=3, n_levels=16, lo_deg=5.0, hi_deg=60.0):
+    """WATERSHED CREASE-AWARE par immersion par niveaux (100 % vectorisé,
+    déterministe) — remplace le snap v6 comme étape 3. Le snap (relaxation
+    locale) reste dans un MINIMUM LOCAL à côté du vrai pli sur les grandes
+    plaques ; ici on ÉRODE toute une bande autour des frontières (faces
+    mixtes + `erosion_rings` anneaux kNN) puis on la re-fait pousser depuis
+    les régions conservées par NIVEAUX d'angle croissants (5°→60°, `n_levels`
+    seuils sur l'angle ORIENTÉ entre normales ROBUSTES des paires voisines) :
+    les paires plates inondent d'abord, les fronts se rencontrent exactement
+    sur les CRÊTES du champ de plis. Garanties : un label entièrement dans la
+    bande est GELÉ (retiré, comme le snap v6) → 0 label perdu ; vote pondéré
+    aire, argmax numpy (tie-break plus petit index, stable) ; reliquat non
+    atteint → plus proche face étiquetée. `lab` = labels compacts int64
+    0..n_lab-1 (copié, PAS modifié en place). Retourne (lab_out, ok).
+    Mesuré (tank 488k faces) : frontière-sur-pli robuste 0.327→0.458 (g=0.2),
+    0.357→0.518 (g=1.0), ~3-6 s (~320-360 itérations internes vectorisées)."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+    t0 = time.time()
+    lab = lab.copy()
+    N = lab.shape[0]
+    validk = dist <= r_max
+    validk[:, 0] = True
+    # --- érosion : bande = faces mixtes + rings de dilatation kNN ---
+    mixed = ((lab[idx] != lab[:, None]) & validk).any(axis=1)
+    band = mixed.copy()
+    for _ in range(erosion_rings):
+        band |= (band[idx] & validk).any(axis=1)
+    # --- gel : un label entièrement dans la bande serait perdu par
+    #     l'érosion -> retiré de la bande (0 label perdu garanti) ---
+    anch = np.bincount(lab[~band], minlength=n_lab)
+    if (anch == 0).any():
+        band[np.isin(lab, np.where(anch == 0)[0])] = False
+    Bfaces = np.where(band)[0]
+    B = Bfaces.size
+    if B == 0 or B * n_lab > 400_000_000:            # garde-fou mémoire
+        return lab, False
+    bandpos = np.full(N, -1, dtype=np.int64)
+    bandpos[Bfaces] = np.arange(B)
+    seed = lab.copy()
+    seed[Bfaces] = -1                                # bande érodée = non étiquetée
+    # --- paires voisines uniques i<j (kNN cutoff), touchant la bande ---
+    kq = idx.shape[1]
+    srcf = np.repeat(np.arange(N, dtype=np.int64), kq - 1)
+    dstf = idx[:, 1:].ravel().astype(np.int64)
+    near = dist[:, 1:].ravel() <= r_max
+    srcf, dstf = srcf[near], dstf[near]
+    a = np.minimum(srcf, dstf)
+    b = np.maximum(srcf, dstf)
+    keys = np.unique(a * np.int64(N) + b)
+    pa = (keys // N).astype(np.int64)
+    pb = (keys % N).astype(np.int64)
+    touch = band[pa] | band[pb]
+    pa, pb = pa[touch], pb[touch]
+    # --- niveaux : angle ORIENTÉ entre normales robustes ré-orientées ---
+    cosr = np.einsum("ij,ij->i", fn_rob[pa], fn_rob[pb])
+    theta = np.arccos(np.clip(cosr, -1.0, 1.0))
+    edges = np.linspace(np.radians(lo_deg), np.radians(hi_deg), n_levels)
+    lvl = np.digitize(theta, edges)                  # 0..n_levels
+    wa = area[pa]
+    wb = area[pb]
+    # --- immersion par niveaux croissants ---
+    n_assigned = 0
+    act = np.arange(pa.size)                         # paires encore utiles
+    for L in range(n_levels + 1):
+        la = seed[pa[act]]
+        lb = seed[pb[act]]
+        act = act[(la == -1) | (lb == -1)]           # prune : tout étiqueté
+        sub = act[lvl[act] <= L]
+        while sub.size:
+            spa = pa[sub]
+            spb = pb[sub]
+            la = seed[spa]
+            lb = seed[spb]
+            m1 = (la == -1) & (lb != -1)             # vote b -> a
+            m2 = (lb == -1) & (la != -1)             # vote a -> b
+            if not (m1.any() or m2.any()):
+                break
+            votes = np.zeros((B, n_lab))
+            np.add.at(votes, (bandpos[spa[m1]], lb[m1]), wb[sub][m1])
+            np.add.at(votes, (bandpos[spb[m2]], la[m2]), wa[sub][m2])
+            gain = votes.sum(axis=1) > 0
+            if not gain.any():
+                break
+            seed[Bfaces[gain]] = votes[gain].argmax(axis=1)
+            n_assigned += int(gain.sum())
+            la = seed[spa]                           # prune du niveau
+            lb = seed[spb]
+            sub = sub[(la == -1) | (lb == -1)]
+    # --- reliquat non atteint -> plus proche face étiquetée ---
+    unl = seed == -1
+    n_fallback = int(unl.sum())
+    if n_fallback:
+        keep = np.where(~unl)[0]
+        uf = np.where(unl)[0]
+        _, nn = cKDTree(cent[keep]).query(cent[uf], k=1, workers=-1)
+        seed[uf] = seed[keep[nn]]
+    log(f"watershed: bande {B} faces ré-inondée "
+        f"({int((seed != lab).sum())} faces changées, {n_fallback} fallback) "
+        f"en {time.time() - t0:.2f}s")
+    return seed, True
+
+
 def _clean_labels(mesh, labels, gran=0.0):
-    """Débruite les labels par-face — pipeline « v6_snap » complet, un seul
-    query cKDTree k=12 partagé par les trois étapes :
+    """Débruite les labels par-face — pipeline « v7_watershed » complet, un
+    seul query cKDTree k=12 partagé par les trois étapes :
       1) mode kNN 1 passe (k=12, cutoff 3·h, bincount) — tue le speckle 1-10
          faces et fiabilise la dominance des composantes pour l'absorption ;
       2) ISLAND ABSORPTION — résorbe les îlots moyens 50-1500 faces (point
          fixe du mode) par réassignation de composantes entières ;
          + 2bis) absorption des LABELS ÉPARPILLÉS entiers ;
-      3) SNAP CREASE-AWARE — relaxation pondérée exp(-(θ/σ)²)·aire dans une
-         bande autour des frontières : la coupe migre vers les plis
-         géométriques (remplace l'ancien lissage k=8 crease-blind, qui
-         déferait le snap). Post-condition : 0 label perdu, sinon revert.
+      3) WATERSHED CREASE-AWARE — érosion d'une bande autour des frontières
+         puis re-croissance par immersion par niveaux d'angle sur des
+         normales ROBUSTES (_robust_normals) : la coupe se pose sur les
+         crêtes du champ de plis (le snap v6 restait dans un minimum local
+         sur les grandes plaques) ; + 3bis) absorption anti-pincement.
+         Repli sur le snap v6 en cas d'exception. Post-condition à chaque
+         sous-étape : 0 label perdu, sinon revert.
     Robuste aux meshes fragmentés (kNN spatial, pas de connectivité).
     No-op si scipy absent ou en cas d'erreur."""
     try:
@@ -416,7 +565,8 @@ def _clean_labels(mesh, labels, gran=0.0):
         h = float(np.median(np.sqrt(np.maximum(area, 1e-30))))
         r_max = 3.0 * h
         kq = min(12, N)
-        dist, idx = cKDTree(cent).query(cent, k=kq, workers=-1)
+        tree = cKDTree(cent)
+        dist, idx = tree.query(cent, k=kq, workers=-1)
         # --- 1) mode kNN 1 passe, cutoff 3·h, bincount vectorisé ---
         uniq0, lab = np.unique(labels, return_inverse=True)
         lab = lab.astype(np.int64)
@@ -436,24 +586,52 @@ def _clean_labels(mesh, labels, gran=0.0):
         # < 120 faces. L'anti-antenne de l'étape 2 protège leur composante
         # dominante — cette étape retire le label ENTIER. ---
         labels2 = _absorb_scattered(labels2, cent, dist, idx, r_max)
-        # --- 3) snap crease-aware : la frontière migre vers les plis ---
+        # --- 3) watershed crease-aware : la coupe se pose sur les crêtes
+        #        du champ de plis (normales robustes) ---
         labels2 = np.asarray(labels2).reshape(-1).astype(np.int64)
         uniq2, lab2 = np.unique(labels2, return_inverse=True)
         lab2 = lab2.astype(np.int64)
         n2 = len(uniq2)
         out = labels2
         try:
-            fn = np.asarray(mesh.face_normals, dtype=np.float64)
-            lab2, ok3 = _crease_snap(
-                lab2, n2, fn, cent, area, dist, idx, r_max)
-            if ok3:
-                out = uniq2[lab2]
-                if len(np.unique(out)) != n2:   # post-condition défensive
-                    log("snap: label perdu — revert étape 3")
-                    out = labels2
+            fn_raw = np.asarray(mesh.face_normals, dtype=np.float64)
+            fn_rob = _robust_normals(cent, area, fn_raw, dist, idx,
+                                     r_max, tree)
+            lab3, ok3 = _crease_watershed(
+                lab2, n2, fn_rob, cent, area, dist, idx, r_max)
+            if ok3 and (lab3 >= 0).all():
+                cand = uniq2[lab3]
+                if len(np.unique(cand)) != n2:  # post-condition défensive
+                    log("watershed: label perdu — revert étape 3")
+                else:
+                    out = cand
+                    # --- 3bis) anti-pincement : deux fronts qui se pincent
+                    # créent des fragments — résorbés par l'absorption de
+                    # l'étape 2 (revert si un label disparaît) ---
+                    out3b = np.asarray(_absorb_islands(
+                        mesh, out,
+                        keep_frac=(0.001 if gran >= 0.7 else 0.002),
+                        _pre=(cent, area, h, dist, idx))
+                    ).reshape(-1).astype(np.int64)
+                    if len(np.unique(out3b)) == n2:
+                        out = out3b
+                    else:
+                        log("watershed: label perdu en 3bis — absorb ignoré")
         except Exception as e:
-            log(f"snap indispo ({e}) — labels étape 2 gardés")
-            out = labels2
+            # repli v6 : snap crease-aware local sur normales brutes
+            log(f"watershed indispo ({e}) — repli snap v6")
+            try:
+                fn = np.asarray(mesh.face_normals, dtype=np.float64)
+                lab2, ok3 = _crease_snap(
+                    lab2, n2, fn, cent, area, dist, idx, r_max)
+                if ok3:
+                    cand = uniq2[lab2]
+                    if len(np.unique(cand)) == n2:
+                        out = cand
+                    else:
+                        log("snap: label perdu — revert étape 3")
+            except Exception as e2:
+                log(f"snap indispo ({e2}) — labels étape 2 gardés")
         log(f"denoise total {time.time()-t0:.1f}s "
             f"(labels {n0}->{len(np.unique(out))})")
         return out

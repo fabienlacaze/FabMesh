@@ -1,5 +1,47 @@
 # FabMesh Agent Log
 
+## 2026-07-11 (segment v7_watershed : la coupe se pose sur les crêtes du champ de plis)
+
+User : « peut-on encore améliorer la précision des zones de coupe ? »
+DIAGNOSTIC (mesuré, labels v6 régénérés) : l'hypothèse « PartSAM pose la
+frontière loin du vrai pli » est FAUSSE (95-99 % de la frontière a un pli
+à ≤ 2 anneaux ; rings 2→3 = no-op strict). Le vrai problème : (a) le champ
+de normales BRUTES du mesh TRELLIS2 est du bruit de marches voxel (une
+frontière ALÉATOIRE score déjà 0.57 sur la métrique « sur-pli brut » — le
+0.667 de v6 était flatté) ; (b) la relaxation locale du snap reste dans un
+minimum local à côté du vrai pli sur les grandes plaques. Métrique honnête
+= frontière-sur-pli ROBUSTE (normales PCA, base aléatoire 0.245).
+5 variantes offline mesurées (labels bruts sauvés, sans GPU, 2 granularités) :
+v7_rob_s20 (snap sur normales robustes) +7.4/+8.1 pts ; cascade +0.1 ;
+k16 (éco) −70 % du gain ; gate 40° quasi no-op ; **v8_watershed_rob GAGNE**.
+INTÉGRÉ (« v7_watershed », scripts/partsam_bridge.py + miroir EXACT
+modal_app/_partsam.py, diff AST = identique) — l'étape 3 devient :
+- **_robust_normals** : plan PCA k=32 pondéré aire + 2 lissages signe-aligné
+  + ré-orientation en signe sur les normales brutes (coques doublées lisent
+  ~180° au dot orienté) — ~2 s / 488k faces ;
+- **_crease_watershed** : érosion d'une bande (faces mixtes + 3 anneaux kNN,
+  labels entiers dans la bande = gelés → 0 label perdu) puis RE-CROISSANCE
+  par immersion par 16 niveaux d'angle 5°→60° (votes aire-pondérés
+  vectorisés, argmax déterministe, reliquat → plus proche face) : les fronts
+  se rencontrent sur les crêtes du champ de plis ;
+- **3bis** : _absorb_islands post-watershed (anti-pincement des fronts) ;
+- repli automatique sur _crease_snap v6 en cas d'exception ; post-check
+  0-label-perdu + revert à chaque sous-étape.
+Mesures (tank 488k tris, crease_metrics ; baseline = v6_snap) :
+- g=0.2 : sur-pli ROBUSTE 0.327→0.4581 (+13.1 pts), parasites 1.305→1.229 %,
+  fragments excédentaires 4→4, 12 parties strictes, angle frontière robuste
+  moyen 22.9°→29.3° ;
+- g=1.0 : sur-pli robuste 0.357→0.5176 (+16.1 pts), parasites 3.52→2.456 %,
+  fragments 19→15 (mieux), 27 parties strictes ;
+- coût : étape 3 ≈ 6 s (g02) / 9 s (g10), denoise total 8.0-10.8 s ≤ 15 s.
+NOTE honnête : le « sur-pli normales brutes » BAISSE (0.667→0.596) — attendu,
+on cesse d'optimiser contre le bruit (base aléatoire brute = 0.57) ; la
+frontière est par contre un peu plus LONGUE que v6 (len_ratio 0.0249 vs
+~0.0175) car elle épouse les crêtes crénelées du voxel.
+Vérif GPU réelle bridge complet g=0.2 : 12 parties, 487 956 faces, sur-pli
+robuste 0.4581, parasites 1.229 %, excess 4, denoise 8.1 s, job 140 s —
+identique à l'offline. Rien committé (demande explicite du run).
+
 ## 2026-07-10 (segment v6_snap : les frontières claquent sur les plis géométriques)
 
 User : les coupes suivent le Voronoï du nuage de points PartSAM — elles
