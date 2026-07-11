@@ -21,6 +21,7 @@
   const I18N = {
     fr: {
       // ---- Generation history popup ----
+      'AI': 'IA',
       'Generation history': 'Historique de génération',
       'View generation history': "Voir l'historique de génération",
       'Source image': 'Image source',

@@ -2804,8 +2804,9 @@ function basename(p) {
 function setViewerFilename(elId, p) {
   const el = document.getElementById(elId);
   if (!el) return;
-  el.textContent = p ? basename(p) : '';
-  el.title = p || '';
+  // Masque les noms d'IA internes (trellis2, partsam, …) — exigence produit.
+  el.textContent = p ? _maskAiNames(basename(p)) : '';
+  el.title = p ? _maskAiNames(p) : '';
 }
 
 // setViewerLoading is defined earlier (line ~681) with the
@@ -4035,7 +4036,8 @@ async function renderViewerInfo(targetEl, filePath, extras) {
         + `style="color:#8ab4ff;text-decoration:underline;cursor:pointer;pointer-events:auto;">`
         + `${_esc(_srcName)}</a></span>`;
     }
-    targetEl.innerHTML = `<span class="vi-title" title="${String(info.filename).replace(/"/g, '&quot;')}">${info.filename}</span>` + rows.join('') + sourceRow;
+    const _viName = _maskAiNames(String(info.filename));
+    targetEl.innerHTML = `<span class="vi-title" title="${String(_viName).replace(/"/g, '&quot;')}">${_viName}</span>` + rows.join('') + sourceRow;
     if (info.sourceImage) {
       const _link = targetEl.querySelector('.vi-source-link');
       if (_link) _link.addEventListener('click', (e) => {
@@ -8014,6 +8016,19 @@ const _OP_LABEL = {
   vc: 'vertex colors', segment: 'part segmentation',
 };
 const _OP_RE = /_(cntile|retexture|trellis2_retex|retex|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i;
+// MASQUAGE des noms d'IA internes (exigence produit) : les moteurs
+// (trellis2, PartSAM, Puppeteer, RealVis…) ne doivent JAMAIS apparaître dans
+// l'UI. Les fichiers sur disque GARDENT leurs noms (les renommer casserait
+// toute la lignée) — on nettoie uniquement à l'AFFICHAGE.
+const _AI_NAME_RE = /(trellis2_native|trellis2|trellis|sf3d|hunyuan|triposg|hi3dgen|sampart3d|partsam|puppeteer|unirig|rokoko|anytop|realvisxl|realvis|hidream|dreamshaper|sdxl|esrgan|meshy)/gi;
+function _maskAiNames(s) {
+  if (!s) return s;
+  return String(s)
+    .replace(_AI_NAME_RE, '')
+    .replace(/_{2,}/g, '_').replace(/-{2,}/g, '-')
+    .replace(/_(\.|$)/g, '$1').replace(/([\\/_-])\1+/g, '$1')
+    .replace(/_\./g, '.');
+}
 // Helpers i18n gardés (FabI18n chargé avant index2.js, mais on dégrade proprement).
 function _i18nT(s) { return (window.FabI18n && FabI18n.t) ? FabI18n.t(s) : s; }
 function _i18nTf(s, ...a) {
@@ -8174,12 +8189,23 @@ async function showGenerationHistory(startPath) {
     }
     return rows.join('');
   };
+  // Les dérivés répètent la racine du mesh (« tank_trellis2_native_<ts> »)
+  // dans CHAQUE nom → illisible. On remplace la racine commune par « … » sur
+  // les étapes dérivées ; le nom complet reste dans le title (tooltip).
+  const _rootStep = steps.find((s) => s.kind === 'mesh');
+  const _rootStem = _rootStep ? String(_rootStep.filename).replace(/\.[^.]+$/, '') : null;
+  const _shortName = (s) => {
+    const f = String(s.filename || '');
+    if (!_rootStem || s.kind === 'mesh' || s.kind === 'image') return _maskAiNames(f);
+    return _maskAiNames(f.includes(_rootStem) ? f.split(_rootStem).join('…') : f);
+  };
   const cards = steps.map((s) => {
     const km = KIND_META[s.kind] || KIND_META.op;
     let title = _i18nT(km.title);
     if (s.kind === 'op' && s.opLabel) title = `${_i18nT('Modification')}: ${_escapeHtml(_i18nT(s.opLabel))}`;
     if (s.kind === 'anim' && s.motionLabel) title = `${_i18nT('Animation')}: ${_escapeHtml(s.motionLabel)}`;
-    const engineTag = s.engine ? ` <span class="gh-engine">${_escapeHtml(s.engine)}</span>` : '';
+    // Badge générique « AI » — jamais le nom du moteur interne (exigence produit).
+    const engineTag = s.engine ? ` <span class="gh-engine">${_escapeHtml(_i18nT('AI'))}</span>` : '';
     const when = s.ts ? new Date(s.ts).toLocaleString() : '';
     const thumbSrc = s.thumb
       ? (String(s.thumb).startsWith('file:') ? s.thumb : 'file:///' + String(s.thumb).replace(/\\/g, '/'))
@@ -8197,7 +8223,7 @@ async function showGenerationHistory(startPath) {
         ${thumb}
         <div class="gh-info">
           <div class="gh-step-title">${title}${engineTag}</div>
-          <div class="gh-file" title="${_escapeHtml(s.filename)}">${_escapeHtml(s.filename)}</div>
+          <div class="gh-file" title="${_escapeHtml(_maskAiNames(s.filename))}">${_escapeHtml(_shortName(s))}</div>
           ${prows ? `<div class="gh-params">${prows}</div>` : legacy}
           ${when ? `<div class="gh-ts">${_escapeHtml(when)}</div>` : ''}
         </div>
@@ -8212,7 +8238,7 @@ async function showGenerationHistory(startPath) {
         <span class="gh-head-ico">⏱</span>
         <div class="gh-head-txt">
           <div class="gh-title">${_i18nT('Generation history')}</div>
-          <div class="gh-sub" title="${_escapeHtml(startPath)}">${_escapeHtml(String(startPath).split(/[\\/]/).pop())}</div>
+          <div class="gh-sub" title="${_escapeHtml(_maskAiNames(startPath))}">${_escapeHtml(_maskAiNames(String(startPath).split(/[\\/]/).pop()))}</div>
         </div>
         <button class="gh-close" title="${_escapeHtml(_i18nT('Close'))}">&#10005;</button>
       </div>
@@ -8347,7 +8373,7 @@ async function renderMeshVersions(p) {
         ${meshSegBadge}
       </div>
     `;
-    t.title = m.filename;
+    t.title = _maskAiNames(m.filename);
     t.addEventListener('click', () => {
       strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected'));
       t.classList.add('selected');
@@ -13893,7 +13919,7 @@ function renderRigVersions(p) {
         <button class="version-history-btn" title="${_escapeHtml(_i18nT('View generation history'))}">&#9201;</button>
       </div>
     `;
-    t.title = r.filename;
+    t.title = _maskAiNames(r.filename);
     t.addEventListener('click', () => {
       strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected', 'used-for-3d'));
       t.classList.add('selected', 'used-for-3d');
@@ -14264,7 +14290,7 @@ function renderAnimVersions(p) {
     const meshBtn = animMeshPath ? '<button class="version-mesh-btn anim-jump" data-jump="mesh" title="Voir le maillage source">&#129482;</button>' : '';
     const rigBtn = a.rigPath ? '<button class="version-rig-btn anim-jump" data-jump="rig" title="Voir le rig source">&#129460;</button>' : '';
     return `
-    <div class="version-thumb${i === activeIdx ? ' selected' : ''}" data-anim-idx="${i}" style="position:relative; width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === activeIdx ? 'var(--accent)' : 'transparent'};" title="${(a.motionLabel || a.filename || '').replace(/"/g, '&quot;')}">
+    <div class="version-thumb${i === activeIdx ? ' selected' : ''}" data-anim-idx="${i}" style="position:relative; width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === activeIdx ? 'var(--accent)' : 'transparent'};" title="${_maskAiNames(a.motionLabel || a.filename || '').replace(/"/g, '&quot;')}">
       <span style="font-size:18px;">${iconFor(a.type)}</span>
       <span style="font-size:11px; font-weight:600;">${a.type || 'clip'}</span>
       <span style="font-size:9px; color:var(--text-2);">v${anims.length - 1 - i}</span>

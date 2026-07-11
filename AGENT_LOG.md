@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-07-11 (UI : masquage des noms d'IA internes + noms courts dans l'history)
+
+Exigence produit (user) : « il ne faut pas que l'on ait le nom des IA que l'on
+utilise ». Masquage À L'AFFICHAGE uniquement (les fichiers disque gardent leurs
+noms — les renommer casserait la lignée) : helper _maskAiNames (regex
+trellis2/sf3d/partsam/puppeteer/unirig/rokoko/realvis/hidream/sdxl/… + nettoyage
+des séparateurs orphelins), appliqué à setViewerFilename, vi-title (overlay
+info), popup Generation History (fichiers + tooltips + sous-titre), tooltips
+des vignettes (mesh/rig/anim). Badge moteur de la popup → « AI »/« IA »
+générique. Aussi : la racine commune des dérivés est remplacée par « … » dans
+la popup (fini le « trellis partout », chaque ligne ne montre que sa modif).
+Desktop + cloud. Renderer-only : Ctrl+R.
+
 ## 2026-07-11 (segment v7_watershed : la coupe se pose sur les crêtes du champ de plis)
 
 User : « peut-on encore améliorer la précision des zones de coupe ? »
