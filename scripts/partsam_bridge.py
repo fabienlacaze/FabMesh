@@ -24,17 +24,21 @@ notre mesh, avec des overrides (granularité + batch=4 pour tenir en 16 Go +
 graph_cut=False pour les gros meshes), puis on relit results/{id}_labels.npy et
 on reconstruit le GLB en sous-meshes.
 
-DÉBRUITAGE (validé sur le tank 488k tris, g=0.2 — voir AGENT_LOG) :
-pipeline « v4_combo » en 3 étapes, UN SEUL query cKDTree k=12 partagé :
+DÉBRUITAGE (validé sur le tank 488k tris, g=0.2 ET g=1.0 — voir AGENT_LOG) :
+pipeline « v6_snap » en 3 étapes, UN SEUL query cKDTree k=12 partagé :
   1) mode kNN 1 passe (k=12, cutoff distance 3·h, vote bincount vectorisé) —
      tue le speckle 1-10 faces sans bleeding à travers les gaps d'air ;
   2) ISLAND ABSORPTION — réassigne les composantes connexes spatiales
      parasites (îlots 50-1500 faces, point fixe du filtre majoritaire) au
      label majoritaire de leurs voisins externes, composante ENTIÈRE ;
-  3) lissage frontière — 1 passe mode k=8 restreinte aux faces à voisinage
-     mixte (adoucit les bords crénelés de la réassignation).
-Résultat mesuré : faces parasites 12.83 % → 1.73 %, fragments excédentaires
-459 → 6, ~2 s CPU (vs ~9 s pour l'ancien kNN k=16 x3 scipy.stats.mode).
+     + 2bis) absorption des LABELS ÉPARPILLÉS entiers (dominance < 45 %) ;
+  3) SNAP CREASE-AWARE des frontières — relaxation itérée pondérée
+     exp(-(θ/σ)²)·aire restreinte à une bande autour des frontières : la
+     coupe MIGRE vers les plis géométriques (bord de tourelle, jupe de
+     caisse) au lieu de serpenter en Voronoï du nuage de points PartSAM.
+Résultat mesuré (g=0.2, 200k pts) : faces parasites 12.83 % → 1.31 %,
+fragments excédentaires 459 → 4, frontière-sur-pli (normales brutes)
+0.51 → 0.67 (angle frontière moyen 33.8° → 43.5°), ~1.6 s CPU total.
 """
 import os
 import shutil
@@ -318,15 +322,80 @@ def _absorb_scattered(labels, cent, dist, idx, r_max,
         return labels
 
 
+def _crease_snap(lab, n_lab, fn, cent, area, dist, idx, r_max,
+                 sigma_deg=30.0, rings=2, iters=8, self_w=0.5):
+    """SNAP CREASE-AWARE — migre les frontières de coupe vers les PLIS
+    géométriques (angle dièdre fort entre normales de faces) au lieu de les
+    laisser serpenter en Voronoï du nuage de points PartSAM sur les surfaces
+    plates. Relaxation itérée SYNCHRONE restreinte à une BANDE autour des
+    frontières : chaque face de la bande reprend le label majoritaire de ses
+    voisins spatiaux avec un poids w_ij = exp(-(θ_ij/σ)²)·aire_j (θ_ij =
+    angle entre normales BRUTES, dot orienté — fiable par-face même sur un
+    mesh non soudé) : continuité forte sur du plat, coupe quasi gratuite au
+    pli. Les faces HORS bande sont des ANCRES (votent, ne bougent jamais —
+    pas de dérive globale) ; un label entièrement contenu dans la bande est
+    GELÉ (retiré de la bande) → garantit 0 label perdu. `lab` = labels
+    compacts int64 0..n_lab-1 (modifié en place) ; dist/idx = query cKDTree
+    k=12 partagé du pipeline. Retourne (lab, ok).
+    Mesuré (tank 488k faces, g=0.2) : ~0.2 s, frontière-sur-pli (normales
+    brutes) 0.51→0.67, angle frontière moyen 33.8°→43.5°, parasites
+    1.34→1.31 %, fragments et n_parts strictement stables. Le cap `iters`
+    borne un cycle limite 2-périodique résiduel (~0.5 % de la bande) —
+    le garder PAIR."""
+    import numpy as np
+    t0 = time.time()
+    validk = dist <= r_max
+    validk[:, 0] = True                                  # self vote toujours
+    # --- 1) BANDE = faces à voisinage mixte + `rings` anneaux de dilatation
+    mixed = ((lab[idx] != lab[:, None]) & validk).any(axis=1)
+    band = mixed.copy()
+    for _ in range(rings):
+        band |= (band[idx] & validk).any(axis=1)         # dilatation kNN
+    # --- 2) ANCRAGE : un label entièrement dans la bande serait perdable →
+    #        on le GÈLE en retirant ses faces de la bande (0 label perdu)
+    anch = np.bincount(lab[~band], minlength=n_lab)
+    if (anch == 0).any():
+        band[np.isin(lab, np.where(anch == 0)[0])] = False
+    B = np.where(band)[0]
+    if B.size == 0 or B.size * n_lab > 400_000_000:      # garde-fou mémoire
+        return lab, False                                # (cf. _knn_mode_vote)
+    # --- 3) POIDS FIXES (précalculés UNE fois, la bande est figée) ---
+    nb = idx[B]                                          # (B, k)
+    cosb = np.einsum('ij,ikj->ik', fn[B], fn[nb])        # dot BRUT, PAS |dot|
+    theta = np.arccos(np.clip(cosb, -1.0, 1.0))
+    w = np.exp(-(theta / np.radians(sigma_deg)) ** 2) * area[nb]
+    w[~validk[B]] = 0.0                                  # cutoff gaps d'air
+    w[:, 0] = self_w * area[B]                           # inertie (amortit
+    rows = np.repeat(np.arange(B.size), nb.shape[1])     #  l'oscillation)
+    before = lab[B].copy()
+    # --- 4) RELAXATION ITÉRÉE synchrone — hors-bande = ancres qui votent
+    #        mais ne bougent pas ---
+    for it in range(iters):
+        votes = np.zeros((B.size, n_lab))                # B×n_lab, jamais N×n_lab
+        np.add.at(votes, (rows, lab[nb].ravel()), w.ravel())
+        new = np.where(votes.max(axis=1) > 0, votes.argmax(axis=1), lab[B])
+        ch = int((new != lab[B]).sum())
+        lab[B] = new
+        if ch == 0 or ch < max(1, B.size // 1000):       # convergence
+            break
+    log(f"snap: {int((lab[B] != before).sum())} faces migrées vers les plis "
+        f"(bande {B.size}, σ={sigma_deg:.0f}°, {it + 1} iters) "
+        f"en {time.time() - t0:.2f}s")
+    return lab, True
+
+
 def _clean_labels(mesh, labels, gran=0.0):
-    """Débruite les labels par-face — pipeline « v4_combo » complet, un seul
+    """Débruite les labels par-face — pipeline « v6_snap » complet, un seul
     query cKDTree k=12 partagé par les trois étapes :
       1) mode kNN 1 passe (k=12, cutoff 3·h, bincount) — tue le speckle 1-10
          faces et fiabilise la dominance des composantes pour l'absorption ;
       2) ISLAND ABSORPTION — résorbe les îlots moyens 50-1500 faces (point
          fixe du mode) par réassignation de composantes entières ;
-      3) lissage frontière — 1 passe mode k=8 restreinte aux faces à
-         voisinage mixte (adoucit les bords crénelés de la réassignation).
+         + 2bis) absorption des LABELS ÉPARPILLÉS entiers ;
+      3) SNAP CREASE-AWARE — relaxation pondérée exp(-(θ/σ)²)·aire dans une
+         bande autour des frontières : la coupe migre vers les plis
+         géométriques (remplace l'ancien lissage k=8 crease-blind, qui
+         déferait le snap). Post-condition : 0 label perdu, sinon revert.
     Robuste aux meshes fragmentés (kNN spatial, pas de connectivité).
     No-op si scipy absent ou en cas d'erreur."""
     try:
@@ -367,23 +436,24 @@ def _clean_labels(mesh, labels, gran=0.0):
         # < 120 faces. L'anti-antenne de l'étape 2 protège leur composante
         # dominante — cette étape retire le label ENTIER. ---
         labels2 = _absorb_scattered(labels2, cent, dist, idx, r_max)
-        # --- 3) lissage frontière : mode k=8 sur faces à voisinage mixte ---
-        uniq2, lab2 = np.unique(
-            np.asarray(labels2).reshape(-1).astype(np.int64),
-            return_inverse=True)
+        # --- 3) snap crease-aware : la frontière migre vers les plis ---
+        labels2 = np.asarray(labels2).reshape(-1).astype(np.int64)
+        uniq2, lab2 = np.unique(labels2, return_inverse=True)
         lab2 = lab2.astype(np.int64)
         n2 = len(uniq2)
-        k8 = min(8, kq)
-        valid8 = dist[:, :k8] <= r_max
-        valid8[:, 0] = True
-        mixed = ((lab2[idx[:, :k8]] != lab2[:, None]) & valid8).any(axis=1)
-        if mixed.any():
-            lab2, ok8 = _knn_mode_vote(
-                lab2, n2, dist, idx, r_max, sub_k=k8, only_faces=mixed)
-            if ok8:
-                log(f"denoise: lissage frontière k={k8} "
-                    f"({int(mixed.sum())} faces mixtes)")
-        out = uniq2[lab2]
+        out = labels2
+        try:
+            fn = np.asarray(mesh.face_normals, dtype=np.float64)
+            lab2, ok3 = _crease_snap(
+                lab2, n2, fn, cent, area, dist, idx, r_max)
+            if ok3:
+                out = uniq2[lab2]
+                if len(np.unique(out)) != n2:   # post-condition défensive
+                    log("snap: label perdu — revert étape 3")
+                    out = labels2
+        except Exception as e:
+            log(f"snap indispo ({e}) — labels étape 2 gardés")
+            out = labels2
         log(f"denoise total {time.time()-t0:.1f}s "
             f"(labels {n0}->{len(np.unique(out))})")
         return out
@@ -503,7 +573,7 @@ def main():
 
         labels = np.load(labels_npy).astype(np.int64).reshape(-1)
         src = trimesh.load(mesh_in, force="mesh")
-        # débruite : mode kNN + island absorption + lissage frontière
+        # débruite : mode kNN + island absorption + snap crease-aware
         labels = _clean_labels(src, labels, gran)
         n_parts = _build_segmented_glb(src, labels, out_glb)
         if not os.path.isfile(out_glb) or os.path.getsize(out_glb) == 0:

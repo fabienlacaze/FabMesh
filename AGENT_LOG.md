@@ -1,5 +1,33 @@
 # FabMesh Agent Log
 
+## 2026-07-10 (segment v6_snap : les frontières claquent sur les plis géométriques)
+
+User : les coupes suivent le Voronoï du nuage de points PartSAM — elles
+serpentent sur les surfaces PLATES au lieu de suivre les plis (bord de
+tourelle, jupe de caisse, base du canon). Nouvelle passe **_crease_snap**
+dans `_clean_labels` (scripts/partsam_bridge.py + miroir exact
+modal_app/_partsam.py) qui REMPLACE l'étape 3 (lissage k=8 crease-blind,
+antagoniste au snap) : relaxation itérée restreinte à une BANDE autour des
+frontières (faces mixtes + 2 anneaux kNN), vote pondéré
+w_ij = exp(−(θ_ij/σ)²)·aire_j (θ = angle entre normales de faces BRUTES,
+dot orienté) — continuité forte sur du plat, coupe quasi gratuite au pli.
+Hors-bande = ancres (votent, ne bougent pas) ; label entier dans la bande =
+gelé → 0 label perdu garanti + post-check revert. Params retenus (variante
+A_default, gagnante de 6 variantes offline testées sur les labels bruts
+sauvés, sans GPU) : σ=30°, rings=2, iters=8 (cap PAIR — cycle limite
+2-périodique résiduel ~0.5 % de la bande), self_w=0.5.
+Mesures (tank 488k tris, crease_metrics ; baseline = v5) :
+- g=0.2 : frontière-sur-pli (normales brutes) 0.5145→0.6667, angle frontière
+  moyen 33.8°→43.5° ; robuste-PCA 0.3124→0.3274 ; parasites 1.338→1.305 %,
+  fragments 4→4, 12→12 parties ; snap 0.16 s, denoise total 1.8 s (vs 2.4 s).
+- g=1.0 : sur-pli brut 0.4944→0.6657 ; parasites 3.779→3.52 %, fragments
+  20→19 (mieux), 27→27 parties ; snap 0.33 s.
+Vérif GPU réelle bridge complet g=0.2 : 12 parties, parasites 1.305 %,
+excess_fragments 4, on_crease 0.3276 / brut 0.6669 — conforme à l'offline.
+Écartées : σ=45 (+1 fragment g02), σ=20+re-absorb (parasites 1.205 mais
+oscillation instable + 1.1 s de plus), poids distance (snap −5 pts),
+self_w=1.0 (snap plus faible), iters=16 (≡ iters=8, diff 0 face).
+
 ## 2026-07-09 (segment v5 : mode fin utilisable + frontières 2x plus fines)
 
 User : « slider à fond = plein de segments » (51 labels mosaïque) + « le
