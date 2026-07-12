@@ -1,0 +1,60 @@
+{
+  "_doc": [
+    "Table bone -> zone canonique (labels EN snake_case, i18n FR a l'affichage).",
+    "Matching: nom normalise en minuscules, prefixes techniques retires (strip_prefixes),",
+    "marqueur de cote detecte et retire (left/right/_l/_r/l_/r_), puis prefix-match",
+    "PLUS LONG parmi tous les prefixes de toutes les parts (longest-prefix wins).",
+    "Bones exclus (exclude_prefixes) = ignores (ik/controllers, normalement sans poids).",
+    "Bone non matche (ex: twist generique) -> herite du label du parent dans la hierarchie.",
+    "Parts 'sided: true' produisent left_<label>/right_<label> si un cote est detecte."
+  ],
+  "exclude_prefixes": ["ik_", "ctrl_", "target_", "pole_", "root"],
+  "strip_prefixes": ["mixamorig:", "mixamorig_", "mixamorig", "cc_base_"],
+  "parts": [
+    {
+      "label": "head",
+      "sided": false,
+      "prefixes": ["head", "neck", "face", "facial", "jaw", "jawroot", "tongue", "teeth", "eye", "upperjaw", "skull", "ear", "horn"]
+    },
+    {
+      "label": "torso",
+      "sided": false,
+      "prefixes": ["spine", "chest", "torso", "ribs", "rib", "ribstwist", "breast", "abdomen", "stomach", "upperchest"]
+    },
+    {
+      "label": "pelvis",
+      "sided": false,
+      "prefixes": ["pelvis", "hips", "hip"]
+    },
+    {
+      "label": "tail",
+      "sided": false,
+      "prefixes": ["tail"]
+    },
+    {
+      "label": "wing",
+      "sided": true,
+      "prefixes": ["wing"]
+    },
+    {
+      "label": "foot",
+      "sided": true,
+      "prefixes": ["foot", "ball", "toe", "toebase", "toebasesharebone", "ankle", "heel", "bigtoe", "midtoe", "indextoe", "ringtoe", "pinkytoe"]
+    },
+    {
+      "label": "leg",
+      "sided": true,
+      "prefixes": ["thigh", "thightwist", "calf", "calftwist", "shin", "knee", "kneesharebone", "upleg", "leg"]
+    },
+    {
+      "label": "hand",
+      "sided": true,
+      "prefixes": ["hand", "palm", "finger", "index", "thumb", "middle", "ring", "pinky", "metacarpal"]
+    },
+    {
+      "label": "arm",
+      "sided": true,
+      "prefixes": ["clavicle", "shoulder", "upperarm", "upperarmtwist", "lowerarm", "forearm", "forearmtwist", "arm", "elbow", "elbowsharebone"]
+    }
+  ]
+}

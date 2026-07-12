@@ -1,0 +1,33 @@
+{
+  "_doc": [
+    "Vocabulaire de labels canoniques (EN snake_case) par type d'asset.",
+    "Consomme par scripts/name_parts.py (routeur) et scripts/part_namer_vision.py (voie B).",
+    "L'i18n FR se fait a l'affichage dans l'UI, PAS ici.",
+    "Familles: plusieurs assetType partagent un meme vocab (family).",
+    "Les assetType 'living' (character/creature/animal/insect/other_living) passent en",
+    "VOIE A (squelette) si un rig est fourni, sinon en VOIE B (vision) avec ce vocab."
+  ],
+  "living_types": ["character", "creature", "animal", "insect", "other_living"],
+  "families": {
+    "vehicle": {
+      "aliases": ["vehicle", "avion", "bateau", "car", "plane", "ship", "tank"],
+      "labels": ["wheel", "continuous_track", "turret", "cannon_barrel", "hull", "hatch", "antenna", "headlight", "fender", "exhaust", "fuel_tank", "machine_gun", "wing", "propeller", "cockpit", "rotor"]
+    },
+    "building": {
+      "aliases": ["building", "environment", "structure"],
+      "labels": ["roof", "wall", "door", "window", "stairs", "chimney", "balcony", "column", "foundation"]
+    },
+    "weapon": {
+      "aliases": ["weapon"],
+      "labels": ["blade", "handle", "guard", "barrel", "stock", "magazine", "scope", "trigger", "grip"]
+    },
+    "living": {
+      "aliases": ["character", "creature", "animal", "insect", "other_living"],
+      "labels": ["head", "torso", "arm", "leg", "hand", "foot", "hair", "tail", "wing", "weapon", "shield"]
+    },
+    "other": {
+      "aliases": ["other", "custom"],
+      "labels": ["part"]
+    }
+  }
+}

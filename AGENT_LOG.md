@@ -1,5 +1,27 @@
 # FabMesh Agent Log
 
+## 2026-07-12 (nommage des parties — BACKEND : routeur name_parts.py 2 voies)
+
+Feature user : nommer les zones segmentees par IA (roue/chenille/tourelle/bras/
+jambe...). Backend de prod construit + verifie GO (workflow 4 agents) :
+- scripts/skin_zone_namer.py (VOIE A, persos rigges) : skin weights -> os
+  dominant/face -> bone_zones.json -> vote pondere aire par part_XX. FIX IK :
+  un os exclu (ik_*) qui porte des poids remonte a son parent mappable
+  (recover_excluded_label) -> jessica UE5 _unlabeled 22%->0%, orc inchange 100%.
+- scripts/part_namer_vision.py (VOIE B, vehicules/objets) : rasterizer torch
+  isole N&B (pas de pyrender) -> CLIP-L (cache, offline) contre vocab par famille
+  -> fusion log-prob priors geometriques (allongement/verticalite/volume/position
+  + paires miroir) -> abstention (conf<0.40 ou marge<0.10 -> 'unknown'). Tank :
+  9/9 corrects + 1 abstention + 0 faux confiant. Rendu contextuel plein-cadre
+  BANNI (effondre CLIP). ~13s a froid (rechargement CLIP).
+- scripts/name_parts.py (ROUTEUR) : <segmented.glb> <out.parts.json>
+  --asset-type T [--rig R]. Living+rig -> voie A, sinon voie B ; fallbacks
+  graceux (pas de rig, rig introuvable, voie A echoue -> vision). Sidecar
+  {schema:1, source, asset_type, parts:[{part_id,label,confidence,abstained}], ts}.
+  Nodes GLB NON renommes (reversible ; l'app lit le sidecar par part_id).
+- scripts/rig_templates/part_vocab.json : vocab canonique EN par famille.
+CPU/GPU auto. Wiring UI (bouton + affichage) = commit suivant.
+
 ## 2026-07-11 (segment v8 : FUSION PAR APPARENCE — dé-patchwork caisse/tourelle)
 
 User (validé visuellement sur le tank v7) : canon/chenilles/antennes propres
