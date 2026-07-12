@@ -530,6 +530,330 @@ def _crease_watershed(lab, n_lab, fn_rob, cent, area, dist, idx, r_max,
     return seed, True
 
 
+def _face_lab_field(mesh, area, dist, idx, r_max):
+    """CHAMP COULEUR Lab PAR FACE (étape 4a du dé-patchwork v8) — échantillonne
+    la texture au CENTROÏDE UV de chaque face (tex[H-1-y, x] : axe Y texture
+    inversé, validé), convertit sRGB→Lab (D65, 100 % numpy, AUCUNE dépendance)
+    puis LISSE par 2 passes de moyenne kNN pondérée aire (mêmes dist/idx que le
+    pipeline, cutoff 3·h → pas de bleeding à travers les gaps d'air
+    chenille↔caisse). Anti-bruit texel. Retourne (N,3) float64, ou None si le
+    mesh n'est pas texturé (→ l'étape 4 bascule en geo-only durci).
+    Mesuré : ~1 s / 488k faces."""
+    try:
+        import numpy as np
+        vis = getattr(mesh, "visual", None)
+        uv = getattr(vis, "uv", None)
+        mat = getattr(vis, "material", None)
+        img = getattr(mat, "baseColorTexture", None)
+        if uv is None or img is None or len(uv) != len(mesh.vertices):
+            return None
+        tex = np.asarray(img.convert("RGB"), dtype=np.float64) / 255.0
+        H, W = tex.shape[:2]
+        fuv = np.asarray(uv, dtype=np.float64)[mesh.faces].mean(axis=1)
+        u = np.mod(fuv[:, 0], 1.0)
+        v = np.mod(fuv[:, 1], 1.0)
+        x = np.clip((u * (W - 1)).round().astype(np.int64), 0, W - 1)
+        y = np.clip((v * (H - 1)).round().astype(np.int64), 0, H - 1)
+        rgb = tex[H - 1 - y, x]                       # axe Y texture inversé
+        fac = getattr(mat, "baseColorFactor", None)
+        if fac is not None:
+            fac = np.asarray(fac, dtype=np.float64).reshape(-1)
+            if fac.size >= 3:
+                f3 = fac[:3]
+                if f3.max() > 1.0:                    # trimesh stocke en uint8
+                    f3 = f3 / 255.0
+                if not np.allclose(f3, 1.0):
+                    rgb = rgb * f3
+        # --- sRGB -> Lab (D65), 100 % numpy ---
+        lin = np.where(rgb <= 0.04045, rgb / 12.92,
+                       ((rgb + 0.055) / 1.055) ** 2.4)
+        M = np.array([[0.4124564, 0.3575761, 0.1804375],
+                      [0.2126729, 0.7151522, 0.0721750],
+                      [0.0193339, 0.1191920, 0.9503041]])
+        xyz = lin @ M.T
+        xyz /= np.array([0.95047, 1.0, 1.08883])
+        d = 6.0 / 29.0
+        f = np.where(xyz > d ** 3, np.cbrt(xyz),
+                     xyz / (3 * d * d) + 4.0 / 29.0)
+        lab_col = np.stack([116.0 * f[:, 1] - 16.0,
+                            500.0 * (f[:, 0] - f[:, 1]),
+                            200.0 * (f[:, 1] - f[:, 2])], axis=1)
+        # --- anti-bruit texel : 2 passes de moyenne kNN pondérée aire ---
+        validk = dist <= r_max
+        validk[:, 0] = True
+        w = validk * area[idx]
+        wsum = w.sum(axis=1, keepdims=True)
+        wsum[wsum <= 0] = 1.0
+        for _ in range(2):
+            lab_col = np.einsum("nk,nki->ni", w, lab_col[idx]) / wsum
+        return lab_col
+    except Exception as e:
+        log(f"champ couleur indispo ({e}) — étape 4 en geo-only")
+        return None
+
+
+def _appearance_pair_rows(labels, pa, pb, th_un, perp, idx, validk,
+                          lab_col, fn_rob, area, crease_deg):
+    """Table par PAIRE de labels adjacents pour la fusion par apparence :
+    n_pairs (contact), crease (part de frontière sur pli, angle NON orienté
+    > `crease_deg`), ang (angle MÉDIAN de frontière), dE (‖médiane Lab bande A
+    − médiane Lab bande B‖ ; None si pas de couleur), perp (médiane
+    |Δc·n|/|Δc| = anti-survol canon/glacis), plate (min sur les 2 bandes de
+    λmax(Σ aire·n nᵀ / Σ aire) = anti-tube). Chaque bande = faces ring0 au
+    contact + 2 anneaux de dilatation kNN restant DANS le même label. Les
+    comparaisons couleur sont des MÉDIANES par bande (quantile robuste aux
+    décals/salissures) — jamais la moyenne globale d'un label bicolore."""
+    import numpy as np
+    uniq, lab = np.unique(labels, return_inverse=True)
+    lab = lab.astype(np.int64)
+    L = len(uniq)
+    la, lb = lab[pa], lab[pb]
+    bnd = la != lb
+    if not bnd.any():
+        return []
+    key = (np.minimum(la[bnd], lb[bnd]) * np.int64(L)
+           + np.maximum(la[bnd], lb[bnd]))
+    pkeys, inv, counts = np.unique(key, return_inverse=True,
+                                   return_counts=True)
+    th_b = th_un[bnd]
+    perp_b = perp[bnd]
+    pa_b, pb_b = pa[bnd], pb[bnd]
+    rows = []
+    for pi, (k, n) in enumerate(zip(pkeys, counts)):
+        A, B = int(k // L), int(k % L)
+        sel = inv == pi
+        sides = []
+        for side in (A, B):
+            s = np.unique(np.concatenate(
+                [pa_b[sel][lab[pa_b[sel]] == side],
+                 pb_b[sel][lab[pb_b[sel]] == side]]))
+            for _ in range(2):                        # 2 anneaux intra-label
+                nb = idx[s][validk[s]]
+                s = np.unique(np.concatenate([s, nb[lab[nb] == side]]))
+            sides.append(s)
+        sideA, sideB = sides
+        dE = None
+        if lab_col is not None:
+            dE = float(np.linalg.norm(np.median(lab_col[sideA], axis=0)
+                                      - np.median(lab_col[sideB], axis=0)))
+        plates = []
+        for s in (sideA, sideB):
+            nn = fn_rob[s]
+            w = area[s]
+            Mn = np.einsum("k,ki,kj->ij", w, nn, nn) / max(w.sum(), 1e-30)
+            plates.append(float(np.linalg.eigvalsh(Mn)[-1]))
+        rows.append({
+            "A": int(uniq[A]), "B": int(uniq[B]), "n_pairs": int(n),
+            "crease": float((th_b[sel] > crease_deg).mean()),
+            "ang": float(np.median(th_b[sel])),
+            "dE": dE,
+            "perp": float(np.median(perp_b[sel])),
+            "plate": float(min(plates)),
+        })
+    return rows
+
+
+def _merge_eligible(r, P, hard_crease):
+    """Une paire (A,B) est fusionnable si sa frontière est PLATE (crease sous
+    le seuil ET sous le HARD BLOCK absolu qui protège canon/chenilles), FINE
+    d'angle, de MÊME couleur (dE), et n'est ni un survol (perp) ni un tube
+    (plate) — chaque garde bloque un piège mesuré du tank."""
+    return (r["n_pairs"] >= P["min_pairs"]
+            and r["crease"] < min(P["crease_max"], hard_crease)
+            and r["ang"] <= P["ang_max"]
+            and (r["dE"] is None or r["dE"] <= P["dE_max"])
+            and r["perp"] <= P["perp_max"]
+            and r["plate"] >= P["plate_min"])
+
+
+def _absorb_debords(labels, pa, pb, th_un, idx, validk, lab_col,
+                    area, N, P, crease_deg):
+    """ÉTAPE 4bis — ABSORPTION DES DÉBORDS PAR APPARENCE : les composantes
+    spatiales NON-dominantes d'un label posées sur la nappe d'un voisin (le
+    patchwork entremêlé visible). Gates : `comp_min` ≤ taille ≤ comp_frac_max·N
+    ET taille < mirror_ratio·(comp dominante du label) [ANTI-MIROIR
+    chenilles/roues] ET voisin majoritaire ≥ maj_min de la frontière ET
+    crease(frontière) < crease_max_comp ET dE bande ≤ dE_max_comp. PAS de gate
+    perp/plate (un débord est par nature posé sur la nappe voisine ; on ne
+    déplace qu'un fragment, jamais un label entier). Décisions sur l'état
+    d'ENTRÉE, ordre déterministe = taille décroissante (argsort stable).
+    Retourne (labels_out, n_absorbed)."""
+    import numpy as np
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    out = np.asarray(labels).copy()
+    uniq, lab = np.unique(out, return_inverse=True)
+    lab = lab.astype(np.int64)
+    same = lab[pa] == lab[pb]
+    adj = coo_matrix((np.ones(int(same.sum()), np.int8),
+                      (pa[same], pb[same])), shape=(N, N))
+    n_comp, comp = connected_components(adj, directed=False)
+    comp_size = np.bincount(comp, minlength=n_comp)
+    comp_label = np.zeros(n_comp, np.int64)
+    comp_label[comp] = lab
+    dom_size = np.zeros(len(uniq), np.int64)
+    np.maximum.at(dom_size, comp_label, comp_size)
+    diff = ~same
+    dpa, dpb = pa[diff], pb[diff]
+    th_d = th_un[diff]
+    size_cap = P["comp_frac_max"] * N
+    n_abs = 0
+    for c in np.argsort(-comp_size, kind="stable"):
+        sz = int(comp_size[c])
+        if sz > size_cap:
+            continue
+        if sz < P["comp_min"]:
+            break                                     # tri décroissant
+        l = int(comp_label[c])
+        if sz >= P["mirror_ratio"] * dom_size[l]:
+            continue                                  # dominante ou miroir
+        selA = comp[dpa] == c
+        selB = comp[dpb] == c
+        if not (selA.any() or selB.any()):
+            continue
+        th_bnd = np.concatenate([th_d[selA], th_d[selB]])
+        crease = float((th_bnd > crease_deg).mean())
+        if crease >= P["crease_max_comp"]:
+            continue
+        other = np.concatenate([lab[dpb[selA]], lab[dpa[selB]]])
+        maj = int(np.bincount(other).argmax())
+        if float((other == maj).mean()) < P["maj_min"]:
+            continue
+        if lab_col is not None:
+            side = np.unique(np.concatenate([dpa[selA], dpb[selB]]))
+            oth = np.unique(np.concatenate(
+                [dpb[selA][lab[dpb[selA]] == maj],
+                 dpa[selB][lab[dpa[selB]] == maj]]))
+            if oth.size == 0:
+                continue
+            for _ in range(2):                        # 2 anneaux de dilatation
+                nb = idx[side][validk[side]]
+                side = np.unique(np.concatenate([side, nb[comp[nb] == c]]))
+                nb = idx[oth][validk[oth]]
+                oth = np.unique(np.concatenate([oth, nb[lab[nb] == maj]]))
+            dE = float(np.linalg.norm(np.median(lab_col[side], axis=0)
+                                      - np.median(lab_col[oth], axis=0)))
+            if dE > P["dE_max_comp"]:
+                continue
+        out[comp == c] = uniq[maj]
+        n_abs += 1
+    return out, n_abs
+
+
+def _merge_by_appearance(labels, gran, fn_rob, lab_col, cent, area,
+                         dist, idx, r_max, crease_deg=25.0, hard_crease=0.45):
+    """ÉTAPE 4 — FUSION PAR APPARENCE (dé-patchwork v8). Après le watershed
+    (les frontières sont déjà sur les plis), deux labels voisins dont la
+    frontière commune est majoritairement HORS PLI (plate) ET dont les
+    couleurs sont proches sont la MÊME pièce sémantique → fusion. Vagues :
+    re-évaluation COMPLÈTE de la table entre chaque vague (anti-transitivité),
+    matching glouton 1 fusion max par label par vague (anti-cascade), plancher
+    de parties strict, tri stable (dE, crease, A, B) → déterministe ; puis
+    étape 4bis (absorption des débords). Paramètres modulés par granularité
+    (g fin = plus conservateur, le user veut plus de parties) ; geo-only durci
+    si `lab_col is None`. POST-CONDITIONS (sinon repli no-op = labels étape 3
+    inchangés) : n_parts_out == n_parts_in − fusions, ≥ plancher, AUCUNE fusion
+    de frontière crease ≥ `hard_crease` (préservation canon/chenilles/antennes,
+    dont les frontières sont sur pli). Réutilise `fn_rob` déjà calculé pour le
+    watershed. Mesuré (tank) : 0.4-0.7 s, g=0.2 12→10 parties, g=1.0 27→25,
+    canon/chenilles/tourelle INTACTS. No-op sur exception."""
+    import numpy as np
+    labels_in = np.asarray(labels).reshape(-1).astype(np.int64)
+    try:
+        t0 = time.time()
+        N = labels_in.shape[0]
+        fine = gran >= 0.7
+        has_col = lab_col is not None
+        P = dict(
+            # --- étape 4 : label-merge par apparence ---
+            crease_max=0.28 if fine else 0.32,        # % max frontière sur pli
+            dE_max=7.0 if fine else 9.0,              # ΔE médian max entre bandes
+            min_pairs=50 if fine else 40,             # contact significatif
+            ang_max=28.0,                             # angle MÉDIAN de frontière
+            perp_max=0.47,                            # anti-survol (canon 0.546)
+            plate_min=0.60,                           # anti-tube (canon 0.478)
+            floor=12 if fine else 6, max_waves=6,
+            # --- étape 4bis : absorption des débords ---
+            comp_min=200, comp_frac_max=0.02, mirror_ratio=0.5,
+            maj_min=0.60, crease_max_comp=0.50, dE_max_comp=8.0,
+        )
+        if not has_col:                               # non texturé -> geo durci
+            P.update(dE_max=float("inf"), crease_max=0.28,
+                     perp_max=0.45, plate_min=0.65, dE_max_comp=float("inf"))
+        # --- précalculs par PAIRE de faces voisines (i<j, cutoff 3·h) ---
+        validk = dist <= r_max
+        validk[:, 0] = True
+        kq = idx.shape[1]
+        srcf = np.repeat(np.arange(N, dtype=np.int64), kq - 1)
+        dstf = idx[:, 1:].ravel().astype(np.int64)
+        near = dist[:, 1:].ravel() <= r_max
+        srcf, dstf = srcf[near], dstf[near]
+        keys = np.unique(np.minimum(srcf, dstf) * np.int64(N)
+                         + np.maximum(srcf, dstf))
+        pa = (keys // N).astype(np.int64)
+        pb = (keys % N).astype(np.int64)
+        # angle NON ORIENTÉ [0,90] (l'orienté sature à ~0.9 : coques doublées)
+        dots = np.abs(np.clip(np.einsum("ij,ij->i", fn_rob[pa], fn_rob[pb]),
+                              -1.0, 1.0))
+        th_un = np.degrees(np.arccos(dots))
+        d = cent[pb] - cent[pa]
+        pd = np.maximum(np.linalg.norm(d, axis=1), 1e-12)
+        perp = np.maximum(np.abs(np.einsum("ij,ij->i", d, fn_rob[pa])),
+                          np.abs(np.einsum("ij,ij->i", d, fn_rob[pb]))) / pd
+        # --- étape 4 : label-merge par vagues ---
+        labels = labels_in.copy()
+        n_in = len(np.unique(labels))
+        n_merges = 0
+        max_merge_crease = 0.0
+        for _wave in range(P["max_waves"]):
+            n_parts = len(np.unique(labels))
+            if n_parts <= P["floor"]:
+                break
+            rows = _appearance_pair_rows(labels, pa, pb, th_un, perp, idx,
+                                         validk, lab_col, fn_rob, area,
+                                         crease_deg)
+            cand = [r for r in rows if _merge_eligible(r, P, hard_crease)]
+            cand.sort(key=lambda r: (
+                r["dE"] if r["dE"] is not None else 0.0,
+                r["crease"], r["A"], r["B"]))
+            used, merges = set(), []
+            for r in cand:
+                if r["A"] in used or r["B"] in used:
+                    continue
+                if n_parts - len(merges) - 1 < P["floor"]:
+                    break
+                used.update((r["A"], r["B"]))
+                merges.append(r)
+            if not merges:                            # point fixe = stabilité
+                break
+            for r in merges:                          # B -> A (A < B, stable)
+                if r["crease"] >= hard_crease:        # défensif
+                    continue
+                labels[labels == r["B"]] = r["A"]
+                max_merge_crease = max(max_merge_crease, r["crease"])
+                n_merges += 1
+        # --- post-conditions du label-merge (sinon no-op) ---
+        n_mid = len(np.unique(labels))
+        if (n_mid != n_in - n_merges or n_mid < P["floor"]
+                or max_merge_crease >= hard_crease):
+            log("appearance: post-condition violée — labels étape 3 gardés")
+            return labels_in
+        # --- étape 4bis : absorption des débords ---
+        final, n_deb = _absorb_debords(labels, pa, pb, th_un, idx, validk,
+                                       lab_col, area, N, P, crease_deg)
+        if len(np.unique(final)) != n_mid:            # défensif (impossible)
+            log("appearance: label perdu en 4bis — débords ignorés")
+            final, n_deb = labels, 0
+        log(f"appearance: {n_merges} fusions ({n_in}->{n_mid} parties), "
+            f"{n_deb} débords absorbés en {time.time()-t0:.2f}s "
+            f"(max crease fusion {max_merge_crease:.3f}, "
+            f"{'texturé' if has_col else 'geo-only'})")
+        return final
+    except Exception as e:
+        log(f"appearance indispo ({e}) — labels étape 3 gardés (no-op)")
+        return labels_in
+
+
 def _clean_labels(mesh, labels, gran=0.0):
     """Débruite les labels par-face — pipeline « v7_watershed » complet, un
     seul query cKDTree k=12 partagé par les trois étapes :
@@ -545,6 +869,12 @@ def _clean_labels(mesh, labels, gran=0.0):
          sur les grandes plaques) ; + 3bis) absorption anti-pincement.
          Repli sur le snap v6 en cas d'exception. Post-condition à chaque
          sous-étape : 0 label perdu, sinon revert.
+      4) FUSION PAR APPARENCE (v8) — dé-patchwork des grandes plaques lisses
+         (caisse/tourelle) : deux labels voisins dont la frontière commune est
+         PLATE (hors pli, watershed déjà passé) ET de couleur texture proche
+         sont fusionnés (_merge_by_appearance), + 4bis absorption des débords.
+         Ne s'exécute QUE si le watershed robuste a réussi (frontières fiables
+         sur les plis) ; réutilise fn_rob. No-op sur exception.
     Robuste aux meshes fragmentés (kNN spatial, pas de connectivité).
     No-op si scipy absent ou en cas d'erreur."""
     try:
@@ -593,6 +923,8 @@ def _clean_labels(mesh, labels, gran=0.0):
         lab2 = lab2.astype(np.int64)
         n2 = len(uniq2)
         out = labels2
+        fn_rob = None                    # hissé : réutilisé par l'étape 4
+        step4_ready = False              # True seulement si watershed robuste OK
         try:
             fn_raw = np.asarray(mesh.face_normals, dtype=np.float64)
             fn_rob = _robust_normals(cent, area, fn_raw, dist, idx,
@@ -605,6 +937,7 @@ def _clean_labels(mesh, labels, gran=0.0):
                     log("watershed: label perdu — revert étape 3")
                 else:
                     out = cand
+                    step4_ready = True
                     # --- 3bis) anti-pincement : deux fronts qui se pincent
                     # créent des fragments — résorbés par l'absorption de
                     # l'étape 2 (revert si un label disparaît) ---
@@ -632,6 +965,17 @@ def _clean_labels(mesh, labels, gran=0.0):
                         log("snap: label perdu — revert étape 3")
             except Exception as e2:
                 log(f"snap indispo ({e2}) — labels étape 2 gardés")
+        # --- 4) FUSION PAR APPARENCE — dé-patchwork des grandes plaques :
+        #        deux labels voisins à frontière plate (hors pli) ET couleur
+        #        texture proche = même pièce → fusion, + 4bis débords. Ne tourne
+        #        que si le watershed robuste a réussi (frontières déjà sur les
+        #        plis, condition d'un signal « frontière plate » fiable) et
+        #        réutilise fn_rob. No-op interne sur exception/post-condition. ---
+        if step4_ready and fn_rob is not None:
+            lab_col = _face_lab_field(mesh, area, dist, idx, r_max)
+            out = np.asarray(_merge_by_appearance(
+                out, gran, fn_rob, lab_col, cent, area, dist, idx, r_max)
+            ).reshape(-1).astype(np.int64)
         log(f"denoise total {time.time()-t0:.1f}s "
             f"(labels {n0}->{len(np.unique(out))})")
         return out

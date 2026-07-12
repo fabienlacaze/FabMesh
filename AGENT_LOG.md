@@ -1,5 +1,56 @@
 # FabMesh Agent Log
 
+## 2026-07-11 (segment v8 : FUSION PAR APPARENCE — dé-patchwork caisse/tourelle)
+
+User (validé visuellement sur le tank v7) : canon/chenilles/antennes propres
+(frontières sur plis), mais CAISSE et TOURELLE restent un PATCHWORK (rose/cyan/
+vert entremêlés sur une même plaque plate). Le watershed place bien les
+frontières mais ne décide pas S'IL FAUT une frontière — les masques PartSAM se
+partagent arbitrairement les grandes surfaces lisses.
+
+SOLUTION (étape 4 de _clean_labels, APRÈS le watershed pour que « frontière
+plate » soit un signal fiable) : deux labels voisins dont la frontière commune
+est majoritairement HORS PLI (plate) ET dont les couleurs texture sont proches
+= même pièce sémantique → fusion. Nouveau CHAMP COULEUR Lab par face
+(_face_lab_field : texel au centroïde UV → sRGB→Lab D65 100 % numpy, 2 passes de
+lissage kNN pondéré aire, cutoff 3·h ; None → geo-only durci). Fusion par PAIRE
+de labels (_merge_by_appearance) : bandes frontalières (ring0 + 2 anneaux
+intra-label), comparaison par MÉDIANE de bande (quantile robuste au camouflage :
+ΔE intra-label médian 5.6-11.1 → moyennes globales interdites). 5 gardes durs,
+chacun bloquant un piège mesuré : crease_frac (frontière sur pli, HARD BLOCK
+0.45 = préservation canon/chenilles/antennes), angle médian, ΔE bandes, perp
+(anti-survol : canon-glacis 0.546), plate = λmax(Σ aire·n nᵀ) (anti-tube :
+canon 0.478). Vagues avec re-évaluation complète (anti-transitivité), matching
+glouton 1 fusion/label/vague (anti-cascade), plancher strict (6 à g=0.2, 12 à
+g=1.0), tri stable → déterministe. Modulé par granularité (g fin = plus
+conservateur, le user veut plus de parties). Étape 4bis : absorption des DÉBORDS
+(composantes spatiales non-dominantes posées sur la nappe voisine ; anti-miroir
+chenilles/roues) → résorbe le patchwork résiduel. try/except global = no-op
+(labels étape 3 inchangés) ; ne tourne que si le watershed robuste a réussi ;
+réutilise fn_rob.
+
+CHOIX DE VARIANTE : G2_standard_plus_débords, gagnante sur 4 candidates
+(G1 sans débords, G3 conservateur = +1 flat pair, G4 geo-seul fusionne à tort
+2 plaques coplanaires de peintures différentes ΔE 11.4 sur mesh texturé,
+G5 nettoyage max = quasi-identique à G2 pour +0.003pp parasites).
+
+VÉRIF GPU RÉELLE (g=0.2, python-segment/PartSAM, 1 seul job, 161.8 s dont
+step4 2.95 s) : 12 masques bruts → v7 12 parties → 2 fusions (12→10) + 4 débords.
+Bit-à-bit identique à la simulation validée. Métriques g=0.2 v7→v8 : parties
+12→10 ; sur-pli robuste 0.458→0.479 (monte) ; parasites 1.229→0.05 % ; fragments
+excédentaires 4→2 ; tiny 3→2. g=1.0 (export contrôle depuis labels sauvés) :
+27→25 ; sur-pli 0.518→0.531 ; parasites 2.456→1.102 % ; fragments 15→11.
+PRÉSERVATION intacte aux 2 granularités : canon/chenilles/tourelle restent des
+labels distincts, 0 collision inter-groupes, max crease fusionné 0.232 (« 0.45).
+GLB : seg_v8_final.glb (10 parties, 48 043 368 bytes) ; contrôle fin
+seg_v8_final_g10.glb (25 parties).
+
+INTÉGRÉ dans scripts/partsam_bridge.py (5 fonctions : _face_lab_field,
+_appearance_pair_rows, _merge_eligible, _absorb_debords, _merge_by_appearance +
+wiring _clean_labels) + MIROIR EXACT modal_app/_partsam.py (diff AST des 6
+fonctions partagées = SAME, log-normalisé). py_compile OK des deux. AUCUNE
+nouvelle dépendance (numpy/scipy/trimesh/PIL). Scripts/renderer-only : Ctrl+R.
+
 ## 2026-07-11 (UI : masquage des noms d'IA internes + noms courts dans l'history)
 
 Exigence produit (user) : « il ne faut pas que l'on ait le nom des IA que l'on
