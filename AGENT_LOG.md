@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-12 (nommage : fix routage + gate + sélecteur de catégorie)
+
+Bugs remontés au 1er test (tank affichait « Unknown » partout) :
+- Le projet tank était typé 'character' (défaut) → routé VOIE A (squelette)
+  sur un tank → 26 parts 'unlabeled'. FIX routeur name_parts.py : si la voie
+  squelette abstient >60% → RuntimeError → fallback VOIE B (vision).
+- Le vocabulaire vision suivait aussi le type projet ('character') → labels
+  torse/bouclier sur un tank. FIX UX : SÉLECTEUR DE CATÉGORIE au clic
+  (_openNameCategoryModal : Véhicule / Personnage / Bâtiment / Arme / Objet),
+  pré-sélectionné depuis le type de projet ; le vocabulaire suit ce choix.
+- Gate VRAM : le job 'name' héritait de la lourdeur 'mesh' (~7 GB) et restait
+  en file. Nouveau kind 'name' (COST 3 / PEAK 3) + gatedRun('name').
+Vérifié : tank en 'vehicle' → chenilles/tourelle/antenne/caisse corrects.
+Renderer + script only → Ctrl+R (pas de restart Electron).
+
 ## 2026-07-12 (nommage des parties — WIRING desktop : bouton + légende)
 
 Câblage de la feature dans l'appli (backend name_parts.py committé avant) :

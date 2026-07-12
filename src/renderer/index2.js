@@ -9293,6 +9293,49 @@ async function _runNamePartsJob(meshPath, assetType, rigPath) {
   }
 }
 
+// Le vocabulaire de nommage dépend de la CATÉGORIE (véhicule ≠ personnage ≠
+// bâtiment...). Le type de projet est souvent un défaut ('character') → on
+// DEMANDE au clic, pré-sélectionné depuis le type de projet.
+function _nameCategoryFromAsset(at) {
+  at = String(at || '').toLowerCase();
+  if (['character', 'creature', 'animal', 'insect', 'other_living'].includes(at)) return 'character';
+  if (['vehicle', 'avion', 'bateau'].includes(at)) return 'vehicle';
+  if (['building', 'environment'].includes(at)) return 'building';
+  if (at === 'weapon') return 'weapon';
+  return 'other';
+}
+
+function _openNameCategoryModal(defaultCat) {
+  const CATS = [
+    { id: 'vehicle', ico: '🚗', en: 'Vehicle' },
+    { id: 'character', ico: '🧍', en: 'Character / Creature' },
+    { id: 'building', ico: '🏛️', en: 'Building' },
+    { id: 'weapon', ico: '⚔️', en: 'Weapon' },
+    { id: 'other', ico: '📦', en: 'Object (generic)' },
+  ];
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1b1d22;color:#eee;border:1px solid #3a3d44;border-radius:12px;padding:20px 22px;max-width:420px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:inherit;';
+    const btns = CATS.map((c) =>
+      `<button class="np-cat ghost-btn" data-cat="${c.id}" style="display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;margin-bottom:8px;text-align:left;font-size:14px;${c.id === defaultCat ? 'border-color:#8b5cf6;background:rgba(139,92,246,0.12);' : ''}"><span style="font-size:18px;">${c.ico}</span>${_escapeHtml(_i18nT(c.en))}</button>`).join('');
+    box.innerHTML =
+      `<div style="font-size:16px;font-weight:600;margin-bottom:4px;">&#127991; ${_escapeHtml(_i18nT('Name the zones (AI)'))}</div>` +
+      `<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:14px;">${_escapeHtml(_i18nT('What kind of object is this? (sets the naming vocabulary)'))}</div>` +
+      btns +
+      `<div style="display:flex;justify-content:flex-end;margin-top:6px;"><button id="np-cancel" class="ghost-btn" style="padding:8px 16px;">${_escapeHtml(_i18nT('Cancel'))}</button></div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    function cleanup(v) { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); }
+    function onKey(e) { if (e.key === 'Escape') cleanup(null); }
+    box.querySelectorAll('.np-cat').forEach((b) => b.addEventListener('click', () => cleanup(b.dataset.cat)));
+    box.querySelector('#np-cancel').addEventListener('click', () => cleanup(null));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 async function runNameParts() {
   const p = state.currentProject;
   const meshPath = p && (p.previewMeshPath || p.selectedMeshPath);
@@ -9302,11 +9345,14 @@ async function runNameParts() {
     showToast(_i18nT('Segment the mesh into parts first (scissors), then name the zones.'), 'info', 3800);
     return;
   }
-  const assetType = document.getElementById('ws-asset-type')?.value || p.assetType || 'character';
-  let rigPath = null;
-  if (_LIVING_ASSETS.has(assetType)) rigPath = _findRigForMesh(p, meshPath);
-  // Gate hardware (rendu + CLIP en VRAM) comme la segmentation.
-  gatedRun('mesh', `name: ${p.name}`, () => _runNamePartsJob(meshPath, assetType, rigPath));
+  const projAsset = document.getElementById('ws-asset-type')?.value || p.assetType || 'character';
+  const cat = await _openNameCategoryModal(_nameCategoryFromAsset(projAsset));
+  if (!cat) return;  // annulé
+  // 'character' → cherche un rig (voie squelette) ; sinon vision directe.
+  const rigPath = cat === 'character' ? _findRigForMesh(p, meshPath) : null;
+  // Gate hardware LÉGER (kind 'name' ~3 GB : CLIP-L + rasterizer ; voie
+  // squelette = CPU) — bien plus léger que la génération/segmentation.
+  gatedRun('name', `name: ${p.name}`, () => _runNamePartsJob(meshPath, cat, rigPath));
 }
 document.getElementById('ws-mesh-name-btn')?.addEventListener('click', runNameParts);
 
@@ -16665,6 +16711,7 @@ const JOB_VRAM_COST_GB = {
   'inpaint': 9,    // SDXL Inpainting + activations + CLIPSeg (~0.4 GB small)
   'mesh':    7,    // Stable Fast 3D peak (~6.2 GB observed) + margin
   'rig':     4,    // UniRig (~3 GB) + margin
+  'name':    3,    // Part naming: CLIP-L (~2 GB) + rasterizer ; voie squelette = CPU (0)
   'bg':      1,    // rembg u2net (~150 MB) — effectively unrestricted
 };
 // Realistic PEAK VRAM per heavy job — used ONLY to decide how many can run in
@@ -16673,7 +16720,7 @@ const JOB_VRAM_COST_GB = {
 // peaks ~15 GB (≈ a whole 16 GB card), so a 16 GB card runs 1 at a time while a
 // 48 GB card runs ~3.
 const JOB_VRAM_PEAK_GB = {
-  'image': 9, 'img2img': 9, 'inpaint': 10, 'mesh': 15, 'rig': 5, 'bg': 1,
+  'image': 9, 'img2img': 9, 'inpaint': 10, 'mesh': 15, 'rig': 5, 'name': 3, 'bg': 1,
 };
 const queuedJobs = []; // [{ kind, run: () => Promise }]
 let _queueProcessing = false;

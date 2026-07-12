@@ -22,6 +22,10 @@
     fr: {
       // ---- Part naming (Nommer les zones) ----
       'Name the zones (AI)': 'Nommer les zones (IA)',
+      'What kind of object is this? (sets the naming vocabulary)':
+        'De quel type d’objet s’agit-il ? (définit le vocabulaire de nommage)',
+      'Vehicle': 'Véhicule', 'Character / Creature': 'Personnage / Créature',
+      'Building': 'Bâtiment', 'Object (generic)': 'Objet (générique)',
       'Named zones': 'Zones nommées',
       'Unknown': 'Inconnu',
       '{x} zones named': '{x} zones nommées',

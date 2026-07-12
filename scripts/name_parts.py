@@ -222,6 +222,15 @@ def route(segmented_glb: str, out_sidecar: str, asset_type: str,
             engine = "skin_zone_namer"
             if not parts:
                 raise RuntimeError("VOIE A n'a produit aucune part")
+            # Filet anti-mauvais-routage : si la voie squelette abstient en
+            # masse (>60% 'unlabeled'), c'est un non-humanoïde étiqueté vivant
+            # (ex: véhicule en assetType 'character' + un rig quelconque du
+            # projet) -> bascule vision (le vrai signal était l'assetType faux).
+            _na = sum(1 for p in parts if p["abstained"])
+            if len(parts) and _na / len(parts) > 0.6:
+                raise RuntimeError(
+                    f"VOIE A abstient en masse ({_na}/{len(parts)}) — "
+                    "mauvais match squelette")
         except Exception as e:  # noqa: BLE001 — fallback gracieux vers vision
             log(f"VOIE A a echoue ({e}) -> fallback VOIE B")
             fallback_reason = f"voie_a_failed: {e}"
