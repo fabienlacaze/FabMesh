@@ -6718,7 +6718,11 @@ ipcMain.handle('name-parts', async (_event, { meshPath, assetType, rigPath }) =>
     const env = {
       ...process.env,
       PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8',
-      HF_HOME: HF_CACHE_DIR,
+      // CLIP-L vit dans le cache HF PAR DÉFAUT (~/.cache/huggingface) — NE PAS
+      // forcer HF_HOME vers hf_cache (app) qui ne le contient pas. Offline pour
+      // éviter toute tentative réseau. TODO packaging : provisionner CLIP-L dans
+      // le cache par défaut de la machine cible via le wizard.
+      HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1',
       PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True',
     };
     safeSend('ai3d-progress', '[Name] Naming parts…');
