@@ -625,6 +625,8 @@
     // Part segmentation: cloud backend (Modal PartSAM) not deployed yet —
     // hide until the cloud PartSAM job is wired, else the button errors.
     'ws-mesh-segment-btn',
+    // Part naming: cloud backend (Modal _partnamer) not deployed yet.
+    'ws-mesh-name-btn',
     // "Open in Blender" / "Show in folder" only work on Desktop where
     // we can spawn `blender` and reveal the file on the user's FS.
     // Browser cannot do either; just hide them on cloud.

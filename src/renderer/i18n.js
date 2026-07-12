@@ -20,6 +20,34 @@
 
   const I18N = {
     fr: {
+      // ---- Part naming (Nommer les zones) ----
+      'Name the zones (AI)': 'Nommer les zones (IA)',
+      'Named zones': 'Zones nommées',
+      'Unknown': 'Inconnu',
+      '{x} zones named': '{x} zones nommées',
+      'Naming failed': 'Échec du nommage',
+      'Naming error': 'Erreur de nommage',
+      'Segment the mesh into parts first (scissors), then name the zones.':
+        'Segmente d’abord le mesh en parties (ciseaux), puis nomme les zones.',
+      // Labels de parties (source EN prettifiée → FR)
+      'Wheel': 'Roue', 'Continuous track': 'Chenille', 'Turret': 'Tourelle',
+      'Cannon barrel': 'Canon', 'Hull': 'Caisse', 'Hatch': 'Trappe',
+      'Antenna': 'Antenne', 'Headlight': 'Phare', 'Fender': 'Garde-boue',
+      'Exhaust': 'Échappement', 'Fuel tank': 'Réservoir', 'Machine gun': 'Mitrailleuse',
+      'Propeller': 'Hélice', 'Cockpit': 'Cockpit', 'Rotor': 'Rotor',
+      'Head': 'Tête', 'Torso': 'Torse', 'Pelvis': 'Bassin',
+      'Left arm': 'Bras gauche', 'Right arm': 'Bras droit', 'Arm': 'Bras',
+      'Left leg': 'Jambe gauche', 'Right leg': 'Jambe droite', 'Leg': 'Jambe',
+      'Left hand': 'Main gauche', 'Right hand': 'Main droite', 'Hand': 'Main',
+      'Left foot': 'Pied gauche', 'Right foot': 'Pied droit', 'Foot': 'Pied',
+      'Tail': 'Queue', 'Wing': 'Aile', 'Left wing': 'Aile gauche', 'Right wing': 'Aile droite',
+      'Hair': 'Cheveux', 'Weapon': 'Arme', 'Shield': 'Bouclier',
+      'Roof': 'Toit', 'Wall': 'Mur', 'Door': 'Porte', 'Window': 'Fenêtre',
+      'Stairs': 'Escalier', 'Chimney': 'Cheminée', 'Balcony': 'Balcon',
+      'Column': 'Colonne', 'Foundation': 'Fondation',
+      'Blade': 'Lame', 'Handle': 'Manche', 'Guard': 'Garde', 'Barrel': 'Canon',
+      'Stock': 'Crosse', 'Magazine': 'Chargeur', 'Scope': 'Lunette',
+      'Trigger': 'Détente', 'Grip': 'Poignée',
       // ---- Generation history popup ----
       'AI': 'IA',
       'Generation history': 'Historique de génération',

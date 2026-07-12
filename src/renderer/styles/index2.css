@@ -1548,6 +1548,41 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   transform: scale(1.12);
 }
 
+/* ═══ Légende des zones nommées (overlay du viewer mesh) ═══ */
+.part-legend {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  max-width: 190px;
+  max-height: 62%;
+  overflow-y: auto;
+  background: rgba(16,16,22,0.82);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 8px 10px;
+  z-index: 6;
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+  pointer-events: auto;
+}
+.part-legend .pl-title {
+  font-size: 11px; font-weight: 600; color: #cfd4dc;
+  text-transform: uppercase; letter-spacing: .04em;
+  margin-bottom: 6px;
+}
+.part-legend .pl-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; padding: 2px 0; color: #eef1f5;
+}
+.part-legend .pl-sw {
+  width: 12px; height: 12px; border-radius: 3px; flex: none;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.18);
+}
+.part-legend .pl-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.part-legend .pl-conf { color: #9aa3b0; font-size: 11px; font-variant-numeric: tabular-nums; }
+.part-legend .pl-abst { opacity: 0.6; }
+.part-legend .pl-abst .pl-name { font-style: italic; }
+
 /* ═══ Generation History popup (timeline verticale) ═══ */
 .gh-overlay {
   position: fixed; inset: 0;

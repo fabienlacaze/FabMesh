@@ -631,6 +631,7 @@
                 <div class="step-preview-col">
                   <div class="step-card-preview" id="step2-preview">
                     <canvas id="ws-mesh-canvas"></canvas>
+                    <div id="ws-mesh-part-legend" class="part-legend" style="display:none;"></div>
                     <div class="preview-placeholder" id="step2-placeholder">No mesh yet</div>
                     <button id="ws-mesh-expand-btn" class="preview-expand-btn hidden" title="View 3D fullscreen">&#x26F6;</button>
                     <div id="ws-mesh-toolbar" class="mesh-toolbar hidden">
@@ -704,6 +705,7 @@
                         <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint the WHOLE texture with the 3D Native PBR engine (best quality, ~90s)">&#11088; Re-texture all (AI)</button>
                         <button id="ws-mesh-region-retex-btn" class="ghost-btn tool-btn" title="Re-texture only ONE part (AI detects it) with a prompt — geometry stays intact">&#127912; Re-texture a region (AI)</button>
                         <button id="ws-mesh-segment-btn" class="ghost-btn tool-btn" title="Split the mesh into semantic parts (head/torso/arms/legs — wheel/chassis/cabin). Runs locally on your GPU (SAMPart3D), ~6-10 min. Adds a colored, separable parts version.">&#9986; Segment parts (AI)</button>
+                        <button id="ws-mesh-name-btn" class="ghost-btn tool-btn" title="Name the parts (wheel / turret / cannon — arm / leg / head) with AI. Requires a segmented mesh.">&#127991; Name the zones (AI)</button>
                       </div>
                     </div>
                     <div class="step-tools-group">

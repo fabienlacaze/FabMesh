@@ -6689,6 +6689,66 @@ ipcMain.handle('mesh-segment', async (_event, { meshPath, granularity, scale }) 
 
 // Material adjust: wraps scripts/mesh_material_adjust.py for the
 // Manual Tools > Material slider modal in the renderer.
+// ── Nommage des parties (roue/chenille/tourelle — bras/jambe/tête) ──────
+// Sur un mesh SEGMENTÉ (sous-meshes part_XX), route par assetType :
+//   vivant + rig → voie squelette (skin weights) ; sinon → voie vision
+//   (rendu isolé + CLIP + priors géométriques). Écrit <mesh>.parts.json
+//   {parts:[{part_id,label,confidence,abstained}]} et le renvoie. Tourne
+//   dans l'env segment (torch cu128 + transformers + CLIP-L en cache).
+ipcMain.handle('name-parts', async (_event, { meshPath, assetType, rigPath }) => {
+  const _t0 = Date.now();
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
+    if (!isPathAllowed(meshPath)) return { success: false, error: 'Mesh path not allowed' };
+    const segPython = app.isPackaged
+      ? path.join(SEGMENT_PYTHON_DIR, 'python.exe')
+      : path.join(__dirname, '..', '..', 'python-segment', 'python.exe');
+    if (!fs.existsSync(segPython)) {
+      return { success: false, error: app.isPackaged
+        ? 'Part engine not installed. Open Settings → Reconfigure FabMesh and complete the "Part segmentation" setup step.'
+        : 'python-segment not found (dev checkout missing).' };
+    }
+    const script = path.join(SCRIPTS_DIR, 'name_parts.py');
+    if (!fs.existsSync(script)) return { success: false, error: 'name_parts.py not found' };
+
+    const sidecar = meshPath + '.parts.json';
+    const at = String(assetType || 'other').replace(/[^a-z_]/gi, '').slice(0, 20) || 'other';
+    const args = [script, meshPath, sidecar, '--asset-type', at];
+    if (rigPath && fs.existsSync(rigPath) && isPathAllowed(rigPath)) args.push('--rig', rigPath);
+    const env = {
+      ...process.env,
+      PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8',
+      HF_HOME: HF_CACHE_DIR,
+      PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True',
+    };
+    safeSend('ai3d-progress', '[Name] Naming parts…');
+    return await new Promise((resolve) => {
+      const proc = execFile(segPython, args, { timeout: 300000, maxBuffer: 20 * 1024 * 1024, env }, (error, _stdout, stderr) => {
+        if (error) {
+          log.error('name-parts', (error.message || '') + ' :: ' + String(stderr || '').slice(-500));
+          resolve({ success: false, error: String(stderr || error.message || 'naming failed').slice(-500) });
+          return;
+        }
+        let data = null;
+        try { data = JSON.parse(fs.readFileSync(sidecar, 'utf-8')); } catch (e) {
+          resolve({ success: false, error: 'parts.json unreadable: ' + e.message }); return;
+        }
+        if (!data || data.source === 'error') {
+          resolve({ success: false, error: (data && data.error) || 'naming produced no result' }); return;
+        }
+        console.log(`[name-parts] DONE in ${((Date.now() - _t0) / 1000).toFixed(0)}s → ${(data.parts || []).length} parts (${data.source})`);
+        resolve({ success: true, sidecar, parts: data.parts || [], source: data.source, assetType: at });
+      });
+      proc.stdout?.on('data', d => safeSend('ai3d-progress', `[Name] ${d.toString()}`));
+      proc.stderr?.on('data', d => safeSend('ai3d-progress', `[Name] ${d.toString()}`));
+      proc.on('error', e => resolve({ success: false, error: e.message }));
+    });
+  } catch (e) {
+    log.error('name-parts', e && e.message);
+    return { success: false, error: e && e.message };
+  }
+});
+
 ipcMain.handle('material-adjust', async (_event, {
   meshPath, brightness, saturation, contrast,
   emissive, metallic, roughness, hue_shift,
@@ -7906,11 +7966,14 @@ ipcMain.handle('list-meshes', async () => {
     try { stats = await fsp.stat(fullPath); } catch (e) { return null; }
     const thumbPath = path.join(MESHES_DIR, f.replace(/\.[^.]+$/, '_thumb.png'));
     const sourcePath = fullPath + '.source';
-    const [thumbExists, source, lineage] = await Promise.all([
+    const [thumbExists, source, lineage, partsData] = await Promise.all([
       fsp.access(thumbPath).then(() => true).catch(() => false),
       fsp.readFile(sourcePath, 'utf-8').then(s => s.trim()).catch(() => null),
       // Lineage sidecar (Generation History): engine/op/parent/params.
       fsp.readFile(fullPath + '.meta.json', 'utf-8')
+        .then(s => JSON.parse(s)).catch(() => null),
+      // Part-naming sidecar (zones nommées) : parts:[{part_id,label,confidence,abstained}].
+      fsp.readFile(fullPath + '.parts.json', 'utf-8')
         .then(s => JSON.parse(s)).catch(() => null),
     ]);
     return {
@@ -7921,7 +7984,8 @@ ipcMain.handle('list-meshes', async () => {
       format: path.extname(f).slice(1).toUpperCase(),
       thumb: thumbExists ? 'file:///' + thumbPath.replace(/\\/g, '/') : null,
       sourceImage: source,
-      meta: lineage || null
+      meta: lineage || null,
+      parts: (partsData && Array.isArray(partsData.parts)) ? partsData.parts : null
     };
   }));
   const list = results.filter(Boolean);

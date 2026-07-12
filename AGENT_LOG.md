@@ -1,5 +1,24 @@
 # FabMesh Agent Log
 
+## 2026-07-12 (nommage des parties — WIRING desktop : bouton + légende)
+
+Câblage de la feature dans l'appli (backend name_parts.py committé avant) :
+- main.js : IPC `name-parts` (miroir mesh-segment) → lance name_parts.py dans
+  l'env segment (HF_HOME=hf_cache pour CLIP-L), écrit <mesh>.parts.json, renvoie
+  {parts}. list-meshes lit aussi <mesh>.parts.json → m.parts (persistance reload).
+  preload : nameParts.
+- index2.js : bouton ws-mesh-name-btn → runNameParts (gate hardware comme
+  segment ; route assetType ; passe le rig le plus proche si vivant) →
+  _runNamePartsJob (job popup) → renderPartLegend. Légende overlay du viewer
+  (couleur = même HSL que les couleurs de segments, confidence %, 'Inconnu'
+  grisé pour les abstentions). showStep2Preview réaffiche la légende au
+  changement de mesh (mesh.parts). Noms d'IA masqués (_maskAiNames).
+- index2.html : bouton après Segment + <div id=ws-mesh-part-legend>.
+- i18n.js : labels EN→FR (Roue/Chenille/Tourelle/Canon/Caisse... + Tête/Bras/
+  Jambe...) + strings UI. CSS .part-legend.
+- cloud-overrides : ws-mesh-name-btn masqué (parité Modal pas encore faite).
+main.js/preload touchés → RESTART Electron.
+
 ## 2026-07-12 (nommage des parties — BACKEND : routeur name_parts.py 2 voies)
 
 Feature user : nommer les zones segmentees par IA (roue/chenille/tourelle/bras/

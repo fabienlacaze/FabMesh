@@ -7861,6 +7861,8 @@ async function showStep2Preview(mesh) {
     wsModel = gltf.scene;
     wsModel.userData.__wsMesh = true;
     wsModel.userData._isSegmented = /_segment_/i.test(mesh.path || '');
+    wsModel.userData.parts = mesh.parts || null;   // zones nommées (sidecar .parts.json)
+    if (typeof renderPartLegend === 'function') renderPartLegend(mesh.parts || null);
     wsScene.add(wsModel);
     _applyMeshTextureFilter(wsModel);
     fitWsCamera(wsModel);
@@ -9216,6 +9218,97 @@ async function runMeshSegment() {
   gatedRun('mesh', `segment: ${p.name}`, () => _runSegmentJob(granularity, true));
 }
 document.getElementById('ws-mesh-segment-btn')?.addEventListener('click', runMeshSegment);
+
+// ═══════════════ NOMMAGE DES PARTIES (roue/tourelle — bras/jambe) ═══════════════
+// Sur un mesh SEGMENTÉ : route par assetType (vivant+rig → squelette, sinon
+// vision). Écrit <mesh>.parts.json et affiche une légende (couleur = même HSL
+// que les couleurs de segments du viewer).
+const _LIVING_ASSETS = new Set(['character', 'creature', 'animal', 'insect', 'other_living']);
+
+function _findRigForMesh(p, meshPath) {
+  const rigs = (p && p.rigs) || [];
+  if (!rigs.length) return null;
+  const base = (meshPath.split(/[\\/]/).pop() || '').replace(/_segment_.*$/i, '').replace(/\.[^.]+$/, '');
+  const key = base.slice(0, 24);
+  const match = rigs.find((r) => (r.filename || '').includes(key));
+  const newest = rigs.slice().sort((a, b) => new Date(b.created || b.mtime || 0) - new Date(a.created || a.mtime || 0))[0];
+  return (match || newest || {}).path || null;
+}
+
+function _prettifyPartLabel(lbl) {
+  const s = String(lbl || '').replace(/_/g, ' ').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+function _partColorHex(partId) {
+  const mm = /part[_-]?(\d+)/i.exec(String(partId || ''));
+  const pi = mm ? parseInt(mm[1], 10) : 0;
+  const c = new THREE.Color().setHSL((pi * 0.61803398875) % 1, 0.85, 0.5);
+  return '#' + c.getHexString();
+}
+
+// Légende des zones nommées (overlay du viewer mesh). parts = [{part_id,label,
+// confidence,abstained}] ; null/[] → cache la légende.
+function renderPartLegend(parts) {
+  const box = document.getElementById('ws-mesh-part-legend');
+  if (!box) return;
+  if (!parts || !parts.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const rows = parts.map((pt) => {
+    const abst = !!pt.abstained || !pt.label || pt.label === 'unknown';
+    const name = abst ? _i18nT('Unknown') : _i18nT(_prettifyPartLabel(pt.label));
+    const col = abst ? '#8a8a90' : _partColorHex(pt.part_id);
+    const conf = Number.isFinite(+pt.confidence) ? Math.round(+pt.confidence * 100) + '%' : '';
+    return `<div class="pl-row${abst ? ' pl-abst' : ''}"><span class="pl-sw" style="background:${col}"></span>`
+      + `<span class="pl-name">${_escapeHtml(name)}</span><span class="pl-conf">${conf}</span></div>`;
+  }).join('');
+  box.innerHTML = `<div class="pl-title">${_escapeHtml(_i18nT('Named zones'))}</div>${rows}`;
+  box.style.display = 'block';
+}
+
+async function _runNamePartsJob(meshPath, assetType, rigPath) {
+  const p = state.currentProject;
+  const meshName = meshPath.split(/[\\/]/).pop();
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`name: ${p.name}`, null, {
+        Tool: 'Name zones (AI)', Mesh: _maskAiNames(meshName), 'Asset type': assetType,
+      }, 30000, { sourceImageUrl: _meshJobThumb(meshPath), projectName: p.name })
+    : null;
+  try {
+    const r = await API.nameParts({ meshPath, assetType, rigPath });
+    if (r && r.success) {
+      const named = (r.parts || []).filter((x) => x && !x.abstained && x.label && x.label !== 'unknown').length;
+      showToast(_i18nTf('{x} zones named', String(named)), 'success');
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
+      const m = (p.meshes || []).find((x) => x && x.path === meshPath);
+      if (m) m.parts = r.parts;
+      if (typeof wsModel !== 'undefined' && wsModel && wsModel.userData) wsModel.userData.parts = r.parts;
+      renderPartLegend(r.parts);
+    } else {
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, r && r.error);
+      showToast(`${_i18nT('Naming failed')}: ${(r && r.error) || 'unknown'}`, 'error', 6000);
+    }
+  } catch (e) {
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
+    showToast(`${_i18nT('Naming error')}: ${e.message}`, 'error', 5000);
+  }
+}
+
+async function runNameParts() {
+  const p = state.currentProject;
+  const meshPath = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!p || !meshPath) { showToast(_i18nT('Pick a mesh first.'), 'error'); return; }
+  if (!API.nameParts) { showToast('Naming engine not available.', 'error'); return; }
+  if (!/_segment_/i.test(meshPath)) {
+    showToast(_i18nT('Segment the mesh into parts first (scissors), then name the zones.'), 'info', 3800);
+    return;
+  }
+  const assetType = document.getElementById('ws-asset-type')?.value || p.assetType || 'character';
+  let rigPath = null;
+  if (_LIVING_ASSETS.has(assetType)) rigPath = _findRigForMesh(p, meshPath);
+  // Gate hardware (rendu + CLIP en VRAM) comme la segmentation.
+  gatedRun('mesh', `name: ${p.name}`, () => _runNamePartsJob(meshPath, assetType, rigPath));
+}
+document.getElementById('ws-mesh-name-btn')?.addEventListener('click', runNameParts);
 
 // ============================================================
 // AI Tools — generic params popup with live 3D preview
