@@ -3393,6 +3393,10 @@ async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
         description: `Marketplace · ${l.asset_kind} · licence: ${l.licence}`.slice(0, 200),
       },
       unit_amount: l.price_cents,
+      // Prix affiché = prix TTC : la TVA calculée par Stripe Tax doit être
+      // INCLUSE dans unit_amount, pas ajoutée par-dessus (défaut Stripe =
+      // 'exclusive'). Sinon le client paie plus que le montant annoncé.
+      tax_behavior: 'inclusive',
     },
   }));
 
@@ -3847,6 +3851,10 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
           description: `Crédits pour la génération 3D MyFabmesh.AI — pack ${pack.name}`,
         },
         unit_amount: pack.euros * 100,
+        // Prix affiché sur /buy = TTC : la TVA doit être INCLUSE dans
+        // unit_amount et non ajoutée au-dessus (défaut Stripe = 'exclusive').
+        // Conformité conso UE : le client paie exactement le prix promis.
+        tax_behavior: 'inclusive',
       },
       quantity: 1,
     }],
