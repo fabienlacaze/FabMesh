@@ -1,5 +1,30 @@
 # FabMesh Agent Log
 
+## 2026-07-13 (release : correction des bloqueurs code-fixables de l'audit)
+
+Suite à l'audit de release (47/100 PAS-PRÊT), correction par code des bloqueurs
+fixables (workflow 5 chantiers, tout compile, RIEN déployé) :
+- EXPORT dé-gaté Blender (main.js export-mesh + animation.js) : GLB/OBJ/STL/PLY/
+  GLTF via trimesh, Blender requis SEULEMENT pour FBX + auto-détection partagée
+  (Program Files/Steam/PATH) au lieu du chemin dev codé en dur.
+- CLOUD sécu (worker.ts + wrangler.toml) : cap $/compte/jour (2$) + par-user sur
+  les 18 endpoints GPU, R2 signing FAIL-CLOSED (throw si secret absent), hook
+  Turnstile (inerte tant que secret absent), Stripe automatic_tax+tax_id sur les
+  3 checkouts, caps abaissés (Modal 20→10$, calls 1000→100).
+- LÉGAL web (cloud legal/buy + docs vitrine) : mentions unifiées + placeholders
+  [À_COMPLÉTER], section médiateur conso (L612-1), renonciation rétractation
+  (L221-28), prix TTC affichés, palier Lite retiré (gate ≥12 Go, <12 Go → Cloud).
+- WIZARD python : smoke-test durci (importe vraiment les 5 wheels CUDA + charge
+  TRELLIS-2 au lieu de juste import diffusers), hw_detect plancher VRAM 6→12 Go,
+  DINOv3 ajouté à wizard_download (3 modes).
+- LICENCES : THIRD_PARTY_LICENSES corrigé (clause animations fausse + attributions
+  Puppeteer/CLIP-L/DreamShaper/RealVis/DINOv3), package.json _releaseGuards.
+RESTE au USER (secrets/admin) : SIRET/immatriculation, adhésion médiateur, clés
+Stripe LIVE + Stripe Tax activé, R2_URL_SIGNING_SECRET, hébergement DINOv3,
+certif de signature. + 2 régas config notées (TTC tax_behavior inclusive, cap 2$).
+Crash Store « product crashes at launch » (10.1.2.10) = à diagnostiquer via
+Windows Sandbox (log %APPDATA%/fabmesh/startup.log).
+
 ## 2026-07-12 (nommage : fix routage + gate + sélecteur de catégorie)
 
 Bugs remontés au 1er test (tank affichait « Unknown » partout) :

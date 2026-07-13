@@ -8317,9 +8317,104 @@ ipcMain.handle('read-mesh-file', (event, filePath) => {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 });
 
+// -----------------------------------------------------------------------------
+// Blender resolution — shared by export-mesh (FBX/rig) and src/main/animation.js.
+// Order: config.blenderPath (if it exists) → auto-detection → null.
+// Kept self-contained (no external deps) so both call sites resolve identically.
+// -----------------------------------------------------------------------------
+function _autoDetectBlender() {
+  // Explicit dev override wins.
+  if (process.env.BLENDER_EXE && fs.existsSync(process.env.BLENDER_EXE)) {
+    return process.env.BLENDER_EXE;
+  }
+  const pf   = process.env['ProgramFiles']      || 'C:\\Program Files';
+  const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const candidates = [];
+  // Program Files\Blender Foundation\Blender X.Y\blender.exe
+  for (const root of [path.join(pf, 'Blender Foundation'), path.join(pf86, 'Blender Foundation')]) {
+    try {
+      if (fs.existsSync(root)) {
+        for (const sub of fs.readdirSync(root)) {
+          const exe = path.join(root, sub, 'blender.exe');
+          if (fs.existsSync(exe)) candidates.push(exe);
+        }
+      }
+    } catch (_) {}
+  }
+  // Steam install
+  for (const steam of [
+    path.join(pf86, 'Steam', 'steamapps', 'common', 'Blender', 'blender.exe'),
+    path.join(pf,   'Steam', 'steamapps', 'common', 'Blender', 'blender.exe'),
+  ]) {
+    try { if (fs.existsSync(steam)) candidates.push(steam); } catch (_) {}
+  }
+  if (candidates.length) {
+    // Highest version last alphabetically → sort desc so "Blender 4.4" beats "4.2".
+    candidates.sort();
+    return candidates[candidates.length - 1];
+  }
+  // Last resort: PATH lookup.
+  try {
+    const out = require('child_process').execSync('where blender', {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const first = out.split(/\r?\n/)[0];
+    if (first && fs.existsSync(first)) return first;
+  } catch (_) {}
+  return null;
+}
+
+function _resolveBlenderPath() {
+  const config = loadConfig();
+  if (config.blenderPath && fs.existsSync(config.blenderPath)) return config.blenderPath;
+  const auto = _autoDetectBlender();
+  if (auto) {
+    // Persist so later calls (and animation.js) reuse it without re-scanning.
+    try { config.blenderPath = auto; saveConfig(config); } catch (_) {}
+    return auto;
+  }
+  return null;
+}
+
+// Convert a mesh to a non-FBX format WITHOUT Blender, using the AI Python env's
+// trimesh. glb→glb (same container) is a straight copy; everything else is a
+// trimesh load+export. FBX is the only format that still requires Blender.
+function _exportViaTrimesh({ sourcePath, outputPath, targetFormat }) {
+  return new Promise((resolve, reject) => {
+    const srcExt = path.extname(sourcePath).slice(1).toLowerCase();
+    if (srcExt === targetFormat) {
+      try {
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.copyFileSync(sourcePath, outputPath);
+        return resolve({ path: outputPath, filename: path.basename(outputPath) });
+      } catch (e) { return reject({ error: e.message }); }
+    }
+    const pyCode = [
+      'import sys, trimesh',
+      'src, out, fmt = sys.argv[1], sys.argv[2], sys.argv[3]',
+      'obj = trimesh.load(src, process=False)',
+      'obj.export(out, file_type=fmt)',
+      'print("TRIMESH_EXPORT_OK", out)',
+    ].join('\n');
+    const proc = execFile(_aiPython(), ['-c', pyCode, sourcePath, outputPath, targetFormat], {
+      timeout: 120000, maxBuffer: 50 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      try {
+        fs.writeFileSync(
+          path.join(LOGS_DIR, 'last_error.log'),
+          `[${new Date().toISOString()}] export-mesh (trimesh)\nsource: ${sourcePath}\noutput: ${outputPath}\nformat: ${targetFormat}\n\n=== STDOUT ===\n${stdout || ''}\n\n=== STDERR ===\n${stderr || ''}\n`
+        );
+      } catch (_) {}
+      if (error) return reject({ error: 'Conversion trimesh échouée : ' + error.message, stderr });
+      if (!fs.existsSync(outputPath)) return reject({ error: 'Export failed (aucun fichier produit)' });
+      resolve({ path: outputPath, filename: path.basename(outputPath) });
+    });
+    proc.on('error', err => reject({ error: err.message }));
+  });
+}
+
 ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat, customName, outputPath: customOutputPath }) => {
   const config = loadConfig();
-  if (!config.blenderPath) throw new Error('Blender path not configured');
 
   // Validate inputs against injection
   const validFormats = ['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply', 'fbx_unreal'];
@@ -8328,6 +8423,20 @@ ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat, customNa
   // For Unreal export the actual file extension is .fbx
   const realFormat = targetFormat === 'fbx_unreal' ? 'fbx' : targetFormat;
   const isUnreal = targetFormat === 'fbx_unreal';
+
+  // Only FBX needs Blender. glb/gltf/obj/stl/ply go through trimesh below.
+  const needsBlender = (realFormat === 'fbx');
+  let blenderPath = null;
+  if (needsBlender) {
+    blenderPath = _resolveBlenderPath();
+    if (!blenderPath) {
+      throw new Error(
+        "Blender est requis pour l'export FBX mais reste introuvable. " +
+        "Installez Blender (blender.org) puis indiquez son chemin dans Réglages, " +
+        "ou exportez en GLB/OBJ/STL/PLY/GLTF (aucun Blender requis)."
+      );
+    }
+  }
 
   // Resolve the destination path
   let outputPath;
@@ -8343,6 +8452,12 @@ ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat, customNa
     outputPath = path.join(MESHES_DIR, `${baseName}.${realFormat}`);
   }
   try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch (e) {}
+
+  // Non-FBX formats: convert via trimesh (no Blender). The source mesh is a GLB,
+  // so glb→glb is a copy and glb→obj/stl/ply/gltf is a trimesh re-export.
+  if (!needsBlender) {
+    return _exportViaTrimesh({ sourcePath, outputPath, targetFormat: realFormat });
+  }
 
   const exportScript = `
 import bpy
@@ -8634,7 +8749,7 @@ elif fmt == 'ply':
 
   return new Promise((resolve, reject) => {
     const cleanup = () => { try { if (fs.existsSync(tmpScript)) fs.unlinkSync(tmpScript); } catch(e) {} };
-    const proc = execFile(config.blenderPath, ['--background', '--python', tmpScript], {
+    const proc = execFile(blenderPath, ['--background', '--python', tmpScript], {
       timeout: 60000,
       maxBuffer: 50 * 1024 * 1024,
     }, (error, stdout, stderr) => {

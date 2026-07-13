@@ -28,15 +28,81 @@ const fs       = require('fs');
 const path     = require('path');
 const os       = require('os');
 const crypto   = require('crypto');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, execSync } = require('child_process');
+const { app } = require('electron');
 // Lineage sidecar <output>.meta.json (Generation History) — best-effort.
 const { writeMeta } = require('./meta');
 
 // -----------------------------------------------------------------------------
-// Paths / configuration
+// Blender resolution — unified with src/main/main.js (_resolveBlenderPath).
+// Order: config.json blenderPath (if it exists) → auto-detection → null.
+// Previously this module hard-coded c:/tools/blender-4.4.3-... which never
+// exists on a client machine, hard-gating retarget/export on a dev-only path.
 // -----------------------------------------------------------------------------
-const BLENDER_EXE = (process.env.BLENDER_EXE
-  || 'c:/tools/blender-4.4.3-windows-x64/blender.exe');
+function _dataBase() {
+  try {
+    return app && app.isPackaged
+      ? app.getPath('userData')
+      : path.join(__dirname, '..', '..');
+  } catch (_) {
+    return path.join(__dirname, '..', '..');
+  }
+}
+
+function _configBlenderPath() {
+  try {
+    const cfgPath = path.join(_dataBase(), 'config.json');
+    if (fs.existsSync(cfgPath)) {
+      const j = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (j && j.blenderPath) return j.blenderPath;
+    }
+  } catch (_) {}
+  return '';
+}
+
+function _autoDetectBlender() {
+  if (process.env.BLENDER_EXE && fs.existsSync(process.env.BLENDER_EXE)) {
+    return process.env.BLENDER_EXE;
+  }
+  const pf   = process.env['ProgramFiles']      || 'C:\\Program Files';
+  const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const candidates = [];
+  for (const root of [path.join(pf, 'Blender Foundation'), path.join(pf86, 'Blender Foundation')]) {
+    try {
+      if (fs.existsSync(root)) {
+        for (const sub of fs.readdirSync(root)) {
+          const exe = path.join(root, sub, 'blender.exe');
+          if (fs.existsSync(exe)) candidates.push(exe);
+        }
+      }
+    } catch (_) {}
+  }
+  for (const steam of [
+    path.join(pf86, 'Steam', 'steamapps', 'common', 'Blender', 'blender.exe'),
+    path.join(pf,   'Steam', 'steamapps', 'common', 'Blender', 'blender.exe'),
+  ]) {
+    try { if (fs.existsSync(steam)) candidates.push(steam); } catch (_) {}
+  }
+  if (candidates.length) {
+    candidates.sort();
+    return candidates[candidates.length - 1];
+  }
+  try {
+    const out = execSync('where blender', {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const first = out.split(/\r?\n/)[0];
+    if (first && fs.existsSync(first)) return first;
+  } catch (_) {}
+  return null;
+}
+
+// Returns a usable blender.exe path, or null if none can be found.
+function _resolveBlender() {
+  const cfg = _configBlenderPath();
+  if (cfg && fs.existsSync(cfg)) return cfg;
+  return _autoDetectBlender();
+}
 
 // Apovivor FBX library bundled in `external/apovivor/1_Source/` when shipped,
 // or pulled from `c:/tmp/apovivor_fbx/1_Source` during dev. We resolve both.
@@ -152,8 +218,12 @@ function _spawnLocalRetarget({
   return new Promise((resolve, reject) => {
     const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
     const scriptPath = path.join(scriptsDir, 'rokoko_batch_retarget.py');
-    if (!fs.existsSync(BLENDER_EXE)) {
-      return reject(new Error(`Blender 4.4.3 not found at ${BLENDER_EXE}`));
+    const blenderExe = _resolveBlender();
+    if (!blenderExe || !fs.existsSync(blenderExe)) {
+      return reject(new Error(
+        "Blender est requis pour l'animation (retarget) mais reste introuvable. " +
+        "Installez Blender (blender.org) puis indiquez son chemin dans Réglages."
+      ));
     }
     if (!fs.existsSync(scriptPath)) {
       return reject(new Error('rokoko_batch_retarget.py missing'));
@@ -166,7 +236,7 @@ function _spawnLocalRetarget({
       '--out-dir', path.dirname(outGlb),
       '--out-name', path.basename(outGlb),
     ];
-    const proc = spawn(BLENDER_EXE, args, {
+    const proc = spawn(blenderExe, args, {
       cwd: scriptsDir,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     });
@@ -263,10 +333,14 @@ function _runExport({ glbPath, format, dest }) {
     }
     const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
     const convertScript = path.join(scriptsDir, 'convert_glb.py');
-    if (!fs.existsSync(convertScript) || !fs.existsSync(BLENDER_EXE)) {
-      return reject(new Error(`Cannot convert to ${format}: missing tooling`));
+    const blenderExe = _resolveBlender();
+    if (!fs.existsSync(convertScript) || !blenderExe || !fs.existsSync(blenderExe)) {
+      return reject(new Error(
+        `Impossible de convertir en ${format} : Blender introuvable ou script manquant. ` +
+        "Installez Blender (blender.org) puis renseignez son chemin dans Réglages."
+      ));
     }
-    execFile(BLENDER_EXE, [
+    execFile(blenderExe, [
       '--background', '--factory-startup',
       '--python', convertScript, '--',
       '--in', glbPath, '--out', dest, '--format', format,
