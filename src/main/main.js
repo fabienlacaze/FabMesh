@@ -986,18 +986,41 @@ function createWindow() {
       nodeIntegration: false
     },
     backgroundColor: '#1a1a2e',
-    show: false
+    // show:true (au lieu de false) : la fenêtre apparaît IMMÉDIATEMENT avec le
+    // backgroundColor (pas de flash blanc), sans dépendre de 'ready-to-show'.
+    // Sur un Win11 propre (Store cert), SAC peut empêcher le renderer/GPU de
+    // peindre → 'ready-to-show' ne fire jamais → avec show:false l'app restait
+    // SANS FENÊTRE = « crashes at launch ». show:true garantit une fenêtre.
+    show: true
   });
 
   // Route to the wizard on first launch, to the main app afterwards.
   const startPage = isSetupComplete() ? 'index2.html' : 'wizard.html';
   log.info('main', `loading ${startPage} (setup ${isSetupComplete() ? 'done' : 'pending'})`);
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', startPage));
+  // .catch : si le chargement de la page échoue (fichier manquant, renderer
+  // mort), on bascule sur la fenêtre de secours au lieu d'un reject global muet.
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', startPage))
+    .catch((e) => {
+      log.error('main', `loadFile(${startPage}) failed: ${e && e.message}`);
+      try { if (typeof showFallbackWindow === 'function') showFallbackWindow(e); } catch (_) {}
+    });
+  // WATCHDOG de révélation : si 'ready-to-show' ne fire pas en 8 s (le renderer
+  // n'a jamais peint — SAC/GPU bloqué), on force show() + fenêtre de secours,
+  // et on loggue l'état pour diagnostiquer sur la machine de certif.
+  let _revealed = false;
+  const _revealWatchdog = setTimeout(() => {
+    if (_revealed || !mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      log.error('main', `ready-to-show not fired in 8s — forcing show (visible=${mainWindow.isVisible()} url=${mainWindow.webContents.getURL()})`);
+    } catch (_) {}
+    try { mainWindow.show(); } catch (_) {}
+    try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer failed to paint within 8s (ready-to-show never fired)')); } catch (_) {}
+  }, 8000);
   mainWindow.once('ready-to-show', () => {
-    // Start maximized so the wizard / main app gets the full screen
-    // real estate. Users can still un-maximize manually.
-    mainWindow.maximize();
-    mainWindow.show();
+    _revealed = true;
+    clearTimeout(_revealWatchdog);
+    try { mainWindow.maximize(); } catch (_) {}
+    try { mainWindow.show(); } catch (_) {}
   });
   mainWindow.setMenuBarVisibility(false);
 
@@ -1015,10 +1038,18 @@ function createWindow() {
   // Auto-reload — but NOT during a normal shutdown ('clean-exit'/'killed') or
   // while quitting, which would cause a reload loop. reload() re-loads the
   // current page; in-flight renderer state is lost but that beats a dead window.
+  let _rendererReloads = 0;
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     try { log.error('main', 'renderer gone: ' + (details && details.reason)); } catch (_) {}
     if (_isQuitting) return;
     if (details && (details.reason === 'clean-exit' || details.reason === 'killed')) return;
+    // Anti-boucle : si le renderer meurt en boucle (GPU/SAC), on ARRÊTE de
+    // reload à l'infini après 3 essais et on montre la fenêtre de secours.
+    if (++_rendererReloads > 3) {
+      log.error('main', 'renderer keeps dying — stop reload loop, showing fallback');
+      try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer keeps dying: ' + (details && details.reason))); } catch (_) {}
+      return;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.reload(); } catch (_) {} }
   });
   mainWindow.webContents.on('unresponsive', () => {

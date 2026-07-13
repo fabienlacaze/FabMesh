@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-07-13 (crash Store « crashes at launch » : boot blindé — watchdog de révélation)
+
+Diagnostic (workflow 5 agents) : le MAIN ne crashe PAS (la ligne top-level
+`wizard.log opened` s'écrit → module évalué en entier, createWindow appelé).
+Le RENDERER du wizard ne peint jamais sur Win11 propre (SAC bloque les DLL
+GPU non signées d'Electron) ; or la fenêtre était `show:false` révélée UNIQUEMENT
+sur `ready-to-show` SANS filet → jamais de fenêtre → cert 10.1.2.10.
+Fix (B) createWindow main.js : show:true (fenêtre immédiate, backgroundColor,
+0 flash) + WATCHDOG 8 s (force show()+fallback si ready-to-show ne fire pas,
+loggue visible/url) + .catch sur loadFile → fallback + anti-boucle sur
+render-process-gone (>3 reload → fallback au lieu de boucler).
+Cause racine (A) HORS main.js : signer TOUS les binaires (electron.exe + .dll +
+python-embed .pyd) + soumettre MSIX signé Partner Center pour que SAC laisse
+démarrer le renderer/GPU. Confirmation possible sans machine vierge : forcer le
+wizard sur le build packagé dev + vérifier si wizard.js logue son [boot].
+main.js touché → restart Electron.
+
 ## 2026-07-13 (uninstall : une seule jolie popup, désinstalleur silencieux, 0 dialogue Windows)
 
 Avant : jolie popup in-app « Continue ? » PUIS dialogue Windows moche « Are you
