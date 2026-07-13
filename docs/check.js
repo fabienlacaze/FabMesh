@@ -1,6 +1,6 @@
 /* MyFabmesh.AI — browser-based compatibility check.
    Pure JS, no dependencies. Detects what it can from navigator + WebGL,
-   then renders a verdict (Full / Standard / Lite / Cloud) and the
+   then renders a verdict (Full / Standard / Cloud — 12 GB min for Desktop) and the
    matching call-to-action buttons.
 */
 (function () {
@@ -56,8 +56,9 @@
     if (!gpu || gpu.vendor !== 'NVIDIA') return 'cloud';
     if (gpu.vram === null)               return 'unknown';
     if (gpu.vram >= 15 * 1024)           return 'full';
-    if (gpu.vram >= 11 * 1024)           return 'standard';
-    if (gpu.vram >= 6  * 1024)           return 'lite';
+    // Desktop minimum raised to 12 GB — below that the pipeline OOMs, so we
+    // steer sub-12 GB machines to Cloud rather than sell a mode that crashes.
+    if (gpu.vram >= 12 * 1024)           return 'standard';
     return 'cloud';
   }
 
@@ -73,8 +74,7 @@
         gpu.vendor === 'Unknown' ? 'warn' : 'bad');
       if (gpu.vram !== null) {
         var gb = (gpu.vram / 1024).toFixed(1) + ' GB';
-        var cls = gpu.vram >= 12 * 1024 ? 'ok' :
-                  gpu.vram >= 6  * 1024 ? 'warn' : 'bad';
+        var cls = gpu.vram >= 12 * 1024 ? 'ok' : 'bad';
         setRow('r-vram', gb, cls);
       } else {
         setRow('r-vram', 'unknown', 'warn');
@@ -109,12 +109,6 @@
       cta.innerHTML =
         '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 49,99 € TTC</a>' +
         '<a href="index.html#cloud-soon" class="btn-ghost">Or try Cloud</a>';
-    } else if (v === 'lite') {
-      box.classList.add('verdict-lite');
-      box.textContent = '⚠ Compatible — Lite mode only';
-      cta.innerHTML =
-        '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 49,99 € TTC</a>' +
-        '<a href="index.html#cloud-soon" class="btn-ghost">Cloud may be smoother</a>';
     } else if (v === 'unknown') {
       box.classList.add('verdict-std');
       box.textContent = '? GPU model not in our database';

@@ -41,6 +41,32 @@ export default function TermsPage() {
         <li>Monthly subscriptions auto-renew until you cancel them. Credits from a subscription month do not roll over.</li>
         <li>Refunds: prepaid credits are non-refundable once they have been spent. Unspent credits are refundable within 14 days of purchase for EU buyers (right of withdrawal — Code de la consommation Art. L221-18 et seq.), unless you have already started consuming them.</li>
         <li>Pricing is shown on <a href="/buy">/buy</a> and can change with 30 days&apos; notice. Prior purchases keep their original credit values.</li>
+        <li>All consumer prices are shown <strong>inclusive of tax (TTC)</strong>. Any applicable VAT is included and computed according to your country of residence.</li>
+      </ul>
+
+      <h2>3a. Right of withdrawal &amp; digital content (EU consumers)</h2>
+      <ul>
+        <li>
+          <strong>Principle.</strong> As an EU consumer you normally have 14 days to
+          withdraw from a distance purchase without giving a reason (Code de la
+          consommation Art. L221-18 et seq.). Unspent, unused credits are refundable
+          within that period.
+        </li>
+        <li>
+          <strong>Waiver for immediately-supplied digital content
+          (Art. L221-28 13°).</strong> Credits are digital content usable
+          immediately, and generated assets are digital content supplied on a
+          non-tangible medium as soon as you launch a generation. By purchasing and
+          by ticking the consent box at checkout, you{' '}
+          <strong>expressly request that performance begin immediately</strong> and
+          you <strong>acknowledge that you thereby lose your right of withdrawal</strong>{' '}
+          in respect of any credit you have started to consume and of any asset
+          already generated (Art. L221-28 13° of the Code de la consommation).
+        </li>
+        <li>
+          <strong>What remains refundable.</strong> Credits that you have neither
+          spent nor started to consume remain refundable within the 14-day period.
+        </li>
       </ul>
 
       <h2>4. Acceptable use</h2>
@@ -99,6 +125,23 @@ export default function TermsPage() {
         These terms are governed by French law. Any dispute that
         can&apos;t be resolved amicably falls under the jurisdiction of
         the French courts.
+      </p>
+
+      <h2>10a. Consumer mediation (Médiateur de la consommation)</h2>
+      <p>
+        In accordance with Article L612-1 of the French Consumer Code, after
+        first sending us a written complaint, any consumer may refer the dispute
+        free of charge to the designated consumer mediator:
+      </p>
+      <ul>
+        <li><strong>Designated consumer mediator:</strong> [À_COMPLÉTER: médiateur agréé — ex. CM2C / Medicys — nom, adresse postale, URL de saisine]</li>
+      </ul>
+      <p>
+        EU consumers may also use the European Commission&apos;s Online Dispute
+        Resolution platform at{' '}
+        <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener">ec.europa.eu/consumers/odr</a>.
+        The full mediator coordinates are also listed in the{' '}
+        <a href="/legal/mentions">Legal Notice (Mentions légales)</a>.
       </p>
 
       <h2>11. Marketplace</h2>
@@ -214,7 +257,7 @@ export default function TermsPage() {
       </ul>
       <h3>13.1 Designated agents</h3>
       <ul style={{ fontSize: 14 }}>
-        <li><strong>DSA single point of contact &amp; copyright / DMCA agent:</strong> [À CONFIRMER — designated agent name], reachable at <a href="mailto:contact@myfabmesh.ai">contact@myfabmesh.ai</a>. Before distributing to U.S. users, this agent must also be registered with the U.S. Copyright Office DMCA Designated Agent Directory.</li>
+        <li><strong>DSA single point of contact &amp; copyright / DMCA agent:</strong> [À_COMPLÉTER: nom de l&apos;agent désigné], reachable at <a href="mailto:contact@myfabmesh.ai">contact@myfabmesh.ai</a>. Before distributing to U.S. users, this agent must also be registered with the U.S. Copyright Office DMCA Designated Agent Directory.</li>
         <li><strong>Registered business identity</strong> (operator, SIRET, registered office, host): see the <a href="/legal/mentions">Legal Notice (Mentions légales)</a>.</li>
       </ul>
 

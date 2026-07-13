@@ -1,5 +1,5 @@
 // Legal Notice (Mentions légales) — French LCEN art. 6-III + GDPR Art. 13
-// publisher/host identification. Fill every [À CONFIRMER] field with the
+// publisher/host identification. Fill every [À_COMPLÉTER: …] field with the
 // registered business identity BEFORE commercial launch.
 
 export const metadata = {
@@ -20,17 +20,22 @@ export default function LegalNoticePage() {
       </p>
 
       <h2>1. Publisher (Éditeur)</h2>
+      <p style={{ fontSize: 13, color: 'var(--text-2)' }}>
+        This is the single source of truth for the operator&apos;s legal identity.
+        Every legal / commercial page (Terms, Privacy, checkout receipts) must
+        reference the same values as below.
+      </p>
       <ul>
         <li><strong>Trade name:</strong> MyFabmesh.AI</li>
         <li><strong>Operator:</strong> Ayros Studio</li>
-        <li><strong>Legal form:</strong> [À CONFIRMER — e.g. entrepreneur individuel / micro-entreprise / EURL / SASU]</li>
-        <li><strong>SIREN / SIRET:</strong> [À CONFIRMER]</li>
-        <li><strong>RCS / RM registration:</strong> [À CONFIRMER]</li>
-        <li><strong>Share capital:</strong> [À CONFIRMER — only if a company]</li>
-        <li><strong>Registered office:</strong> [À CONFIRMER — full postal address]</li>
-        <li><strong>Intra-community VAT:</strong> [À CONFIRMER — or &ldquo;TVA non applicable, art. 293 B du CGI&rdquo; if under the franchise en base de TVA]</li>
-        <li><strong>Director of publication (Directeur de la publication):</strong> [À CONFIRMER — e.g. Fabien Lacaze]</li>
-        <li><strong>Contact:</strong> <a href="mailto:contact@myfabmesh.ai">contact@myfabmesh.ai</a> [À CONFIRMER — set up a professional mailbox]</li>
+        <li><strong>Legal form:</strong> [À_COMPLÉTER: forme juridique — ex. entrepreneur individuel / micro-entreprise / EURL / SASU]</li>
+        <li><strong>SIREN / SIRET:</strong> [À_COMPLÉTER: SIREN 9 chiffres / SIRET 14 chiffres]</li>
+        <li><strong>RCS / RM registration:</strong> [À_COMPLÉTER: n° RCS ou RM + ville d&apos;immatriculation]</li>
+        <li><strong>Share capital:</strong> [À_COMPLÉTER: capital social — uniquement si société ; sinon « sans objet »]</li>
+        <li><strong>Registered office:</strong> [À_COMPLÉTER: adresse postale complète du siège — valeur unique reprise à l&apos;identique sur toutes les pages légales]</li>
+        <li><strong>Intra-community VAT:</strong> [À_COMPLÉTER: n° TVA intracommunautaire — ou « TVA non applicable, art. 293 B du CGI » si franchise en base de TVA]</li>
+        <li><strong>Director of publication (Directeur de la publication):</strong> [À_COMPLÉTER: nom du directeur de la publication — ex. Fabien Lacaze]</li>
+        <li><strong>Contact:</strong> <a href="mailto:contact@myfabmesh.ai">contact@myfabmesh.ai</a> [À_COMPLÉTER: confirmer/créer la boîte professionnelle]</li>
       </ul>
 
       <h2>2. Host (Hébergeur)</h2>
@@ -72,13 +77,24 @@ export default function LegalNoticePage() {
         Service</a>.
       </p>
 
-      <h2>6. Consumer mediation</h2>
+      <h2>6. Consumer mediation (Médiateur de la consommation)</h2>
       <p>
-        For consumers resident in the EU: in case of an unresolved dispute you may
-        use the European Commission&apos;s Online Dispute Resolution platform at{' '}
+        In accordance with Article L612-1 of the French Consumer Code, any
+        consumer has the right to free recourse to a consumer mediator with a view
+        to the amicable resolution of a dispute with a trader. Before referring a
+        matter to the mediator, the consumer must first have submitted a written
+        complaint to us (see contact above).
+      </p>
+      <ul>
+        <li><strong>Designated consumer mediator (médiateur agréé):</strong> [À_COMPLÉTER: médiateur agréé — ex. CM2C / Medicys — nom, adresse postale, site web]</li>
+        <li><strong>Mediator postal &amp; web contact:</strong> [À_COMPLÉTER: coordonnées complètes du médiateur (adresse + URL de saisine en ligne)]</li>
+      </ul>
+      <p>
+        For consumers resident in the EU, the European Commission also provides an
+        Online Dispute Resolution platform at{' '}
         <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener">ec.europa.eu/consumers/odr</a>.
-        The designated consumer mediator (médiateur de la consommation) is [À
-        CONFIRMER — mandatory for B2C sales in France].
+        Recourse to mediation is optional; the consumer remains free to bring the
+        matter before the competent courts.
       </p>
 
       <p style={{ marginTop: 32, fontSize: 13 }}>

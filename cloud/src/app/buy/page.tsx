@@ -16,6 +16,9 @@ export default function BuyPage() {
   // those cards so the user doesn't get a 503 mid-checkout. null = still
   // loading; missing key = treat as available (fail-open on fetch error).
   const [availability, setAvailability] = useState<Record<string, boolean> | null>(null);
+  // EU right-of-withdrawal waiver (Art. L221-28 13°): the user must explicitly
+  // consent before any checkout can start. Gates every BuyButton on the page.
+  const [consented, setConsented] = useState(false);
 
   useEffect(() => {
     fetch('/api/me')
@@ -44,9 +47,35 @@ export default function BuyPage() {
         <h2>Buy credits</h2>
         {user && <span className="credits-pill">{user.credits} credits</span>}
       </div>
-      <p style={{ color: 'var(--text-2)', marginBottom: 24 }}>
+      <p style={{ color: 'var(--text-2)', marginBottom: 8 }}>
         No subscription. Credits never expire.
       </p>
+      <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 24 }}>
+        All prices shown are <strong>TTC (VAT included)</strong> — VAT is calculated
+        according to your country at checkout.
+      </p>
+
+      <label
+        style={{
+          display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 24,
+          padding: '12px 14px', border: '1px solid var(--border, #333)', borderRadius: 8,
+          fontSize: 13, lineHeight: 1.5, cursor: 'pointer',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={consented}
+          onChange={(e) => setConsented(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span>
+          I expressly request that credits be made available immediately and I
+          acknowledge that, once I start consuming a credit or generate an asset, I{' '}
+          <strong>lose my 14-day right of withdrawal</strong> for that digital
+          content (Art. L221-28 13° of the French Consumer Code). See the{' '}
+          <a href="/legal/terms">Terms of Service</a>.
+        </span>
+      </label>
 
       <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>One-shot top-ups</h3>
       <div className="pricing-grid" style={{ padding: 0 }}>
@@ -56,10 +85,10 @@ export default function BuyPage() {
               {p.name}
               {p.id === 'pro' && <span className="feat-tag">popular</span>}
             </div>
-            <div className="amount">{p.euros} €</div>
+            <div className="amount">{p.euros} € <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-2)' }}>TTC</span></div>
             <div className="unit">{p.credits} credits</div>
             <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
-            <BuyButton packId={p.id} loggedIn={!!user} />
+            <BuyButton packId={p.id} loggedIn={!!user} consented={consented} />
           </div>
         ))}
       </div>
@@ -80,10 +109,10 @@ export default function BuyPage() {
                 {p.name}
                 {p.id === 'sub_pro' && <span className="feat-tag">best value</span>}
               </div>
-              <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>/ month</span></div>
+              <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>TTC / month</span></div>
               <div className="unit">{p.credits} credits / month</div>
               <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
-              <BuyButton packId={p.id} loggedIn={!!user} />
+              <BuyButton packId={p.id} loggedIn={!!user} consented={consented} />
             </div>
           ))}
         </div>

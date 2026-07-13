@@ -4,12 +4,15 @@ import { useRouter } from 'next/navigation';
 
 const MOCK = process.env.NEXT_PUBLIC_MOCK === '1';
 
-export function BuyButton({ packId, loggedIn }: { packId: string; loggedIn: boolean }) {
+export function BuyButton({ packId, loggedIn, consented = true }: { packId: string; loggedIn: boolean; consented?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
 
   async function buy() {
     if (!loggedIn) { router.push(`/login?next=/buy`); return; }
+    // EU consumers must waive their right of withdrawal for immediately-supplied
+    // digital content (Art. L221-28 13°) before checkout can start.
+    if (!consented) { alert('Please tick the consent box before buying.'); return; }
     setBusy(true);
     const endpoint = MOCK ? '/api/mock-checkout' : '/api/checkout';
     const res = await fetch(endpoint, {
@@ -23,7 +26,7 @@ export function BuyButton({ packId, loggedIn }: { packId: string; loggedIn: bool
   }
 
   return (
-    <button onClick={buy} disabled={busy} className="primary-btn" style={{ width: '100%' }}>
+    <button onClick={buy} disabled={busy || !consented} className="primary-btn" style={{ width: '100%' }}>
       {busy ? '…' : MOCK ? 'Add credits (DEV)' : 'Buy'}
     </button>
   );
