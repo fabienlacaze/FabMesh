@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-07-13 (uninstaller : question dédiée « supprimer les contenus générés » + bons chemins)
+
+Demande user. Le désinstalleur NSIS (build/uninstaller.nsh) avait 2 bugs :
+supprimait %APPDATA%abmesh (mauvais dossier ; le vrai userData packagé =
+%APPDATA%\myfabmesh-ai) et prétendait (commentaire) que les meshes sont dans
+Documents (faux : userData/meshes). Réécrit avec 3 questions indépendantes,
+toutes « Non » par défaut (/SD IDNO — jamais de destruction silencieuse) :
+1) modèles IA ~17 Go, 2) CONTENUS GÉNÉRÉS (projects/images/meshes/previews/
+history sous userData), 3) réglages (config+logs). S'applique au PROCHAIN build.
+
 ## 2026-07-13 (release : correction des bloqueurs code-fixables de l'audit)
 
 Suite à l'audit de release (47/100 PAS-PRÊT), correction par code des bloqueurs
