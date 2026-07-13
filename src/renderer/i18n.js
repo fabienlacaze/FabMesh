@@ -30,6 +30,7 @@
       'Delete my settings': 'Supprimer mes réglages',
       'Config and logs.': 'Configuration et logs.',
       'Nothing checked = your creations and models are kept.': 'Rien de coché = tes créations et modèles sont conservés.',
+      'Uncheck an item to keep it after uninstalling.': 'Décoche un élément pour le conserver après la désinstallation.',
       'Uninstall': 'Désinstaller',
       // ---- Part naming (Nommer les zones) ----
       'Name the zones (AI)': 'Nommer les zones (IA)',

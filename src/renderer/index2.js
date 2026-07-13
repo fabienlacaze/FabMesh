@@ -17182,14 +17182,14 @@ function _openUninstallModal() {
     box.style.cssText = 'background:#1b1d22;color:#eee;border:1px solid #3a3d44;border-radius:12px;padding:20px 22px;max-width:440px;width:92%;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:inherit;';
     const rows = OPTS.map((o) =>
       `<label style="display:flex;gap:10px;align-items:flex-start;padding:9px 10px;margin-bottom:7px;border:1px solid #33363d;border-radius:8px;cursor:pointer;">
-         <input type="checkbox" data-opt="${o.id}" style="margin-top:2px;width:16px;height:16px;flex:none;">
+         <input type="checkbox" data-opt="${o.id}" checked style="margin-top:2px;width:16px;height:16px;flex:none;">
          <span><span style="font-size:13.5px;font-weight:500;">${_escapeHtml(_i18nT(o.en))}</span><br><span style="font-size:11.5px;opacity:.65;">${_escapeHtml(_i18nT(o.sub))}</span></span>
        </label>`).join('');
     box.innerHTML =
       `<div style="font-size:16px;font-weight:600;margin-bottom:4px;">&#128465; ${_escapeHtml(_i18nT('Uninstall MyFabmesh.AI'))}</div>` +
       `<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:14px;">${_escapeHtml(_i18nT('This removes the app. Optionally, also delete:'))}</div>` +
       rows +
-      `<div style="font-size:11.5px;opacity:.6;margin:4px 0 14px;">${_escapeHtml(_i18nT('Nothing checked = your creations and models are kept.'))}</div>` +
+      `<div style="font-size:11.5px;opacity:.6;margin:4px 0 14px;">${_escapeHtml(_i18nT('Uncheck an item to keep it after uninstalling.'))}</div>` +
       `<div style="display:flex;gap:10px;justify-content:flex-end;">` +
         `<button id="unins-cancel" class="ghost-btn" style="padding:8px 16px;">${_escapeHtml(_i18nT('Cancel'))}</button>` +
         `<button id="unins-go" class="primary-btn" style="padding:8px 16px;background:#c0392b;border-color:#c0392b;">${_escapeHtml(_i18nT('Uninstall'))}</button></div>`;
