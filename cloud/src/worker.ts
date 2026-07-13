@@ -118,6 +118,18 @@ export interface Env {
   ALERT_FROM_EMAIL?: string;          // From: for alert emails (Resend-verified domain; default onboarding@resend.dev)
   MODAL_USAGE_SECRET?: string;        // shared secret the modal-billing poller uses to push REAL usage
   MAX_USER_DAILY_CALLS?: string;
+  // Anti-DoS: per-account (per-user) daily $ spend cap on GPU jobs. A single
+  // account can never push more than this much estimated cost through the
+  // Modal/Replicate GPU endpoints in one UTC day, regardless of how many
+  // credits they hold. Complements the GLOBAL MAX_DAILY_*_SPEND_USD caps.
+  // Default $2.00/user/day (see DEFAULT_MAX_USER_DAILY_SPEND_USD).
+  MAX_USER_DAILY_SPEND_USD?: string;
+
+  // Cloudflare Turnstile (captcha) secret for the siteverify call. When SET,
+  // the expensive GPU endpoints require a valid `cf-turnstile-response` token
+  // (see verifyTurnstile / assertTurnstile). When UNSET, the check is a no-op
+  // so the pipeline keeps working until the frontend widget + keys are wired.
+  TURNSTILE_SECRET_KEY?: string;
 
   // NSFW filter bypass — set to "1" to disable the prompt pre-filter
   // (intended for dev/staging, NEVER in prod). When unset, all prompts
@@ -139,9 +151,17 @@ export interface Env {
   // R2 bucket (incl. user face photos) is no longer reachable at permanent,
   // guessable, unauthenticated r2.dev URLs. Set as a Cloudflare Worker SECRET
   // (`npx wrangler secret put R2_URL_SIGNING_SECRET`), NEVER as a plaintext
-  // var in wrangler.toml. When UNSET, signedR2Url() falls back to the raw
-  // R2_PUBLIC_URL form (non-breaking) and the /r2/ route returns 404.
+  // var in wrangler.toml. When UNSET, signedR2Url() THROWS (fail-closed) so a
+  // private bucket is never exposed via permanent public URLs — unless
+  // R2_ALLOW_UNSIGNED="1" (local dev) or MOCK mode is active.
   R2_URL_SIGNING_SECRET?: string;
+
+  // Escape hatch for LOCAL DEV ONLY. By default, when R2_URL_SIGNING_SECRET is
+  // unset (and we are NOT in MOCK mode), signedR2Url() THROWS rather than leak
+  // a permanent public r2.dev URL — signed URLs are mandatory for a private
+  // bucket in production. Set R2_ALLOW_UNSIGNED="1" to opt back into the old
+  // public-URL fallback for local development. NEVER set this in production.
+  R2_ALLOW_UNSIGNED?: string;
 }
 
 /** Minimal R2Bucket type (avoid pulling @cloudflare/workers-types). */
@@ -169,6 +189,11 @@ const DEFAULT_MAX_MODAL_SPEND_USD = 2.00;  // Modal is ~5-10× cheaper per
                                            // image but the cap is its OWN
                                            // wallet, not shared with Replicate.
 const DEFAULT_MAX_USER_DAILY_CALLS = 10;
+// Anti-DoS per-account $ cap: even with unlimited credits a single account can
+// never burn more than this much estimated GPU cost per UTC day. Conservative
+// default; override with MAX_USER_DAILY_SPEND_USD. This is the second line of
+// defence behind the GLOBAL MAX_DAILY_*_SPEND_USD caps.
+const DEFAULT_MAX_USER_DAILY_SPEND_USD = 2.00;
 
 function todayUTC(): string { return new Date().toISOString().slice(0, 10); }
 
@@ -263,12 +288,32 @@ async function _casIncrementCounter(env: Env, key: string, delta: number, max: n
   return null;  // sustained contention — fail safe rather than risk a cap bypass
 }
 
+/** Anti-DoS per-account daily $ cap. CAS-atomic. Returns remaining $ for the
+ *  user today, or null if this call would push the account over its personal
+ *  daily budget. Counter lives at `_meta/userspend/<userId>/<YYYY-MM-DD>` and
+ *  resets at UTC midnight. Soft cap: NOT refunded on downstream failure (same
+ *  policy as checkAndIncrementUserCalls) so a failure-spamming attacker still
+ *  burns their own budget. */
+async function checkAndIncrementUserDailySpend(env: Env, userId: string, estimatedUsd: number): Promise<number | null> {
+  const maxUsd = parseFloat(env.MAX_USER_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_USER_DAILY_SPEND_USD;
+  const next = await _casIncrementCounter(env, `_meta/userspend/${userId}/${todayUTC()}`, estimatedUsd, maxUsd);
+  return next == null ? null : maxUsd - next;
+}
+
 /** Check the daily Replicate spend cap. Returns the remaining budget
- *  in USD, or null if the request would push us over. CAS-atomic. */
-async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number): Promise<number | null> {
+ *  in USD, or null if the request would push us over (global OR per-account).
+ *  CAS-atomic. When userId is passed, the per-account daily $ cap is enforced
+ *  too; if the account is over budget we roll back the global increment so the
+ *  shared counter stays accurate. */
+async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number, userId?: string): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_DAILY_SPEND_USD;
   const next = await _casIncrementCounter(env, `_meta/spend/${todayUTC()}`, estimatedUsd, maxUsd);
-  return next == null ? null : maxUsd - next;
+  if (next == null) return null;
+  if (userId && (await checkAndIncrementUserDailySpend(env, userId, estimatedUsd)) == null) {
+    await refundDailySpend(env, estimatedUsd);  // roll back global; account is over its personal cap
+    return null;
+  }
+  return maxUsd - next;
 }
 
 /** Refund the spend if the call ended up failing — keeps the budget
@@ -285,10 +330,17 @@ async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
  *  counter is exhausted, which is exactly the bug the user hit on
  *  2026-05-25. The default cap is MORE generous than Replicate ($2 vs
  *  $0.50) because Modal is ~5-10× cheaper per image. */
-async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number): Promise<number | null> {
+async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userId?: string): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
   const next = await _casIncrementCounter(env, `_meta/modal_spend/${todayUTC()}`, estimatedUsd, maxUsd);
   if (next == null) return null;
+  // Anti-DoS per-account daily $ cap. If the account is over its personal
+  // budget, roll back the global increment (refundModalSpend also fixes the
+  // running total) and refuse — same signal as a global over-budget.
+  if (userId && (await checkAndIncrementUserDailySpend(env, userId, estimatedUsd)) == null) {
+    await refundModalSpend(env, estimatedUsd);
+    return null;
+  }
   // Running cumulative spend since the last budget top-up (for the admin budget
   // gauge + the low-budget alert). Best-effort — never blocks a paid call.
   try {
@@ -374,6 +426,55 @@ async function checkAndIncrementUserCalls(env: Env, userId: string): Promise<num
   const maxCalls = parseInt(env.MAX_USER_DAILY_CALLS ?? '', 10) || DEFAULT_MAX_USER_DAILY_CALLS;
   const next = await _casIncrementCounter(env, `_meta/userdaily/${userId}/${todayUTC()}`, 1, maxCalls);
   return next == null ? null : maxCalls - next;
+}
+
+/* ─────────────────────────── Turnstile (captcha) ────────────────────────
+ * Anti-abuse hook for the expensive GPU endpoints. When TURNSTILE_SECRET_KEY
+ * is UNSET the check is a NO-OP (returns true) so nothing breaks until the
+ * frontend widget + keys are wired up. When SET, the caller must present a
+ * Cloudflare Turnstile token (form field `cf-turnstile-response` or the
+ * `cf-turnstile-response` / `x-turnstile-token` header) that validates against
+ * Cloudflare's siteverify endpoint.
+ *
+ * To fully enable (USER TODO):
+ *   1. Create a Turnstile widget in the Cloudflare dashboard (get a site key
+ *      + secret key).
+ *   2. `npx wrangler secret put TURNSTILE_SECRET_KEY`  (paste the secret key).
+ *   3. Add the Turnstile widget to the buy/generate UI (site key) and send the
+ *      token as `cf-turnstile-response` on the generate request. Also add
+ *      https://challenges.cloudflare.com to the CSP script-src/frame-src.
+ * ──────────────────────────────────────────────────────────────────────── */
+async function verifyTurnstile(env: Env, token: string | null, remoteIp?: string | null): Promise<boolean> {
+  // No secret configured → hook is inert (does not block the pipeline).
+  if (!env.TURNSTILE_SECRET_KEY) return true;
+  if (!token) return false;
+  try {
+    const body = new URLSearchParams();
+    body.set('secret', env.TURNSTILE_SECRET_KEY);
+    body.set('response', token);
+    if (remoteIp) body.set('remoteip', remoteIp);
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    if (!r.ok) return false;
+    const data = await r.json() as { success?: boolean };
+    return data.success === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Extract a Turnstile token from a request's form data or headers. Best-effort;
+ *  returns null when absent. Call BEFORE consuming the body elsewhere or pass a
+ *  pre-parsed FormData. */
+function extractTurnstileToken(req: Request, form?: FormData): string | null {
+  const fromForm = form ? (form.get('cf-turnstile-response') as string | null) : null;
+  return fromForm
+      || req.headers.get('cf-turnstile-response')
+      || req.headers.get('x-turnstile-token')
+      || null;
 }
 
 /* ─────────────────────────── tiny helpers ──────────────────────────── */
@@ -464,11 +565,21 @@ async function signedR2Url(env: Env, key: string, kind: R2UrlKind = 'image'): Pr
   const clean = key.replace(/^\/+/, '');
   const base = siteUrl(env, 'http://localhost:3030').replace(/\/+$/, '');
   if (!env.R2_URL_SIGNING_SECRET) {
-    if (!_r2SignWarned) {
-      _r2SignWarned = true;
-      console.warn('[r2] R2_URL_SIGNING_SECRET unset — falling back to public R2_PUBLIC_URL (objects remain publicly reachable). Set the secret to enable signed URLs.');
+    // Fail-closed for production: never hand out a permanent, guessable public
+    // r2.dev URL for a private bucket. Only fall back to the public form in
+    // MOCK mode or when an operator explicitly opts in for local dev.
+    if (isMock(env) || env.R2_ALLOW_UNSIGNED === '1') {
+      if (!_r2SignWarned) {
+        _r2SignWarned = true;
+        console.warn('[r2] R2_URL_SIGNING_SECRET unset — falling back to public R2_PUBLIC_URL (objects remain publicly reachable). Set the secret to enable signed URLs.');
+      }
+      return `${(env.R2_PUBLIC_URL || '').replace(/\/+$/, '')}/${clean}`;
     }
-    return `${(env.R2_PUBLIC_URL || '').replace(/\/+$/, '')}/${clean}`;
+    throw new Error(
+      'R2_URL_SIGNING_SECRET is required to serve private R2 URLs. ' +
+      'Set it with `openssl rand -hex 32 | npx wrangler secret put R2_URL_SIGNING_SECRET`, ' +
+      'or set R2_ALLOW_UNSIGNED="1" to opt into the public-URL fallback for local dev only.'
+    );
   }
   const exp = Math.floor(Date.now() / 1000) + r2TtlFor(kind);
   const sig = await r2SignHex(env.R2_URL_SIGNING_SECRET, `v1:${clean}\n${exp}`);
@@ -3295,6 +3406,11 @@ async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
       user_id: user.id,
       listing_ids: listings.map((l) => l.id).join(','),
     },
+    // EU VAT / sales-tax auto-collection. _stripeForm encodes these as
+    // automatic_tax[enabled]=true / tax_id_collection[enabled]=true.
+    // Requires Stripe Tax enabled + origin address in the Dashboard.
+    automatic_tax: { enabled: true },
+    tax_id_collection: { enabled: true },
     success_url: `${SITE}/market?paid=1`,
     cancel_url: `${SITE}/market?canceled=1`,
   });
@@ -3705,6 +3821,13 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
       subscription_data: {
         metadata: { user_id: user.id, pack_id: pack.id, credits: String(pack.credits) },
       },
+      // EU VAT / sales-tax: let Stripe Tax compute and collect the correct
+      // rate from the customer's billing address. Requires Stripe Tax to be
+      // enabled + an origin address set in the Stripe Dashboard (Settings →
+      // Tax). Checkout auto-collects the billing address when this is on.
+      automatic_tax: { enabled: true },
+      // Let B2B customers enter a VAT/tax ID (reverse-charge handling).
+      tax_id_collection: { enabled: true },
       success_url: `${SITE}/account?paid=1`,
       cancel_url: `${SITE}/buy?canceled=1`,
     });
@@ -3728,6 +3851,9 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
       quantity: 1,
     }],
     metadata: { user_id: user.id, pack_id: pack.id, credits: String(pack.credits) },
+    // EU VAT / sales-tax auto-collection (see subscription branch above).
+    automatic_tax: { enabled: true },
+    tax_id_collection: { enabled: true },
     success_url: `${SITE}/account?paid=1`,
     cancel_url: `${SITE}/buy?canceled=1`,
   });
@@ -3955,6 +4081,16 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
 
   const form = await req.formData();
+
+  // Anti-abuse captcha gate on the most expensive endpoint. No-op while
+  // TURNSTILE_SECRET_KEY is unset; once set, a valid token is required.
+  // (Same pattern can be added to the other Modal handlers as needed.)
+  const _tsOk = await verifyTurnstile(
+    env,
+    extractTurnstileToken(req, form),
+    req.headers.get('cf-connecting-ip'),
+  );
+  if (!_tsOk) return err(403, 'captcha verification failed');
   let image = form.get('image');
   // If the client passed an HTTPS URL (R2/blob), capture it so the
   // Modal mesh path can re-use it directly without round-tripping
@@ -4042,8 +4178,8 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   const ESTIMATED_USD_MESH = useModalMesh ? 0.16 : 0.50;
 
   const remainingBudget = useModalMesh
-    ? await checkAndIncrementModalSpend(env, ESTIMATED_USD_MESH)
-    : await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH);
+    ? await checkAndIncrementModalSpend(env, ESTIMATED_USD_MESH, user.id)
+    : await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH, user.id);
   if (remainingBudget == null) {
     const provider = 'Cloud GPU';
     return err(429, 'The service is temporarily at capacity — your credits are safe and you were not charged. Please try again shortly.');
@@ -6360,8 +6496,8 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // Conservative — never falsifies the budget upward. Modal uses its
   // own R2 counter so the two backends don't share a cap.
   const remainingBudget = useModal
-    ? await checkAndIncrementModalSpend(env, estimatedTotal)
-    : await checkAndIncrementDailySpend(env, estimatedTotal);
+    ? await checkAndIncrementModalSpend(env, estimatedTotal, user.id)
+    : await checkAndIncrementDailySpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     const provider = 'Cloud GPU';
     return json({ ok: false, success: false,
@@ -6489,8 +6625,8 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   const estimatedTotal = ESTIMATED_USD_PER_BACK * n;
 
   const remainingBudget = useModal
-    ? await checkAndIncrementModalSpend(env, estimatedTotal)
-    : await checkAndIncrementDailySpend(env, estimatedTotal);
+    ? await checkAndIncrementModalSpend(env, estimatedTotal, user.id)
+    : await checkAndIncrementDailySpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     const provider = 'Cloud GPU';
     return json({ ok: false, success: false,
@@ -6585,7 +6721,7 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   const cost = COST_PER_MODIFY;
   const estimatedTotal = 0.05;  // ≈ back-view cost, warm container
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
       error: `daily Cloud GPU budget reached. Try again after midnight UTC.` }, { status: 429 });
@@ -6650,7 +6786,7 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
 
   const cost = await getPrice(env, 'segment');  // admin-configurable (Pricing tab)
   const estimatedTotal = 0.05;
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
       error: 'daily Cloud GPU budget reached. Try again after midnight UTC.' }, { status: 429 });
@@ -6728,7 +6864,7 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
   const cost = COST_PER_INPAINT;
   const estimatedTotal = 0.08;
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
       error: 'daily Cloud GPU budget reached. Try again after midnight UTC.' }, { status: 429 });
@@ -6836,7 +6972,7 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
   const COST_PER = await getPrice(env, 'mask_inpaint');
   const estimatedTotal = 0.07;
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
       error: 'daily Cloud GPU budget reached. Try again after midnight UTC.' }, { status: 429 });
@@ -6894,7 +7030,7 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
 
   const COST_PER = await getPrice(env, 'face_fix_image');
   const estimatedTotal = 0.05;
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
       error: 'daily Cloud GPU budget reached.' }, { status: 429 });
@@ -7014,7 +7150,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   // Cheap op (CPU, ~$0.001 Modal) — defaults to 1 credit, admin-tunable.
   const COST_PER = await getPrice(env, 'mesh_op_simple');
   const estimatedTotal = 0.005;
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false, error: 'daily Cloud GPU budget reached.' }, { status: 429 });
   }
@@ -7613,7 +7749,7 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   }
   const skeleton = typeof body.skeleton === 'string' ? body.skeleton : undefined;
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_RIG);
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_RIG, user.id);
   if (remainingBudget == null) {
     return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
   }
@@ -7943,7 +8079,7 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
   granularity = Math.max(0, Math.min(1, granularity));
   const projectName = typeof body.projectName === 'string' ? body.projectName : '';
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_SEGMENT);
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_SEGMENT, user.id);
   if (remainingBudget == null) {
     return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
   }
@@ -8975,7 +9111,7 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
     : '';
   const projectName = typeof body.projectName === 'string' ? body.projectName : '';
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM);
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM, user.id);
   if (remainingBudget == null) return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
   const refundAnimSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM); };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
@@ -9251,7 +9387,7 @@ async function handleAnimateFromReference(req: Request, env: Env): Promise<Respo
     : '';
   const projectName = typeof body.projectName === 'string' ? body.projectName : '';
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM);
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM, user.id);
   if (remainingBudget == null) return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
   const refundSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM); };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
@@ -9569,7 +9705,7 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
   const upscaleBase = await getPrice(env, 'upscale');
   const COST_PER = factor === 4 ? upscaleBase + 1 : upscaleBase;
   const estimatedTotal = factor === 4 ? 0.07 : 0.05;
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
       error: 'daily Cloud GPU budget reached.' }, { status: 429 });
@@ -9703,7 +9839,7 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   const cost = COST_PER_RECTIFY;
   const estimatedTotal = 0.10 * nSeeds;
 
-  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
       error: `daily Cloud GPU budget reached. Try again after midnight UTC.` }, { status: 429 });

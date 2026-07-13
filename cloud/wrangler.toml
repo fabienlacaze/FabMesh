@@ -97,12 +97,32 @@ NEXT_PUBLIC_MOCK = "0"
 NEXT_PUBLIC_SITE_URL = "https://myfabmesh-cloud.fabien65400.workers.dev"
 NEXT_PUBLIC_SUPABASE_URL = "https://ovoccoipeqmkfnugkmyh.supabase.co"
 NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92b2Njb2lwZXFta2ZudWdrbXloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MTIzODgsImV4cCI6MjA5NTE4ODM4OH0.0vjGjN1VD_h_MefS4quDFnGXa-nTsbpM2KpNvQZKQlI"
+# ⚠️ STRIPE TEST-MODE KEY — this is a *publishable* (public) key, safe to ship,
+# but it is a TEST key: no real money is collected while it is in place.
+# BEFORE COMMERCIAL LAUNCH the USER must swap this for the live publishable key
+# ([À_COMPLÉTER: pk_live_...]) AND set the matching live secret key via
+#   `npx wrangler secret put STRIPE_SECRET_KEY`   (sk_live_...)
+#   `npx wrangler secret put STRIPE_WEBHOOK_SECRET` (whsec_... from the LIVE
+#                                                    webhook endpoint)
+# The publishable key stays here (baked into the frontend at build). Keeping the
+# TEST key means dev/staging keeps working; production is a one-line swap.
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_51TEArR3uvj2cFz0krEmYFCk7Pfj3wnWboyu9dwEWxpBSTxelTH6Q80KLLBOjTrxXO4kxbt2Q05TSAt1Y3nUQSdA700OL4r1KcL"
 REPLICATE_MODEL = "fishwowater/trellis2"
 R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
 # R2_URL_SIGNING_SECRET is a Worker SECRET, NOT a [vars] entry. Never put it
 # here. Set it with: openssl rand -hex 32 | npx wrangler secret put R2_URL_SIGNING_SECRET
-# While unset, signedR2Url() falls back to the public R2_PUBLIC_URL (non-breaking).
+# REQUIRED IN PRODUCTION: signed URLs are now MANDATORY. When this secret is
+# unset (and MOCK=0), signedR2Url() FAILS CLOSED (throws) instead of leaking a
+# permanent public r2.dev URL for the private bucket — so the bucket can be made
+# private without exposing user face photos / meshes. For LOCAL DEV ONLY you can
+# set R2_ALLOW_UNSIGNED="1" to restore the old public-URL fallback; NEVER set
+# R2_ALLOW_UNSIGNED in production.
+#
+# TURNSTILE_SECRET_KEY (Worker SECRET, optional) — anti-abuse captcha on the
+# expensive /api/generate endpoint. UNSET = the captcha check is a no-op. Set it
+# with `npx wrangler secret put TURNSTILE_SECRET_KEY` once the Turnstile widget
+# is added to the frontend (site key) and the token is sent as
+# `cf-turnstile-response`. See verifyTurnstile() in src/worker.ts.
 
 # Hard budget safeguards — the Worker refuses any Replicate call if
 # the cumulative daily spend (across ALL users) would exceed
@@ -117,16 +137,23 @@ R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
 # user volume. text2image + back-view live on Modal (own counter at
 # MAX_DAILY_MODAL_SPEND_USD), no impact here.
 MAX_DAILY_SPEND_USD = "5.00"
-# Daily Modal spend cap. Defaults to $2/day in worker.ts; bumped to
-# $20/day on 2026-06-01 for heavy dev/test (text2image+meshes+rigs+anims
-# all live on Modal at ~$0.05-$0.50 each). Drop back to $2 in prod
-# before paying users hit it.
-MAX_DAILY_MODAL_SPEND_USD = "20.00"
-# Per-user daily call cap. Bumped 10 → 100 (2026-05-25), then
-# 100 → 1000 (2026-06-01) because heavy dev/test sessions blow through
-# 100 in an afternoon. Modal cost per call is small (~$0.06 image, ~$0.50
-# auto-rig) so 1000 calls × $0.50 = $500/user/day MAX is bounded by
-# MAX_DAILY_SPEND_USD (currently $5) and MAX_DAILY_MODAL_SPEND_USD anyway
-# — the per-user cap is a softer rate-limit, not a budget cap. Drop to
-# 200 once we have paying users to limit abuse.
-MAX_USER_DAILY_CALLS = "1000"
+# Daily Modal spend cap (GLOBAL, across ALL users). Was bumped to $20/day for
+# heavy dev/test; LOWERED to $10/day for commercial launch so a single bad day
+# can't run away. Raise again for heavy dev sessions if needed.
+MAX_DAILY_MODAL_SPEND_USD = "10.00"
+# Per-user daily CALL cap. Was 1000 for heavy dev/test; LOWERED to 100 for
+# commercial launch to blunt abuse (a single account can't fire 1000 GPU jobs/
+# day). Combined with MAX_USER_DAILY_SPEND_USD below this bounds per-account
+# cost. Raise for dev sessions if it gets in the way.
+MAX_USER_DAILY_CALLS = "100"
+# ANTI-DoS PER-ACCOUNT $ CAP (new). Even with unlimited credits, one account
+# can never push more than this much ESTIMATED GPU cost per UTC day across all
+# Modal/Replicate endpoints. Counter: `_meta/userspend/<userId>/<YYYY-MM-DD>`.
+# $2/day = plenty for legitimate use (~4-40 jobs) while stopping a compromised
+# or abusive account from exploding the bill. Default in worker.ts is also $2.
+MAX_USER_DAILY_SPEND_USD = "2.00"
+#
+# NOTE (free signup grant): the initial free-credit grant for a NEW account is
+# set in Supabase (DB default / trigger on the profiles table), NOT here. If it
+# is currently generous, the USER should lower it in Supabase so a wave of
+# throwaway signups can't drain the GPU budget. See userTodo.
