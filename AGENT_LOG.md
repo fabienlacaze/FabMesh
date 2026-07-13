@@ -1,5 +1,30 @@
 # FabMesh Agent Log
 
+## 2026-07-13 (Round 2 release-fixes : TVA TTC, miroir DINOv3 non-gaté, légal mono-source, durcissement)
+
+Deuxième passe de correctifs code-fixables avant vente (« tu peux vraiment pas
+régler plus de choses ? »). 4 chantiers, tout compile :
+- **TVA TTC (worker.ts)** : `tax_behavior:'inclusive'` sur le checkout marketplace
+  (:3396) ET le pack de crédits /buy (:3851). Sans ça Stripe Tax ajoutait la TVA
+  PAR-DESSUS le prix annoncé (défaut 'exclusive') → client payait plus que promis.
+- **Miroir DINOv3 non-gaté (wizard_download.py)** : source par défaut =
+  `camenduru/dinov3-vitl16-pretrain-lvd1689m` (public, non license-gated, config
+  byte-identique au ViT-L/16 canonique, safetensors 1.21 GB — vérifié 2026-07-13).
+  Nouveaux env `FABMESH_DINOV3_REPO` (id HF source==target, staging natif) et
+  `FABMESH_DINOV3_URL` (base URL R2/CDN auto-hébergée). Élimine le todo
+  « héberger DINOv3 » pour le chemin par défaut. `_dinov3_target_repo()` reflète
+  la résolution du backbone runtime → les deux ne divergent jamais.
+- **Légal mono-source (cloud/src/config/legal-identity.ts)** : identité légale
+  unique (raison sociale, SIRET, RCS, TVA, médiateur, hébergeur…) avec marqueurs
+  `[À_COMPLÉTER:…]` + `legalIdentityUnfilledFields()` pour un check pré-lancement.
+  Les 3 pages (mentions/terms/privacy) importent d'ici → 1 seul fichier à remplir.
+- **Durcissement + UX (main.js / index2.html / index2.js)** : setWindowOpenHandler
+  + will-navigate (toute nav http part au navigateur système ; l'app ne navigue
+  jamais in-window en http — login/checkout passent déjà par shell.openExternal,
+  donc AUCUNE régression auth) ; retrait de l'option d'anim morte « Custom (text
+  prompt) » (jamais lue) ; `humanizeErrorMessage()` traduit les OOM VRAM/RAM en
+  message FR actionnable (« passez au Cloud »). main.js touché → restart Electron.
+
 ## 2026-07-13 (crash Store « crashes at launch » : boot blindé — watchdog de révélation)
 
 Diagnostic (workflow 5 agents) : le MAIN ne crashe PAS (la ligne top-level

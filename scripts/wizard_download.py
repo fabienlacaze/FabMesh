@@ -70,18 +70,28 @@ _OPTIONAL_MODELS = {'esrgan', 'florence2'}
 # stage it into the canonical cache folder, letting from_pretrained resolve it
 # locally with no token.
 #
-# Source priority (see download_dinov3):
-#   1. FABMESH_DINOV3_URL  — self-hosted copy the shipper controls. Either an
-#      HF repo id ("myorg/dinov3-mirror") or a base URL serving the weight
-#      files (…/config.json, …/model.safetensors). PREFERRED for a commercial
-#      release: a mirror you own can't be deleted out from under you.
-#   2. DINOV3_MIRROR_REPO  — community HF mirror (non-gated fallback).
+# Download-SOURCE priority (see download_dinov3):
+#   1. FABMESH_DINOV3_URL  — self-hosted BASE URL serving the weight files
+#      (…/config.json, …/model.safetensors). A copy you own can't be deleted
+#      out from under you — set this for a fully self-contained release.
+#   2. FABMESH_DINOV3_REPO — an HF repo id you point at (your own re-upload or
+#      another non-gated mirror). Becomes BOTH the download source AND the id
+#      the runtime backbone loader (DinoV3FeatureExtractor) requests, so the
+#      two stay in lock-step. Same env var the extractor reads.
+#   3. DINOV3_MIRROR_REPO  — the default non-gated community HF mirror below.
+# The mirror weights get staged into the CANONICAL id's cache folder so the
+# vendored gen configs (which reference facebook/…) resolve with no Meta token.
 DINOV3_CANONICAL_REPO = 'facebook/dinov3-vitl16-pretrain-lvd1689m'
-# Non-gated community mirror (verified: config.json + model.safetensors 1.21 GB
-# + preprocessor_config.json, HF transformers format, no license gate).
-# NOTE for the shipper: for a commercial release, re-host these weights on your
-# own R2/CDN and set FABMESH_DINOV3_URL — do not depend on a third-party mirror
-# staying online. See userTodo "host DINOv3 weights".
+# Default non-gated community mirror. VERIFIED 2026-07-13 via HF web:
+#   • repo public, NOT license-gated (tree page + raw file access with no token)
+#   • config.json byte-identical to the canonical DINOv3 ViT-L/16 config
+#     (architectures=["DINOv3ViTModel"], hidden_size 1024, 24 layers, 16 heads,
+#      patch_size 16, num_register_tokens 4) → same checkpoint family
+#   • model.safetensors 1.21 GB + preprocessor_config.json present (transformers
+#     format, loadable by DINOv3ViTModel.from_pretrained)
+# This eliminates the shipper's "host DINOv3 weights" todo for the default path.
+# For maximal independence you may STILL re-host on your own R2/CDN and set
+# FABMESH_DINOV3_URL (a third-party mirror could go offline).
 DINOV3_MIRROR_REPO = 'camenduru/dinov3-vitl16-pretrain-lvd1689m'
 DINOV3_FILES = ['config.json', 'model.safetensors', 'preprocessor_config.json']
 
@@ -441,10 +451,20 @@ def _hub_cache_root():
                 else os.path.expanduser('~/.cache/huggingface/hub')))
 
 
-def _dinov3_canonical_root():
+def _dinov3_target_repo():
+    """The HF repo id the runtime backbone loader (DinoV3FeatureExtractor) will
+    request via from_pretrained — the cache we must populate. Mirrors the
+    extractor's OWN resolution so the two never diverge: FABMESH_DINOV3_REPO if
+    the shipper set it, else the Meta-canonical id (whose cache we fill from a
+    non-gated mirror, letting from_pretrained resolve with no token)."""
+    return (os.environ.get('FABMESH_DINOV3_REPO', '').strip()
+            or DINOV3_CANONICAL_REPO)
+
+
+def _dinov3_canonical_root(repo=None):
     return os.path.join(
         _hub_cache_root(),
-        'models--' + DINOV3_CANONICAL_REPO.replace('/', '--'))
+        'models--' + (repo or _dinov3_target_repo()).replace('/', '--'))
 
 
 def _dinov3_already_staged():
@@ -464,19 +484,19 @@ def _dinov3_already_staged():
         return False
 
 
-def _stage_dinov3_canonical(src_dir):
+def _stage_dinov3_canonical(src_dir, repo=None):
     """Copy the mirror's files into the canonical HF cache layout for the
-    GATED facebook repo so DINOv3ViTModel.from_pretrained(canonical_id)
-    resolves them locally — no Meta token, no GatedRepoError — when the
-    runtime loads offline (HF_HUB_OFFLINE=1 / local_files_only). Plain file
-    copies (not symlinks) keep this Windows-safe."""
+    target repo id so DINOv3ViTModel.from_pretrained(target_id) resolves them
+    locally — no Meta token, no GatedRepoError — even when that id is the GATED
+    facebook repo (the extractor loads with local_files_only, so the gated HEAD
+    is never issued). Plain file copies (not symlinks) keep this Windows-safe."""
     import hashlib
     import shutil
-    root = _dinov3_canonical_root()
+    repo = repo or _dinov3_target_repo()
+    root = _dinov3_canonical_root(repo)
     # Deterministic 40-hex 'revision' — refs/main just has to point at a
     # snapshots/<rev>/ dir that exists; the value itself is never verified.
-    rev = hashlib.sha1(
-        ('fabmesh-mirror-' + DINOV3_CANONICAL_REPO).encode()).hexdigest()
+    rev = hashlib.sha1(('fabmesh-mirror-' + repo).encode()).hexdigest()
     snap = os.path.join(root, 'snapshots', rev)
     os.makedirs(snap, exist_ok=True)
     os.makedirs(os.path.join(root, 'refs'), exist_ok=True)
@@ -547,18 +567,25 @@ def download_dinov3(item_id, expected_mb, total_done_mb_ref):
     emit({'id': item_id, 'pct': 0, 'done': False, 'in_progress': True,
           'elapsed_s': 0, 'total_done_mb': total_done_mb_ref[0]})
     t0 = time.time()
-    src = os.environ.get('FABMESH_DINOV3_URL', '').strip()
+    target = _dinov3_target_repo()             # id the runtime will request
+    url = os.environ.get('FABMESH_DINOV3_URL', '').strip()
+    repo_override = os.environ.get('FABMESH_DINOV3_REPO', '').strip()
 
-    if src and '://' in src:
-        # Self-hosted base URL (R2 / CDN).
-        staged_dir = _download_dinov3_from_url(src)
+    if url and '://' in url:
+        # Self-hosted base URL (R2 / CDN) → temp dir → stage into target cache.
+        staged_dir = _download_dinov3_from_url(url)
+        _stage_dinov3_canonical(staged_dir, target)
     else:
-        repo = src or DINOV3_MIRROR_REPO
+        # HF repo pull. Default source = the verified non-gated community
+        # mirror; FABMESH_DINOV3_REPO overrides it (that id is then BOTH the
+        # source AND == target, so snapshot_download caches it natively where
+        # from_pretrained will look — no extra staging needed).
+        repo = repo_override or DINOV3_MIRROR_REPO
         if not repo or repo.startswith('[') or 'À_COMPLÉTER' in repo:
             raise RuntimeError(
-                'No non-gated DINOv3 source configured. Set FABMESH_DINOV3_URL '
-                'to a self-hosted copy (HF repo id or base URL of the weight '
-                'files). See userTodo "host DINOv3 weights".')
+                'No non-gated DINOv3 source configured. Set FABMESH_DINOV3_REPO '
+                'to a non-gated HF repo id, or FABMESH_DINOV3_URL to a '
+                'self-hosted base URL of the weight files.')
         stop = threading.Event()
         hb = threading.Thread(
             target=_heartbeat,
@@ -574,8 +601,11 @@ def download_dinov3(item_id, expected_mb, total_done_mb_ref):
         finally:
             stop.set()
             hb.join(timeout=2.0)
-
-    _stage_dinov3_canonical(staged_dir)
+        if repo != target:
+            # Source id (default mirror) differs from the id from_pretrained
+            # requests (canonical facebook) → stage into the target's cache.
+            # When repo == target, snapshot_download already cached it there.
+            _stage_dinov3_canonical(staged_dir, target)
     dt = max(time.time() - t0, 0.001)
     total_done_mb_ref[0] += expected_mb
     emit({'id': item_id, 'pct': 100, 'done': True,
