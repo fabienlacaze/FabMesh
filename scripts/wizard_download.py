@@ -60,13 +60,41 @@ def _lower_priority():
 _OPTIONAL_MODELS = {'esrgan', 'florence2'}
 
 
+# ---------------------------------------------------------------------------
+# DINOv3 — TRELLIS-2's image backbone.
+#
+# TRELLIS-2 loads facebook/dinov3-vitl16-pretrain-lvd1689m LAZILY on the first
+# generation. That repo is GATED by Meta, so a client with no Meta token hits
+# GatedRepoError mid-generation — a hard release blocker. Meta's DINOv3 license
+# DOES permit redistribution, so we pull a NON-GATED copy at install time and
+# stage it into the canonical cache folder, letting from_pretrained resolve it
+# locally with no token.
+#
+# Source priority (see download_dinov3):
+#   1. FABMESH_DINOV3_URL  — self-hosted copy the shipper controls. Either an
+#      HF repo id ("myorg/dinov3-mirror") or a base URL serving the weight
+#      files (…/config.json, …/model.safetensors). PREFERRED for a commercial
+#      release: a mirror you own can't be deleted out from under you.
+#   2. DINOV3_MIRROR_REPO  — community HF mirror (non-gated fallback).
+DINOV3_CANONICAL_REPO = 'facebook/dinov3-vitl16-pretrain-lvd1689m'
+# Non-gated community mirror (verified: config.json + model.safetensors 1.21 GB
+# + preprocessor_config.json, HF transformers format, no license gate).
+# NOTE for the shipper: for a commercial release, re-host these weights on your
+# own R2/CDN and set FABMESH_DINOV3_URL — do not depend on a third-party mirror
+# staying online. See userTodo "host DINOv3 weights".
+DINOV3_MIRROR_REPO = 'camenduru/dinov3-vitl16-pretrain-lvd1689m'
+DINOV3_FILES = ['config.json', 'model.safetensors', 'preprocessor_config.json']
+
+
 MODELS = {
     'lite': [
         ('trellis2', 'microsoft/TRELLIS.2-4B', 4100),
+        ('dinov3',   DINOV3_CANONICAL_REPO, 1250),
         ('blip1',    'Salesforce/blip-image-captioning-large', 990),
     ],
     'standard': [
         ('trellis2',  'microsoft/TRELLIS.2-4B', 4100),
+        ('dinov3',    DINOV3_CANONICAL_REPO, 1250),
         ('realvis',   'SG161222/RealVisXL_V4.0', 6500),
         ('lightning', 'ByteDance/SDXL-Lightning', 400),
         ('cn_pose',   'xinsir/controlnet-openpose-sdxl-1.0', 2400),
@@ -76,6 +104,7 @@ MODELS = {
     ],
     'full': [
         ('trellis2',  'microsoft/TRELLIS.2-4B', 4100),
+        ('dinov3',    DINOV3_CANONICAL_REPO, 1250),
         ('realvis',   'SG161222/RealVisXL_V4.0', 6500),
         ('lightning', 'ByteDance/SDXL-Lightning', 400),
         ('sdxl_inp',  'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', 6500),
@@ -403,6 +432,159 @@ def download_esrgan(item_id, expected_mb, total_done_mb_ref):
           'total_done_mb': total_done_mb_ref[0]})
 
 
+def _hub_cache_root():
+    """Absolute path of the HF hub cache, honoring HUGGINGFACE_HUB_CACHE /
+    HF_HOME exactly like _hf_cache_size_mb does."""
+    return (os.environ.get('HUGGINGFACE_HUB_CACHE')
+            or (os.path.join(os.environ['HF_HOME'], 'hub')
+                if os.environ.get('HF_HOME')
+                else os.path.expanduser('~/.cache/huggingface/hub')))
+
+
+def _dinov3_canonical_root():
+    return os.path.join(
+        _hub_cache_root(),
+        'models--' + DINOV3_CANONICAL_REPO.replace('/', '--'))
+
+
+def _dinov3_already_staged():
+    """True when config.json + model.safetensors are present under the
+    canonical facebook/… cache folder (so from_pretrained resolves locally)."""
+    try:
+        root = _dinov3_canonical_root()
+        ref = os.path.join(root, 'refs', 'main')
+        if not os.path.isfile(ref):
+            return False
+        with open(ref, 'r', encoding='utf-8') as f:
+            rev = f.read().strip()
+        snap = os.path.join(root, 'snapshots', rev)
+        return (os.path.isfile(os.path.join(snap, 'config.json'))
+                and os.path.isfile(os.path.join(snap, 'model.safetensors')))
+    except Exception:
+        return False
+
+
+def _stage_dinov3_canonical(src_dir):
+    """Copy the mirror's files into the canonical HF cache layout for the
+    GATED facebook repo so DINOv3ViTModel.from_pretrained(canonical_id)
+    resolves them locally — no Meta token, no GatedRepoError — when the
+    runtime loads offline (HF_HUB_OFFLINE=1 / local_files_only). Plain file
+    copies (not symlinks) keep this Windows-safe."""
+    import hashlib
+    import shutil
+    root = _dinov3_canonical_root()
+    # Deterministic 40-hex 'revision' — refs/main just has to point at a
+    # snapshots/<rev>/ dir that exists; the value itself is never verified.
+    rev = hashlib.sha1(
+        ('fabmesh-mirror-' + DINOV3_CANONICAL_REPO).encode()).hexdigest()
+    snap = os.path.join(root, 'snapshots', rev)
+    os.makedirs(snap, exist_ok=True)
+    os.makedirs(os.path.join(root, 'refs'), exist_ok=True)
+    for fn in os.listdir(src_dir):
+        s = os.path.join(src_dir, fn)
+        if not os.path.isfile(s):
+            continue
+        d = os.path.join(snap, fn)
+        if not os.path.exists(d) or os.path.getsize(d) != os.path.getsize(s):
+            shutil.copy2(s, d)
+    with open(os.path.join(root, 'refs', 'main'), 'w', encoding='utf-8') as f:
+        f.write(rev)
+    return snap
+
+
+def _download_dinov3_from_url(base_url):
+    """Pull the DINOv3 files from a self-hosted base URL (R2/CDN) into a temp
+    dir and return it. config.json + model.safetensors are required; the
+    preprocessor is optional (TRELLIS-2 does its own image transforms)."""
+    import tempfile
+    base = base_url.rstrip('/')
+    out = tempfile.mkdtemp(prefix='fabmesh_dinov3_')
+    for fn in DINOV3_FILES:
+        url = f'{base}/{fn}'
+        target = os.path.join(out, fn)
+        try:
+            req = urllib.request.Request(
+                url, headers={'User-Agent': 'fabmesh-wizard/1.0'})
+            with urllib.request.urlopen(req, timeout=180) as resp, \
+                    open(target, 'wb') as f:
+                while True:
+                    chunk = resp.read(1024 * 256)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+        except Exception:
+            # config.json / model.safetensors are mandatory; preprocessor isn't.
+            if fn in ('config.json', 'model.safetensors'):
+                raise
+            try:
+                os.path.isfile(target) and os.remove(target)
+            except Exception:
+                pass
+    return out
+
+
+def download_dinov3(item_id, expected_mb, total_done_mb_ref):
+    """Fetch the DINOv3 backbone from a NON-GATED source and stage it where
+    TRELLIS-2 expects the Meta-gated canonical repo. ESSENTIAL model: a
+    failure here fails the install (correct — the engine can't generate
+    without it). Meta's DINOv3 license permits redistribution, so mirroring
+    / self-hosting is legitimate."""
+    from huggingface_hub import snapshot_download
+
+    if _dinov3_already_staged():
+        base = total_done_mb_ref[0]
+        for pct in (12, 38, 66, 100):
+            emit({'id': item_id, 'pct': pct, 'done': pct >= 100,
+                  'in_progress': pct < 100, 'speed_mbps': 0, 'eta': '–',
+                  'elapsed_s': 0,
+                  'msg': ('DINOv3 already staged' if pct >= 100 else 'verifying…'),
+                  'total_done_mb': base + (expected_mb * pct // 100)})
+            if pct < 100:
+                time.sleep(0.08)
+        total_done_mb_ref[0] = base + expected_mb
+        return
+
+    emit({'id': item_id, 'pct': 0, 'done': False, 'in_progress': True,
+          'elapsed_s': 0, 'total_done_mb': total_done_mb_ref[0]})
+    t0 = time.time()
+    src = os.environ.get('FABMESH_DINOV3_URL', '').strip()
+
+    if src and '://' in src:
+        # Self-hosted base URL (R2 / CDN).
+        staged_dir = _download_dinov3_from_url(src)
+    else:
+        repo = src or DINOV3_MIRROR_REPO
+        if not repo or repo.startswith('[') or 'À_COMPLÉTER' in repo:
+            raise RuntimeError(
+                'No non-gated DINOv3 source configured. Set FABMESH_DINOV3_URL '
+                'to a self-hosted copy (HF repo id or base URL of the weight '
+                'files). See userTodo "host DINOv3 weights".')
+        stop = threading.Event()
+        hb = threading.Thread(
+            target=_heartbeat,
+            args=(item_id, repo, expected_mb, total_done_mb_ref, stop, t0),
+            daemon=True)
+        hb.start()
+        try:
+            staged_dir = _with_retry(
+                lambda: snapshot_download(
+                    repo_id=repo, resume_download=True, max_workers=4,
+                    token=_hf_token(), allow_patterns=DINOV3_FILES),
+                item_id, total_done_mb_ref)
+        finally:
+            stop.set()
+            hb.join(timeout=2.0)
+
+    _stage_dinov3_canonical(staged_dir)
+    dt = max(time.time() - t0, 0.001)
+    total_done_mb_ref[0] += expected_mb
+    emit({'id': item_id, 'pct': 100, 'done': True,
+          'speed_mbps': round(expected_mb / dt, 2), 'eta': '–',
+          'elapsed_s': round(dt, 1),
+          'msg': 'DINOv3 staged into canonical cache',
+          'total_done_mb': total_done_mb_ref[0]})
+
+
 def main():
     _lower_priority()  # keep the desktop responsive during the multi-GB pull
     ap = argparse.ArgumentParser()
@@ -416,6 +598,8 @@ def main():
         try:
             if item_id == 'esrgan':
                 download_esrgan(item_id, size, total_done)
+            elif item_id == 'dinov3':
+                download_dinov3(item_id, size, total_done)
             else:
                 download_hf(item_id, repo, size, total_done)
         except Exception as e:

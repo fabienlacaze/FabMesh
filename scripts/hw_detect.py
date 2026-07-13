@@ -7,8 +7,12 @@ line to stdout — easy to parse from Node's execFile.
 The wizard uses this JSON to pick the right install mode:
   - "full"     16 GB+ VRAM, all features
   - "standard" 12 GB+ VRAM, full local generation
-  - "lite"     6-8 GB VRAM, basic generation only
-  - "cloud"    no compatible GPU, cloud-only mode
+  - "lite"     12 GB+ VRAM (tight), core generation only
+  - "cloud"    < 12 GB VRAM or non-NVIDIA GPU, cloud-only mode
+
+NOTE: TRELLIS-2 (the local 3D engine) needs ~15 GB VRAM and OOMs below
+~12 GB, so there is NO viable local mode under 12 GB — such machines are
+routed to Cloud instead of a local install that would crash on first run.
 
 Run from anywhere — only uses stdlib + subprocess.
 """
@@ -152,11 +156,16 @@ def recommend_mode(gpu, ram_mb, disk_gb):
     if not gpu or gpu['vendor'] != 'NVIDIA':
         return 'cloud'
     vram = gpu.get('vram_mb', 0)
+    # TRELLIS-2 needs ~15 GB VRAM and OOMs below ~12 GB. 12 GB is the hard
+    # floor for ANY local mode (it works only with the RAM-offload cascade);
+    # 16 GB is comfortable. Below 12 GB there is no local engine that runs, so
+    # we route to Cloud rather than hand the user a local install that crashes.
+    _LOCAL_VRAM_FLOOR = 12 * 1024
     if vram >= 16 * 1024 and ram_mb >= 16 * 1024 and disk_gb >= 30:
         return 'full'
-    if vram >= 12 * 1024 and ram_mb >= 16 * 1024 and disk_gb >= 25:
+    if vram >= _LOCAL_VRAM_FLOOR and ram_mb >= 16 * 1024 and disk_gb >= 25:
         return 'standard'
-    if vram >= 6 * 1024 and ram_mb >= 8 * 1024 and disk_gb >= 15:
+    if vram >= _LOCAL_VRAM_FLOOR and ram_mb >= 8 * 1024 and disk_gb >= 20:
         return 'lite'
     return 'cloud'
 
@@ -195,6 +204,12 @@ def main():
         warnings.append(
             f"{gpu['vendor']} GPU detected — local generation needs NVIDIA. "
             "Cloud mode will be used instead."
+        )
+    elif gpu.get('vram_mb', 0) < 12 * 1024:
+        warnings.append(
+            f"GPU has {gpu.get('vram_mb', 0) // 1024} GB VRAM — the local "
+            "3D engine (TRELLIS-2) needs at least 12 GB and would run out of "
+            "memory. Cloud mode will be used instead."
         )
     if ram_mb < 8 * 1024:
         warnings.append(f"Low system RAM ({ram_mb // 1024} GB). 16 GB recommended.")
