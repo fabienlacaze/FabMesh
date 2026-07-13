@@ -145,10 +145,47 @@ function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
 }
 
+// ------------------------------------------------------------
+// humanizeErrorMessage — mappe les erreurs de saturation mémoire
+// ------------------------------------------------------------
+// Les jobs Python (mesh/rig/texture/anim) remontent parfois une stack
+// brute « CUDA out of memory » / « MemoryError » incompréhensible pour
+// l'utilisateur final. On détecte ces signatures et on renvoie un
+// message FR actionnable (« GPU/RAM insuffisant — … passez au Cloud »).
+// Toute autre erreur est renvoyée telle quelle.
+function humanizeErrorMessage(raw) {
+  const s = String(raw || '');
+  const low = s.toLowerCase();
+  // Saturation VRAM (GPU) — CUDA / cuBLAS / allocation carte graphique.
+  const gpuOom = /cuda out of memory|outofmemoryerror|cublas_status_alloc_failed|cudaerrormemoryallocation|cuda error: out of memory|hip out of memory|torch\.cuda\.outofmemory/i.test(s);
+  // Saturation RAM système (CPU) — allocateur PyTorch / bad_alloc / MemoryError.
+  const ramOom = /defaultcpuallocator: not enough memory|std::bad_alloc|bad_alloc|\bmemoryerror\b|cannot allocate memory|paging file is too small/i.test(s);
+  if (gpuOom) {
+    return 'GPU insuffisant — la mémoire de votre carte graphique (VRAM) est saturée.\n\n'
+      + 'Solutions :\n'
+      + '• Fermez les autres applications qui utilisent le GPU (jeux, navigateurs, IA).\n'
+      + '• Réessayez avec une qualité/résolution plus faible.\n'
+      + '• Ou passez au mode Cloud (bouton « Cloud ») pour lancer ce calcul sur nos serveurs.';
+  }
+  if (ramOom) {
+    return 'RAM insuffisante — la mémoire de votre système est saturée.\n\n'
+      + 'Solutions :\n'
+      + '• Fermez les autres applications ouvertes pour libérer de la mémoire.\n'
+      + '• Réessayez avec une qualité/résolution plus faible.\n'
+      + '• Ou passez au mode Cloud (bouton « Cloud ») pour lancer ce calcul sur nos serveurs.';
+  }
+  return s;
+}
+window.humanizeErrorMessage = humanizeErrorMessage;
+
 // Show a long error message in a styled modal instead of native alert()
 function customError(message, title = 'Error') {
+  // Traduit les erreurs OOM (VRAM/RAM) en message FR actionnable avant affichage.
+  const mapped = humanizeErrorMessage(message);
+  const isOom = mapped !== String(message || '');
+  if (isOom && (title === 'Error' || title === 'Erreur')) title = 'Mémoire insuffisante';
   // Truncate insanely long messages but keep them scrollable
-  const safe = String(message || 'Unknown error');
+  const safe = String(mapped || 'Unknown error');
   const modal = document.getElementById('modal-confirm');
   const titleEl = document.getElementById('confirm-title');
   const msgEl = document.getElementById('confirm-message');
@@ -15082,7 +15119,10 @@ function completeJob(id, success, errorMessage) {
   j.progress = 100;
   j.status = success ? 'done' : 'error';
   if (!success && errorMessage) {
-    j.errorMessage = String(errorMessage);
+    // Mappe les OOM VRAM/RAM en message FR clair (au lieu d'une stack brute).
+    j.errorMessage = (typeof humanizeErrorMessage === 'function')
+      ? humanizeErrorMessage(errorMessage)
+      : String(errorMessage);
   }
   // 2026-06-02 liveliness: trigger the one-shot bounce-and-flash on
   // the matching step card so the user gets a satisfying visual cue

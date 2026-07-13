@@ -930,12 +930,11 @@
                       <option value="attack">Attack</option>
                       <option value="death">Death</option>
                       <option value="fly">Fly</option>
-                      <option value="custom">Custom (text prompt)</option>
+                      <!-- « Custom (text prompt) » retiré (audit 2026-07-06 #2) :
+                           le prompt n'était jamais lu, la Motion Library Rokoko
+                           ne contient aucun motion « custom » → échec garanti.
+                           À réactiver seulement quand un moteur text→motion sera câblé. -->
                     </select>
-                  </div>
-                  <div class="form-row" id="ws-anim-prompt-row" style="display:none;">
-                    <label for="ws-anim-prompt">Prompt</label>
-                    <input id="ws-anim-prompt" type="text" placeholder="e.g. dragon breathes fire" style="width:100%; padding:6px;">
                   </div>
                   <div class="form-row" id="ws-anim-video-row" style="display:none;">
                     <label for="ws-anim-video">Reference video</label>

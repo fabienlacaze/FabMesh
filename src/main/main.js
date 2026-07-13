@@ -1076,6 +1076,44 @@ function createWindow() {
     if (menu.items.length) menu.popup();
   });
 
+  // ----------------------------------------------------------
+  // Durcissement Electron : contrôle des window.open / navigations
+  // ----------------------------------------------------------
+  // Sans handler, un window.open() ou un lien target=_blank ouvre une
+  // nouvelle BrowserWindow Chromium DANS l'app (contexte privilégié).
+  // On refuse toute création de fenêtre : les URL http/https/mailto
+  // partent vers le navigateur système (Chrome), le reste est bloqué.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:') {
+        shell.openExternal(url).catch((e) => log.warn('main', `openExternal blocked url failed: ${e && e.message}`));
+      } else {
+        log.warn('main', `window.open denied (protocole non autorisé): ${url}`);
+      }
+    } catch (_) {
+      log.warn('main', `window.open denied (url invalide): ${url}`);
+    }
+    return { action: 'deny' };
+  });
+  // Empêche le renderer de naviguer AILLEURS que vers les pages locales
+  // de l'app (index2.html / wizard.html). Un clic sur un lien http:// est
+  // redirigé vers le navigateur système au lieu de remplacer la page.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'file:') return; // navigation interne autorisée
+      event.preventDefault();
+      if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:') {
+        shell.openExternal(url).catch(() => {});
+      } else {
+        log.warn('main', `will-navigate bloqué: ${url}`);
+      }
+    } catch (_) {
+      event.preventDefault();
+    }
+  });
+
   // Intercept close: ask the renderer if there are running jobs.
   // The renderer shows its own styled modal and replies via IPC.
   // Exception: on the wizard, close immediately — there's no risk of
