@@ -20,6 +20,17 @@
 
   const I18N = {
     fr: {
+      // ---- Uninstall popup ----
+      'Uninstall MyFabmesh.AI': 'Désinstaller MyFabmesh.AI',
+      'This removes the app. Optionally, also delete:': "Ceci retire l'application. En option, supprimer aussi :",
+      'Delete the AI models (~17 GB)': 'Supprimer les modèles IA (~17 Go)',
+      'Re-downloadable — keep to reinstall without downloading again.': 'Re-téléchargeables — garde-les pour réinstaller sans re-télécharger.',
+      'Delete my generated content': 'Supprimer mes contenus générés',
+      'Your projects, source images and 3D meshes.': 'Tes projets, images sources et meshes 3D.',
+      'Delete my settings': 'Supprimer mes réglages',
+      'Config and logs.': 'Configuration et logs.',
+      'Nothing checked = your creations and models are kept.': 'Rien de coché = tes créations et modèles sont conservés.',
+      'Uninstall': 'Désinstaller',
       // ---- Part naming (Nommer les zones) ----
       'Name the zones (AI)': 'Nommer les zones (IA)',
       'What kind of object is this? (sets the naming vocabulary)':

@@ -7624,12 +7624,21 @@ function _findUninstaller() {
 // Launch the NSIS uninstaller (from the app or from dev — resolved via the
 // exe folder or the Windows registry). The uninstaller itself asks whether to
 // also delete models/generated content/settings.
-ipcMain.handle('app:uninstall', async () => {
+ipcMain.handle('app:uninstall', async (_e, opts = {}) => {
   const uninstaller = _findUninstaller();
   if (uninstaller) {
     const { spawn } = require('child_process');
-    // /currentuser : per-user NSIS uninstall (comme l'entrée du registre).
-    spawn(uninstaller, ['/currentuser'], { detached: true, stdio: 'ignore' }).unref();
+    // On lance le désinstalleur en SILENCIEUX (/S) : les questions (confirmer,
+    // supprimer modèles / contenus générés / réglages) sont déjà posées par la
+    // jolie popup in-app → plus AUCUN dialogue Windows moche. Les choix sont
+    // transmis via variables d'env, lues par customUnInstall (build/uninstaller.nsh).
+    const env = {
+      ...process.env,
+      FABMESH_UNINST_MODELS: opts.models ? '1' : '0',
+      FABMESH_UNINST_GENERATED: opts.generated ? '1' : '0',
+      FABMESH_UNINST_SETTINGS: opts.settings ? '1' : '0',
+    };
+    spawn(uninstaller, ['/S', '/currentuser'], { detached: true, stdio: 'ignore', env }).unref();
     // En build packagé, on quitte pour libérer les fichiers verrouillés ;
     // en dev l'app installée est distincte, on ne tue pas l'éditeur.
     if (app.isPackaged) setTimeout(() => app.quit(), 500);

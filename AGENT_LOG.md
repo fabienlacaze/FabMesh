@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-07-13 (uninstall : une seule jolie popup, désinstalleur silencieux, 0 dialogue Windows)
+
+Avant : jolie popup in-app « Continue ? » PUIS dialogue Windows moche « Are you
+sure ? » PUIS 3 MessageBox natives (modèles/réglages). Double/triple confirmation.
+Maintenant : UNE popup in-app (_openUninstallModal, 3 cases à cocher : modèles /
+contenus générés / réglages, tout décoché = on garde) → le désinstalleur est
+lancé en SILENCIEUX (/S) → plus AUCUN dialogue Windows. Les choix voyagent en
+variables d'env (FABMESH_UNINST_MODELS/GENERATED/SETTINGS) lues par
+customUnInstall (uninstaller.nsh, via ReadEnvStr, défaut = garder). main.js +
+preload + renderer + i18n FR. main.js touché → restart Electron.
+
 ## 2026-07-13 (fix : bouton « Uninstall » in-app trouve enfin le désinstalleur)
 
 Le handler 'app:uninstall' cherchait « Uninstall FabMesh.exe » alors que le

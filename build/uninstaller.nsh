@@ -1,15 +1,18 @@
 ; MyFabmesh.AI — custom NSIS uninstaller hook
 ;
-; Runs during uninstall and asks the user, in THREE independent steps, what
-; to also remove. Every prompt DEFAULTS TO "No" (/SD IDNO) so a silent /
-; distracted uninstall NEVER destroys the user's creations.
+; The app launches the uninstaller SILENTLY (/S) after asking everything in a
+; nice in-app popup (no ugly native Windows dialogs). The three delete choices
+; are passed as environment variables and read here:
 ;
-;   1. AI models cache (~17 GB, HuggingFace) — re-downloadable.
-;   2. Generated content (projects/images + 3D meshes) — the user's creations.
-;   3. Settings (config + logs).
+;   FABMESH_UNINST_MODELS    = "1" -> delete the AI models cache (~17 GB, HF)
+;   FABMESH_UNINST_GENERATED = "1" -> delete generated content (projects/images/meshes)
+;   FABMESH_UNINST_SETTINGS  = "1" -> delete settings (config + logs)
+;
+; Each defaults to "0" (KEEP) when the var is unset, so a bare /S uninstall or
+; a manual run from Add/Remove Programs never destroys the user's creations.
 ;
 ; NOTE on paths: the packaged app's data lives under userData =
-;   %APPDATA%\myfabmesh-ai\   (Electron uses the package `name`, not "fabmesh").
+;   %APPDATA%\myfabmesh-ai\  (Electron uses the package `name`, not "fabmesh").
 ; meshes/, images/, previews/, history/ are SUBFOLDERS of that userData dir.
 ; (If the user relocated heavy data via config.dataDir to another drive, that
 ;  custom folder is left untouched here — only the default location is cleaned.)
@@ -18,32 +21,29 @@
 
 !macro customUnInstall
   ; ----- 1) AI models cache (~17 GB)? -----
-  MessageBox MB_YESNO|MB_ICONQUESTION \
-    "Also delete the AI models cache (~17 GB)?$\r$\n$\r$\nKeep it (No) to reinstall MyFabmesh.AI later WITHOUT re-downloading the models." \
-    /SD IDNO IDNO skipModels
+  ReadEnvStr $0 "FABMESH_UNINST_MODELS"
+  ${If} $0 == "1"
     RMDir /r "$PROFILE\.cache\huggingface\hub"
     RMDir /r "$PROFILE\.cache\realesrgan_weights"
-  skipModels:
+  ${EndIf}
 
   ; ----- 2) Generated content (projects, images, 3D meshes)? -----
-  MessageBox MB_YESNO|MB_ICONQUESTION \
-    "Also delete ALL your generated content?$\r$\n$\r$\nThis removes your projects, source images and 3D meshes.$\r$\nChoose No to KEEP your creations for after a reinstall." \
-    /SD IDNO IDNO skipGenerated
+  ReadEnvStr $1 "FABMESH_UNINST_GENERATED"
+  ${If} $1 == "1"
     RMDir /r "$APPDATA\myfabmesh-ai\meshes"
     RMDir /r "$APPDATA\myfabmesh-ai\images"
     RMDir /r "$APPDATA\myfabmesh-ai\previews"
     RMDir /r "$APPDATA\myfabmesh-ai\history"
-  skipGenerated:
+  ${EndIf}
 
   ; ----- 3) Settings (config + logs)? -----
-  MessageBox MB_YESNO|MB_ICONQUESTION \
-    "Also delete your MyFabmesh.AI settings (config + logs)?$\r$\n$\r$\nYour generated content is not affected by this choice." \
-    /SD IDNO IDNO skipConfig
+  ReadEnvStr $2 "FABMESH_UNINST_SETTINGS"
+  ${If} $2 == "1"
     Delete "$APPDATA\myfabmesh-ai\config.json"
     Delete "$APPDATA\myfabmesh-ai\setup_state.json"
     RMDir /r "$APPDATA\myfabmesh-ai\logs"
     RMDir /r "$APPDATA\fabmesh"   ; legacy early-boot startup.log dir
-  skipConfig:
+  ${EndIf}
 
   ; ----- Always remove these app-internal token files -----
   Delete "$INSTDIR\.mcp_bridge_token"

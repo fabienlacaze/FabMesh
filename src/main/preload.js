@@ -90,7 +90,7 @@ contextBridge.exposeInMainWorld('__fabmeshTest', {
 
 contextBridge.exposeInMainWorld('meshyAPI', {
   reconfigureFabmesh: () => ipcRenderer.invoke('wizard:reset-setup'),
-  uninstallFabmesh: () => ipcRenderer.invoke('app:uninstall'),
+  uninstallFabmesh: (opts) => ipcRenderer.invoke('app:uninstall', opts),
   openWebsite: () => ipcRenderer.invoke('app:open-website'),
   checkForUpdate: () => ipcRenderer.invoke('app:check-for-update'),
   installUpdateNow: () => ipcRenderer.invoke('app:install-update-now'),

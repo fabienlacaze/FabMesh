@@ -17166,22 +17166,53 @@ document.getElementById('set-reconfigure')?.addEventListener('click', async () =
   }
 });
 
-// Uninstall MyFabmesh.AI: launches the Windows NSIS uninstaller. The
-// uninstaller itself asks the user whether to also delete models and
-// settings — we don't ask twice here, just confirm intent and quit.
+// Uninstall MyFabmesh.AI: ONE nice in-app popup asks everything (confirm +
+// the 3 delete choices). The Windows uninstaller is then run SILENTLY (/S) —
+// no ugly native dialogs. Choices travel to the uninstaller via env vars.
+function _openUninstallModal() {
+  const OPTS = [
+    { id: 'models', en: 'Delete the AI models (~17 GB)', sub: 'Re-downloadable — keep to reinstall without downloading again.' },
+    { id: 'generated', en: 'Delete my generated content', sub: 'Your projects, source images and 3D meshes.' },
+    { id: 'settings', en: 'Delete my settings', sub: 'Config and logs.' },
+  ];
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1b1d22;color:#eee;border:1px solid #3a3d44;border-radius:12px;padding:20px 22px;max-width:440px;width:92%;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:inherit;';
+    const rows = OPTS.map((o) =>
+      `<label style="display:flex;gap:10px;align-items:flex-start;padding:9px 10px;margin-bottom:7px;border:1px solid #33363d;border-radius:8px;cursor:pointer;">
+         <input type="checkbox" data-opt="${o.id}" style="margin-top:2px;width:16px;height:16px;flex:none;">
+         <span><span style="font-size:13.5px;font-weight:500;">${_escapeHtml(_i18nT(o.en))}</span><br><span style="font-size:11.5px;opacity:.65;">${_escapeHtml(_i18nT(o.sub))}</span></span>
+       </label>`).join('');
+    box.innerHTML =
+      `<div style="font-size:16px;font-weight:600;margin-bottom:4px;">&#128465; ${_escapeHtml(_i18nT('Uninstall MyFabmesh.AI'))}</div>` +
+      `<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:14px;">${_escapeHtml(_i18nT('This removes the app. Optionally, also delete:'))}</div>` +
+      rows +
+      `<div style="font-size:11.5px;opacity:.6;margin:4px 0 14px;">${_escapeHtml(_i18nT('Nothing checked = your creations and models are kept.'))}</div>` +
+      `<div style="display:flex;gap:10px;justify-content:flex-end;">` +
+        `<button id="unins-cancel" class="ghost-btn" style="padding:8px 16px;">${_escapeHtml(_i18nT('Cancel'))}</button>` +
+        `<button id="unins-go" class="primary-btn" style="padding:8px 16px;background:#c0392b;border-color:#c0392b;">${_escapeHtml(_i18nT('Uninstall'))}</button></div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    function cleanup(v) { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); }
+    function onKey(e) { if (e.key === 'Escape') cleanup(null); }
+    box.querySelector('#unins-cancel').addEventListener('click', () => cleanup(null));
+    box.querySelector('#unins-go').addEventListener('click', () => {
+      const pick = (id) => !!box.querySelector(`input[data-opt="${id}"]`)?.checked;
+      cleanup({ models: pick('models'), generated: pick('generated'), settings: pick('settings') });
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 document.getElementById('set-uninstall')?.addEventListener('click', async () => {
-  const ok = await customConfirm(
-    'This will launch the Windows uninstaller. You can choose to also '
-    + 'delete the AI models (~17 GB) and your settings in the next '
-    + 'step. Generated meshes in your projects folder are never '
-    + 'touched. Continue?',
-    'Uninstall MyFabmesh.AI', 'Uninstall');
-  if (!ok) return;
+  const choices = await _openUninstallModal();
+  if (!choices) return;  // annulé
   try {
-    const r = await window.meshyAPI.uninstallFabmesh();
-    if (!r.ok && r.mode === 'dev') {
-      showToast(r.error, 'warning', 8000);
-    }
+    const r = await window.meshyAPI.uninstallFabmesh(choices);
+    if (!r.ok) showToast(r.error || 'Uninstall failed', 'warning', 8000);
   } catch (e) {
     showToast('Uninstall failed: ' + e.message, 'error');
   }
