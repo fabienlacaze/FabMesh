@@ -1,7 +1,9 @@
 // Privacy Policy — GDPR-compliant baseline for the EU launch.
 // Tailored to MyFabmesh.AI's actual data flows (Supabase auth, Stripe
 // payments, Cloudflare R2 storage, Modal GPU compute, Replicate API).
-// Edit before launch with your registered business name / address.
+// The data-controller identity is defined ONCE in @/config/legal-identity.
+
+import { legalIdentity as id } from '@/config/legal-identity';
 
 export const metadata = {
   title: 'Privacy Policy — MyFabmesh.AI',
@@ -23,9 +25,9 @@ export default function PrivacyPage() {
 
       <h2>1. Data controller</h2>
       <p>
-        MyFabmesh.AI is operated by <strong>Ayros Studio</strong> (France).
+        {id.tradeName} is operated by <strong>{id.operator}</strong> ({id.country}).
         Contact for any privacy request:{' '}
-        <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
+        <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a>.
       </p>
 
       <h2>2. What we collect</h2>

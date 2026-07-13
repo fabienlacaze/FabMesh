@@ -1,6 +1,8 @@
 // Legal Notice (Mentions légales) — French LCEN art. 6-III + GDPR Art. 13
-// publisher/host identification. Fill every [À_COMPLÉTER: …] field with the
-// registered business identity BEFORE commercial launch.
+// publisher/host identification. The registered business identity is defined
+// ONCE in @/config/legal-identity and imported here — fill it there.
+
+import { legalIdentity as id } from '@/config/legal-identity';
 
 export const metadata = {
   title: 'Legal Notice (Mentions légales) — MyFabmesh.AI',
@@ -26,24 +28,24 @@ export default function LegalNoticePage() {
         reference the same values as below.
       </p>
       <ul>
-        <li><strong>Trade name:</strong> MyFabmesh.AI</li>
-        <li><strong>Operator:</strong> Ayros Studio</li>
-        <li><strong>Legal form:</strong> [À_COMPLÉTER: forme juridique — ex. entrepreneur individuel / micro-entreprise / EURL / SASU]</li>
-        <li><strong>SIREN / SIRET:</strong> [À_COMPLÉTER: SIREN 9 chiffres / SIRET 14 chiffres]</li>
-        <li><strong>RCS / RM registration:</strong> [À_COMPLÉTER: n° RCS ou RM + ville d&apos;immatriculation]</li>
-        <li><strong>Share capital:</strong> [À_COMPLÉTER: capital social — uniquement si société ; sinon « sans objet »]</li>
-        <li><strong>Registered office:</strong> [À_COMPLÉTER: adresse postale complète du siège — valeur unique reprise à l&apos;identique sur toutes les pages légales]</li>
-        <li><strong>Intra-community VAT:</strong> [À_COMPLÉTER: n° TVA intracommunautaire — ou « TVA non applicable, art. 293 B du CGI » si franchise en base de TVA]</li>
-        <li><strong>Director of publication (Directeur de la publication):</strong> [À_COMPLÉTER: nom du directeur de la publication — ex. Fabien Lacaze]</li>
-        <li><strong>Contact:</strong> <a href="mailto:contact@myfabmesh.ai">contact@myfabmesh.ai</a> [À_COMPLÉTER: confirmer/créer la boîte professionnelle]</li>
+        <li><strong>Trade name:</strong> {id.tradeName}</li>
+        <li><strong>Operator:</strong> {id.operator}</li>
+        <li><strong>Legal form:</strong> {id.legalForm}</li>
+        <li><strong>SIREN / SIRET:</strong> {id.siret}</li>
+        <li><strong>RCS / RM registration:</strong> {id.rcs}</li>
+        <li><strong>Share capital:</strong> {id.shareCapital}</li>
+        <li><strong>Registered office:</strong> {id.registeredOffice}</li>
+        <li><strong>Intra-community VAT:</strong> {id.vatNumber}</li>
+        <li><strong>Director of publication (Directeur de la publication):</strong> {id.publicationDirector}</li>
+        <li><strong>Contact:</strong> <a href={`mailto:${id.contactEmail}`}>{id.contactEmail}</a></li>
       </ul>
 
       <h2>2. Host (Hébergeur)</h2>
       <p>The site is served from the Cloudflare platform (Workers / Pages / R2):</p>
       <ul>
-        <li><strong>Cloudflare, Inc.</strong></li>
-        <li>101 Townsend Street, San Francisco, CA 94107, USA</li>
-        <li><a href="https://www.cloudflare.com" target="_blank" rel="noopener">www.cloudflare.com</a></li>
+        <li><strong>{id.host.name}</strong></li>
+        <li>{id.host.address}</li>
+        <li><a href={id.host.url} target="_blank" rel="noopener">{id.host.url.replace(/^https?:\/\//, '')}</a></li>
       </ul>
       <p>
         GPU inference and data-processing sub-processors (full list in the{' '}
@@ -86,8 +88,8 @@ export default function LegalNoticePage() {
         complaint to us (see contact above).
       </p>
       <ul>
-        <li><strong>Designated consumer mediator (médiateur agréé):</strong> [À_COMPLÉTER: médiateur agréé — ex. CM2C / Medicys — nom, adresse postale, site web]</li>
-        <li><strong>Mediator postal &amp; web contact:</strong> [À_COMPLÉTER: coordonnées complètes du médiateur (adresse + URL de saisine en ligne)]</li>
+        <li><strong>Designated consumer mediator (médiateur agréé):</strong> {id.mediator.name}</li>
+        <li><strong>Mediator postal &amp; web contact:</strong> {id.mediator.postalAddress} — <a href={id.mediator.url} target="_blank" rel="noopener">{id.mediator.url}</a></li>
       </ul>
       <p>
         For consumers resident in the EU, the European Commission also provides an

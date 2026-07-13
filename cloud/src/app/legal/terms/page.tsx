@@ -1,5 +1,7 @@
 // Terms of Service — baseline tailored to MyFabmesh.AI's actual flows.
-// Replace the placeholder business identity before launch.
+// The business identity is defined ONCE in @/config/legal-identity.
+
+import { legalIdentity as id } from '@/config/legal-identity';
 
 export const metadata = {
   title: 'Terms of Service — MyFabmesh.AI',
@@ -13,10 +15,10 @@ export default function TermsPage() {
       <p style={{ color: 'var(--text-2)' }}>Last updated: 2026-06-20</p>
 
       <p>
-        By creating an account on MyFabmesh.AI (operated by{' '}
-        <strong>Ayros Studio</strong>, France), you accept these terms.
+        By creating an account on {id.tradeName} (operated by{' '}
+        <strong>{id.operator}</strong>, {id.country}), you accept these terms.
         If you don&apos;t accept them, don&apos;t create an account.
-        Contact: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
+        Contact: <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a>.
       </p>
 
       <h2>1. The service</h2>
@@ -113,7 +115,7 @@ export default function TermsPage() {
       <h2>9. Responsible disclosure</h2>
       <p>
         If you find a security vulnerability, please email{' '}
-        <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>{' '}
+        <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a>{' '}
         with the details. We&apos;ll acknowledge within 48 hours, work with
         you on a fix, and credit you on a public thank-you page if you
         want. Don&apos;t exploit, don&apos;t exfiltrate other users&apos; data,
@@ -134,7 +136,7 @@ export default function TermsPage() {
         free of charge to the designated consumer mediator:
       </p>
       <ul>
-        <li><strong>Designated consumer mediator:</strong> [À_COMPLÉTER: médiateur agréé — ex. CM2C / Medicys — nom, adresse postale, URL de saisine]</li>
+        <li><strong>Designated consumer mediator:</strong> {id.mediator.name} — {id.mediator.postalAddress} — <a href={id.mediator.url} target="_blank" rel="noopener">{id.mediator.url}</a></li>
       </ul>
       <p>
         EU consumers may also use the European Commission&apos;s Online Dispute
@@ -196,7 +198,7 @@ export default function TermsPage() {
       <p>
         If you believe content on MyFabmesh.AI (a generated asset, a marketplace
         listing, or an uploaded image) infringes your copyright, email{' '}
-        <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a> with the
+        <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> with the
         subject &ldquo;Copyright notice&rdquo; and include: identification of the
         copyrighted work and of the infringing material (with a URL or listing
         ID); your contact details; a statement that you have a good-faith belief
@@ -230,7 +232,7 @@ export default function TermsPage() {
         <li>
           <strong>How to report:</strong> use the &ldquo;Report&rdquo; control on a
           marketplace listing, or email{' '}
-          <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a> with
+          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> with
           the subject &ldquo;Illegal content&rdquo;, an explanation of why the
           content is illegal, and its location (URL or listing ID).
         </li>
@@ -257,7 +259,7 @@ export default function TermsPage() {
       </ul>
       <h3>13.1 Designated agents</h3>
       <ul style={{ fontSize: 14 }}>
-        <li><strong>DSA single point of contact &amp; copyright / DMCA agent:</strong> [À_COMPLÉTER: nom de l&apos;agent désigné], reachable at <a href="mailto:contact@myfabmesh.ai">contact@myfabmesh.ai</a>. Before distributing to U.S. users, this agent must also be registered with the U.S. Copyright Office DMCA Designated Agent Directory.</li>
+        <li><strong>DSA single point of contact &amp; copyright / DMCA agent:</strong> {id.designatedAgent}, reachable at <a href={`mailto:${id.contactEmail}`}>{id.contactEmail}</a>. Before distributing to U.S. users, this agent must also be registered with the U.S. Copyright Office DMCA Designated Agent Directory.</li>
         <li><strong>Registered business identity</strong> (operator, SIRET, registered office, host): see the <a href="/legal/mentions">Legal Notice (Mentions légales)</a>.</li>
       </ul>
 
