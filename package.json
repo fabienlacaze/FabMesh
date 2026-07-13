@@ -8,6 +8,11 @@
     "email": "fabien65400@hotmail.fr"
   },
   "license": "SEE LICENSE IN LICENSE.txt",
+  "_releaseGuards": {
+    "note": "Metadata only — ignored by npm and electron-builder. Documents packaging constraints that must not be violated.",
+    "doNotBundleMotionLibrary": "NE PAS ajouter external/apovivor (ni aucun pack de motions FBX Mixamo/Rokoko/apovivor) à build.files ni à build.extraResources tant que la provenance de CHAQUE clip FBX n'est pas tracée et ses droits de redistribution vérifiés. Ces licences interdisent la redistribution des motions brutes. Voir THIRD_PARTY_LICENSES.txt (clause 'motion library') et src/main/animation.js (chargement DEV-ONLY hors-arbre).",
+    "puppeteerExcludesAnimation": "Le bloc extraResources de external/Puppeteer exclut volontairement animation/ examples/ inputs/ assets/ et les checkpoints. Ne pas retirer ces exclusions."
+  },
   "scripts": {
     "start": "set ELECTRON_RUN_AS_NODE= && electron .",
     "dev": "set ELECTRON_RUN_AS_NODE= && electron . --dev",

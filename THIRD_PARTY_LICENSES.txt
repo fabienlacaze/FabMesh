@@ -7,9 +7,21 @@ weights. Each component is distributed under its own license. Full license
 texts are available at the URLs listed below. This document is provided to
 satisfy the attribution requirements of those licenses.
 
-FabMesh itself redistributes NO third-party 3D assets, character models,
-skeletons, animations, or textures. All bundled rig templates under
-`scripts/rig_templates/` are CC0, authored by the FabMesh team.
+FabMesh's shipping build (see the `files` / `extraResources` sections of
+package.json) redistributes NO third-party 3D assets, character models,
+textures, or pre-recorded animation clips. All bundled rig templates under
+`scripts/rig_templates/` are CC0, authored by the FabMesh team, and the
+Puppeteer rig backend is bundled WITHOUT its `animation/` directory.
+
+IMPORTANT — motion library: the desktop app contains code
+(`src/main/animation.js`) that can load an external FBX motion library from
+`external/apovivor/1_Source/` or `c:/tmp/apovivor_fbx/`. That library is a
+DEV-ONLY, out-of-tree resource and is deliberately NOT included in the
+packaged build. It MUST NOT be redistributed: the FBX motions are of
+Mixamo / Rokoko / apovivor provenance whose licenses prohibit redistribution
+of the raw motion assets. Do not add `external/apovivor` (or any equivalent
+motion pack) to `extraResources`/`files` until each clip's provenance and
+redistribution rights have been individually cleared and documented here.
 
 --------------------------------------------------------------------------------
  1. Electron
@@ -332,6 +344,75 @@ FabMesh uses Argos Translate to translate the user's prompt into English offline
 MIT/CC0; the downloaded language packages are trained on OPUS/CC0 data.
 Commercial use permitted. Full text:
 https://github.com/argosopentech/argos-translate/blob/master/LICENSE
+
+--------------------------------------------------------------------------------
+ 33. Puppeteer (rig + skinning backend)
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://github.com/chaoyuesong/Puppeteer
+FabMesh bundles Puppeteer (`external/Puppeteer/`) as its default automatic
+skeleton + skinning backend for character/creature rigging. Copyright (c)
+Chaoyue Song et al. (Nanyang Technological University / ByteDance Seed).
+Apache License 2.0. The bundled copy ships WITHOUT its `animation/`,
+`examples/`, `inputs/` and `assets/` directories and without model
+checkpoints (downloaded at runtime). Full license text:
+https://github.com/chaoyuesong/Puppeteer/blob/main/LICENSE
+Puppeteer vendors additional third-party components under `third_partys/`
+(e.g. Michelangelo, PartField), each retaining its own upstream license; see
+those sub-directories for their respective notices.
+
+--------------------------------------------------------------------------------
+ 34. PartSAM (3D part segmentation)
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/Pointcept/PartSAM
+FabMesh uses PartSAM as its feedforward 3D mesh part-segmentation engine
+(the "segment parts" feature). MIT License, Copyright (c) 2026 Czvvd.
+Model weights are downloaded at runtime and not redistributed by FabMesh.
+Full license text: see PartSAM/LICENSE.txt in the source tree.
+
+--------------------------------------------------------------------------------
+ 35. CLIP (openai/clip-vit-large-patch14, "CLIP-L")
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://huggingface.co/openai/clip-vit-large-patch14
+FabMesh's "Part Namer" (vision route) and several auxiliary pipelines use
+OpenAI's CLIP ViT-L/14 image-text model for zero-shot semantic scoring.
+Copyright (c) OpenAI. MIT License. Weights are downloaded on first run and
+not redistributed by FabMesh. Full license text:
+https://github.com/openai/CLIP/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 36. DreamShaper XL Lightning (Lykon/dreamshaper-xl-lightning)
+--------------------------------------------------------------------------------
+License: CreativeML Open RAIL++-M
+URL:     https://huggingface.co/Lykon/dreamshaper-xl-lightning
+FabMesh's T-pose / neutral-stance image-generation path uses DreamShaper XL
+Lightning (a community SDXL fine-tune) together with ControlNet OpenPose.
+Model weights are downloaded on first run and not redistributed by FabMesh.
+Licensed under the CreativeML Open RAIL++-M License; commercial use is
+permitted subject to the use-based restrictions in the license. Full text:
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md
+
+--------------------------------------------------------------------------------
+ 37. CLIPSeg (CIDAS/clipseg-rd64-refined)
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://huggingface.co/CIDAS/clipseg-rd64-refined
+FabMesh uses CLIPSeg for text-prompted image segmentation in the inpaint /
+auto-inpaint and back-view pipelines. Apache-2.0 per the model card. Weights
+are downloaded at runtime and not redistributed by FabMesh. Full license:
+https://huggingface.co/CIDAS/clipseg-rd64-refined
+
+--------------------------------------------------------------------------------
+ 38. NSFW image detector (Falconsai/nsfw_image_detection)
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://huggingface.co/Falconsai/nsfw_image_detection
+FabMesh uses this ViT image classifier to screen generated/uploaded images
+for NSFW content. Copyright (c) Falconsai. Apache License 2.0. Weights are
+downloaded at runtime and not redistributed by FabMesh. Full license:
+https://huggingface.co/Falconsai/nsfw_image_detection
 
 --------------------------------------------------------------------------------
  Bundled rig templates
