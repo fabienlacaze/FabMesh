@@ -32,6 +32,7 @@
       'Nothing checked = your creations and models are kept.': 'Rien de coché = tes créations et modèles sont conservés.',
       'Uncheck an item to keep it after uninstalling.': 'Décoche un élément pour le conserver après la désinstallation.',
       'Uninstall': 'Désinstaller',
+      'Uninstalling MyFabmesh.AI… (running silently)': 'Désinstallation de MyFabmesh.AI… (en cours, silencieux)',
       // ---- Part naming (Nommer les zones) ----
       'Name the zones (AI)': 'Nommer les zones (IA)',
       'What kind of object is this? (sets the naming vocabulary)':

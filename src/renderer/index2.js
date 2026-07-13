@@ -17212,7 +17212,13 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
   if (!choices) return;  // annulé
   try {
     const r = await window.meshyAPI.uninstallFabmesh(choices);
-    if (!r.ok) showToast(r.error || 'Uninstall failed', 'warning', 8000);
+    if (r && r.ok) {
+      // Le désinstalleur tourne en SILENCIEUX (/S) → sans ce toast, l'user
+      // croit qu'il ne se passe rien. En packagé l'app se ferme aussi.
+      showToast(_i18nT('Uninstalling MyFabmesh.AI… (running silently)'), 'success', 7000);
+    } else {
+      showToast((r && r.error) || 'Uninstall failed', 'warning', 8000);
+    }
   } catch (e) {
     showToast('Uninstall failed: ' + e.message, 'error');
   }
