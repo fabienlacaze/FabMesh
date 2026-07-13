@@ -7587,26 +7587,59 @@ ipcMain.handle('wizard:install-segment', async (event) => {
 // Models cached on disk + user projects are kept (only the "setup
 // done" flag is reset), so the wizard reopens but the heavy assets
 // are still there if the user only wants to change install mode.
-// Launch the NSIS uninstaller. In a packaged build, electron-builder
-// places `Uninstall FabMesh.exe` next to the app executable. In dev
-// mode we just open the AI assets cleanup script as a fallback so the
-// user has SOMETHING to click that does the right thing.
+// Trouve le désinstalleur NSIS de façon ROBUSTE. Le nom exact dépend du
+// productName (« Uninstall MyFabmesh.AI.exe » — l'ancien code cherchait
+// « Uninstall FabMesh.exe » et ne le trouvait donc JAMAIS). On tente, dans
+// l'ordre : (1) à côté de l'exe (packagé) par glob « Uninstall *.exe », puis
+// (2) l'UninstallString du registre Windows — ce qui marche AUSSI en dev tant
+// que l'app est installée sur la machine.
+function _findUninstaller() {
+  try {
+    const appDir = path.dirname(app.getPath('exe'));
+    const hit = fs.readdirSync(appDir).find((f) => /^Uninstall .*\.exe$/i.test(f));
+    if (hit) return path.join(appDir, hit);
+  } catch (_) {}
+  if (process.platform === 'win32') {
+    for (const root of ['HKCU', 'HKLM']) {
+      try {
+        const out = require('child_process').execFileSync('reg',
+          ['query', `${root}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall`, '/s'],
+          { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+        // Cherche une UninstallString qui pointe vers notre désinstalleur.
+        const re = /UninstallString\s+REG_SZ\s+(.+)/gi;
+        let m;
+        while ((m = re.exec(out))) {
+          const val = m[1].trim();
+          if (!/myfabmesh/i.test(val)) continue;
+          const q = val.match(/^"([^"]+\.exe)"/i) || val.match(/^([^\s"]+\.exe)/i);
+          const exe = q ? q[1] : null;
+          if (exe && fs.existsSync(exe)) return exe;
+        }
+      } catch (_) {}
+    }
+  }
+  return null;
+}
+
+// Launch the NSIS uninstaller (from the app or from dev — resolved via the
+// exe folder or the Windows registry). The uninstaller itself asks whether to
+// also delete models/generated content/settings.
 ipcMain.handle('app:uninstall', async () => {
-  const appDir = path.dirname(app.getPath('exe'));
-  const uninstaller = path.join(appDir, 'Uninstall FabMesh.exe');
-  if (fs.existsSync(uninstaller)) {
+  const uninstaller = _findUninstaller();
+  if (uninstaller) {
     const { spawn } = require('child_process');
-    spawn(uninstaller, [], { detached: true, stdio: 'ignore' }).unref();
-    // Quit the app so the uninstaller can clean files without lock.
-    setTimeout(() => app.quit(), 500);
-    return { ok: true, mode: 'nsis' };
+    // /currentuser : per-user NSIS uninstall (comme l'entrée du registre).
+    spawn(uninstaller, ['/currentuser'], { detached: true, stdio: 'ignore' }).unref();
+    // En build packagé, on quitte pour libérer les fichiers verrouillés ;
+    // en dev l'app installée est distincte, on ne tue pas l'éditeur.
+    if (app.isPackaged) setTimeout(() => app.quit(), 500);
+    return { ok: true, mode: 'nsis', packaged: app.isPackaged };
   }
   return {
     ok: false,
-    mode: 'dev',
-    error: 'Uninstaller not found. In a packaged build, this button '
-         + 'launches the official Windows uninstaller. In dev mode, '
-         + 'remove the project folder manually.',
+    mode: 'not-installed',
+    error: "Désinstalleur introuvable — MyFabmesh.AI n'est pas installé sur "
+         + 'cette machine (ou a déjà été désinstallé). Rien à faire.',
   };
 });
 

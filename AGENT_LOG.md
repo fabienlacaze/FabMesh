@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-07-13 (fix : bouton « Uninstall » in-app trouve enfin le désinstalleur)
+
+Le handler 'app:uninstall' cherchait « Uninstall FabMesh.exe » alors que le
+productName est « MyFabmesh.AI » → le vrai fichier est « Uninstall MyFabmesh.AI.exe »
+→ JAMAIS trouvé, même en build packagé (toujours « Uninstaller not found »).
+Fix _findUninstaller() : (1) glob « Uninstall *.exe » à côté de l'exe, (2)
+fallback UninstallString du registre Windows (marche AUSSI en dev si l'app est
+installée). Lance avec /currentuser ; ne quitte l'app qu'en packagé.
+
 ## 2026-07-13 (uninstaller : question dédiée « supprimer les contenus générés » + bons chemins)
 
 Demande user. Le désinstalleur NSIS (build/uninstaller.nsh) avait 2 bugs :
