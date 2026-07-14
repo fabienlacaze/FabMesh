@@ -26,7 +26,8 @@
     "@google/model-viewer": "^4.2.0",
     "@sentry/electron": "^7.13.0",
     "electron-updater": "^6.8.3",
-    "three": "^0.182.0"
+    "three": "^0.182.0",
+    "three-mesh-bvh": "^0.9.11"
   },
   "devDependencies": {
     "electron": "^31.0.0",

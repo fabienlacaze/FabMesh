@@ -12,7 +12,20 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { Viewer3D } from './lib/Viewer3D.js';
+
+// BVH-accelerated raycasting (three-mesh-bvh, MIT). The 3D clone-stamp fires
+// hundreds of raycasts per stamp; native three.js raycast is O(triangles) and
+// froze on 500k-tri meshes. Patch the prototypes ONCE (guarded so a hot-reload
+// or re-import never double-applies), then call geometry.computeBoundsTree() on
+// meshes we intend to raycast heavily and geometry.disposeBoundsTree() to free.
+if (!THREE.Mesh.prototype.__bvhPatched) {
+  THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+  THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+  THREE.Mesh.prototype.raycast = acceleratedRaycast;
+  THREE.Mesh.prototype.__bvhPatched = true;
+}
 
 const API = window.meshyAPI;
 
@@ -11117,12 +11130,17 @@ const peState = {
   retexMeshPath: null,
   loupeOn: false,
   // 3D clone-stamp sub-mode: edits the mesh's BASE-COLOR atlas in place.
-  // cloneSource = { mesh, u, v } set by Ctrl+click; cloneOffset (atlas px) +
-  // cloneSrcCanvas (source snapshot) are fixed at each stroke start.
+  // The clone works in SCREEN space (see _pcStampClone): Ctrl+click stores the
+  // source 3D point (cloneSource3D) + its screen position; each stroke fixes a
+  // screen-space offset and snapshots every mesh atlas once. Both source and
+  // dest are re-resolved through per-sample raycasts, so the discontinuous UV
+  // atlas never leaks cross-island / gutter artefacts.
   cloneMode: false,
-  cloneSource: null,
-  cloneOffset: null,
-  cloneSrcCanvas: null,
+  cloneSource: null,          // { mesh, u, v } — kept for the green marker
+  cloneSource3D: null,        // THREE.Vector3 world point of the source
+  cloneSourceScreen: null,    // { x, y } client px of the source at Ctrl+click
+  cloneOffsetScreen: null,    // { dx, dy } screen px, fixed per stroke
+  cloneSrcSnaps: null,        // Map<Mesh, ImageData> — atlas snapshot per stroke
 };
 function _peClamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 // Throttle the (expensive) CanvasTexture→GPU re-upload during a paint stroke:
@@ -11300,8 +11318,13 @@ function _peRestoreMaterials() {
 // native resolution so cloning never downscales the texture), bound to mat.map.
 function _pcSetupCloneCanvas() {
   peState.canvases = new Map();
-  peState.cloneSource = null; peState.cloneOffset = null; peState.cloneSrcCanvas = null;
+  peState.cloneSource = null; peState.cloneSource3D = null; peState.cloneSourceScreen = null;
+  peState.cloneOffsetScreen = null; peState.cloneSrcSnaps = null;
   peState.meshes.forEach((entry) => {
+    // Build a BVH so the clone-stamp's per-sample raycasts stay real-time even
+    // on 500k-tri meshes. computeBoundsTree() is idempotent-ish (rebuilds); we
+    // only call it here, once per mesh when the clone viewer loads.
+    try { entry.mesh.geometry.computeBoundsTree?.(); } catch (_) {}
     const m = entry.mesh.material;
     const mats = Array.isArray(m) ? m : [m];
     const mat0 = mats.find((mm) => mm && mm.map && mm.map.image) || mats[0];
@@ -11327,12 +11350,17 @@ function _pcSetupCloneCanvas() {
   _peHistoryPush();
 }
 
-// Ctrl+click defines the clone SOURCE (a UV point on a mesh).
+// Ctrl+click defines the clone SOURCE. We store the source WORLD point (so the
+// screen anchor can be re-projected at each stroke start, surviving camera
+// moves between strokes) plus its current screen position as a fallback.
 function _pcSetSource(clientX, clientY) {
   const hit = _peRaycast(clientX, clientY);
   if (!hit) { showToast('Vise le mesh pour définir la source.', 'error', 2000); return; }
   peState.cloneSource = { mesh: hit.object, u: _peClamp01(hit.uv.x), v: _peClamp01(hit.uv.y) };
-  peState.cloneOffset = null;
+  peState.cloneSource3D = hit.point.clone();
+  peState.cloneSourceScreen = { x: clientX, y: clientY };
+  peState.cloneOffsetScreen = null;
+  peState.cloneSrcSnaps = null;
   // Green source marker on the mesh (the 3D equivalent of the 2D clone's green
   // source ring) so the user sees exactly where the clone is copying FROM.
   try {
@@ -11356,62 +11384,124 @@ function _pcSetSource(clientX, clientY) {
   showToast('Source définie — clic gauche + glisser pour cloner.', 'success', 1800);
 }
 
-// Clone the source atlas region onto the destination — a DIRECT per-pixel copy
-// in atlas space (O(brush²), the same math as the 2D clone stamp) with a soft
-// radial falloff. No per-triangle loop and no worldToLocal, so it stays instant
-// even on 500k-triangle meshes (the old triangle-fill froze the machine).
+// Fast raycast for a client-space point, reusing a cached canvas rect and the
+// shared pointer/raycaster (BVH-accelerated). Returns the nearest hit with a uv.
+function _pcRaycastAt(clientX, clientY, rect, meshes) {
+  const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  const y = ((clientY - rect.top) / rect.height) * -2 + 1;
+  peState.pointer.set(x, y);
+  peState.raycaster.setFromCamera(peState.pointer, peState.camera);
+  const hits = peState.raycaster.intersectObjects(meshes, false);
+  if (!hits.length || !hits[0].uv) return null;
+  return hits[0];
+}
+
+// SCREEN-SPACE clone stamp. The UV atlas is DISCONTINUOUS (islands scattered
+// arbitrarily), so the old fixed atlas-space offset only held at the exact
+// source point and sampled the wrong island/gutter for every neighbouring
+// pixel → garbled/black artefacts. Instead we clone in screen space: for each
+// brush sample we raycast the DEST point AND the offset SOURCE point, resolving
+// each one's true UV independently, so cross-island offsets are always correct.
+// BVH raycasting (three-mesh-bvh) keeps the many casts/stamp real-time.
 function _pcStampClone(clientX, clientY, isStart) {
-  const hit = _peRaycast(clientX, clientY);
-  if (!hit) return;
-  const entry = peState.canvases?.get(hit.object);
-  if (!entry) return;
-  if (!peState.cloneSource) { showToast('Ctrl+clic pour définir la source à cloner d\'abord.', 'error', 2500); return; }
-  const ctx = entry.ctx;
-  const TEX = entry.canvas.width;
-  const dpx = _peClamp01(hit.uv.x) * TEX;
-  const dpy = _peClamp01(hit.uv.y) * TEX;
-  if (isStart) {
-    const srcEntry = peState.canvases.get(peState.cloneSource.mesh) || entry;
-    const sTEX = srcEntry.canvas.width;
-    peState.cloneOffset = { dx: _peClamp01(peState.cloneSource.u) * sTEX - dpx,
-                            dy: _peClamp01(peState.cloneSource.v) * sTEX - dpy };
-    // Snapshot the source atlas ONCE per stroke as ImageData (fast pixel reads).
-    peState.cloneSrcData = srcEntry.ctx.getImageData(0, 0, srcEntry.canvas.width, srcEntry.canvas.height);
+  if (!peState.cloneSource3D && !peState.cloneSourceScreen) {
+    showToast('Ctrl+clic pour définir la source à cloner d\'abord.', 'error', 2500);
+    return;
   }
-  const off = peState.cloneOffset, src = peState.cloneSrcData;
-  if (!off || !src) return;
+  if (!peState.canvases || !peState.raycaster || !peState.camera) return;
+  const rect = peState.renderer.domElement.getBoundingClientRect();
+  const meshes = peState.meshes.map((e) => e.mesh);
+  if (!meshes.length) return;
+
+  if (isStart) {
+    // Re-project the source WORLD point to the current screen (survives camera
+    // moves between strokes); fall back to the stored screen point.
+    let srcScreen = peState.cloneSourceScreen;
+    if (peState.cloneSource3D) {
+      const ndc = peState.cloneSource3D.clone().project(peState.camera);
+      srcScreen = {
+        x: (ndc.x * 0.5 + 0.5) * rect.width + rect.left,
+        y: (-ndc.y * 0.5 + 0.5) * rect.height + rect.top,
+      };
+    }
+    peState.cloneOffsetScreen = { dx: srcScreen.x - clientX, dy: srcScreen.y - clientY };
+    // Snapshot EVERY mesh atlas once per stroke (source samples may resolve to a
+    // different mesh than the one being painted). Fast pixel reads afterwards.
+    peState.cloneSrcSnaps = new Map();
+    peState.canvases.forEach((entry, mesh) => {
+      peState.cloneSrcSnaps.set(mesh, entry.ctx.getImageData(0, 0, entry.canvas.width, entry.canvas.height));
+    });
+  }
+  const off = peState.cloneOffsetScreen, snaps = peState.cloneSrcSnaps;
+  if (!off || !snaps) return;
+
   const r = Math.max(1, peState.brushSize * 0.5);
   const hardness = _peClamp01(peState.brushFalloff);
   const opacity = _peClamp01(peState.brushOpacity);
-  const ox = Math.max(0, Math.floor(dpx - r)), oy = Math.max(0, Math.floor(dpy - r));
-  const w = Math.min(TEX - ox, Math.ceil(r * 2)), h = Math.min(TEX - oy, Math.ceil(r * 2));
-  if (w <= 0 || h <= 0) return;
-  const dst = ctx.getImageData(ox, oy, w, h);
-  const dd = dst.data, sd = src.data, sw = src.width, sh = src.height;
-  for (let py = 0; py < h; py++) {
-    for (let px = 0; px < w; px++) {
-      const ax = ox + px, ay = oy + py;
-      const ddx = ax - dpx, ddy = ay - dpy;
-      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-      if (dist > r) continue;
-      const t = dist / r;
-      const a = ((1 - t * t) * (hardness + (1 - hardness) * (1 - t))) * opacity;
-      if (a <= 0) continue;
-      const sx = Math.round(ax + off.dx), sy = Math.round(ay + off.dy);
-      if (sx < 0 || sy < 0 || sx >= sw || sy >= sh) continue;
-      const s = (sy * sw + sx) * 4, d = (py * w + px) * 4;
-      // Skip atlas GUTTERS (transparent, or the pure-black padding between UV
-      // islands): cloning across an island boundary would otherwise paint black
-      // artefacts. Legitimate dark texture is dark-red/brown, not (0,0,0).
-      if (sd[s+3] < 8 || (sd[s] < 8 && sd[s+1] < 8 && sd[s+2] < 8)) continue;
-      dd[d]   = dd[d]   * (1 - a) + sd[s]   * a;
-      dd[d+1] = dd[d+1] * (1 - a) + sd[s+1] * a;
-      dd[d+2] = dd[d+2] * (1 - a) + sd[s+2] * a;
-      dd[d+3] = dd[d+3] * (1 - a) + sd[s+3] * a;
+  // Sample the brush footprint on a screen grid (~16 steps across, min 3px) —
+  // one raycast per grid node, not per pixel.
+  const step = Math.max(3, Math.ceil((2 * r) / 16));
+
+  // Estimate atlas-pixels-per-screen-pixel at the brush centre so each resolved
+  // sample can paint a small disc that just fills the gap to its neighbours.
+  let scale = 1;
+  const centerDest = _pcRaycastAt(clientX, clientY, rect, meshes);
+  if (centerDest) {
+    const cEntry = peState.canvases.get(centerDest.object);
+    const cTEX = (cEntry && cEntry.canvas.width) || PE_TEX_SIZE;
+    const cx = _peClamp01(centerDest.uv.x) * cTEX, cy = _peClamp01(centerDest.uv.y) * cTEX;
+    const nb = _pcRaycastAt(clientX + step, clientY, rect, meshes)
+            || _pcRaycastAt(clientX, clientY + step, rect, meshes);
+    if (nb && nb.object === centerDest.object) {
+      const d = Math.hypot(_peClamp01(nb.uv.x) * cTEX - cx, _peClamp01(nb.uv.y) * cTEX - cy);
+      if (isFinite(d) && d > 0) scale = d / step;
     }
   }
-  ctx.putImageData(dst, ox, oy);
-  _peMarkDirty(entry);
+  const discR = Math.max(1.5, scale * step * 0.7);
+
+  const touched = new Set();
+  for (let gy = -r; gy <= r; gy += step) {
+    for (let gx = -r; gx <= r; gx += step) {
+      const ds = Math.hypot(gx, gy);
+      if (ds > r) continue;
+      // Radial brush falloff by screen distance from the brush centre.
+      const t = ds / r;
+      const a = ((1 - t * t) * (hardness + (1 - hardness) * (1 - t))) * opacity;
+      if (a <= 0) continue;
+
+      const destHit = _pcRaycastAt(clientX + gx, clientY + gy, rect, meshes);
+      if (!destHit) continue;
+      const dEntry = peState.canvases.get(destHit.object);
+      if (!dEntry) continue;
+
+      const srcHit = _pcRaycastAt(clientX + gx + off.dx, clientY + gy + off.dy, rect, meshes);
+      if (!srcHit) continue;
+      const snap = snaps.get(srcHit.object);
+      if (!snap) continue;
+      const sW = snap.width, sH = snap.height;
+      const sx = Math.round(_peClamp01(srcHit.uv.x) * sW);
+      const sy = Math.round(_peClamp01(srcHit.uv.y) * sH);
+      if (sx < 0 || sy < 0 || sx >= sW || sy >= sH) continue;
+      const si = (sy * sW + sx) * 4;
+      const sr = snap.data[si], sg = snap.data[si + 1], sb = snap.data[si + 2], sa = snap.data[si + 3];
+      // Skip atlas GUTTERS (transparent, or pure-black island padding) — cloning
+      // those would paint black artefacts. Legit dark texture is not (0,0,0).
+      if (sa < 8 || (sr < 8 && sg < 8 && sb < 8)) continue;
+
+      const dTEX = dEntry.canvas.width;
+      const dax = _peClamp01(destHit.uv.x) * dTEX;
+      const day = _peClamp01(destHit.uv.y) * dTEX;
+      const dctx = dEntry.ctx;
+      dctx.globalAlpha = a;
+      dctx.fillStyle = `rgb(${sr},${sg},${sb})`;
+      dctx.beginPath();
+      dctx.arc(dax, day, discR, 0, Math.PI * 2);
+      dctx.fill();
+      dctx.globalAlpha = 1;
+      touched.add(dEntry);
+    }
+  }
+  touched.forEach((e) => _peMarkDirty(e));
 }
 
 async function _peLoadMesh(meshPath) {
@@ -11762,7 +11852,8 @@ function openPaintEmissive(opts = {}) {
   peState.maskMode = maskMode;
   peState.cloneMode = cloneMode;
   peState.retexMeshPath = meshPath;
-  peState.cloneSource = null; peState.cloneOffset = null; peState.cloneSrcCanvas = null;
+  peState.cloneSource = null; peState.cloneSource3D = null; peState.cloneSourceScreen = null;
+  peState.cloneOffsetScreen = null; peState.cloneSrcSnaps = null;
   modal.classList.remove('hidden');
 
   const $ = (id) => document.getElementById(id);
@@ -11936,6 +12027,9 @@ function openPaintEmissive(opts = {}) {
     const preview = document.getElementById('pe-brush-preview');
     if (preview) preview.style.display = 'none';
     if (peState.cloneSrcMarker) peState.cloneSrcMarker.visible = false;
+    // Free the BVHs built for the clone-stamp raycasts.
+    try { peState.meshes?.forEach((e) => e.mesh.geometry?.disposeBoundsTree?.()); } catch (_) {}
+    peState.cloneSrcSnaps = null;
   };
   $('pe-cancel').onclick = () => close(true);
   $('pe-apply-device').onclick = async () => {
