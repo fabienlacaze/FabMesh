@@ -131,3 +131,15 @@ hf_cache/
 # Junk temp files accidentally written to the repo root with a bad
 # 'c:tmp<name>' relative path (the ':' is the U+F03A private-use glyph).
 c?tmp*
+
+# Vendored part-segmentation engines — cloned repos + weights, fetched/built
+# locally (like SAMPart3D/ and external/Puppeteer/). PartSAM alone is ~1.3 GB
+# with model binaries that exceed GitHub's file-size limits; never committed.
+PartSAM/
+torkit3d_src/
+
+# tsc incremental cache for the worker typecheck (regenerated every check)
+cloud/tsconfig.worker.check.tsbuildinfo
+
+# Scratch/verification stderr dumps written to the repo root during debugging
+scratch_*.err
