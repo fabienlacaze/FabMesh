@@ -9846,7 +9846,11 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
   // that finds the MOST boundary loops but is NOT the finest (finest leaves
   // seams unwelded → false loops). We take the coarsest tol that still yields
   // near-max loops.
-  const tols = [meanEdge * 0.1, meanEdge * 0.25, meanEdge * 0.45, meanEdge * 0.7];
+  // Wider weld ladder: a hole whose boundary verts weld cleanly only at a
+  // specific tolerance was missed with the old 4-step ladder. More steps
+  // (finer + coarser) → more holes' boundary loops close. We keep the tol that
+  // finds the MOST loops (best hole coverage).
+  const tols = [0.05, 0.1, 0.18, 0.28, 0.4, 0.55, 0.75, 1.0].map((f) => meanEdge * f);
   let best = null, bestTol = tols[1];
   for (const tol of tols) {
     const r = detect(tol);
