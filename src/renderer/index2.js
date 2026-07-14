@@ -11781,8 +11781,7 @@ function openPaintEmissive(opts = {}) {
   const loupeBtn = $('pe-loupe-toggle');
   if (loupeBtn) {
     const syncLoupeBtn = () => {
-      loupeBtn.style.background = peState.loupeOn ? 'var(--accent, #5a4fcf)' : '';
-      loupeBtn.style.color = peState.loupeOn ? '#fff' : '';
+      loupeBtn.classList.toggle('tool-active', peState.loupeOn);
       if (!peState.loupeOn) { const lb = $('pe-loupe'); if (lb) lb.style.display = 'none'; }
     };
     loupeBtn.onclick = () => { peState.loupeOn = !peState.loupeOn; syncLoupeBtn(); };

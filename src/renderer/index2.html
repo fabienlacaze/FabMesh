@@ -1793,14 +1793,16 @@
               <button id="pe-mode-paint" class="ghost-btn" style="flex:1; padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;">🖌 Paint</button>
               <button id="pe-mode-erase" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;">🧽 Erase</button>
             </div>
-            <div style="display:flex; gap:6px;">
-              <button id="pe-undo" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Undo (Ctrl+Z)">↶ Undo</button>
-              <button id="pe-redo" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Redo (Ctrl+Y)">↷ Redo</button>
-              <button id="pe-loupe-toggle" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Loupe (agrandisseur)">🔍 Loupe</button>
+            <!-- Compact icon toolbar (loupe / undo / redo / reset) — same
+                 disposition as the mesh-edit viewer's top bar. -->
+            <div style="display:flex; gap:6px; justify-content:center; align-items:center;">
+              <button id="pe-loupe-toggle" class="secondary-btn tool-btn" title="Loupe (agrandisseur)">&#128269;</button>
+              <button id="pe-undo" class="secondary-btn tool-btn" disabled title="Annuler (Ctrl+Z)">&#8630;</button>
+              <button id="pe-redo" class="secondary-btn tool-btn" disabled title="Rétablir (Ctrl+Y)">&#8631;</button>
+              <button id="pe-clear" class="secondary-btn tool-btn" title="Tout effacer">&#8635;</button>
             </div>
             <button id="pe-toggle-emissive" class="ghost-btn pe-emissive-only" style="padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;" title="Show/hide the emissive texture on the mesh">💡 Emissive ON</button>
             <button id="pe-load-image-layer" class="ghost-btn pe-emissive-only" style="padding:6px; font-size:11px;" title="Re-project the emissive layer painted on the source image">⬇ Load from image layer</button>
-            <button id="pe-clear" class="ghost-btn" style="padding:6px; font-size:11px;">↺ Clear all</button>
             <div class="pe-emissive-only" style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">
               Output: <code>T_emissive</code> 1024×1024 PNG embedded in the GLB.
             </div>
