@@ -2025,7 +2025,10 @@ bindStepCardCollapse();
 
   function _curMeshPath() {
     const p = state.currentProject;
-    return (p && (p.selectedMeshPath || (p.meshes && p.meshes[0] && p.meshes[0].path))) || null;
+    // Prefer the mesh version CURRENTLY DISPLAYED in the step-2 viewer
+    // (previewMeshPath) so the tools act on what the user is looking at —
+    // not the rig-selected mesh or meshes[0] (which opened "the last one").
+    return (p && (p.previewMeshPath || p.selectedMeshPath || (p.meshes && p.meshes[0] && p.meshes[0].path))) || null;
   }
   function _pos(e) {
     const r = canvas.getBoundingClientRect();
@@ -9251,8 +9254,10 @@ function _meshJobThumb(meshPath) {
 
 async function runMeshTool(operation, params = [], namedParams = null) {
   const p = state.currentProject;
-  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
-  const meshPath = p.selectedMeshPath;
+  // Operate on the DISPLAYED mesh version (previewMeshPath) — not the rig-selected
+  // / last-generated mesh (selectedMeshPath) which made the tool hit the wrong one.
+  const meshPath = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!p || !meshPath) { showToast('Pick a mesh first.', 'error'); return; }
   const meshName = meshPath.split(/[\\/]/).pop();
   const expectedMs = MESH_TOOL_EXPECTED_MS[operation] || 10000;
   // Show the full "Running task" popup (same component as 3D generation,
@@ -9396,8 +9401,8 @@ async function _installSegmentEngine() {
 
 async function _runSegmentJob(granularity, allowInstall) {
   const p = state.currentProject;
-  if (!p || !p.selectedMeshPath) return;
-  const meshPath = p.selectedMeshPath;
+  const meshPath = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!p || !meshPath) return;
   const meshName = meshPath.split(/[\\/]/).pop();
   const expectedMs = 120000;  // ~1-2 min (PartSAM feedforward)
   const job = (typeof pushJob === 'function')
@@ -10404,7 +10409,7 @@ function openMeshToolModal(toolName) {
   const schema = MESH_TOOL_SCHEMAS[toolName];
   if (!schema) { showToast(`Unknown tool: ${toolName}`, 'error'); return; }
   const p = state.currentProject;
-  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  if (!p || !(p.previewMeshPath || p.selectedMeshPath)) { showToast('Pick a mesh first.', 'error'); return; }
   if (schema.needsImage && !p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
 
   const modal = document.getElementById('modal-mesh-tool');
@@ -10535,7 +10540,7 @@ function openMeshToolModal(toolName) {
   applyBtn.onclick = async () => {
     const vals = _mtCollectVals(body);
     if (schema.confirm && !await customConfirm(schema.confirm, schema.title, 'Continue')) return;
-    const ctx = { imagePath: p.selectedImagePath, meshPath: p.selectedMeshPath };
+    const ctx = { imagePath: p.selectedImagePath, meshPath: (p.previewMeshPath || p.selectedMeshPath) };
     // A schema can pick the operation at apply time (e.g. Triangle count
     // decides decimate vs subdivide from the target vs the current count).
     if (typeof schema.resolveOp === 'function') {
@@ -10554,7 +10559,7 @@ function openMeshToolModal(toolName) {
   // Init viewport then load mesh; preview kicks off once geoms are cached.
   requestAnimationFrame(async () => {
     await _mtInitViewport();
-    _mtLoadMesh(p.selectedMeshPath);
+    _mtLoadMesh(p.previewMeshPath || p.selectedMeshPath);
   });
 }
 
@@ -11714,7 +11719,7 @@ function openPaintEmissive(opts = {}) {
   const p = state.currentProject;
   const maskMode = !!opts.maskMode;
   const cloneMode = !!opts.cloneMode;
-  const meshPath = opts.meshPath || (p && p.selectedMeshPath);
+  const meshPath = opts.meshPath || (p && (p.previewMeshPath || p.selectedMeshPath));
   if (!meshPath) { showToast('Pick a mesh first.', 'error'); return; }
   const modal = document.getElementById('modal-paint-emissive');
   if (!modal) return;
