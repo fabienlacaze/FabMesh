@@ -663,6 +663,38 @@ async function refreshProjectsPage() {
   _runNsfwBackgroundScan();
 }
 
+// Open a project given only its (folder-stem) name — used when we have a name
+// but not yet the in-memory project object: drop-to-create (the project was
+// just written to disk and isn't in state.projects until a rescan) and
+// job-step navigation. This was REFERENCED in 3 places (np-create,
+// _navigateToJobStep, jump-to-project) but NEVER defined, so every call was a
+// silent no-op via `typeof … === 'function'` === false — which is exactly why
+// dropping an image on the projects grid created the project on disk but left
+// the listing stale and never opened it.
+// Contract: rescan from disk when the name isn't loaded yet (this also
+// refreshes the grid), then open it through the SAME path as clicking its card
+// (openProject). Returns true if a project was opened.
+window.openProjectByName = async function openProjectByName(name) {
+  if (!name) return false;
+  const norm = (s) => String(s || '').toLowerCase();
+  const target = norm(name);
+  const stem = norm(String(name).replace(/_\d+$/, ''));
+  const _find = () => (state.projects || []).find(p => {
+    if (!p) return false;
+    const n = norm(p.name), d = norm(p.displayName);
+    return n === target || d === target || n === stem;
+  });
+  let p = _find();
+  if (!p) {
+    // Freshly created on disk (or otherwise absent from memory): rescan the
+    // grid from disk — this refreshes the listing — then retry the lookup once.
+    try { await refreshProjectsPage(); } catch (_) {}
+    p = _find();
+  }
+  if (p && typeof openProject === 'function') { await openProject(p); return true; }
+  return false;
+};
+
 // NSFW keywords for project name / prompt filtering (renderer-side).
 // Fetched from main.js on first use so both sides share the same list.
 let _nsfwKeywordsCache = null;
@@ -1450,10 +1482,12 @@ document.getElementById('np-create').addEventListener('click', async () => {
       } catch (_) {}
     }
     const openName = r.projectName || name;
-    try {
-      if (typeof window.openProjectByName === 'function') await window.openProjectByName(openName);
-      else await refreshProjectsPage();
-    } catch (_) { try { await refreshProjectsPage(); } catch (_) {} }
+    // openProjectByName rescans from disk (refreshing the grid) then opens the
+    // new project. If it somehow can't open it, still guarantee the listing is
+    // refreshed so the new project appears instead of leaving a stale grid.
+    let opened = false;
+    try { opened = await window.openProjectByName(openName); } catch (_) {}
+    if (!opened) { try { await refreshProjectsPage(); } catch (_) {} }
     showToast?.('Project created from dropped file', 'success', 1800);
     return;
   }
