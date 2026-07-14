@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (construction-stages → NOUVELLE VERSION, sans écraser la version source)
+
+Avant: les études de construction décoraient la version courante (v7) — la barre de
+stages swappait l'aperçu de v7 → impression d'écrasement. Désormais elles créent leur
+PROPRE nouvelle version d'image, la source reste intacte.
+- Backend `generate-construction-stages`: écrit un nouveau PNG `<srcStem>_chantier_<ts>.png`
+  dans le dossier projet (→ vu comme une version au reload puisque hors préfixe `_`/`.`),
+  cover = bâtiment final ; les vues d'étapes vont dans `<newStem>_stages/` pour que
+  check-stages-dir les lie à CETTE version. Retourne `versionImagePath`.
+- Renderer `bs-start`: après succès → `reloadCurrentProject()` (récupère + sélectionne la
+  version la plus récente), on épingle la sélection sur `versionImagePath` et la barre de
+  stages réapparaît via `_checkStagesForCurrentImage` (association disque). Plus de
+  décoration de la version source.
+- Modèle de versions confirmé (list-image-folders): chaque PNG d'un dossier projet =
+  une version (tri par birthtime desc), les sous-dossiers `_stages` sont exclus.
+
 ## 2026-07-14 (construction-stages → ÉCHAFAUDAGES EN BOIS sur le bord révélé)
 
 Le bord de révélation "jagged" laissait voir des fenêtres coupées / bord noir. Ajout

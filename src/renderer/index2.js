@@ -3569,14 +3569,25 @@ document.getElementById('bs-start')?.addEventListener('click', async () => {
       const r = await API.generateConstructionStages({ imagePath: target, prompt, stageCount: count, jobId: job.id });
       if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
         completeJob(job.id, true);
-        if (!p._stages) p._stages = {};
-        if (!p._stagesList) p._stagesList = {};
-        p._stages[target] = r.dir;
-        p._stagesList[target] = r.stages;
-        p._activeStageKey = r.stages.length - 1;  // land on the final by default
-        p._activeStage = null;
-        _showStagesBar(r.dir, r.stages);
-        showToast(`${r.stages.length} étapes de construction générées`, 'success', 2200);
+        // The study now creates its OWN new image version (r.versionImagePath) so
+        // the source version stays untouched. Reload picks it up + selects the
+        // newest; we pin selection to the new version and its stages bar appears
+        // via the disk association (check-stages-dir on <newStem>_stages/).
+        await reloadCurrentProject();
+        const np = state.currentProject;
+        if (np && r.versionImagePath) {
+          np.previewImagePath = r.versionImagePath;
+          np.selectedImagePath = r.versionImagePath;
+          np._activeStageKey = r.stages.length - 1;  // land on the final by default
+          np._activeStage = null;
+          if (!np._stages) np._stages = {};
+          if (!np._stagesList) np._stagesList = {};
+          np._stages[r.versionImagePath] = r.dir;
+          np._stagesList[r.versionImagePath] = r.stages;
+          try { showStep1Preview(r.versionImagePath); } catch (_) {}
+          try { _checkStagesForCurrentImage(); } catch (_) {}
+        }
+        showToast(`Nouvelle version « chantier » créée — ${r.stages.length} étapes`, 'success', 2600);
       } else {
         completeJob(job.id, false);
         if (!job.cancelled) customError(r?.error || 'unknown', 'Étapes de construction — échec');

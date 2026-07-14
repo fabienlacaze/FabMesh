@@ -4564,10 +4564,18 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
     const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 4));
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath) || '.png';
-    // Same stem convention as multi-view (path.basename, NOT safeBase) so the
-    // check-stages-dir lookup matches the folder we write here.
-    const stem = path.basename(imagePath, ext);
-    const outDir = path.join(dir, stem + '_stages');
+    const srcStem = path.basename(imagePath, ext);
+    // Create a NEW image version so the ORIGINAL stays untouched. The new version
+    // is a plain PNG in the same project folder (→ picked up as a version on
+    // reload); its cover = the finished building, and its construction "views"
+    // go into the matching <newStem>_stages/ folder so check-stages-dir binds
+    // them to THIS version (not the source). Stem via path.basename (not
+    // safeBase) so the check-stages-dir lookup matches the folder we write.
+    const ts = Date.now();
+    const newStem = `${srcStem}_chantier_${ts}`;
+    const versionImagePath = path.join(dir, newStem + ext);
+    fs.copyFileSync(imagePath, versionImagePath);
+    const outDir = path.join(dir, newStem + '_stages');
     try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
     fs.mkdirSync(outDir, { recursive: true });
     const stages = [];
@@ -4589,7 +4597,7 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
       stages.push({ index: i, path: outPath, progress });
       try { event.sender.send('construction-stage-progress', { stage: i + 1, total: n }); } catch (_) {}
     }
-    return { success: true, dir: outDir, stages, count: n };
+    return { success: true, versionImagePath, dir: outDir, stages, count: n };
   } catch (e) {
     return { success: false, error: e.message };
   }
