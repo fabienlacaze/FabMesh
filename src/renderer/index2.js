@@ -3006,7 +3006,11 @@ function showStep1Preview(imgPath) {
   preview.onclick = (e) => {
     // Ignore clicks on the use-for-3d bar buttons that bubble up
     if (e.target.closest('button')) return;
-    openLightbox(imgPath);
+    // Open the image CURRENTLY displayed — a selected construction stage or
+    // multi-view, not the captured base version — so fullscreen matches the
+    // preview (same rule as the expand button below).
+    const pp = state.currentProject;
+    openLightbox((pp && (pp._activeStage || pp._activeMultiview)) || imgPath);
   };
   // Show + wire the expand button
   const expandBtn = document.getElementById('ws-image-expand-btn');
@@ -3587,7 +3591,12 @@ document.getElementById('bs-start')?.addEventListener('click', async () => {
           try { showStep1Preview(r.versionImagePath); } catch (_) {}
           try { _checkStagesForCurrentImage(); } catch (_) {}
         }
-        showToast(`Nouvelle version « chantier » créée — ${r.stages.length} étapes`, 'success', 2600);
+        const goEl = document.getElementById('step-card-image') || document.getElementById('step1-preview');
+        if (goEl && typeof showGoToToast === 'function') {
+          showGoToToast(goEl, `Nouvelle version « chantier » créée — ${r.stages.length} étapes ✅`, 'Aller à l\'élément généré');
+        } else {
+          showToast(`Nouvelle version « chantier » créée — ${r.stages.length} étapes`, 'success', 2600);
+        }
       } else {
         completeJob(job.id, false);
         if (!job.cancelled) customError(r?.error || 'unknown', 'Étapes de construction — échec');
@@ -4879,8 +4888,28 @@ async function openLightbox(imgPath) {
   const lb = document.getElementById('lightbox-2');
   const img = document.getElementById('lightbox-2-img');
   const p = state.currentProject;
-  _lightboxImages = (p && p.images) ? p.images.map(i => i.path) : [imgPath];
-  _lightboxIndex = Math.max(0, _lightboxImages.indexOf(imgPath));
+  // Pick the fullscreen gallery: if we're viewing a construction STAGE, use the
+  // stages as the gallery (so the user can flip through them in fullscreen);
+  // else use the project's version list. A stage isn't a project version, so
+  // without this it would fall to index 0 of the versions ("1/8" bug) and show
+  // the wrong image.
+  let _lbGallery = null, _lbStart = 0;
+  if (p && p._stagesList && p.previewImagePath) {
+    const key = Object.keys(p._stagesList).find(k => _normPath(k) === _normPath(p.previewImagePath));
+    if (key) {
+      const stagePaths = (p._stagesList[key] || []).map(s => s.path);
+      const si = stagePaths.indexOf(imgPath);
+      if (si >= 0) { _lbGallery = stagePaths; _lbStart = si; }
+    }
+  }
+  if (!_lbGallery) {
+    const versions = (p && p.images) ? p.images.map(i => i.path) : [imgPath];
+    const vi = versions.indexOf(imgPath);
+    _lbGallery = vi >= 0 ? versions : [imgPath];
+    _lbStart = vi >= 0 ? vi : 0;
+  }
+  _lightboxImages = _lbGallery;
+  _lightboxIndex = _lbStart;
   img.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
   updateLightboxBottom(imgPath);
   updateLightboxNavButtons();
