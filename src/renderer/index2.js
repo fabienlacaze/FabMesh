@@ -1840,10 +1840,29 @@ function _applyAssetOptionsProfile(assetType) {
   // up with Ultra Quality re-checked by the asset profile.
   try { gateUltraQualityByRAM(); } catch (_) {}
 }
+// Guess the asset type from the project prompt so a castle/car/sword typed as the
+// default 'character' doesn't show face-only options. Returns null when unsure
+// (→ keep whatever is set). Only used to CORRECT the raw default, never to override
+// an explicit choice (see populateWorkspace + _assetTypeManual).
+function _autoDetectAssetType(text) {
+  const t = (text || '').toLowerCase();
+  const m = (re) => re.test(t);
+  if (m(/\b(castle|ch[aâ]teau|building|b[aâ]timent|tower|tour|house|maison|temple|cathedral|cath[eé]drale|church|[eé]glise|fort|fortress|forteresse|palace|palais|mansion|manoir|villa|hut|cabin|cabane|bridge|pont|rampart|donjon|keep|monument)\b/)) return 'building';
+  if (m(/\b(car|voiture|truck|camion|plane|avion|aircraft|jet|ship|bateau|boat|tank|vehicle|v[eé]hicule|motorcycle|moto|helicopter|h[eé]licopt[eè]re|bus|train)\b/)) return 'vehicle';
+  if (m(/\b(sword|[eé]p[eé]e|gun|pistol|rifle|fusil|axe|hache|dagger|dague|weapon|arme|mace|masse|spear|lance|shield|bouclier|hammer|marteau)\b/)) return 'weapon';
+  if (m(/\b(dragon|monster|monstre|beast|b[eê]te|demon|d[eé]mon|creature|cr[eé]ature|golem|ogre|troll|zombie|alien)\b/)) return 'creature';
+  if (m(/\b(dog|chien|cat|chat|horse|cheval|bird|oiseau|fish|poisson|lion|tiger|tigre|bear|ours|wolf|loup|elephant|[eé]l[eé]phant|animal)\b/)) return 'animal';
+  if (m(/\b(chair|chaise|table|lamp|lampe|vase|bottle|bouteille|cup|tasse|barrel|tonneau|furniture|meuble|tool|outil|book|livre|potion)\b/)) return 'prop';
+  return null;
+}
 (function _wireAssetOptionsProfile() {
   const sel = document.getElementById('ws-asset-type');
   if (!sel) return;
-  sel.addEventListener('change', () => _applyAssetOptionsProfile(sel.value));
+  sel.addEventListener('change', () => {
+    // A manual pick sticks — auto-detect must never override it afterwards.
+    if (state.currentProject) state.currentProject._assetTypeManual = true;
+    _applyAssetOptionsProfile(sel.value);
+  });
   // Apply once on initial render so the default character profile takes effect.
   _applyAssetOptionsProfile(sel.value || 'character');
 })();
@@ -2356,6 +2375,19 @@ function populateWorkspace(p) {
   // Restore Asset type + Style from the project's first generation so a
   // creature-project doesn't default back to character on follow-up gens.
   _restoreProjectMeta(p);
+  // Auto-correct the asset type from the prompt when it's still the raw default
+  // ('character') — e.g. a castle shouldn't show face-only options. A manual pick
+  // (p._assetTypeManual) always wins; an unsure guess (null) changes nothing.
+  try {
+    const atSel = document.getElementById('ws-asset-type');
+    if (atSel && !p._assetTypeManual && (!p.assetType || atSel.value === 'character')) {
+      const guess = _autoDetectAssetType(rawPrompt || p.name || '');
+      if (guess && guess !== atSel.value) {
+        atSel.value = guess; p.assetType = guess;
+        _applyAssetOptionsProfile(guess);
+      }
+    }
+  } catch (_) {}
 
   // Reset image / mesh paths — they belonged to the previous project.
   // The renderXxxVersions() functions will then auto-select the latest item
