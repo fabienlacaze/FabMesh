@@ -11506,14 +11506,31 @@ function _pcStampClone(clientX, clientY, isStart) {
     const cEntry = peState.canvases.get(centerDest.object);
     const cTEX = (cEntry && cEntry.canvas.width) || PE_TEX_SIZE;
     const cx = _peClamp01(centerDest.uv.x) * cTEX, cy = _peClamp01(centerDest.uv.y) * cTEX;
-    const nb = _pcRaycastAt(clientX + step, clientY, rect, meshes)
-            || _pcRaycastAt(clientX, clientY + step, rect, meshes);
-    if (nb && nb.object === centerDest.object) {
+    // Probe TWO orthogonal neighbours and keep the SMALLEST plausible texels/px.
+    // A neighbour that straddles a UV seam / lands on a different island yields a
+    // huge bogus texel distance; taking the min rejects that outlier. Any estimate
+    // still above SCALE_MAX is discarded (fall back to scale=1) so a seam crossing
+    // can never blow the disc radius up and flood the shared atlas.
+    const SCALE_MAX = 32; // sane ceiling on atlas texels per screen pixel
+    let best = Infinity;
+    const nbs = [
+      _pcRaycastAt(clientX + step, clientY, rect, meshes),
+      _pcRaycastAt(clientX, clientY + step, rect, meshes),
+    ];
+    for (const nb of nbs) {
+      if (!nb || nb.object !== centerDest.object) continue;
       const d = Math.hypot(_peClamp01(nb.uv.x) * cTEX - cx, _peClamp01(nb.uv.y) * cTEX - cy);
-      if (isFinite(d) && d > 0) scale = d / step;
+      if (isFinite(d) && d > 0) best = Math.min(best, d / step);
     }
+    if (best !== Infinity && best <= SCALE_MAX) scale = best;
   }
-  const discR = Math.max(1.5, scale * step * 0.7);
+  // Hard clamp: a single stamp disc must NEVER cover more than a couple of grid
+  // steps' worth of texels (and never a large fraction of the atlas). Without this
+  // ceiling a bad scale estimate produces a disc that floods the whole 2048 atlas
+  // — and since every sub-material shares that one atlas, it darkens the entire
+  // mesh cumulatively. 24 texels on a 2048 canvas is ~0.04% of the atlas area.
+  const discCeil = Math.max(4, Math.min(step * 2, 24));
+  const discR = Math.max(1.5, Math.min(scale * step * 0.7, discCeil));
 
   const touched = new Set();
   for (let gy = -r; gy <= r; gy += step) {
