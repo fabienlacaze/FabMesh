@@ -9843,7 +9843,11 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
       while ((succ.get(start) || []).length) {
         const loop = []; let g = start; let closed = false;
         for (let s = 0; s < 100000; s++) { loop.push(g); const nx = popNext(g); if (nx == null) break; if (nx === start) { closed = true; break; } g = nx; }
-        if (closed && loop.length >= 3) lps.push(loop);
+        // Keep CLOSED loops (any size) AND long OPEN chains: interior holes on
+        // TRELLIS meshes often have a boundary broken by a non-manifold junction
+        // so they never close — dropping them (closed-only) hid every hole except
+        // the clean bottom rim. Open chains ≥6 edges are real holes worth showing.
+        if (loop.length >= 3 && (closed || loop.length >= 6)) lps.push(loop);
       }
     }
     return { loops: lps, boundaryEdges, groupOf, repOf };
