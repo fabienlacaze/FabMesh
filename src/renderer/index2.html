@@ -1751,11 +1751,22 @@
             </div>
           </div>
           <div style="width:280px; flex-shrink:0; display:flex; flex-direction:column; gap:10px;">
-            <div>
+            <!-- Region re-texture (mask) mode — shown only when opened from
+                 "Re-texture a region"; peints a white UV mask, then SDXL
+                 inpaints only that area (uvMask:true → no back-face bleed). -->
+            <div id="pe-mask-panel" style="display:none; flex-direction:column; gap:8px; padding:8px; background:#160f2e; border:1px solid var(--accent, #5a4fcf); border-radius:6px;">
+              <div style="font-size:11px; color:var(--text-2); text-transform:uppercase; letter-spacing:0.5px;">Zone à re-texturer</div>
+              <label style="font-size:11px;">À quoi doit ressembler cette zone ?</label>
+              <input type="text" id="pe-mask-prompt" placeholder="ex. armure en métal doré poli" style="width:100%; padding:6px; font-size:12px;" />
+              <label style="display:flex; justify-content:space-between; font-size:11px;">Intensité <span id="pe-mask-strength-val" class="slider-val">0.8</span></label>
+              <input type="range" id="pe-mask-strength" min="0.3" max="1" step="0.05" value="0.8" style="width:100%;" />
+              <div style="font-size:10px; color:var(--text-2); line-height:1.4;">Peins la zone en <b>blanc</b> sur le mesh (clic gauche + glisser). Tourne avec le clic droit, zoom molette.</div>
+            </div>
+            <div class="pe-emissive-only">
               <label style="display:block; font-size:11px; color:var(--text-2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Emissive color</label>
               <input type="color" id="pe-color" value="#ffaa33" style="width:100%; height:36px; cursor:pointer; background:#1a1a2e; border:1px solid #333; border-radius:4px;" />
             </div>
-            <div>
+            <div class="pe-emissive-only">
               <label style="display:flex; justify-content:space-between; font-size:11px;">Intensity <span id="pe-intensity-val" class="slider-val">1.0</span></label>
               <input type="range" id="pe-intensity" min="0.1" max="20" step="0.1" value="1.0" style="width:100%;" />
             </div>
@@ -1778,9 +1789,10 @@
             <div style="display:flex; gap:6px;">
               <button id="pe-undo" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Undo (Ctrl+Z)">↶ Undo</button>
               <button id="pe-redo" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Redo (Ctrl+Y)">↷ Redo</button>
+              <button id="pe-loupe-toggle" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Loupe (agrandisseur)">🔍 Loupe</button>
             </div>
-            <button id="pe-toggle-emissive" class="ghost-btn" style="padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;" title="Show/hide the emissive texture on the mesh">💡 Emissive ON</button>
-            <button id="pe-load-image-layer" class="ghost-btn" style="padding:6px; font-size:11px;" title="Re-project the emissive layer painted on the source image">⬇ Load from image layer</button>
+            <button id="pe-toggle-emissive" class="ghost-btn pe-emissive-only" style="padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;" title="Show/hide the emissive texture on the mesh">💡 Emissive ON</button>
+            <button id="pe-load-image-layer" class="ghost-btn pe-emissive-only" style="padding:6px; font-size:11px;" title="Re-project the emissive layer painted on the source image">⬇ Load from image layer</button>
             <button id="pe-clear" class="ghost-btn" style="padding:6px; font-size:11px;">↺ Clear all</button>
             <div style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">
               Output: <code>T_emissive</code> 1024×1024 PNG embedded in the GLB.
@@ -1793,6 +1805,8 @@
         </div>
       </div>
     </div>
+    <!-- Magnifier loupe for the Paint-Emissive / region-retex 3D viewer -->
+    <div id="pe-loupe" style="position:fixed; display:none; z-index:11000; border:2px solid rgba(245,158,11,0.9); border-radius:6px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.6); pointer-events:none; background:#000;"><canvas id="pe-loupe-canvas" width="150" height="150" style="width:150px; height:150px;"></canvas></div>
 
     <!-- ============================================================
          SETTINGS MODAL

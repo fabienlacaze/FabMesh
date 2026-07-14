@@ -2062,7 +2062,15 @@ bindStepCardCollapse();
     } catch (_) { showToast('Render failed.', 'error'); close(); return; }
     finally { $('rrx-loading').style.display = 'none'; }
   }
-  $('ws-mesh-region-retex-btn')?.addEventListener('click', open);
+  // Region-retex now uses the real 3D paint viewer (orbit, undo/redo, loupe,
+  // occlusion-correct UV mask) instead of the flat front-render. Falls back to
+  // the legacy flat modal if the 3D viewer isn't available.
+  $('ws-mesh-region-retex-btn')?.addEventListener('click', () => {
+    const mp = _curMeshPath();
+    if (!mp) { showToast('Pick a mesh first.', 'error'); return; }
+    if (typeof openPaintEmissive === 'function') openPaintEmissive({ maskMode: true, meshPath: mp });
+    else open();
+  });
 
   // AI auto-detect: CLIPSeg finds the named part on the rendered front and fills the
   // mask — no manual painting. Returns true if a mask was produced.
@@ -11082,6 +11090,11 @@ const peState = {
   isPainting: false,
   history: [],
   historyIndex: -1,
+  // Region-retex "mask" sub-mode: paint a WHITE UV mask, then SDXL inpaints
+  // only that area (uvMask:true). Reuses the whole paint engine + undo/redo.
+  maskMode: false,
+  retexMeshPath: null,
+  loupeOn: false,
 };
 const PE_HISTORY_MAX = 30;
 function _peSnapshotAll() {
@@ -11136,7 +11149,9 @@ async function _peInitViewport() {
   if (!canvas || !wrap) return;
   const w = wrap.clientWidth || 800;
   const h = wrap.clientHeight || 560;
-  peState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  // preserveDrawingBuffer:true so the magnifier loupe can drawImage() the
+  // rendered canvas (needed by _peUpdateLoupe).
+  peState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   peState.renderer.setSize(w, h, false);
   peState.renderer.setPixelRatio(window.devicePixelRatio);
   peState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -11528,16 +11543,53 @@ function _peHexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function openPaintEmissive() {
+// Reshape the Paint-Emissive modal for either "emissive paint" or "region
+// mask" mode: hide the emissive-only controls + show the mask panel, and set
+// the title / apply-button label accordingly.
+function _peConfigureModeUI(maskMode) {
+  const $ = (id) => document.getElementById(id);
+  document.querySelectorAll('#modal-paint-emissive .pe-emissive-only')
+    .forEach((el) => { el.style.display = maskMode ? 'none' : ''; });
+  const panel = $('pe-mask-panel');
+  if (panel) panel.style.display = maskMode ? 'flex' : 'none';
+  const h2 = document.querySelector('#modal-paint-emissive h2');
+  const sub = document.querySelector('#modal-paint-emissive .modal-subtitle');
+  const apply = $('pe-apply-device');
+  const status = $('pe-status');
+  if (maskMode) {
+    if (h2) h2.textContent = '🎨 Re-texturer une zone (IA)';
+    if (sub) sub.textContent = "Peins la zone à re-texturer directement sur le mesh 3D (tourne, zoome, loupe, undo/redo), puis décris le nouveau rendu et applique.";
+    if (apply) apply.textContent = '✨ Appliquer la re-texture';
+    if (status) status.textContent = 'Clic gauche + glisser = peindre la zone (blanc). Clic droit = tourner. Molette = zoom.';
+  } else {
+    if (h2) h2.textContent = '💡 Paint Emissive';
+    if (sub) sub.innerHTML = 'Paint glow areas (lamps, windows, runes). The painted areas become a separate <code>T_emissive</code> texture wired to <code>emissiveMap</code> on the material.';
+    if (apply) apply.textContent = '💾 Save new version';
+    if (status) status.textContent = 'Left-click + drag on the mesh to paint. Orbit with right-click.';
+  }
+}
+
+function openPaintEmissive(opts = {}) {
   const p = state.currentProject;
-  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  const maskMode = !!opts.maskMode;
+  const meshPath = opts.meshPath || (p && p.selectedMeshPath);
+  if (!meshPath) { showToast('Pick a mesh first.', 'error'); return; }
   const modal = document.getElementById('modal-paint-emissive');
   if (!modal) return;
+  peState.maskMode = maskMode;
+  peState.retexMeshPath = meshPath;
   modal.classList.remove('hidden');
 
   const $ = (id) => document.getElementById(id);
+  _peConfigureModeUI(maskMode);
+  // Mask mode: white brush produces a white-on-black UV mask; the emissive glow
+  // is only a live preview of what's selected.
+  if (maskMode) { peState.brushColor = '#ffffff'; peState.brushMode = 'paint'; }
   $('pe-color').oninput = (e) => { peState.brushColor = e.target.value; };
-  peState.brushColor = $('pe-color').value;
+  if (!maskMode) peState.brushColor = $('pe-color').value;
+  // Mask-panel strength slider (region-retex).
+  const ms = $('pe-mask-strength');
+  if (ms) ms.oninput = (e) => { const v = $('pe-mask-strength-val'); if (v) v.textContent = e.target.value; };
   $('pe-intensity').oninput = (e) => {
     const v = Number(e.target.value);
     peState.intensity = v;
@@ -11581,6 +11633,16 @@ function openPaintEmissive() {
   };
   $('pe-undo').onclick = () => _peUndo();
   $('pe-redo').onclick = () => _peRedo();
+  const loupeBtn = $('pe-loupe-toggle');
+  if (loupeBtn) {
+    const syncLoupeBtn = () => {
+      loupeBtn.style.background = peState.loupeOn ? 'var(--accent, #5a4fcf)' : '';
+      loupeBtn.style.color = peState.loupeOn ? '#fff' : '';
+      if (!peState.loupeOn) { const lb = $('pe-loupe'); if (lb) lb.style.display = 'none'; }
+    };
+    loupeBtn.onclick = () => { peState.loupeOn = !peState.loupeOn; syncLoupeBtn(); };
+    syncLoupeBtn();
+  }
   $('pe-load-image-layer').onclick = async () => {
     const btn = $('pe-load-image-layer');
     const orig = btn.textContent;
@@ -11646,6 +11708,7 @@ function openPaintEmissive() {
     };
     const move = (e) => {
       updateBrushPreview(e);
+      if (peState.loupeOn) _peUpdateLoupe(e);
       if (!peState.isPainting) return;
       _peStampAtPointer(e.clientX, e.clientY);
     };
@@ -11656,13 +11719,13 @@ function openPaintEmissive() {
       }
       try { cv.releasePointerCapture(e.pointerId); } catch {}
     };
-    const leave = () => { preview.style.display = 'none'; };
+    const leave = () => { preview.style.display = 'none'; const lb = document.getElementById('pe-loupe'); if (lb) lb.style.display = 'none'; };
     cv.onpointerdown = down;
     cv.onpointermove = move;
     cv.onpointerup = up;
     cv.onpointercancel = up;
     cv.onpointerleave = leave;
-    _peLoadMesh(p.selectedMeshPath);
+    _peLoadMesh(meshPath);
   });
 
   const close = (restore) => {
@@ -11676,16 +11739,99 @@ function openPaintEmissive() {
     const btn = $('pe-apply-device');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'Saving…';
+    btn.textContent = peState.maskMode ? 'Re-texture…' : 'Saving…';
     try {
-      await _peApplyOnDevice();
+      if (peState.maskMode) {
+        await _peApplyMaskRetex();
+      } else {
+        await _peApplyOnDevice();
+      }
       close(false);
     } catch (e) {
-      showToast(`Paint Emissive failed: ${e?.message || e}`, 'error', 5000);
+      showToast(`${peState.maskMode ? 'Re-texture' : 'Paint Emissive'} failed: ${e?.message || e}`, 'error', 5000);
       btn.textContent = orig;
       btn.disabled = false;
     }
   };
+}
+
+// Region-retex apply: the painted white-on-black canvas IS the UV/atlas mask.
+// Export it and call regionRetex with uvMask:true — the backend applies it
+// straight to the atlas (no screen→UV projection, no back-face bleed).
+async function _peApplyMaskRetex() {
+  const meshPath = peState.retexMeshPath;
+  if (!meshPath) throw new Error('no mesh');
+  const rawPrompt = (document.getElementById('pe-mask-prompt')?.value || '').trim();
+  if (!rawPrompt) { showToast('Décris à quoi doit ressembler la zone.', 'error'); throw new Error('no prompt'); }
+  // Pick the painted mask canvas. Region-retex targets a single atlas; use the
+  // mesh with the most painted texels (handles single-mesh GLBs = the common case).
+  let best = null, bestScore = -1;
+  peState.canvases?.forEach((entry) => {
+    const d = entry.ctx.getImageData(0, 0, PE_TEX_SIZE, PE_TEX_SIZE).data;
+    let s = 0;
+    for (let i = 0; i < d.length; i += 4) { if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 40) s++; }
+    if (s > bestScore) { bestScore = s; best = entry; }
+  });
+  if (!best || bestScore <= 0) { showToast('Peins d\'abord la zone à re-texturer (en blanc).', 'error'); throw new Error('empty mask'); }
+  // Binarize to pure white-on-black (the atlas may carry faint falloff edges).
+  const mc = document.createElement('canvas'); mc.width = PE_TEX_SIZE; mc.height = PE_TEX_SIZE;
+  const mctx = mc.getContext('2d');
+  mctx.fillStyle = '#000000'; mctx.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
+  const src = best.ctx.getImageData(0, 0, PE_TEX_SIZE, PE_TEX_SIZE).data;
+  const out = mctx.getImageData(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
+  for (let i = 0; i < src.length; i += 4) {
+    if (src[i] > 40 || src[i + 1] > 40 || src[i + 2] > 40) { out.data[i] = out.data[i + 1] = out.data[i + 2] = out.data[i + 3] = 255; }
+  }
+  mctx.putImageData(out, 0, 0);
+  const maskDataUrl = mc.toDataURL('image/png');
+  const prompt = await translateUserPrompt(rawPrompt);
+  const strength = parseFloat(document.getElementById('pe-mask-strength')?.value) || 0.8;
+  const job = (typeof pushJob === 'function')
+    ? pushJob('AI region re-texture', null, { 'Source mesh': String(meshPath).split(/[/\\]/).pop() }, 60000) : null;
+  const r = await window.meshyAPI.regionRetex?.({ meshPath, maskDataUrl, prompt, strength, uvMask: true });
+  if (r && r.ok && r.path) {
+    if (job) completeJob(job.id, true);
+    showToast('Zone re-texturée ✅', 'success');
+    try { await reloadCurrentProject(); } catch (_) {}
+  } else {
+    if (job) completeJob(job.id, false);
+    throw new Error((r && r.error) || 'unknown');
+  }
+}
+
+// Magnifier loupe for the Paint-Emissive / region-retex 3D viewer. Ported from
+// _meUpdateLoupe — reads the rendered canvas (needs preserveDrawingBuffer:true).
+function _peUpdateLoupe(e) {
+  const box = document.getElementById('pe-loupe');
+  if (!box) return;
+  if (!peState.loupeOn) { box.style.display = 'none'; return; }
+  const src = peState.renderer && peState.renderer.domElement;
+  const loupeCv = document.getElementById('pe-loupe-canvas');
+  if (!src || !loupeCv) return;
+  const rect = src.getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+    box.style.display = 'none'; return;
+  }
+  const ix = (e.clientX - rect.left) * (src.width / rect.width);
+  const iy = (e.clientY - rect.top) * (src.height / rect.height);
+  const L = loupeCv.width;
+  const MAG = 3.2;
+  const crop = L / MAG;
+  const lctx = loupeCv.getContext('2d');
+  lctx.imageSmoothingEnabled = false;
+  lctx.clearRect(0, 0, L, L);
+  try { lctx.drawImage(src, ix - crop / 2, iy - crop / 2, crop, crop, 0, 0, L, L); } catch (_) {}
+  lctx.strokeStyle = 'rgba(245,158,11,0.9)'; lctx.lineWidth = 1;
+  lctx.beginPath();
+  lctx.moveTo(L / 2 - 8, L / 2); lctx.lineTo(L / 2 + 8, L / 2);
+  lctx.moveTo(L / 2, L / 2 - 8); lctx.lineTo(L / 2, L / 2 + 8);
+  lctx.stroke();
+  const off = 26, size = 150;
+  let px = e.clientX + off, py = e.clientY - size - off;
+  if (px + size > window.innerWidth) px = e.clientX - size - off;
+  if (py < 0) py = e.clientY + off;
+  box.style.left = px + 'px'; box.style.top = py + 'px';
+  box.style.display = 'block';
 }
 
 async function _peApplyOnDevice() {

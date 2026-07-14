@@ -1,5 +1,29 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (feat A : Re-texturer une zone sur vrai viewer 3D — masque UV via Paint-Emissive)
+
+Demande : le modal « Re-texturer une zone (IA) » doit utiliser un vrai viewer
+3D (undo/redo, loupe, rotation) au lieu du rendu front plat. Design issu d'un
+workflow d'exploration (map-3d-paint-infra). Choix : réutiliser le moteur
+**Paint-Emissive** (`peState`, index2.js), seul viewer avec canvas UV/atlas +
+raycast→UV + stamping occlusion-correct — PAS « Peinture de sommets » (qui peint
+des couleurs de sommets, mauvais artefact).
+- **Mask-mode** : `openPaintEmissive({maskMode, meshPath})` — pinceau blanc →
+  le canvas emissive DEVIENT le masque UV. `_peConfigureModeUI` masque les
+  contrôles emissive (`.pe-emissive-only`) + montre `#pe-mask-panel` (prompt +
+  intensité) + adapte titre/bouton.
+- **Apply** : `_peApplyMaskRetex` binarise le canvas → `regionRetex({…,
+  uvMask:true})`. **0 nouveau code Python** : `main.js:6714` bascule déjà sur
+  `--uv-mask`, `face_inpaint_atlas.py:356` l'applique direct à l'atlas (fini la
+  bavure back-face de la reprojection écran→UV).
+- **Loupe** : `_peUpdateLoupe` portée depuis `_meUpdateLoupe` + renderer PE
+  passé en `preserveDrawingBuffer:true`. Undo/redo réutilisés tels quels.
+- Redirection du bouton `ws-mesh-region-retex-btn` (+ le lightbox délègue au
+  même bouton). Ancien modal flat conservé en fallback.
+Vérifié en live : clic → modal 3D en mask-mode (panneau visible, emissive caché,
+titre/bouton OK), 0 erreur console. Peinture réelle + apply = à tester à la main.
+Reste : Feature B (tampon de clonage 3D). index2.html/js touchés → reload.
+
 ## 2026-07-14 (feat : Étapes de construction pour images — timeline img2img affichée comme les multi-vues)
 
 Demande user : « construction steps » pour images = générer le building final,
