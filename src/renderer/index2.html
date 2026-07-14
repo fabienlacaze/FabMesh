@@ -264,12 +264,6 @@
                   <input type="range" id="ws-quality" min="10" max="60" step="2" value="30" style="flex:1; accent-color: var(--accent);" />
                   <span id="ws-quality-val" style="min-width: 90px; font-size: 11px; color: var(--text-2); text-align: right;">30 steps</span>
                 </div>
-                <div class="form-row check-row" id="ws-img-buildstages-row">
-                  <label class="inline-check">
-                    <input type="checkbox" id="ws-img-buildstages" />
-                    Construction stages (3 progressive versions)
-                  </label>
-                </div>
                 <!-- Multi-view scope: TRELLIS-2 already textures from 1
                      front photo, but additional reference views (back, sides,
                      top, bottom) reduce dorsal/lateral hallucinations during
@@ -517,12 +511,6 @@
                   <div id="ws-3d-quality-hint" class="form-hint" style="display:none;">~200K triangles · 1024 px texture</div>
                   <div id="ws-3d-sf3d-hint" class="form-hint" style="margin-top:2px; display:none;">Texture is baked on the GPU. Triangles are added via subdivision (CPU, no extra VRAM).</div>
                   <div id="ws-3d-highcount-warn" class="form-hint hidden" style="color: #f4a632; margin-top:4px;">&#9888;&#65039; Above ~50K triangles the UV atlas gets over-crowded (micro-island packing) and the texture ends up as voronoi noise. For best texture quality keep triangles ≤ 50K. High-poly only makes sense when you only need the geometry.</div>
-                  <div class="form-row check-row">
-                    <label class="inline-check">
-                      <input type="checkbox" id="ws-3d-buildstages" />
-                      Construction stages (3 versions)
-                    </label>
-                  </div>
                   <!-- TRELLIS-2 Texturing options -->
                   <details id="ws-3d-trellis2-opts" style="margin-top:8px; font-size:12px;">
                     <summary style="cursor:pointer; color:var(--text-muted);">&#9881;&#65039; Advanced texture options</summary>

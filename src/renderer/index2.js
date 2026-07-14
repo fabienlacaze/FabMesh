@@ -1831,45 +1831,20 @@ function _applyAssetOptionsProfile(assetType) {
   }
 })();
 
-// Show/hide "Construction stages" checkbox based on asset type —
-// hidden for living subjects (character, creature) where 3-stage
-// progressive build doesn't make sense. Visible for buildings,
-// vehicles, weapons, props, environment, custom — assets that have
-// a natural "blueprint → rough → finished" progression.
-(function _wireBuildStagesVisibility() {
-  const applyVisibility = () => {
-    const at = document.getElementById('ws-asset-type')?.value || 'character';
-    const row = document.getElementById('ws-img-buildstages-row');
-    if (!row) return;
-    // No build stages for living subjects (character/creature/animal) or flat 2D icons.
-    const hide = (at === 'character' || at === 'creature' || at === 'animal' || at === 'icon');
-    row.style.display = hide ? 'none' : '';
-    if (hide) {
-      const cb = document.getElementById('ws-img-buildstages');
-      if (cb) cb.checked = false;
-    }
-  };
+// Re-pick a default skeleton when the user changes asset_type (unless they have
+// already pinned a custom rigTarget for this project). The old "Construction
+// stages" checkbox that used to be toggled here was removed — construction
+// stages are now a dedicated post-generation tool (ws-buildstages-btn).
+(function _wireAssetTypeSkeleton() {
   const sel = document.getElementById('ws-asset-type');
-  if (sel) {
-    sel.addEventListener('change', applyVisibility);
-    // Also re-pick a default skeleton when the user changes asset_type
-    // (unless they have already pinned a custom rigTarget for this project).
-    sel.addEventListener('change', () => {
-      try {
-        if (state && state.currentProject) {
-          // Clear any auto-picked default so populateRigSkeletonDropdown
-          // recomputes from the NEW asset_type. We only clear if the
-          // current rigTarget matches what the OLD asset_type would have
-          // produced — otherwise we respect the user's explicit pick.
-          if (typeof populateRigSkeletonDropdown === 'function') {
-            populateRigSkeletonDropdown();
-          }
-        }
-      } catch (_) {}
-    });
-    // Run once on load so default view is correct
-    applyVisibility();
-  }
+  if (!sel) return;
+  sel.addEventListener('change', () => {
+    try {
+      if (state && state.currentProject && typeof populateRigSkeletonDropdown === 'function') {
+        populateRigSkeletonDropdown();
+      }
+    } catch (_) {}
+  });
 })();
 
 // Import Image → create project with imported image
@@ -3178,11 +3153,11 @@ function _updateGenButtonsEstimate() {
   if (ba) ba.textContent = ba.disabled ? 'Generate Animation' : `Generate Animation : ${_fmtEta(20000)}`;
 }
 [
-  'ws-3d-engine', 'ws-3d-quality', 'ws-3d-triangles', 'ws-3d-buildstages',
+  'ws-3d-engine', 'ws-3d-quality', 'ws-3d-triangles',
   'ws-trellis2-preset', 'ws-trellis2-refine', 'ws-trellis2-rectify',
   'ws-trellis2-smooth', 'ws-trellis2-quality-plus', 'ws-trellis2-ultra-q',
   'ws-trellis2-face-fix', 'ws-engine', 'ws-count', 'ws-quality',
-  'ws-mv-scope', 'ws-asset-type', 'ws-img-buildstages', 'ws-anim-type',
+  'ws-mv-scope', 'ws-asset-type', 'ws-anim-type',
 ].forEach(id => {
   const el = document.getElementById(id);
   if (el) { el.addEventListener('change', _updateGenButtonsEstimate); el.addEventListener('input', _updateGenButtonsEstimate); }
