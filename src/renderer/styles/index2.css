@@ -1191,7 +1191,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
    scrollable since it can hold up to 20 stage buttons. */
 .stages-bar {
   position: absolute;
-  top: 10px;
+  bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

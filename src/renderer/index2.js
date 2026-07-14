@@ -11380,6 +11380,10 @@ function _pcStampClone(clientX, clientY, isStart) {
       const sx = Math.round(ax + off.dx), sy = Math.round(ay + off.dy);
       if (sx < 0 || sy < 0 || sx >= sw || sy >= sh) continue;
       const s = (sy * sw + sx) * 4, d = (py * w + px) * 4;
+      // Skip atlas GUTTERS (transparent, or the pure-black padding between UV
+      // islands): cloning across an island boundary would otherwise paint black
+      // artefacts. Legitimate dark texture is dark-red/brown, not (0,0,0).
+      if (sd[s+3] < 8 || (sd[s] < 8 && sd[s+1] < 8 && sd[s+2] < 8)) continue;
       dd[d]   = dd[d]   * (1 - a) + sd[s]   * a;
       dd[d+1] = dd[d+1] * (1 - a) + sd[s+1] * a;
       dd[d+2] = dd[d+2] * (1 - a) + sd[s+2] * a;
@@ -11650,10 +11654,12 @@ function _peStampAtPointer(clientX, clientY) {
   const uvArr = uvAttr.array;
   const triCount = idx ? Math.floor(idx.length / 3) : Math.floor(posAttr.count / 3);
   ctx.save();
-  ctx.beginPath();
-  ctx.arc(px, py, r, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.fillStyle = grad;
+  // Fill each near-3D triangle SOLIDLY — no UV-disc clip, no UV-centred
+  // gradient. A brush stroke covers a surface region that spans MULTIPLE UV
+  // islands; a UV-centred clip/gradient left triangles in the OTHER islands
+  // unpainted → patchy mask with "forgotten" triangles. 3D proximity (R3D)
+  // already bounds the footprint, so a flat fill covers every touched triangle.
+  ctx.fillStyle = innerColor;
   for (let t = 0; t < triCount; t++) {
     const i0 = idx ? idx[t*3]   : t*3;
     const i1 = idx ? idx[t*3+1] : t*3+1;
