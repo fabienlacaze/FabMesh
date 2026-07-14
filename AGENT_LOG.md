@@ -1,5 +1,25 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (feat B : Tampon de clonage 3D — clone la texture d'une zone du mesh vers une autre)
+
+Analog 3D du tampon de clonage 2D, greffé sur le moteur Paint-Emissive (peState),
+nouveau `cloneMode`. Bouton `ws-mesh-clone3d-btn` dans les outils mesh.
+- `_pcSetupCloneCanvas` : canvas par mesh pré-rempli depuis l'atlas base-color
+  EXISTANT à sa **résolution native** (min(4096, atlas), sinon on downscalerait
+  la texture), bindé sur `mat.map`. `_peSnapshotAll` généralisé à la taille du
+  canvas ; `_peRestoreMaterials` restaure `mat.map` (clone) OU emissive.
+- `_pcSetSource` (Ctrl+clic → raycast→UV = source) ; `_pcStampClone` réutilise le
+  raycast + le **garde-fou anti-couture R3D** de `_peStampAtPointer`, mais remplit
+  les triangles proches avec un **CanvasPattern de la source** décalé de l'offset
+  (fixé au début du trait, snapshot 'live' de l'atlas). Undo/redo + loupe réutilisés.
+- Save : réutilise `_peApplyOnDevice` (GLTFExporter exporte l'atlas édité) → **0
+  nouveau code Python**. Writeback rig-safe (`mesh:swap-atlas` via `replace_glb_atlas`)
+  DIFFÉRÉ : v1 mieux adapté aux meshes non-riggés (GLTFExporter peut perturber le rig).
+Limites v1 : pinceau à bord dur (pas de falloff doux en clone), clone même-atlas
+comme cas principal. Vérifié live : ouverture clone-mode OK, 0 erreur console.
+Peinture réelle (Ctrl+clic source + glisser) + apply = test manuel. index2.html/js
+touchés → reload.
+
 ## 2026-07-14 (feat A : Re-texturer une zone sur vrai viewer 3D — masque UV via Paint-Emissive)
 
 Demande : le modal « Re-texturer une zone (IA) » doit utiliser un vrai viewer

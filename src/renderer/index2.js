@@ -2071,6 +2071,12 @@ bindStepCardCollapse();
     if (typeof openPaintEmissive === 'function') openPaintEmissive({ maskMode: true, meshPath: mp });
     else open();
   });
+  // 3D clone-stamp: clone a texture region onto another, directly on the mesh.
+  $('ws-mesh-clone3d-btn')?.addEventListener('click', () => {
+    const mp = _curMeshPath();
+    if (!mp) { showToast('Pick a mesh first.', 'error'); return; }
+    if (typeof openPaintEmissive === 'function') openPaintEmissive({ cloneMode: true, meshPath: mp });
+  });
 
   // AI auto-detect: CLIPSeg finds the named part on the rendered front and fills the
   // mask — no manual painting. Returns true if a mask was produced.
@@ -11095,13 +11101,23 @@ const peState = {
   maskMode: false,
   retexMeshPath: null,
   loupeOn: false,
+  // 3D clone-stamp sub-mode: edits the mesh's BASE-COLOR atlas in place.
+  // cloneSource = { mesh, u, v } set by Ctrl+click; cloneOffset (atlas px) +
+  // cloneSrcCanvas (source snapshot) are fixed at each stroke start.
+  cloneMode: false,
+  cloneSource: null,
+  cloneOffset: null,
+  cloneSrcCanvas: null,
 };
+function _peClamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 const PE_HISTORY_MAX = 30;
 function _peSnapshotAll() {
   if (!peState.canvases) return null;
   const snap = new Map();
   peState.canvases.forEach((entry, mesh) => {
-    snap.set(mesh, entry.ctx.getImageData(0, 0, PE_TEX_SIZE, PE_TEX_SIZE));
+    // Per-canvas size: emissive/mask canvases are PE_TEX_SIZE, but clone
+    // canvases match the mesh's native atlas resolution (e.g. 2048).
+    snap.set(mesh, entry.ctx.getImageData(0, 0, entry.canvas.width, entry.canvas.height));
   });
   return snap;
 }
@@ -11236,13 +11252,119 @@ function _peSetupCanvasAndBind() {
 function _peRestoreMaterials() {
   peState.meshes.forEach((entry) => {
     if (!entry.prev) return;
-    entry.prev.forEach(({ mat, emissiveMap, emissiveIntensity, emissive }) => {
-      mat.emissiveMap = emissiveMap;
-      mat.emissiveIntensity = emissiveIntensity;
-      if (emissive) mat.emissive = emissive;
+    entry.prev.forEach((p) => {
+      const mat = p.mat;
+      if ('map' in p) mat.map = p.map;               // clone mode restores baseColor
+      if ('emissiveMap' in p) {                      // emissive/mask mode
+        mat.emissiveMap = p.emissiveMap;
+        mat.emissiveIntensity = p.emissiveIntensity;
+        if (p.emissive) mat.emissive = p.emissive;
+      }
       mat.needsUpdate = true;
     });
   });
+}
+
+// ── 3D clone-stamp helpers ────────────────────────────────────────────────
+// Set up per-mesh canvases pre-filled from the EXISTING base-color atlas (at
+// native resolution so cloning never downscales the texture), bound to mat.map.
+function _pcSetupCloneCanvas() {
+  peState.canvases = new Map();
+  peState.cloneSource = null; peState.cloneOffset = null; peState.cloneSrcCanvas = null;
+  peState.meshes.forEach((entry) => {
+    const m = entry.mesh.material;
+    const mats = Array.isArray(m) ? m : [m];
+    const mat0 = mats.find((mm) => mm && mm.map && mm.map.image) || mats[0];
+    const img = mat0 && mat0.map && mat0.map.image;
+    const sz = (img && img.width) ? Math.min(4096, img.width) : PE_TEX_SIZE;
+    const canvas = document.createElement('canvas');
+    canvas.width = sz; canvas.height = sz;
+    const ctx = canvas.getContext('2d');
+    try { if (img) ctx.drawImage(img, 0, 0, sz, sz); else throw 0; }
+    catch (_) { ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, sz, sz); }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = false;
+    texture.name = (mat0 && mat0.map && mat0.map.name) || 'T_baseColor';
+    texture.needsUpdate = true;
+    peState.canvases.set(entry.mesh, { canvas, ctx, texture });
+    entry.prev = mats.map((mat) => ({ mat, map: mat.map }));
+    mats.forEach((mat) => { mat.map = texture; mat.needsUpdate = true; });
+  });
+  peState.history = []; peState.historyIndex = -1;
+  _peHistoryPush();
+}
+
+// Ctrl+click defines the clone SOURCE (a UV point on a mesh).
+function _pcSetSource(clientX, clientY) {
+  const hit = _peRaycast(clientX, clientY);
+  if (!hit) { showToast('Vise le mesh pour définir la source.', 'error', 2000); return; }
+  peState.cloneSource = { mesh: hit.object, u: _peClamp01(hit.uv.x), v: _peClamp01(hit.uv.y) };
+  peState.cloneOffset = null;
+  showToast('Source définie — clic gauche + glisser pour cloner.', 'success', 1800);
+}
+
+// Clone the source atlas region onto the destination, seam-safe (same R3D
+// occlusion filter as _peStampAtPointer) via a source-pattern fill.
+function _pcStampClone(clientX, clientY, isStart) {
+  const hit = _peRaycast(clientX, clientY);
+  if (!hit) return;
+  const entry = peState.canvases?.get(hit.object);
+  if (!entry) return;
+  if (!peState.cloneSource) { showToast('Ctrl+clic pour définir la source à cloner d\'abord.', 'error', 2500); return; }
+  const ctx = entry.ctx;
+  const TEX = entry.canvas.width;
+  const dpx = _peClamp01(hit.uv.x) * TEX;
+  const dpy = _peClamp01(hit.uv.y) * TEX;
+  if (isStart) {
+    const srcEntry = peState.canvases.get(peState.cloneSource.mesh) || entry;
+    const sTEX = srcEntry.canvas.width;
+    peState.cloneOffset = { dx: _peClamp01(peState.cloneSource.u) * sTEX - dpx,
+                            dy: _peClamp01(peState.cloneSource.v) * sTEX - dpy };
+    const snap = document.createElement('canvas');
+    snap.width = srcEntry.canvas.width; snap.height = srcEntry.canvas.height;
+    snap.getContext('2d').drawImage(srcEntry.canvas, 0, 0);
+    peState.cloneSrcCanvas = snap;
+  }
+  if (!peState.cloneOffset || !peState.cloneSrcCanvas) return;
+  const pattern = ctx.createPattern(peState.cloneSrcCanvas, 'no-repeat');
+  if (!pattern) return;
+  // dest (x,y) samples source at (x+dx, y+dy) → translate the source by -offset.
+  try { pattern.setTransform(new DOMMatrix([1, 0, 0, 1, -peState.cloneOffset.dx, -peState.cloneOffset.dy])); } catch (_) {}
+  const r = Math.max(1, peState.brushSize * 0.5);
+  const mesh = hit.object, geom = mesh.geometry;
+  const uvAttr = geom.attributes.uv, posAttr = geom.attributes.position;
+  const idx = geom.index?.array;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(dpx, dpy, r, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = pattern;
+  if (!uvAttr || !posAttr) {
+    ctx.fillRect(dpx - r, dpy - r, r * 2, r * 2);
+    ctx.restore(); entry.texture.needsUpdate = true; return;
+  }
+  const localHit = mesh.worldToLocal(hit.point.clone());
+  const cam = peState.camera;
+  const camDist = cam.position.distanceTo(hit.point);
+  const viewH = peState.renderer.domElement.clientHeight || 600;
+  const unitsPerPx = (2 * camDist * Math.tan((cam.fov * Math.PI / 180) / 2)) / viewH;
+  const R3DSq = (peState.brushSize * 0.5 * unitsPerPx * 1.2) ** 2;
+  const posArr = posAttr.array, uvArr = uvAttr.array;
+  const triCount = idx ? Math.floor(idx.length / 3) : Math.floor(posAttr.count / 3);
+  for (let t = 0; t < triCount; t++) {
+    const i0 = idx ? idx[t*3] : t*3, i1 = idx ? idx[t*3+1] : t*3+1, i2 = idx ? idx[t*3+2] : t*3+2;
+    const p0x=posArr[i0*3],p0y=posArr[i0*3+1],p0z=posArr[i0*3+2];
+    const p1x=posArr[i1*3],p1y=posArr[i1*3+1],p1z=posArr[i1*3+2];
+    const p2x=posArr[i2*3],p2y=posArr[i2*3+1],p2z=posArr[i2*3+2];
+    const d0=(p0x-localHit.x)**2+(p0y-localHit.y)**2+(p0z-localHit.z)**2;
+    if (d0>=R3DSq){const d1=(p1x-localHit.x)**2+(p1y-localHit.y)**2+(p1z-localHit.z)**2; if(d1>=R3DSq){const d2=(p2x-localHit.x)**2+(p2y-localHit.y)**2+(p2z-localHit.z)**2; if(d2>=R3DSq) continue;}}
+    ctx.beginPath();
+    ctx.moveTo(uvArr[i0*2]*TEX, uvArr[i0*2+1]*TEX);
+    ctx.lineTo(uvArr[i1*2]*TEX, uvArr[i1*2+1]*TEX);
+    ctx.lineTo(uvArr[i2*2]*TEX, uvArr[i2*2+1]*TEX);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  entry.texture.needsUpdate = true;
 }
 
 async function _peLoadMesh(meshPath) {
@@ -11282,8 +11404,12 @@ async function _peLoadMesh(meshPath) {
         peState.meshes.push({ mesh: child });
       }
     });
-    _peSetupCanvasAndBind();
-    _peTryProjectFromImageLayer();
+    if (peState.cloneMode) {
+      _pcSetupCloneCanvas();
+    } else {
+      _peSetupCanvasAndBind();
+      _peTryProjectFromImageLayer();
+    }
   });
 }
 
@@ -11546,17 +11672,24 @@ function _peHexToRgba(hex, alpha) {
 // Reshape the Paint-Emissive modal for either "emissive paint" or "region
 // mask" mode: hide the emissive-only controls + show the mask panel, and set
 // the title / apply-button label accordingly.
-function _peConfigureModeUI(maskMode) {
+function _peConfigureModeUI() {
   const $ = (id) => document.getElementById(id);
+  const maskMode = peState.maskMode, cloneMode = peState.cloneMode;
+  const special = maskMode || cloneMode;   // non-emissive modes hide emissive controls
   document.querySelectorAll('#modal-paint-emissive .pe-emissive-only')
-    .forEach((el) => { el.style.display = maskMode ? 'none' : ''; });
-  const panel = $('pe-mask-panel');
-  if (panel) panel.style.display = maskMode ? 'flex' : 'none';
+    .forEach((el) => { el.style.display = special ? 'none' : ''; });
+  const maskPanel = $('pe-mask-panel'); if (maskPanel) maskPanel.style.display = maskMode ? 'flex' : 'none';
+  const clonePanel = $('pe-clone-panel'); if (clonePanel) clonePanel.style.display = cloneMode ? 'flex' : 'none';
   const h2 = document.querySelector('#modal-paint-emissive h2');
   const sub = document.querySelector('#modal-paint-emissive .modal-subtitle');
   const apply = $('pe-apply-device');
   const status = $('pe-status');
-  if (maskMode) {
+  if (cloneMode) {
+    if (h2) h2.textContent = '🩹 Tampon de clonage 3D';
+    if (sub) sub.textContent = "Clone une zone de la texture vers une autre. Ctrl+clic = définir la source, puis clic gauche + glisser = cloner. Tourne (clic droit), zoome, loupe, undo/redo.";
+    if (apply) apply.textContent = '💾 Enregistrer (nouvelle version)';
+    if (status) status.textContent = 'Ctrl+clic = source · clic gauche + glisser = cloner · clic droit = tourner · molette = zoom';
+  } else if (maskMode) {
     if (h2) h2.textContent = '🎨 Re-texturer une zone (IA)';
     if (sub) sub.textContent = "Peins la zone à re-texturer directement sur le mesh 3D (tourne, zoome, loupe, undo/redo), puis décris le nouveau rendu et applique.";
     if (apply) apply.textContent = '✨ Appliquer la re-texture';
@@ -11572,19 +11705,23 @@ function _peConfigureModeUI(maskMode) {
 function openPaintEmissive(opts = {}) {
   const p = state.currentProject;
   const maskMode = !!opts.maskMode;
+  const cloneMode = !!opts.cloneMode;
   const meshPath = opts.meshPath || (p && p.selectedMeshPath);
   if (!meshPath) { showToast('Pick a mesh first.', 'error'); return; }
   const modal = document.getElementById('modal-paint-emissive');
   if (!modal) return;
   peState.maskMode = maskMode;
+  peState.cloneMode = cloneMode;
   peState.retexMeshPath = meshPath;
+  peState.cloneSource = null; peState.cloneOffset = null; peState.cloneSrcCanvas = null;
   modal.classList.remove('hidden');
 
   const $ = (id) => document.getElementById(id);
-  _peConfigureModeUI(maskMode);
+  _peConfigureModeUI();
   // Mask mode: white brush produces a white-on-black UV mask; the emissive glow
-  // is only a live preview of what's selected.
+  // is only a live preview of what's selected. Clone mode paints the atlas.
   if (maskMode) { peState.brushColor = '#ffffff'; peState.brushMode = 'paint'; }
+  if (cloneMode) { peState.brushMode = 'paint'; }
   $('pe-color').oninput = (e) => { peState.brushColor = e.target.value; };
   if (!maskMode) peState.brushColor = $('pe-color').value;
   // Mask-panel strength slider (region-retex).
@@ -11702,15 +11839,18 @@ function openPaintEmissive(opts = {}) {
     };
     const down = (e) => {
       if (e.button !== 0) return;
+      if (peState.cloneMode && (e.ctrlKey || e.metaKey)) { _pcSetSource(e.clientX, e.clientY); return; }
       peState.isPainting = true;
       cv.setPointerCapture(e.pointerId);
-      _peStampAtPointer(e.clientX, e.clientY);
+      if (peState.cloneMode) _pcStampClone(e.clientX, e.clientY, true);
+      else _peStampAtPointer(e.clientX, e.clientY);
     };
     const move = (e) => {
       updateBrushPreview(e);
       if (peState.loupeOn) _peUpdateLoupe(e);
       if (!peState.isPainting) return;
-      _peStampAtPointer(e.clientX, e.clientY);
+      if (peState.cloneMode) _pcStampClone(e.clientX, e.clientY, false);
+      else _peStampAtPointer(e.clientX, e.clientY);
     };
     const up = (e) => {
       if (peState.isPainting) {

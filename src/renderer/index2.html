@@ -697,6 +697,7 @@
                         <button id="ws-mesh-detail-synth-btn" class="ghost-btn tool-btn" title="Ajoute du vrai détail (rendu → SDXL → re-bake, ~2 min)">&#10024; Détail++ (IA)</button>
                         <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint the WHOLE texture with the 3D Native PBR engine (best quality, ~90s)">&#11088; Re-texture all (AI)</button>
                         <button id="ws-mesh-region-retex-btn" class="ghost-btn tool-btn" title="Re-texture only ONE part (AI detects it) with a prompt — geometry stays intact">&#127912; Re-texture a region (AI)</button>
+                        <button id="ws-mesh-clone3d-btn" class="ghost-btn tool-btn" title="Clone une zone de la texture vers une autre directement sur le mesh 3D (comme le tampon de clonage 2D)">&#129657; Tampon de clonage 3D</button>
                         <button id="ws-mesh-segment-btn" class="ghost-btn tool-btn" title="Split the mesh into semantic parts (head/torso/arms/legs — wheel/chassis/cabin). Runs locally on your GPU (SAMPart3D), ~6-10 min. Adds a colored, separable parts version.">&#9986; Segment parts (AI)</button>
                         <button id="ws-mesh-name-btn" class="ghost-btn tool-btn" title="Name the parts (wheel / turret / cannon — arm / leg / head) with AI. Requires a segmented mesh.">&#127991; Name the zones (AI)</button>
                       </div>
@@ -1761,6 +1762,12 @@
               <label style="display:flex; justify-content:space-between; font-size:11px;">Intensité <span id="pe-mask-strength-val" class="slider-val">0.8</span></label>
               <input type="range" id="pe-mask-strength" min="0.3" max="1" step="0.05" value="0.8" style="width:100%;" />
               <div style="font-size:10px; color:var(--text-2); line-height:1.4;">Peins la zone en <b>blanc</b> sur le mesh (clic gauche + glisser). Tourne avec le clic droit, zoom molette.</div>
+            </div>
+            <!-- Clone-stamp (3D) mode — shown only when opened from "Tampon de clonage 3D". -->
+            <div id="pe-clone-panel" style="display:none; flex-direction:column; gap:8px; padding:8px; background:#0f1e2e; border:1px solid #2a7fb8; border-radius:6px;">
+              <div style="font-size:11px; color:var(--text-2); text-transform:uppercase; letter-spacing:0.5px;">Tampon de clonage</div>
+              <div style="font-size:11px; line-height:1.5;"><b>Ctrl+clic</b> sur le mesh = définir la <b>source</b>.<br><b>Clic gauche + glisser</b> = cloner vers la destination.</div>
+              <div style="font-size:10px; color:var(--text-2); line-height:1.4;">Règle le pinceau ci-dessous. La texture (base color) est éditée sur place, sans toucher à la géométrie.</div>
             </div>
             <div class="pe-emissive-only">
               <label style="display:block; font-size:11px; color:var(--text-2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Emissive color</label>
