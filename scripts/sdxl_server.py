@@ -21,6 +21,10 @@ Endpoints:
                             reference image. Replaces ControlNet-Tile for organic
                             texture (no more hallucinated runes / frayed hair).
   POST /inpaint           - { input, target, prompt, output, dilate }
+  POST /mask_inpaint      - { input, mask, prompt, output, seed }
+                            client-supplied mask (white=inpaint, black=keep);
+                            composites the result back so the black region stays
+                            pixel-identical. seed optional (deterministic RNG).
   POST /shutdown          - graceful exit
   POST /unload            - free a specific model from VRAM
 """
@@ -1488,7 +1492,7 @@ def _mask_bbox(msk, threshold: int = 30):
             int(xs.max()) + 1, int(ys.max()) + 1)
 
 
-def do_mask_inpaint(input_path, mask_path, prompt, output_path):
+def do_mask_inpaint(input_path, mask_path, prompt, output_path, seed=None):
     """Inpaint using a user-provided mask (white = inpaint, black = keep).
 
     Crop-inpaint-paste strategy (ported from cloud cat8):
@@ -1496,6 +1500,10 @@ def do_mask_inpaint(input_path, mask_path, prompt, output_path):
       - >40% coverage → fall back to global path
       - composite-back with full-res blurred mask so only painted pixels change
       - prompt enrichment via _enrich_prompt (concept boosters, add/remove verbs)
+
+    seed: optional deterministic RNG seed. Used by the construction-stages
+    (vertical-reveal) timeline so the inpainted top band stays coherent across
+    frames. None = non-deterministic (legacy behaviour for the mask tool).
     """
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
@@ -1523,6 +1531,10 @@ def do_mask_inpaint(input_path, mask_path, prompt, output_path):
                 msk = msk.resize((orig_w, orig_h), Image.LANCZOS)
 
             pos_prompt, neg_prompt = _enrich_prompt(prompt)
+
+            gen = None
+            if seed is not None and torch.cuda.is_available():
+                gen = torch.Generator('cuda').manual_seed(int(seed))
 
             bbox = _mask_bbox(msk)
             if bbox is None:
@@ -1579,6 +1591,7 @@ def do_mask_inpaint(input_path, mask_path, prompt, output_path):
                         guidance_scale=8.5,
                         strength=0.99,
                         height=work, width=work,
+                        generator=gen,
                     ).images[0]
 
                 result_crop = result_w.resize((cw, ch), Image.LANCZOS)
@@ -1620,6 +1633,7 @@ def do_mask_inpaint(input_path, mask_path, prompt, output_path):
                         guidance_scale=8.5,
                         strength=0.99,
                         height=work_h, width=work_w,
+                        generator=gen,
                     ).images[0]
 
                 if (work_w, work_h) != (orig_w, orig_h):
@@ -1839,6 +1853,7 @@ class Handler(BaseHTTPRequestHandler):
                     data['mask'],
                     data.get('prompt', ''),
                     data['output'],
+                    data.get('seed'),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

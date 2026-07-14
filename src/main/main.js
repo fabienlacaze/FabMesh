@@ -4476,6 +4476,42 @@ function _constructionStagePrompt(progress) {
 }
 function _lerp(a, b, t) { return a + (b - a) * t; }
 
+// Build a VERTICAL-REVEAL mask for one construction stage.
+//   keepFrac  = bottom fraction of the image that is the FINISHED building
+//               (BLACK = keep, pixel-identical). The top (1-keepFrac) is
+//               WHITE = inpaint ("under construction"). A one-sided feather of
+//               `featherFrac`*H just ABOVE the construction line softens the
+//               transition while leaving the bottom band PURE black (zero drift).
+// Paths go through argv (never string-interpolated) so a filename containing a
+// quote can't break out of the Python literal — same rule as remove_bg.py.
+function _makeRevealMask(imagePath, maskPath, keepFrac, featherFrac) {
+  const pyCode = `
+import sys
+import numpy as np
+from PIL import Image
+src = Image.open(sys.argv[1])
+W, H = src.size
+keep = float(sys.argv[3])       # bottom fraction kept (BLACK)
+feather = float(sys.argv[4])    # feather height as fraction of H
+line = (1.0 - keep) * H          # rows at/below this index are kept (black)
+f = max(1.0, feather * H)
+ys = np.arange(H, dtype=np.float32).reshape(H, 1)
+# 255 (inpaint) high above the line, ramps 255->0 across the feather just above
+# the line, and is exactly 0 (keep) at/below the line -> bottom stays untouched.
+val = np.clip((line - ys) / f, 0.0, 1.0) * 255.0
+row = val.astype(np.uint8)                 # (H,1)
+mask = np.repeat(row, W, axis=1)           # (H,W)
+Image.fromarray(mask, 'L').save(sys.argv[2])
+print("OK")
+`;
+  return new Promise((resolve) => {
+    execFile(_aiPython(), ['-c', pyCode, imagePath, maskPath, String(keepFrac), String(featherFrac)],
+      { timeout: 120000 }, (error) => {
+        resolve(!error && fs.existsSync(maskPath));
+      });
+  });
+}
+
 ipcMain.handle('generate-construction-stages', async (event, opts) => {
   try {
     const { imagePath, prompt, stageCount } = (opts || {});
@@ -4489,29 +4525,47 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
     const outDir = path.join(dir, stem + '_stages');
     try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
     fs.mkdirSync(outDir, { recursive: true });
+    // Masks live in a subfolder so check-stages-dir (which only matches
+    // /^stage_\d+\.png$/) never picks them up as stage frames.
+    const maskDir = path.join(outDir, '.masks');
+    try { fs.mkdirSync(maskDir, { recursive: true }); } catch (_) {}
 
-    const seed = 424242;  // fixed → same composition/framing across all stages
+    const seed = 424242;  // fixed → coherent scaffolding/sky across the timeline
     const basePrompt = (prompt && String(prompt).trim()) || 'a building, isometric view, white background, 3D render';
     const stages = [];
     for (let i = 0; i < n; i++) {
       const progress = n <= 1 ? 1 : i / (n - 1);   // 0 (site) .. 1 (final)
       const outPath = path.join(outDir, `stage_${i}.png`);
       if (i === n - 1) {
-        fs.copyFileSync(imagePath, outPath);         // final = the finished image, exact
+        // Final stage = the finished image, EXACT (progress==1, nothing to build).
+        fs.copyFileSync(imagePath, outPath);
       } else {
         await ensureSdxlServer();
         if (!sdxlReady) return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
+        // VERTICAL REVEAL: the bottom `keepFrac` of the image is the EXACT final
+        // building; the top is inpainted as "under construction". keepFrac==progress
+        // except we floor stage 0 to a thin sliver so the site still has a
+        // grounding base (task: "only a sliver of finished base at the very bottom").
+        const keepFrac = Math.max(progress, 0.03);
+        const featherFrac = 0.06;  // soft transition line (~6% of height)
+        const maskPath = path.join(maskDir, `mask_${i}.png`);
+        const maskOk = await _makeRevealMask(imagePath, maskPath, keepFrac, featherFrac);
+        if (!maskOk) {
+          // Couldn't build the mask → keep the timeline complete with the final.
+          try { fs.copyFileSync(imagePath, outPath); } catch (_) {}
+          stages.push({ index: i, path: outPath, progress });
+          try { event.sender.send('construction-stage-progress', { stage: i + 1, total: n }); } catch (_) {}
+          continue;
+        }
         const stagePrompt = `${_constructionStagePrompt(progress)}, ${basePrompt}`;
         const safety = checkPromptSafety(stagePrompt);
         if (!safety.safe) return { success: false, error: safety.reason };
-        // Earlier stages deviate MORE from the finished building (higher strength).
-        const strength = _lerp(0.75, 0.32, progress);
-        // Explicit step budget: without it the server auto-derives 25/strength
-        // capped at 60, so low-strength (near-final) stages waste ~60 steps.
-        // A construction VARIANT doesn't need final-render quality → 22 keeps
-        // the whole timeline (up to 20 stages) practical.
-        const r = await sdxlServerCall('/img2img', {
-          input: imagePath, prompt: stagePrompt, output: outPath, strength, seed, steps: 22,
+        // Inpaint ONLY the top (white) band against the FINAL image, with the
+        // fixed seed. The server composites the result back through the mask so
+        // the bottom (black) band stays pixel-identical to `imagePath` — the
+        // building never changes shape/colour, it only builds UP.
+        const r = await sdxlServerCall('/mask_inpaint', {
+          input: imagePath, mask: maskPath, prompt: stagePrompt, output: outPath, seed,
         });
         if (!r.ok) {
           // Keep the timeline complete rather than failing the whole run.

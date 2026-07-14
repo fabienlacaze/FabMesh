@@ -1,5 +1,24 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (construction-stages → VERTICAL REVEAL bottom-up, plus /mask_inpaint seed)
+
+Le handler `generate-construction-stages` (src/main/main.js) faisait un img2img
+indépendant de l'image FINALE à strength décroissant → le bâtiment CHANGEAIT de
+forme/couleur entre étapes et était déjà bâti dès l'étape 1 (aucune construction
+progressive). Nouvelle approche = révélation verticale de bas en haut :
+- Pour l'étape i (progress p=i/(n-1)), le bas `keepFrac=max(p,0.03)` de l'image =
+  bâtiment FINAL EXACT (pixel-identique) ; le haut (1-keepFrac) = "en construction"
+  inpainté via `/mask_inpaint` (le serveur recompose le masque → zone noire = source
+  intacte, dérive nulle). Feather 6% au-dessus de la ligne de construction.
+- Masque généré par un mini-script PIL/numpy inline (paths via argv, pas
+  d'interpolation) ; stocké dans `<stem>_stages/.masks/` pour que check-stages-dir
+  (`/^stage_\d+\.png$/`) ne le prenne pas pour une frame.
+- Étape N-1 = copie exacte de l'image finale. Contrat JSON, seed fixe, warmup SDXL
+  et l'event `construction-stage-progress` inchangés.
+- scripts/sdxl_server.py : ajout d'un paramètre `seed` optionnel à `do_mask_inpaint`
+  (+ route `/mask_inpaint`) pour la cohérence de l'échafaudage/ciel entre frames.
+  None = comportement legacy (outil masque). generator passé aux 2 appels pipe().
+
 ## 2026-07-14 (feat B : Tampon de clonage 3D — clone la texture d'une zone du mesh vers une autre)
 
 Analog 3D du tampon de clonage 2D, greffé sur le moteur Paint-Emissive (peState),
