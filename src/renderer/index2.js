@@ -11321,8 +11321,10 @@ function _pcSetSource(clientX, clientY) {
   showToast('Source définie — clic gauche + glisser pour cloner.', 'success', 1800);
 }
 
-// Clone the source atlas region onto the destination, seam-safe (same R3D
-// occlusion filter as _peStampAtPointer) via a source-pattern fill.
+// Clone the source atlas region onto the destination — a DIRECT per-pixel copy
+// in atlas space (O(brush²), the same math as the 2D clone stamp) with a soft
+// radial falloff. No per-triangle loop and no worldToLocal, so it stays instant
+// even on 500k-triangle meshes (the old triangle-fill froze the machine).
 function _pcStampClone(clientX, clientY, isStart) {
   const hit = _peRaycast(clientX, clientY);
   if (!hit) return;
@@ -11338,49 +11340,38 @@ function _pcStampClone(clientX, clientY, isStart) {
     const sTEX = srcEntry.canvas.width;
     peState.cloneOffset = { dx: _peClamp01(peState.cloneSource.u) * sTEX - dpx,
                             dy: _peClamp01(peState.cloneSource.v) * sTEX - dpy };
-    const snap = document.createElement('canvas');
-    snap.width = srcEntry.canvas.width; snap.height = srcEntry.canvas.height;
-    snap.getContext('2d').drawImage(srcEntry.canvas, 0, 0);
-    peState.cloneSrcCanvas = snap;
+    // Snapshot the source atlas ONCE per stroke as ImageData (fast pixel reads).
+    peState.cloneSrcData = srcEntry.ctx.getImageData(0, 0, srcEntry.canvas.width, srcEntry.canvas.height);
   }
-  if (!peState.cloneOffset || !peState.cloneSrcCanvas) return;
-  const pattern = ctx.createPattern(peState.cloneSrcCanvas, 'no-repeat');
-  if (!pattern) return;
-  // dest (x,y) samples source at (x+dx, y+dy) → translate the source by -offset.
-  try { pattern.setTransform(new DOMMatrix([1, 0, 0, 1, -peState.cloneOffset.dx, -peState.cloneOffset.dy])); } catch (_) {}
+  const off = peState.cloneOffset, src = peState.cloneSrcData;
+  if (!off || !src) return;
   const r = Math.max(1, peState.brushSize * 0.5);
-  const mesh = hit.object, geom = mesh.geometry;
-  const uvAttr = geom.attributes.uv, posAttr = geom.attributes.position;
-  const idx = geom.index?.array;
-  ctx.save();
-  ctx.beginPath(); ctx.arc(dpx, dpy, r, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = pattern;
-  if (!uvAttr || !posAttr) {
-    ctx.fillRect(dpx - r, dpy - r, r * 2, r * 2);
-    ctx.restore(); _peMarkDirty(entry); return;
+  const hardness = _peClamp01(peState.brushFalloff);
+  const opacity = _peClamp01(peState.brushOpacity);
+  const ox = Math.max(0, Math.floor(dpx - r)), oy = Math.max(0, Math.floor(dpy - r));
+  const w = Math.min(TEX - ox, Math.ceil(r * 2)), h = Math.min(TEX - oy, Math.ceil(r * 2));
+  if (w <= 0 || h <= 0) return;
+  const dst = ctx.getImageData(ox, oy, w, h);
+  const dd = dst.data, sd = src.data, sw = src.width, sh = src.height;
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const ax = ox + px, ay = oy + py;
+      const ddx = ax - dpx, ddy = ay - dpy;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dist > r) continue;
+      const t = dist / r;
+      const a = ((1 - t * t) * (hardness + (1 - hardness) * (1 - t))) * opacity;
+      if (a <= 0) continue;
+      const sx = Math.round(ax + off.dx), sy = Math.round(ay + off.dy);
+      if (sx < 0 || sy < 0 || sx >= sw || sy >= sh) continue;
+      const s = (sy * sw + sx) * 4, d = (py * w + px) * 4;
+      dd[d]   = dd[d]   * (1 - a) + sd[s]   * a;
+      dd[d+1] = dd[d+1] * (1 - a) + sd[s+1] * a;
+      dd[d+2] = dd[d+2] * (1 - a) + sd[s+2] * a;
+      dd[d+3] = dd[d+3] * (1 - a) + sd[s+3] * a;
+    }
   }
-  const localHit = mesh.worldToLocal(hit.point.clone());
-  const cam = peState.camera;
-  const camDist = cam.position.distanceTo(hit.point);
-  const viewH = peState.renderer.domElement.clientHeight || 600;
-  const unitsPerPx = (2 * camDist * Math.tan((cam.fov * Math.PI / 180) / 2)) / viewH;
-  const R3DSq = (peState.brushSize * 0.5 * unitsPerPx * 1.2) ** 2;
-  const posArr = posAttr.array, uvArr = uvAttr.array;
-  const triCount = idx ? Math.floor(idx.length / 3) : Math.floor(posAttr.count / 3);
-  for (let t = 0; t < triCount; t++) {
-    const i0 = idx ? idx[t*3] : t*3, i1 = idx ? idx[t*3+1] : t*3+1, i2 = idx ? idx[t*3+2] : t*3+2;
-    const p0x=posArr[i0*3],p0y=posArr[i0*3+1],p0z=posArr[i0*3+2];
-    const p1x=posArr[i1*3],p1y=posArr[i1*3+1],p1z=posArr[i1*3+2];
-    const p2x=posArr[i2*3],p2y=posArr[i2*3+1],p2z=posArr[i2*3+2];
-    const d0=(p0x-localHit.x)**2+(p0y-localHit.y)**2+(p0z-localHit.z)**2;
-    if (d0>=R3DSq){const d1=(p1x-localHit.x)**2+(p1y-localHit.y)**2+(p1z-localHit.z)**2; if(d1>=R3DSq){const d2=(p2x-localHit.x)**2+(p2y-localHit.y)**2+(p2z-localHit.z)**2; if(d2>=R3DSq) continue;}}
-    ctx.beginPath();
-    ctx.moveTo(uvArr[i0*2]*TEX, uvArr[i0*2+1]*TEX);
-    ctx.lineTo(uvArr[i1*2]*TEX, uvArr[i1*2+1]*TEX);
-    ctx.lineTo(uvArr[i2*2]*TEX, uvArr[i2*2+1]*TEX);
-    ctx.closePath(); ctx.fill();
-  }
-  ctx.restore();
+  ctx.putImageData(dst, ox, oy);
   _peMarkDirty(entry);
 }
 
