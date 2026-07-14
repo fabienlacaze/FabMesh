@@ -330,6 +330,7 @@ function reportPipelineError(errMsg, title) {
 
 // Inline toast banner — appears at the bottom of the screen for 3s then fades.
 // type: 'error' (red), 'success' (green), 'info' (blue)
+const _activeToasts = new Map();  // key = "type|message" -> { el, count, hideTimer, removeTimer }
 function showToast(message, type = 'info', durationMs = 3000) {
   let container = document.getElementById('toast-container');
   if (!container) {
@@ -338,19 +339,38 @@ function showToast(message, type = 'info', durationMs = 3000) {
     container.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:99999; display:flex; flex-direction:column; gap:6px; align-items:center; pointer-events:none;';
     document.body.appendChild(container);
   }
-  const toast = document.createElement('div');
   const colors = {
     error: 'rgba(220,38,38,0.9)',
     success: 'rgba(22,163,74,0.9)',
     info: 'rgba(99,102,241,0.9)',
   };
+  const key = type + '|' + message;
+  // Dedupe: if an identical toast is still on screen, bump a ×N counter and
+  // reset its timer instead of stacking a duplicate. Kills spam like the 8
+  // identical "Variant failed: …" toasts when a whole batch fails the same way.
+  const existing = _activeToasts.get(key);
+  if (existing) {
+    existing.count += 1;
+    existing.el.textContent = message + '  ×' + existing.count;
+    existing.el.style.opacity = '1';
+    clearTimeout(existing.hideTimer);
+    clearTimeout(existing.removeTimer);
+    existing.hideTimer = setTimeout(() => {
+      existing.el.style.opacity = '0';
+      existing.removeTimer = setTimeout(() => { existing.el.remove(); _activeToasts.delete(key); }, 300);
+    }, durationMs);
+    return;
+  }
+  const toast = document.createElement('div');
   toast.style.cssText = `background:${colors[type] || colors.info}; color:white; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; pointer-events:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3); transition:opacity 0.3s; max-width:500px; text-align:center;`;
   toast.textContent = message;
   container.appendChild(toast);
-  setTimeout(() => {
+  const entry = { el: toast, count: 1, hideTimer: null, removeTimer: null };
+  entry.hideTimer = setTimeout(() => {
     toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 300);
+    entry.removeTimer = setTimeout(() => { toast.remove(); _activeToasts.delete(key); }, 300);
   }, durationMs);
+  _activeToasts.set(key, entry);
 }
 
 // Offer to unlock the content filter when a dropped/imported image is flagged
@@ -5728,6 +5748,9 @@ document.getElementById('ws-modify-btn').addEventListener('click', () => {
   _updateModStrengthHint();
   modifyModal.classList.remove('hidden');
   setTimeout(() => document.getElementById('mod-prompt').focus(), 50);
+  // Warm the argos translate server in the background while the user types, so
+  // the first "Modify" click doesn't pay the ~5s cold-start (no-op in English).
+  try { translateUserPrompt('warm'); } catch (_) {}
 });
 document.getElementById('mod-cancel').addEventListener('click', () => {
   modifyModal.classList.add('hidden');
@@ -5738,7 +5761,6 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
   if (!target) return;
   const rawPrompt = document.getElementById('mod-prompt').value.trim();
   if (!rawPrompt) { showToast('Type a modification first.', 'error'); return; }
-  const prompt = await translateUserPrompt(rawPrompt);  // user types in their language → EN for the model
   const engine = document.getElementById('mod-engine').value;
   const strength = parseInt(modStrength.value) / 100;
   modifyModal.classList.add('hidden');
@@ -5748,9 +5770,15 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
     const job = pushJob(`Modify image: ${p.name}`, null, {
       Engine: engineLabel(engine),
       Strength: `${Math.round(strength * 100)}%`,
-      Prompt: prompt,
+      Prompt: rawPrompt,   // show the user's text now; refined to EN below
     }, modifyExpected, { sourceImageUrl: target, projectName: p.name });
     try {
+      // Translate INSIDE the job so the card + progress appear INSTANTLY on
+      // click. Previously translateUserPrompt awaited BEFORE any UI: on the
+      // first use (or after 5 min idle) the argos translate server cold-starts
+      // (~5s) and the app looked frozen — the user's "beaucoup de temps avant
+      // de lancer l'analyse". Now the job is already on screen while we wait.
+      const prompt = await translateUserPrompt(rawPrompt);
       const r = await API.img2img({ imagePath: target, prompt, strength, engine, jobId: job.id });
       if (r?.success) {
         completeJob(job.id, true);
