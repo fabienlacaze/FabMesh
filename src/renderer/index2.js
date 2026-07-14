@@ -3549,8 +3549,10 @@ function _showStagesBar(dir, stages) {
     btn.className = 'stage-btn' + (s.index === activeKey ? ' stage-active' : '');
     btn.dataset.stage = String(s.index);
     btn.dataset.path = s.path;
-    btn.textContent = String(s.index + 1);
     const pct = Math.round((s.progress != null ? s.progress : (s.index / last)) * 100);
+    const lbl = s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%');
+    // Labelled button like the multi-view bar (number + phase), not a tiny digit.
+    btn.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${lbl}</span>`;
     btn.title = s.index === last
       ? `Étape ${s.index + 1}/${stages.length} — bâtiment final`
       : `Étape ${s.index + 1}/${stages.length} — chantier ${pct}%`;

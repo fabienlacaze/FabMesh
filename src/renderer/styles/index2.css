@@ -1209,26 +1209,27 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .stages-bar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 4px; }
 .stage-btn {
   flex: 0 0 auto;
-  min-width: 20px;
+  min-width: 42px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 3px 6px;
+  gap: 1px;
+  padding: 5px 9px;
   border: none;
   background: transparent;
-  color: rgba(255,255,255,0.6);
+  color: rgba(255,255,255,0.62);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 5px;
   transition: all 0.15s;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
 }
-.stage-btn:hover { background: rgba(255,255,255,0.1); color: white; }
+.stage-btn:hover { background: rgba(255,255,255,0.12); color: white; }
 .stage-btn.stage-active {
   background: rgba(245,158,11,0.3);
   color: #f59e0b;
 }
+.stage-num { font-size: 14px; font-weight: 700; line-height: 1; }
+.stage-lbl { font-size: 8px; letter-spacing: 0.3px; opacity: 0.85; }
 /* Tool-button active state (brush/eraser/flip toggles etc.) —
    strong highlight so the user sees which mode is currently on. */
 .tool-btn.tool-active,
