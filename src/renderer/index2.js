@@ -386,6 +386,53 @@ function showToast(message, type = 'info', durationMs = 3000) {
   _activeToasts.set(key, entry);
 }
 
+// FEATURE B — toast de complétion NON-bloquant avec un bouton d'action. Remplace
+// l'ancien "saut auto" (scrollIntoView) à la fin d'une génération/import : la vue
+// ne saute plus toute seule — l'utilisateur clique le bouton pour scroller vers
+// (et faire pulser) l'élément fraîchement généré. Se ferme au clic ou après ~15s.
+// Réutilise #toast-container pour rester cohérent avec showToast.
+function showGoToToast(targetEl, message, label, onGo) {
+  if (!targetEl) return;
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:99999; display:flex; flex-direction:column; gap:6px; align-items:center; pointer-events:none;';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.style.cssText = 'background:rgba(22,163,74,0.95); color:white; padding:10px 16px; border-radius:8px; font-size:13px; font-weight:600; pointer-events:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3); transition:opacity 0.3s; max-width:520px; display:flex; align-items:center; gap:12px;';
+  const span = document.createElement('span');
+  span.textContent = message || 'Élément généré ✅';
+  const btn = document.createElement('button');
+  btn.textContent = label || 'Aller à l\'élément généré';
+  btn.style.cssText = 'background:rgba(255,255,255,0.2); color:#fff; border:1px solid rgba(255,255,255,0.55); border-radius:6px; padding:5px 12px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; flex:none;';
+  let hideTimer = null, removeTimer = null;
+  const dismiss = () => {
+    clearTimeout(hideTimer); clearTimeout(removeTimer);
+    toast.style.opacity = '0';
+    removeTimer = setTimeout(() => { try { toast.remove(); } catch (_) {} }, 300);
+  };
+  btn.addEventListener('click', () => {
+    try {
+      if (typeof onGo === 'function') {
+        onGo();
+      } else {
+        // Comportement d'origine du scrollIntoView remplacé, différé au clic.
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        targetEl.classList.add('pulse-highlight');
+        setTimeout(() => { try { targetEl.classList.remove('pulse-highlight'); } catch (_) {} }, 1500);
+      }
+    } catch (_) {}
+    dismiss();
+  });
+  toast.appendChild(span);
+  toast.appendChild(btn);
+  container.appendChild(toast);
+  hideTimer = setTimeout(dismiss, 15000);
+  return toast;
+}
+
 // Offer to unlock the content filter when a dropped/imported image is flagged
 // NSFW, instead of silently blocking it. Runs the same parental toggle + PIN
 // flow as the New Project popup. Returns true if content is (now) unrestricted.
@@ -5759,11 +5806,8 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
           const editStage = imgCard.querySelector('.stage-edit');
           if (createStage) createStage.open = false;
           if (editStage) editStage.open = true;
-          setTimeout(() => {
-            imgCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            imgCard.classList.add('pulse-highlight');
-            setTimeout(() => imgCard.classList.remove('pulse-highlight'), 1500);
-          }, 120);
+          // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément généré".
+          showGoToToast(imgCard, 'Image générée ✅', 'Aller à l\'élément généré');
         }
       } else {
         completeJob(job.id, false, r?.error || 'unknown');
@@ -11287,8 +11331,20 @@ function _peSetupCanvasAndBind() {
     }));
     mats.forEach((mat) => {
       mat.emissiveMap = texture;
-      mat.emissive = new THREE.Color(0xffffff);
-      mat.emissiveIntensity = peState.intensity;
+      if (peState.maskMode) {
+        // FEATURE A — mode "Re-texturer une zone" : la sélection s'affiche
+        // comme un surlignage CYAN additif par-dessus le mesh (option A choisie
+        // par l'utilisateur). Le masque blanc-sur-noir sert d'emissiveMap et
+        // module l'émission cyan → blanc du masque = glow cyan additif, noir =
+        // rien (la texture du mesh reste visible dessous). Le canvas exporté
+        // vers le backend (--uv-mask, blanc/noir) est INCHANGÉ, et
+        // _peRestoreMaterials() restaure l'émission d'origine à la fermeture.
+        mat.emissive = new THREE.Color(0x00ffff);
+        mat.emissiveIntensity = 0.9;
+      } else {
+        mat.emissive = new THREE.Color(0xffffff);
+        mat.emissiveIntensity = peState.intensity;
+      }
       mat.needsUpdate = true;
     });
   });
@@ -14946,11 +15002,8 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
           const editStage = rigCard.querySelector('.stage-edit');
           if (createStage) createStage.open = false;
           if (editStage) editStage.open = true;
-          setTimeout(() => {
-            rigCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            rigCard.classList.add('pulse-highlight');
-            setTimeout(() => rigCard.classList.remove('pulse-highlight'), 1500);
-          }, 120);
+          // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément généré".
+          showGoToToast(rigCard, 'Rig généré ✅', 'Aller à l\'élément généré');
         }
       } else {
         completeJob(job.id, false);
@@ -15029,11 +15082,8 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
           const editStage = rigCard.querySelector('.stage-edit');
           if (createStage) createStage.open = false;
           if (editStage) editStage.open = true;
-          setTimeout(() => {
-            rigCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            rigCard.classList.add('pulse-highlight');
-            setTimeout(() => rigCard.classList.remove('pulse-highlight'), 1500);
-          }, 120);
+          // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément généré".
+          showGoToToast(rigCard, 'Rig généré ✅', 'Aller à l\'élément généré');
         }
       } else {
         completeJob(job.id, false, r?.error || 'unknown');
@@ -19336,13 +19386,11 @@ window.addEventListener('drop', async (e) => {
         const editStage = card.querySelector('.stage-edit');
         if (createStage) createStage.open = false;
         if (editStage) editStage.open = true;
-        setTimeout(() => {
-          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          card.classList.add('pulse-highlight');
-          setTimeout(() => card.classList.remove('pulse-highlight'), 1500);
-        }, 120);
+        // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément importé".
+        showGoToToast(card, `Nouvelle version ${r.kind} ajoutée ✅`, 'Aller à l\'élément importé');
       }
-      showToast?.(`Added a new ${r.kind} version`, 'success', 1800);
+      // Fallback si la carte cible est absente (aucun toast go-to affiché).
+      if (!card) showToast?.(`Added a new ${r.kind} version`, 'success', 1800);
     } else {
       await refreshProjectsPage();
       showToast?.('New project created from import', 'success', 1800);
