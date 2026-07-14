@@ -9835,29 +9835,23 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
     const popNext = (g) => { const a = succ.get(g); return a && a.length ? a.pop() : null; };
     for (const start of succ.keys()) {
       while ((succ.get(start) || []).length) {
-        const loop = []; let g = start;
-        for (let s = 0; s < 100000; s++) { loop.push(g); const nx = popNext(g); if (nx == null) break; if (nx === start) break; g = nx; }
-        if (loop.length >= 3) lps.push(loop);
+        const loop = []; let g = start; let closed = false;
+        for (let s = 0; s < 100000; s++) { loop.push(g); const nx = popNext(g); if (nx == null) break; if (nx === start) { closed = true; break; } g = nx; }
+        if (closed && loop.length >= 3) lps.push(loop);
       }
     }
     return { loops: lps, boundaryEdges, groupOf, repOf };
   };
-  // Weld tolerance = a fraction of the mean edge length: fine enough to keep
-  // adjacent distinct boundary verts apart, coarse enough to merge duplicate
-  // seam verts (drift << one edge). Try a small ladder and keep the result
-  // that finds the MOST boundary loops but is NOT the finest (finest leaves
-  // seams unwelded → false loops). We take the coarsest tol that still yields
-  // near-max loops.
-  // Wider weld ladder: a hole whose boundary verts weld cleanly only at a
-  // specific tolerance was missed with the old 4-step ladder. More steps
-  // (finer + coarser) → more holes' boundary loops close. We keep the tol that
-  // finds the MOST loops (best hole coverage).
-  const tols = [0.05, 0.1, 0.18, 0.28, 0.4, 0.55, 0.75, 1.0].map((f) => meanEdge * f);
-  let best = null, bestTol = tols[1];
-  for (const tol of tols) {
-    const r = detect(tol);
-    if (!best || r.loops.length > best.loops.length) { best = r; bestTol = tol; }
-  }
+  // Single fixed weld tolerance — no ladder, no max-loops heuristic.
+  // Seam/marching-cubes duplicate verts are (near-)bit-exact and merge at any
+  // tol>0, while the nearest DISTINCT boundary verts sit ~hundreds× farther
+  // apart — so any tol in [1e-6,1e-4]·bbDiag reveals the SAME correct hole set
+  // (verified on the real meshes). We pick 1e-5·bbDiag, floored at 1e-6·bbDiag
+  // and capped below 0.25·meanEdge so a real hole's rim can never collapse.
+  // The old meanEdge ladder selected on loop count, which is INVERTED: a finer
+  // tol under-welds → thousands of spurious seam loops → wrongly "preferred".
+  const bestTol = Math.max(bbDiag * 1e-6, Math.min(bbDiag * 1e-5, meanEdge * 0.25));
+  const best = detect(bestTol);
   const { loops, boundaryEdges, repOf } = best;
   try {
     console.log(`[fill-holes] indexed=${indexed} verts=${n} tris=${triCount} bbDiag=${bbDiag.toFixed(4)} meanEdge=${meanEdge.toExponential(2)} weldTol=${bestTol.toExponential(2)} boundaryEdges=${boundaryEdges} loops=${loops.length} (min=${minHoleSize} max=${maxHoleSize})`);
