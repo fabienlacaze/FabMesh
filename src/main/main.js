@@ -4457,6 +4457,97 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine, s
   }
 });
 
+// ------------------------------------------------------------------
+// Construction stages — from a FINAL building image, generate N (2..20)
+// progressive construction-phase variants via img2img (bare site +
+// scaffolding → … → finished building), saved into <stem>_stages/.
+// Stage 0 = earliest (foundation/site), stage N-1 = the finished image
+// itself (exact copy, no regen). The renderer shows them as a stages
+// bar, exactly like the multi-view bar. A fixed seed keeps the framing
+// consistent across the whole timeline.
+// ------------------------------------------------------------------
+function _constructionStagePrompt(progress) {
+  // progress: 1 = finished building, 0 = bare construction site.
+  if (progress >= 0.80) return 'building almost complete, minor scaffolding still up, final finishing touches, facade nearly finished, construction work in progress';
+  if (progress >= 0.60) return 'building under construction, most walls and roof built, scaffolding all around, some sections still exposed and unfinished, construction work in progress';
+  if (progress >= 0.40) return 'building half-built, partial walls, exposed structural frame, scaffolding, roof beams without covering, construction work in progress';
+  if (progress >= 0.20) return 'early construction, bare structural framework and skeleton, steel and concrete frame, extensive scaffolding, exposed girders, construction work in progress';
+  return 'construction site, foundation and excavation, cleared ground, piles of building materials, scaffolding and cranes, no building yet, early construction phase';
+}
+function _lerp(a, b, t) { return a + (b - a) * t; }
+
+ipcMain.handle('generate-construction-stages', async (event, opts) => {
+  try {
+    const { imagePath, prompt, stageCount } = (opts || {});
+    if (!imagePath || !fs.existsSync(imagePath)) return { success: false, error: 'Image not found' };
+    const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 4));
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath) || '.png';
+    // Same stem convention as multi-view (path.basename, NOT safeBase) so the
+    // check-stages-dir lookup matches the folder we write here.
+    const stem = path.basename(imagePath, ext);
+    const outDir = path.join(dir, stem + '_stages');
+    try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
+    fs.mkdirSync(outDir, { recursive: true });
+
+    const seed = 424242;  // fixed → same composition/framing across all stages
+    const basePrompt = (prompt && String(prompt).trim()) || 'a building, isometric view, white background, 3D render';
+    const stages = [];
+    for (let i = 0; i < n; i++) {
+      const progress = n <= 1 ? 1 : i / (n - 1);   // 0 (site) .. 1 (final)
+      const outPath = path.join(outDir, `stage_${i}.png`);
+      if (i === n - 1) {
+        fs.copyFileSync(imagePath, outPath);         // final = the finished image, exact
+      } else {
+        await ensureSdxlServer();
+        if (!sdxlReady) return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
+        const stagePrompt = `${_constructionStagePrompt(progress)}, ${basePrompt}`;
+        const safety = checkPromptSafety(stagePrompt);
+        if (!safety.safe) return { success: false, error: safety.reason };
+        // Earlier stages deviate MORE from the finished building (higher strength).
+        const strength = _lerp(0.75, 0.32, progress);
+        // Explicit step budget: without it the server auto-derives 25/strength
+        // capped at 60, so low-strength (near-final) stages waste ~60 steps.
+        // A construction VARIANT doesn't need final-render quality → 22 keeps
+        // the whole timeline (up to 20 stages) practical.
+        const r = await sdxlServerCall('/img2img', {
+          input: imagePath, prompt: stagePrompt, output: outPath, strength, seed, steps: 22,
+        });
+        if (!r.ok) {
+          // Keep the timeline complete rather than failing the whole run.
+          try { fs.copyFileSync(imagePath, outPath); } catch (_) {}
+        }
+      }
+      stages.push({ index: i, path: outPath, progress });
+      try { event.sender.send('construction-stage-progress', { stage: i + 1, total: n }); } catch (_) {}
+    }
+    return { success: true, dir: outDir, stages, count: n };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Disk fallback: does a construction-stages folder already exist for an image?
+// Lets the stages bar re-appear after a reload / image-version switch.
+ipcMain.handle('check-stages-dir', async (_event, imagePath) => {
+  try {
+    if (!imagePath) return { exists: false };
+    const stem = path.basename(imagePath, path.extname(imagePath));
+    const dir = path.join(path.dirname(imagePath), stem + '_stages');
+    if (!fs.existsSync(dir)) return { exists: false };
+    const files = fs.readdirSync(dir).filter(f => /^stage_\d+\.png$/i.test(f));
+    if (files.length < 2) return { exists: false };
+    const sorted = files
+      .map(f => ({ index: parseInt(f.match(/stage_(\d+)/i)[1], 10), path: path.join(dir, f) }))
+      .sort((a, b) => a.index - b.index);
+    const stages = sorted.map((s) => ({
+      index: s.index, path: s.path,
+      progress: sorted.length <= 1 ? 1 : s.index / (sorted.length - 1),
+    }));
+    return { exists: true, dir, stages, count: stages.length };
+  } catch (_) { return { exists: false }; }
+});
+
 // Quick image edits: symmetrize, upscale, brightness, crop, etc.
 // All done via a single Python one-liner using PIL — fast, no GPU needed.
 ipcMain.handle('image-quick-edit', async (event, { imagePath, operation, params }) => {

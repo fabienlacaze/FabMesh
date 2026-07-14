@@ -1186,6 +1186,49 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: rgba(245,158,11,0.3);
   color: #f59e0b;
 }
+/* Construction-stages timeline bar — same pill look as the multi-view bar
+   but pinned to the TOP (multi-view owns the bottom) and horizontally
+   scrollable since it can hold up to 20 stage buttons. */
+.stages-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  background: rgba(0,0,0,0.7);
+  border-radius: 8px;
+  padding: 4px 6px;
+  z-index: 12;
+  backdrop-filter: blur(4px);
+  max-width: 92%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.stages-bar::-webkit-scrollbar { height: 4px; }
+.stages-bar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 4px; }
+.stage-btn {
+  flex: 0 0 auto;
+  min-width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.6);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+.stage-btn:hover { background: rgba(255,255,255,0.1); color: white; }
+.stage-btn.stage-active {
+  background: rgba(245,158,11,0.3);
+  color: #f59e0b;
+}
 /* Tool-button active state (brush/eraser/flip toggles etc.) —
    strong highlight so the user sees which mode is currently on. */
 .tool-btn.tool-active,

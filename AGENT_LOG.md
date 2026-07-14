@@ -1,5 +1,33 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (feat : Étapes de construction pour images — timeline img2img affichée comme les multi-vues)
+
+Demande user : « construction steps » pour images = générer le building final,
+PUIS le modifier automatiquement en plusieurs étapes de chantier (échafaudages),
+affichées comme le système de multi-vues. Décisions user : bouton dédié
+post-génération, slider 2→20 étapes, desktop d'abord.
+- **Backend (main.js)** : IPC `generate-construction-stages(imagePath, prompt,
+  stageCount)` → pour chaque étape i sur N, **img2img de l'image finale** via le
+  serveur SDXL persistant, à force décroissante (`lerp(0.75→0.32)` : fondations+
+  échafaudages → … → final). L'étape N-1 = copie EXACTE de l'image finale (pas de
+  regen). Seed fixe (cadrage constant). Sauve dans `<image>_stages/stage_i.png`
+  (même convention que `_multiview/`). `steps:22` explicite pour éviter le
+  plafond auto 60-steps sur les faibles strengths. + IPC `check-stages-dir`
+  (fallback disque). preload : generateConstructionStages/checkStagesDir/
+  onConstructionStageProgress.
+- **Frontend** : bouton `ws-buildstages-btn` (outils image) → modal
+  `modal-buildstages-options` (slider 2-20) → gatedRun('img2img') →
+  barre `#ws-stages-bar` DYNAMIQUE (N boutons numérotés, en haut du preview,
+  scrollable) calquée sur `.multiview-bar` : clic = swap de l'aperçu. Modèle de
+  données `p._stages`/`p._stagesList`/`p._activeStage`/`p._activeStageKey` calqué
+  sur multi-vues ; hook dans `_checkMultiviewForCurrentImage` + resets projet +
+  carry-over reloadCurrentProject.
+- Câblage vérifié en live (bouton/modal/slider/barre/3 IPC présents). Rendu réel
+  non validé : VRAM saturée par UE 5.7 + Ostriv + Chrome (15,6/16 Go) pendant le
+  test → l'img2img était affamé. En UI réelle le gate VRAM aurait mis en file.
+  i18n EN en suivi (labels FR hardcodés, cf. précédent « Recolorier »).
+  main.js/preload touchés → restart Electron.
+
 ## 2026-07-14 (backup complet + push GitHub : snapshot de l'état de travail)
 
 Backup demandé avant d'attaquer la feature « construction steps » pour images.

@@ -2310,6 +2310,9 @@ function populateWorkspace(p) {
   // (index 0 because the lists are sorted newest first).
   p.selectedImagePath = null;
   p._activeMultiview = null;
+  p._activeStage = null;         // construction-stages: same full reset as
+  p._activeStageKey = null;      // multi-view so a stale stage key can't leak
+                                  // across projects.
   p._activeMultiviewKey = null;  // <-- also reset, otherwise the bar's
                                   // stored key from a previous session
                                   // re-attaches to the OLD multiview path
@@ -3388,6 +3391,9 @@ function _normPath(p) { return (p || '').replace(/\\/g, '/'); }
 
 async function _checkMultiviewForCurrentImage() {
   const p = state.currentProject;
+  // Keep the construction-stages bar in sync with the same preview-image
+  // lifecycle as the multi-view bar (fire-and-forget; it has its own guards).
+  try { _checkStagesForCurrentImage(); } catch (_) {}
   console.log('[mv-check] previewImagePath:', p?.previewImagePath, 'multiviews keys:', p?._multiviews ? Object.keys(p._multiviews) : 'none', 'backphotos:', p?._backPhotos ? Object.keys(p._backPhotos) : 'none');
   if (!p || !p.previewImagePath) { _hideMultiviewBar(); return; }
   const key = _normPath(p.previewImagePath);
@@ -3468,6 +3474,148 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
     imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
   }
 });
+
+// ============================================================
+// CONSTRUCTION STAGES — a chantier timeline (2..20 stages) built from the
+// FINAL building image via img2img, shown as a stages bar that works like
+// the multi-view bar (click a stage → swap the preview). Data model mirrors
+// multi-view: p._stages[imgPath] = dir, p._stagesList[imgPath] = [{index,
+// path,progress}], p._activeStage (resolved path|null), p._activeStageKey
+// (stage index|null).
+// ============================================================
+document.getElementById('ws-buildstages-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const target = (typeof editTarget === 'function' ? editTarget(p) : null) || p?.selectedImagePath || p?.previewImagePath;
+  if (!target) { showToast('Génère ou choisis une image d\'abord.', 'error'); return; }
+  document.getElementById('modal-buildstages-options')?.classList.remove('hidden');
+});
+document.getElementById('bs-count')?.addEventListener('input', (e) => {
+  const el = document.getElementById('bs-count-val');
+  if (el) el.textContent = e.target.value;
+});
+document.getElementById('bs-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-buildstages-options')?.classList.add('hidden');
+});
+document.getElementById('bs-start')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  const target = (typeof editTarget === 'function' ? editTarget(p) : null) || p?.selectedImagePath || p?.previewImagePath;
+  if (!target) { showToast('Génère ou choisis une image d\'abord.', 'error'); return; }
+  const count = Math.max(2, Math.min(20, parseInt(document.getElementById('bs-count')?.value, 10) || 4));
+  document.getElementById('modal-buildstages-options')?.classList.add('hidden');
+  const prompt = (p && (p.prompt || p.initialPrompt)) || '';
+  gatedRun('img2img', `Étapes de construction: ${p.name}`, async () => {
+    const job = pushJob(`Étapes de construction: ${p.name}`, null,
+      { 'Étapes': count, Source: String(target).split(/[\\/]/).pop() },
+      count * 9000, { sourceImageUrl: target, projectName: p.name });
+    try {
+      const r = await API.generateConstructionStages({ imagePath: target, prompt, stageCount: count, jobId: job.id });
+      if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
+        completeJob(job.id, true);
+        if (!p._stages) p._stages = {};
+        if (!p._stagesList) p._stagesList = {};
+        p._stages[target] = r.dir;
+        p._stagesList[target] = r.stages;
+        p._activeStageKey = r.stages.length - 1;  // land on the final by default
+        p._activeStage = null;
+        _showStagesBar(r.dir, r.stages);
+        showToast(`${r.stages.length} étapes de construction générées`, 'success', 2200);
+      } else {
+        completeJob(job.id, false);
+        if (!job.cancelled) customError(r?.error || 'unknown', 'Étapes de construction — échec');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Étapes de construction — erreur');
+    }
+  });
+});
+
+// Per-stage progress → nudge the running job's progress bar.
+try {
+  window.meshyAPI?.onConstructionStageProgress?.(({ stage, total }) => {
+    const j = (state.jobs || []).find(x => x.status === 'running' && /Étapes de construction/.test(x.title || ''));
+    if (j && total) { j.progress = Math.min(99, Math.round((stage / total) * 100)); try { renderJobs(); } catch (_) {} }
+  });
+} catch (_) {}
+
+function _hideStagesBar() {
+  const bar = document.getElementById('ws-stages-bar');
+  if (bar) { bar.classList.add('hidden'); bar.innerHTML = ''; }
+}
+// Build the dynamic stage buttons (numbered 1..N) and show the bar.
+// `stages` = [{index,path,progress}] ordered 0 (site) .. N-1 (final).
+function _showStagesBar(dir, stages) {
+  const bar = document.getElementById('ws-stages-bar');
+  if (!bar || !Array.isArray(stages) || stages.length < 2) { _hideStagesBar(); return; }
+  const last = stages.length - 1;
+  bar.dataset.dir = dir || '';
+  bar.innerHTML = '';
+  const p = state.currentProject;
+  const activeKey = (p && typeof p._activeStageKey === 'number') ? p._activeStageKey : last; // default = final
+  for (const s of stages) {
+    const btn = document.createElement('button');
+    btn.className = 'stage-btn' + (s.index === activeKey ? ' stage-active' : '');
+    btn.dataset.stage = String(s.index);
+    btn.dataset.path = s.path;
+    btn.textContent = String(s.index + 1);
+    const pct = Math.round((s.progress != null ? s.progress : (s.index / last)) * 100);
+    btn.title = s.index === last
+      ? `Étape ${s.index + 1}/${stages.length} — bâtiment final`
+      : `Étape ${s.index + 1}/${stages.length} — chantier ${pct}%`;
+    bar.appendChild(btn);
+  }
+  bar.classList.remove('hidden');
+  // Swap the preview to the active stage (unless it's the final = current image).
+  if (p && typeof activeKey === 'number' && activeKey !== last) {
+    const s = stages.find(x => x.index === activeKey);
+    if (s) {
+      p._activeStage = s.path;
+      const imgEl = document.getElementById('step1-preview')?.querySelector('img');
+      if (imgEl) imgEl.src = 'file:///' + s.path.replace(/\\/g, '/') + '?t=' + Date.now();
+    }
+  }
+}
+
+// Click a stage → swap the previewed image (like the multi-view bar).
+document.getElementById('ws-stages-bar')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.stage-btn');
+  if (!btn) return;
+  const bar = document.getElementById('ws-stages-bar');
+  bar.querySelectorAll('.stage-btn').forEach(b => b.classList.remove('stage-active'));
+  btn.classList.add('stage-active');
+  const idx = parseInt(btn.dataset.stage, 10);
+  const imgPath = btn.dataset.path;
+  const p = state.currentProject;
+  if (p) { p._activeStage = imgPath; p._activeStageKey = idx; }
+  if (!imgPath) return;
+  const imgEl = document.getElementById('step1-preview')?.querySelector('img');
+  if (imgEl) imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+});
+
+// Refresh the stages bar for the current preview image (mirrors
+// _checkMultiviewForCurrentImage): in-memory cache first, disk fallback next.
+async function _checkStagesForCurrentImage() {
+  const p = state.currentProject;
+  if (!p || !p.previewImagePath) { _hideStagesBar(); return; }
+  const key = _normPath(p.previewImagePath);
+  if (p._stagesList) {
+    const found = Object.keys(p._stagesList).find(k => _normPath(k) === key);
+    if (found && (p._stagesList[found] || []).length >= 2) { _showStagesBar(p._stages?.[found], p._stagesList[found]); return; }
+  }
+  try {
+    const info = await window.meshyAPI.checkStagesDir(p.previewImagePath);
+    if (info && info.exists && (info.stages || []).length >= 2) {
+      if (!p._stages) p._stages = {};
+      if (!p._stagesList) p._stagesList = {};
+      p._stages[p.previewImagePath] = info.dir;
+      p._stagesList[p.previewImagePath] = info.stages;
+      _showStagesBar(info.dir, info.stages);
+      return;
+    }
+  } catch (_) {}
+  _hideStagesBar();
+}
+window._checkStagesForCurrentImage = _checkStagesForCurrentImage;
 
 // ============================================================
 // MESH VIEWER CONTROLS (toolbar logic shared between mini + lightbox)
@@ -14928,6 +15076,8 @@ async function reloadCurrentProject() {
     // and are referenced by per-image map state)
     if (state.currentProject._multiviews) refreshed._multiviews = state.currentProject._multiviews;
     if (state.currentProject._backPhotos) refreshed._backPhotos = state.currentProject._backPhotos;
+    if (state.currentProject._stages) refreshed._stages = state.currentProject._stages;
+    if (state.currentProject._stagesList) refreshed._stagesList = state.currentProject._stagesList;
     state.currentProject = refreshed;
     console.log('[reload] images:', refreshed.images?.length, 'meshes:', refreshed.meshes?.length);
     populateWorkspace(refreshed);
