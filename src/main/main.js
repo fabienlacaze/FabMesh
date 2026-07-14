@@ -4587,7 +4587,8 @@ a = np.clip((ys - colB) / feather, 0.0, 1.0)          # 1 built, 0 above
 white = np.array([255.0, 255.0, 255.0], np.float32)
 rw = (rgb * a[..., None] + white.reshape(1, 1, 3) * (1.0 - a[..., None])).clip(0, 255).astype(np.uint8)
 Image.fromarray(rw, 'RGB').save(sys.argv[2])
-up = 0.13 * H; down = 0.06 * H                          # band straddling the line (room for a full scaffold)
+up = 0.14 * H
+down = (0.06 + max(0.0, 0.5 - keep) * 0.24) * H        # early stages: taller band at ground for site materials
 band = (((ys >= colB - up) & (ys < colB + down)).astype(np.uint8) * 255)
 Image.fromarray(band.astype(np.uint8), 'L').save(sys.argv[3])
 Image.fromarray((base_a * a).astype(np.uint8), 'L').save(sys.argv[4])
@@ -4671,7 +4672,9 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
         if (await _makeScaffoldPrep(imagePath, revealWhite, maskP, alphaP, keepFrac)) {
           await ensureSdxlServer();
           if (sdxlReady) {
-            const prompt = 'dense wooden construction scaffolding, grid of vertical wooden poles and horizontal wooden planks, timber work platform and walkways, scaffolding covering the building facade, construction site, photorealistic, detailed wood texture';
+            const prompt = progress < 0.35
+              ? 'medieval castle construction site, wooden crates and barrels, stacks of timber planks, piles of stone blocks, gravel and rubble, raw building materials, wooden scaffolding, wooden crane, bare earth, photorealistic, highly detailed'
+              : 'dense wooden construction scaffolding, grid of vertical wooden poles and horizontal wooden planks, wooden crane, timber work platform and walkways, scaffolding on the building facade, construction site, photorealistic, detailed wood texture';
             const r = await sdxlServerCall('/mask_inpaint', { input: revealWhite, mask: maskP, prompt, output: inpP, seed: 424242 });
             if (r.ok && fs.existsSync(inpP)) done = await _finalizeScaffoldStage(inpP, alphaP, maskP, outPath);
           }

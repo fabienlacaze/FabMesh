@@ -17,6 +17,11 @@ Pipeline par étape (non finale) dans generate-construction-stages :
 LIMITE : SDXL donne un échafaudage épars/ambigu (passerelle+garde-corps), pas une grille
 dense. Piste future : hybride treillis procédural + refine photoréaliste.
 
+MAJ : prompt + masque ADAPTATIFS à l'étape. Étape précoce (progress<0.35) → bande plus
+haute au sol (down = 0.06 + max(0,0.5-keep)*0.24) + prompt "chantier : caisses, tas de
+bois, tas de pierres, gravats, grue" → vrai chantier avec matériaux (règle l'étape 0
+vide). Étapes suivantes → prompt échafaudage + grue.
+
 ## 2026-07-14 (construction-stages → NOUVELLE VERSION, sans écraser la version source)
 
 Avant: les études de construction décoraient la version courante (v7) — la barre de
