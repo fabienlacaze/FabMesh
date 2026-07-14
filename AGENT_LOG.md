@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (construction-stages → échafaudage PHOTORÉALISTE via SDXL band-inpaint)
+
+Choix user = photoréaliste plutôt que le treillis procédural (jugé "pas réaliste").
+Pipeline par étape (non finale) dans generate-construction-stages :
+- `_makeScaffoldPrep` : révélation déterministe composée sur BLANC (input inpaint) +
+  masque bande FINE à la ligne (up 0.13*H, down 0.06*H = petit masque → fiable, ne
+  régénère jamais le bâtiment) + alpha de révélation conservé.
+- `sdxlServerCall('/mask_inpaint', {input,mask,prompt,seed})` : SDXL peint le bois
+  seulement dans la bande. Prompt "dense wooden scaffolding, grid of poles and planks..."
+  ("cranes" retiré → causait câbles/antennes ; négatif auto via _enrich_prompt). ~9s/étape.
+- `_finalizeScaffoldStage` : RGB inpaint + alpha révélation ; chroma-key du blanc restant
+  dans la bande → ciel transparent, bois opaque. Sortie RGBA transparente.
+- Repli sur le treillis procédural (`_makeRevealStage`) si SDXL indispo. Temp `.p<i>_*`
+  nettoyés (préfixe `.` → ignorés par check-stages-dir).
+LIMITE : SDXL donne un échafaudage épars/ambigu (passerelle+garde-corps), pas une grille
+dense. Piste future : hybride treillis procédural + refine photoréaliste.
+
 ## 2026-07-14 (construction-stages → NOUVELLE VERSION, sans écraser la version source)
 
 Avant: les études de construction décoraient la version courante (v7) — la barre de

@@ -4557,6 +4557,78 @@ print("OK")
   });
 }
 
+// PHOTOREAL scaffolding — step 1/2: from the finished image, produce the three
+// inputs an SDXL band-inpaint needs, all for ONE stage at `keepFrac`:
+//   - revealWhite (RGB): the building revealed from the ground up, composited on
+//     white (the not-built area is white so the inpaint sees a clean sky).
+//   - mask (L): a THIN white band at the build line = the only region SDXL may
+//     repaint (small mask → reliable; never regenerates the whole building).
+//   - alpha (L): the reveal alpha (building opaque, above transparent) kept for
+//     step 2 so the final stage stays transparent where nothing is built.
+// Deterministic seed → coherent build line across the timeline. argv-only paths.
+function _makeScaffoldPrep(imagePath, revealWhitePath, maskPath, alphaPath, keepFrac) {
+  const pyCode = `
+import sys
+import numpy as np
+from PIL import Image
+src = Image.open(sys.argv[1]); keep = float(sys.argv[5]); mode = src.mode
+if mode == 'RGBA':
+    rgba = np.asarray(src).astype(np.float32); rgb = rgba[..., :3]; base_a = rgba[..., 3]
+else:
+    rgb = np.asarray(src.convert('RGB')).astype(np.float32)
+    base_a = np.full(rgb.shape[:2], 255.0, np.float32)
+H, W = rgb.shape[0], rgb.shape[1]
+rng = np.random.default_rng(1234); raw = rng.standard_normal(W); k = max(9, (W // 25) | 1)
+sm = np.convolve(raw, np.ones(k) / k, mode='same'); sm = sm / (np.abs(sm).max() + 1e-6)
+amp = 0.010 * H; feather = max(1.0, 0.02 * H)
+ys = np.arange(H, dtype=np.float32).reshape(H, 1)
+col = (1.0 - keep) * H + sm * amp; colB = col.reshape(1, W)
+a = np.clip((ys - colB) / feather, 0.0, 1.0)          # 1 built, 0 above
+white = np.array([255.0, 255.0, 255.0], np.float32)
+rw = (rgb * a[..., None] + white.reshape(1, 1, 3) * (1.0 - a[..., None])).clip(0, 255).astype(np.uint8)
+Image.fromarray(rw, 'RGB').save(sys.argv[2])
+up = 0.13 * H; down = 0.06 * H                          # band straddling the line (room for a full scaffold)
+band = (((ys >= colB - up) & (ys < colB + down)).astype(np.uint8) * 255)
+Image.fromarray(band.astype(np.uint8), 'L').save(sys.argv[3])
+Image.fromarray((base_a * a).astype(np.uint8), 'L').save(sys.argv[4])
+print("OK")
+`;
+  return new Promise((resolve) => {
+    execFile(_aiPython(), ['-c', pyCode, imagePath, revealWhitePath, maskPath, alphaPath, String(keepFrac)],
+      { timeout: 120000 }, (error) => {
+        resolve(!error && fs.existsSync(revealWhitePath) && fs.existsSync(maskPath) && fs.existsSync(alphaPath));
+      });
+  });
+}
+
+// PHOTOREAL scaffolding — step 2/2: recombine the SDXL inpaint output with the
+// reveal alpha. The building keeps its reveal alpha (opaque below the line,
+// transparent above); inside the scaffold band, pixels the inpaint left ~white
+// are sky → transparent, everything else (the generated wooden scaffold) → opaque.
+// Result = a transparent-background stage with photoreal scaffolding at the line.
+function _finalizeScaffoldStage(inpaintPath, alphaPath, maskPath, outPath) {
+  const pyCode = `
+import sys
+import numpy as np
+from PIL import Image
+rgb = np.asarray(Image.open(sys.argv[1]).convert('RGB')).astype(np.uint8)
+alpha = np.asarray(Image.open(sys.argv[2]).convert('L')).astype(np.float32)
+band = np.asarray(Image.open(sys.argv[3]).convert('L')).astype(np.float32) > 127
+mn = rgb.min(axis=2); mx = rgb.max(axis=2)
+near_white = (mn > 232) & ((mx - mn) < 18)             # sky left ~white by inpaint
+scaff = band & (~near_white)                            # generated scaffold in the band
+final_a = np.maximum(alpha, scaff.astype(np.float32) * 255.0).astype(np.uint8)
+Image.fromarray(np.dstack([rgb, final_a]), 'RGBA').save(sys.argv[4])
+print("OK")
+`;
+  return new Promise((resolve) => {
+    execFile(_aiPython(), ['-c', pyCode, inpaintPath, alphaPath, maskPath, outPath],
+      { timeout: 120000 }, (error) => {
+        resolve(!error && fs.existsSync(outPath));
+      });
+  });
+}
+
 ipcMain.handle('generate-construction-stages', async (event, opts) => {
   try {
     const { imagePath, prompt, stageCount } = (opts || {});
@@ -4586,13 +4658,29 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
         // Final stage = the finished image, EXACT (progress==1, nothing to build).
         fs.copyFileSync(imagePath, outPath);
       } else {
-        // DETERMINISTIC vertical reveal (no GPU, no inpaint): the building is
-        // revealed from the ground up. keepFrac floored to a thin sliver so the
-        // earliest stage still shows a grounding base. Instant, coherent, and
-        // the building stays pixel-identical (it IS the final image, revealed).
+        // PHOTOREAL scaffolding: deterministic vertical reveal (building rises
+        // from the ground, stays identical) + SDXL band-inpaint that paints a
+        // realistic wooden scaffold ONLY in a thin band at the build line (small
+        // mask → reliable, never regenerates the building). Falls back to the
+        // procedural scaffold if SDXL is unavailable so the timeline never breaks.
         const keepFrac = Math.max(progress, 0.03);
-        const ok = await _makeRevealStage(imagePath, outPath, keepFrac);
-        if (!ok) { try { fs.copyFileSync(imagePath, outPath); } catch (_) {} }
+        const pfx = path.join(outDir, `.p${i}`);
+        const revealWhite = pfx + '_rw.png', maskP = pfx + '_m.png';
+        const alphaP = pfx + '_a.png', inpP = pfx + '_ip.png';
+        let done = false;
+        if (await _makeScaffoldPrep(imagePath, revealWhite, maskP, alphaP, keepFrac)) {
+          await ensureSdxlServer();
+          if (sdxlReady) {
+            const prompt = 'dense wooden construction scaffolding, grid of vertical wooden poles and horizontal wooden planks, timber work platform and walkways, scaffolding covering the building facade, construction site, photorealistic, detailed wood texture';
+            const r = await sdxlServerCall('/mask_inpaint', { input: revealWhite, mask: maskP, prompt, output: inpP, seed: 424242 });
+            if (r.ok && fs.existsSync(inpP)) done = await _finalizeScaffoldStage(inpP, alphaP, maskP, outPath);
+          }
+        }
+        if (!done) {                                   // fallback: procedural scaffold
+          const ok = await _makeRevealStage(imagePath, outPath, keepFrac);
+          if (!ok) { try { fs.copyFileSync(imagePath, outPath); } catch (_) {} }
+        }
+        for (const f of [revealWhite, maskP, alphaP, inpP]) { try { fs.rmSync(f, { force: true }); } catch (_) {} }
       }
       stages.push({ index: i, path: outPath, progress });
       try { event.sender.send('construction-stage-progress', { stage: i + 1, total: n }); } catch (_) {}
