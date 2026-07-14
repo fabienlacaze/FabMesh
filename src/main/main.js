@@ -316,7 +316,17 @@ function _matchesKeyword(text, kw) {
            padded.includes(' ' + kw + '?') || text.startsWith(kw + ' ') ||
            text.endsWith(' ' + kw);
   }
-  return text.includes(kw);
+  // Longer words / stems: match only at a WORD START (left \b boundary) rather
+  // than as a raw substring. A stem like "strangul"/"mutilat" still matches
+  // "strangulation"/"mutilate" (word begins with the stem), but the keyword no
+  // longer fires MID-word — the plain-substring version blocked innocent prompts
+  // because e.g. "changing" CONTAINS "hanging", "exchange" contains "hang…",
+  // "refresh" ⊄ "flesh" but "fleshy" begins with "flesh" (kept, intended).
+  // 2026-07-14: this is what blocked "changing haircut" (Argos translation of
+  // « changer la coupe de cheveux ») on the "hanging" keyword. Word-boundary
+  // matching is strictly MORE precise → it can only REMOVE false positives.
+  const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + esc).test(text);
 }
 
 // ── HARD FLOOR — illegal content (CSAM / child abuse) that NO setting,

@@ -1,5 +1,28 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (Modifier l'image : faux-blocage « hanging », lenteur cold-start, spam de toasts)
+
+Signalé : « clic sur Modifier → beaucoup de temps avant de lancer l'analyse » +
+captures montrant un blocage « Filtre de contenu : "hanging" est bloqué » sur
+« changer la coupe de cheveux » + ~8 toasts rouges identiques. 3 bugs :
+- **Faux-positif de sous-chaîne (main.js `_matchesKeyword`)** : « changer la coupe
+  de cheveux » → Argos → « changing haircut » → le filtre testait
+  `"changing haircut".includes("hanging")` = VRAI (« c**hanging** » contient
+  « hanging »). Fix : match par frontière de mot gauche (`\b` + regex échappée)
+  pour les mots-clés >4 car. au lieu d'un `includes()` brut. Les radicaux
+  (strangul→strangulation, mutilat→mutilate, decapitat→decapitation) restent
+  matchés (frontière = début de mot) ; le vrai sens violent (« hanging from a
+  rope ») reste bloqué. Vérifié 9/9 cas. Strictement PLUS précis → ne peut que
+  RETIRER des faux positifs, jamais en ajouter. main.js → restart Electron.
+- **Lenteur (index2.js `mod-apply`)** : `await translateUserPrompt()` s'exécutait
+  AVANT tout feedback ; au 1er usage (ou après 5 min d'inactivité) le serveur
+  argos cold-starte ~5s → app figée « avant de lancer l'analyse ». Fix : traduire
+  À L'INTÉRIEUR du job (après `pushJob`) → carte + progression instantanées ;
+  + pré-chauffage du serveur à l'ouverture du modal (`ws-modify-btn`).
+- **Spam de toasts (index2.js `showToast`)** : N variantes échouant sur la même
+  erreur → N toasts identiques. Fix : dédup global — les messages identiques
+  encore affichés fusionnent en un compteur « ×N » (Map + reset du timer).
+
 ## 2026-07-13 (Round 2 release-fixes : TVA TTC, miroir DINOv3 non-gaté, légal mono-source, durcissement)
 
 Deuxième passe de correctifs code-fixables avant vente (« tu peux vraiment pas
