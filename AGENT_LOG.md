@@ -22,6 +22,13 @@ haute au sol (down = 0.06 + max(0,0.5-keep)*0.24) + prompt "chantier : caisses, 
 bois, tas de pierres, gravats, grue" → vrai chantier avec matériaux (règle l'étape 0
 vide). Étapes suivantes → prompt échafaudage + grue.
 
+MAJ2 : (a) SOL ancré sur la bbox du bâtiment — `col = Rbase - keep*(Rbase-Rtop)` (au lieu
+de (1-keep)*H) où Rtop/Rbase = lignes haute/basse de `building` → le sol du chantier
+(étape 0) tombe EXACTEMENT sur la base du bâtiment final (constant entre étapes).
+(b) Grues = "Roman-style wooden treadwheel crane, human-powered squirrel-cage timber
+crane" dans les 2 prompts (remplace les mâts à câbles). NON TESTÉ (une 3D tournait,
+restart éditeur interdit) — à valider par régénération quand le user donne le feu vert.
+
 ## 2026-07-14 (construction-stages → NOUVELLE VERSION, sans écraser la version source)
 
 Avant: les études de construction décoraient la version courante (v7) — la barre de

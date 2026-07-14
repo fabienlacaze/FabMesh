@@ -4574,15 +4574,24 @@ from PIL import Image
 src = Image.open(sys.argv[1]); keep = float(sys.argv[5]); mode = src.mode
 if mode == 'RGBA':
     rgba = np.asarray(src).astype(np.float32); rgb = rgba[..., :3]; base_a = rgba[..., 3]
+    building = base_a > 16
 else:
     rgb = np.asarray(src.convert('RGB')).astype(np.float32)
     base_a = np.full(rgb.shape[:2], 255.0, np.float32)
+    corners = np.stack([rgb[0, 0], rgb[0, -1], rgb[-1, 0], rgb[-1, -1]])
+    building = np.abs(rgb - np.median(corners, axis=0).reshape(1, 1, 3)).max(axis=2) > 18.0
 H, W = rgb.shape[0], rgb.shape[1]
+# Anchor the GROUND to the building's BASE row, so the earliest stage's site sits
+# exactly where the finished building's bottom is → constant ground across stages
+# (fixes stage 0 floating above the final building's base).
+rows = np.where(building.any(axis=1))[0]
+Rtop = int(rows.min()) if len(rows) else 0
+Rbase = int(rows.max()) if len(rows) else H - 1
 rng = np.random.default_rng(1234); raw = rng.standard_normal(W); k = max(9, (W // 25) | 1)
 sm = np.convolve(raw, np.ones(k) / k, mode='same'); sm = sm / (np.abs(sm).max() + 1e-6)
 amp = 0.010 * H; feather = max(1.0, 0.02 * H)
 ys = np.arange(H, dtype=np.float32).reshape(H, 1)
-col = (1.0 - keep) * H + sm * amp; colB = col.reshape(1, W)
+col = (Rbase - keep * (Rbase - Rtop)) + sm * amp; colB = col.reshape(1, W)
 a = np.clip((ys - colB) / feather, 0.0, 1.0)          # 1 built, 0 above
 white = np.array([255.0, 255.0, 255.0], np.float32)
 rw = (rgb * a[..., None] + white.reshape(1, 1, 3) * (1.0 - a[..., None])).clip(0, 255).astype(np.uint8)
@@ -4673,8 +4682,8 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
           await ensureSdxlServer();
           if (sdxlReady) {
             const prompt = progress < 0.35
-              ? 'medieval castle construction site, wooden crates and barrels, stacks of timber planks, piles of stone blocks, gravel and rubble, raw building materials, wooden scaffolding, wooden crane, bare earth, photorealistic, highly detailed'
-              : 'dense wooden construction scaffolding, grid of vertical wooden poles and horizontal wooden planks, wooden crane, timber work platform and walkways, scaffolding on the building facade, construction site, photorealistic, detailed wood texture';
+              ? 'medieval castle construction site, wooden crates and barrels, stacks of timber planks, piles of stone blocks, gravel and rubble, raw building materials, wooden scaffolding, Roman-style wooden treadwheel crane, human-powered squirrel-cage timber crane, bare earth, photorealistic, highly detailed'
+              : 'dense wooden construction scaffolding, grid of vertical wooden poles and horizontal wooden planks, Roman-style wooden treadwheel crane, human-powered squirrel-cage timber crane made of wooden beams, timber work platform and walkways, scaffolding on the building facade, medieval construction site, photorealistic, detailed wood texture';
             const r = await sdxlServerCall('/mask_inpaint', { input: revealWhite, mask: maskP, prompt, output: inpP, seed: 424242 });
             if (r.ok && fs.existsSync(inpP)) done = await _finalizeScaffoldStage(inpP, alphaP, maskP, outPath);
           }
