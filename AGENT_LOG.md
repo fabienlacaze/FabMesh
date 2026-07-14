@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (construction-stages → ÉCHAFAUDAGES EN BOIS sur le bord révélé)
+
+Le bord de révélation "jagged" laissait voir des fenêtres coupées / bord noir. Ajout
+d'un vrai échafaudage bois dans `_makeRevealStage` (vectorisé numpy, ~190ms/étape) :
+- bord de construction quasi-droit (amp 0.010*H) car le platelage cache la coupe ;
+- PLATELAGE de planches opaque (couleur par rangée droite → pas d'effet "tressé")
+  couvrant la bande haute du bâti → masque les parties partiellement visibles ;
+- POTEAUX verticaux (~tous les 56px) + 3 LISSES horizontales montant dans le ciel =
+  cadre de l'étage suivant ; le tout épouse la silhouette (colonnes où `building`).
+- RGBA : alpha = max(reveal, couverture échafaudage) pour rendre le bois opaque
+  au-dessus de la ligne ; RGB : composité sur le fond détecté. Étape N-1 = finale nue.
+
 ## 2026-07-14 (construction-stages → révélation verticale DÉTERMINISTE, sans GPU)
 
 L'approche `/mask_inpaint` (voir entrée précédente) ne marchait qu'à moitié : sur les

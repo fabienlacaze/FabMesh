@@ -4468,14 +4468,15 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine, s
 // exactly like the multi-view bar. Instant, and identical on web + desktop.
 // ------------------------------------------------------------------
 
-// Build ONE construction stage by deterministic vertical reveal. Below the
-// build line = the EXACT final image; above = the image's background (the part
-// not built yet). A FIXED low-frequency jagged/feathered edge makes the top read
-// as walls-in-progress rather than a clean horizontal slice; the seed is fixed
-// so the SAME wall-top profile simply slides up as `keepFrac` grows → perfectly
-// coherent across stages. keepFrac = bottom fraction already built (0..1).
-// RGBA sources reveal over transparency; RGB over the detected corner background.
-// Paths go through argv (never string-interpolated) — same rule as remove_bg.py.
+// Build ONE construction stage by deterministic vertical reveal + WOODEN
+// SCAFFOLDING. Below the build line = the EXACT final image; above = the
+// background (not built yet). At the build line we draw a wooden scaffold —
+// a solid plank working-deck that HIDES the raw cut edge (half-windows etc.),
+// plus vertical standards and horizontal ledgers rising into the sky as the
+// frame of the next lift. The scaffold hugs the building silhouette (only
+// columns where the structure exists). A fixed seed keeps everything coherent
+// across stages. keepFrac = bottom fraction already built (0..1). RGBA reveals
+// over transparency; RGB over the detected corner background. Paths via argv.
 function _makeRevealStage(imagePath, outPath, keepFrac) {
   const pyCode = `
 import sys
@@ -4487,31 +4488,64 @@ mode = src.mode
 if mode == 'RGBA':
     rgba = np.asarray(src).astype(np.float32)
     rgb = rgba[..., :3]; base_a = rgba[..., 3]; bg = None
+    building = base_a > 16
 else:
     rgb = np.asarray(src.convert('RGB')).astype(np.float32)
     base_a = None
     corners = np.stack([rgb[0, 0], rgb[0, -1], rgb[-1, 0], rgb[-1, -1]])
     bg = np.median(corners, axis=0)          # background colour (usually white)
+    building = np.abs(rgb - bg.reshape(1, 1, 3)).max(axis=2) > 18.0
 H, W = rgb.shape[0], rgb.shape[1]
-# deterministic low-frequency jagged per-column build height (fixed seed)
+# deterministic low-frequency near-straight build line (fixed seed → coherent).
+# amp is small: the scaffold deck hides the cut, so no big jaggedness is needed.
 rng = np.random.default_rng(1234)
 raw = rng.standard_normal(W)
-k = max(9, (W // 25) | 1)                     # smoothing kernel (odd)
+k = max(9, (W // 25) | 1)
 sm = np.convolve(raw, np.ones(k) / k, mode='same')
 sm = sm / (np.abs(sm).max() + 1e-6)          # -1..1
-amp = 0.045 * H                               # jaggedness amplitude
-feather = max(1.0, 0.03 * H)                  # soft edge (~3% of height)
-line = (1.0 - keep) * H                        # rows below this are kept (built)
-col = line + sm * amp                          # (W,) per-column build height
+amp = 0.010 * H
+feather = max(1.0, 0.02 * H)
 ys = np.arange(H, dtype=np.float32).reshape(H, 1)
-a = np.clip((ys - col.reshape(1, W)) / feather, 0.0, 1.0)   # 1 built, 0 bg
+xs = np.arange(W)
+col = (1.0 - keep) * H + sm * amp             # (W,) per-column build height
+coli = col.astype(int)
+colB = col.reshape(1, W)
+a = np.clip((ys - colB) / feather, 0.0, 1.0)  # 1 built, 0 bg
 if mode == 'RGBA':
-    out_a = (base_a * a).astype(np.uint8)
-    out = np.dstack([rgb.astype(np.uint8), out_a])
-    Image.fromarray(out, 'RGBA').save(sys.argv[2])
+    out = rgb.copy()
 else:
     a3 = a[..., None]
     out = rgb * a3 + bg.reshape(1, 1, 3) * (1.0 - a3)
+scaff = np.zeros((H, W), bool)
+# a column carries scaffold only if the structure exists just below the line
+probe = np.clip(coli + int(0.03 * H), 0, H - 1)
+has = building[probe, xs]
+if has.any():
+    hasB = has.reshape(1, W)
+    deckH = int(0.055 * H); board = max(3, int(0.014 * H))
+    lip = int(0.012 * H); up = int(0.085 * H)
+    mean = int(np.median(coli[has]))          # straight reference for plank seams
+    ridx = ((ys.astype(int) - mean) // board)
+    BOARDS = np.array([[182, 138, 86], [166, 122, 72], [154, 110, 64]], np.float32)
+    rowcol = BOARDS[(ridx % 3).reshape(-1)].copy()
+    rowcol[((ys.astype(int) - mean) % board == 0).reshape(-1)] = np.array([96, 64, 36], np.float32)
+    deckmask = ((ys >= colB - lip) & (ys < colB + deckH) & hasB)
+    out = np.where(deckmask[..., None], rowcol.reshape(H, 1, 3), out); scaff |= deckmask
+    LEDG = np.array([124, 80, 42], np.float32); thk = max(2, int(0.004 * H))
+    for lv in (0.030, 0.060, 0.088):          # horizontal ledgers (next-lift frame)
+        lm = ((np.abs(ys - (colB - lv * H)) < thk) & hasB)
+        out = np.where(lm[..., None], LEDG.reshape(1, 1, 3), out); scaff |= lm
+    POLE = np.array([104, 66, 34], np.float32); poleW = max(2, int(0.004 * W))
+    polecols = np.zeros(W, bool)
+    for x0 in range(0, W, 56):                 # vertical standards every ~56px
+        polecols[x0:min(x0 + poleW, W)] = True
+    polecols &= has
+    pm = ((ys >= colB - up) & (ys < colB + deckH) & polecols.reshape(1, W))
+    out = np.where(pm[..., None], POLE.reshape(1, 1, 3), out); scaff |= pm
+if mode == 'RGBA':
+    aa = np.maximum(base_a * a, scaff * 255.0).astype(np.uint8)
+    Image.fromarray(np.dstack([out.clip(0, 255).astype(np.uint8), aa]), 'RGBA').save(sys.argv[2])
+else:
     Image.fromarray(out.clip(0, 255).astype(np.uint8), 'RGB').save(sys.argv[2])
 print("OK")
 `;
