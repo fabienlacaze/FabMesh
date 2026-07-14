@@ -39,7 +39,7 @@ import modal
 # ============================================================
 app = modal.App("myfabmesh-fbx-retarget")
 
-# bpy 5.1+ ships an official PyPI wheel of Blender as a Python module.
+# bpy 5.0+ ships an official PyPI wheel of Blender as a Python module.
 # This is the FBX-parsing leg of the pipeline. Keep it pinned so a
 # silent upstream API change doesn't break parse_fbx() in prod.
 #
@@ -56,9 +56,14 @@ image = (
         "libxkbcommon0", "libglib2.0-0",
     )
     .pip_install(
-        # bpy 5.1.2 → Blender 5.1 — supports FBX 2006-2026 incl. UE5
-        # Mannequin and CC4 exports (ORC_M1).
-        "bpy==5.1.2",
+        # bpy 5.0.1 → Blender 5.0 — latest version published on PyPI
+        # (Modal mirror caps out at 5.0.1; 5.1.x not yet released).
+        # Supports FBX 2006-2026 incl. UE5 Mannequin and CC4 exports
+        # (ORC_M1). FBX importer API used by scripts/bpy_worker.py
+        # (bpy.ops.import_scene.fbx, bpy.data.objects, bpy.context,
+        # pose.bones[*].rotation_euler) is stable since 4.2.
+        # Fallback if regression: pin "bpy==4.5.10" (last 4.5 LTS).
+        "bpy==5.0.1",
         "numpy>=1.26,<2",
         "scipy==1.13.1",
         "fastapi[standard]",

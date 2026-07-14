@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (backup complet + push GitHub : snapshot de l'état de travail)
+
+Backup demandé avant d'attaquer la feature « construction steps » pour images.
+Snapshot des changements préexistants non committés (pipeline Blender/FBX) :
+- `scripts/bpy_worker.py` / `scripts/fbx_motion.py` : worker FBX lancé via
+  `blender -b -P` quand le Python courant n'a pas `bpy` (détection blender.exe
+  + parsing argv après `--`) ; pin `bpy==5.1.2`→`5.0.1` (dernière sur PyPI/Modal).
+- `modal_app/_ref_anim.py`, `scripts/training_data_gen.py` : ajustements mineurs.
+- `.gitignore` : exclusion des moteurs vendored PartSAM/ (~1.3 Go, binaires >
+  limite GitHub) et torkit3d_src/ (67 Mo), + artefacts (tsbuildinfo worker,
+  scratch_*.err). Ces deps sont fetchées/buildées localement, jamais committées.
+- `FABMESH_PROJECTS_BACKUP.{json,md}` : sauvegarde des 237 projets / 152 prompts.
+Push de la branche feat/r2-signed-urls sur origin (toutes les corrections de la
+session : filtre mot-clé, drop-to-create, modify UX, Round 2 release-fixes…).
+
 ## 2026-07-14 (Modifier l'image : faux-blocage « hanging », lenteur cold-start, spam de toasts)
 
 Signalé : « clic sur Modifier → beaucoup de temps avant de lancer l'analyse » +

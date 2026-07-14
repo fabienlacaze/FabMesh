@@ -36,9 +36,18 @@ def _err(msg: str, code: int = 1) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) < 4:
+    # FabMesh (2026-06-08): when launched via `blender -b -P bpy_worker.py -- args`,
+    # Blender prepends its own argv (own script path, etc) and the real args come
+    # AFTER `--`. Detect this and slice off everything up to `--`.
+    argv = sys.argv
+    if "--" in argv:
+        idx = argv.index("--")
+        args = argv[idx + 1:]
+    else:
+        args = argv[1:]
+    if len(args) < 3:
         _err("usage: bpy_worker.py <fbx_in> <out_json> <out_npz>", 2)
-    fbx_in, out_json, out_npz = sys.argv[1], sys.argv[2], sys.argv[3]
+    fbx_in, out_json, out_npz = args[0], args[1], args[2]
     if not os.path.isfile(fbx_in):
         _err(f"input FBX not found: {fbx_in}", 2)
 
