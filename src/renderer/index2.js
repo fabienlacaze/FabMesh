@@ -4893,13 +4893,24 @@ async function openLightbox(imgPath) {
   // else use the project's version list. A stage isn't a project version, so
   // without this it would fall to index 0 of the versions ("1/8" bug) and show
   // the wrong image.
-  let _lbGallery = null, _lbStart = 0;
-  if (p && p._stagesList && p.previewImagePath) {
-    const key = Object.keys(p._stagesList).find(k => _normPath(k) === _normPath(p.previewImagePath));
+  let _lbGallery = null, _lbStart = 0, _lbStagesMeta = null;
+  if (p && p._stagesList) {
+    // A construction version matches if imgPath (or the current preview) is its
+    // cover/key OR one of its stage frames — so opening the version COVER also
+    // enters the stages gallery (landing on FINAL), not the version list.
+    const key = Object.keys(p._stagesList).find(k =>
+      _normPath(k) === _normPath(imgPath) ||
+      (p.previewImagePath && _normPath(k) === _normPath(p.previewImagePath)) ||
+      (p._stagesList[k] || []).some(s => _normPath(s.path) === _normPath(imgPath)));
     if (key) {
-      const stagePaths = (p._stagesList[key] || []).map(s => s.path);
-      const si = stagePaths.indexOf(imgPath);
-      if (si >= 0) { _lbGallery = stagePaths; _lbStart = si; }
+      const list = p._stagesList[key] || [];
+      if (list.length >= 2) {
+        const stagePaths = list.map(s => s.path);
+        let si = stagePaths.indexOf(imgPath);
+        if (si < 0 && p._activeStage) si = stagePaths.indexOf(p._activeStage);
+        if (si < 0) si = list.length - 1;               // cover/final → land on FINAL
+        _lbGallery = stagePaths; _lbStart = si; _lbStagesMeta = list;
+      }
     }
   }
   if (!_lbGallery) {
@@ -4910,6 +4921,8 @@ async function openLightbox(imgPath) {
   }
   _lightboxImages = _lbGallery;
   _lightboxIndex = _lbStart;
+  _renderLbStagesBar(_lbStagesMeta);       // stage thumbnails inside fullscreen
+  _syncLbStagesBarActive();
   img.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
   updateLightboxBottom(imgPath);
   updateLightboxNavButtons();
@@ -5066,7 +5079,46 @@ function lightboxShowAt(idx) {
   document.getElementById('lightbox-2-img').src = 'file:///' + path_.replace(/\\/g, '/') + '?t=' + Date.now();
   updateLightboxBottom(path_);
   updateLightboxNavButtons();
+  _syncLbStagesBarActive();
 }
+
+// Construction-stage thumbnails inside the fullscreen lightbox (mirrors the
+// workspace ws-stages-bar) so the user can switch stages without leaving big view.
+function _renderLbStagesBar(stages) {
+  const bar = document.getElementById('lb-stages-bar');
+  if (!bar) return;
+  if (!Array.isArray(stages) || stages.length < 2) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
+  const last = stages.length - 1;
+  bar.innerHTML = '';
+  for (const s of stages) {
+    const btn = document.createElement('button');
+    btn.className = 'stage-btn';
+    btn.dataset.path = s.path;
+    btn.dataset.stage = String(s.index);
+    const pct = Math.round((s.progress != null ? s.progress : (s.index / last)) * 100);
+    const lbl = s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%');
+    btn.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${lbl}</span>`;
+    bar.appendChild(btn);
+  }
+  bar.classList.remove('hidden');
+}
+function _syncLbStagesBarActive() {
+  const bar = document.getElementById('lb-stages-bar');
+  if (!bar || bar.classList.contains('hidden')) return;
+  const cur = _lightboxImages[_lightboxIndex];
+  bar.querySelectorAll('.stage-btn').forEach(b =>
+    b.classList.toggle('stage-active', _normPath(b.dataset.path) === _normPath(cur)));
+}
+document.getElementById('lb-stages-bar')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.stage-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  const idx = _lightboxImages.indexOf(btn.dataset.path);
+  if (idx >= 0) lightboxShowAt(idx);
+  // Keep the workspace preview in sync so closing fullscreen lands on this stage.
+  const p = state.currentProject;
+  if (p) { p._activeStage = btn.dataset.path; p._activeStageKey = parseInt(btn.dataset.stage, 10); }
+});
 function updateLightboxBottom(imgPath) {
   const fn = document.getElementById('lightbox-2-filename');
   if (fn) fn.textContent = (imgPath.split(/[/\\]/).pop() || '') + `  ·  ${_lightboxIndex + 1} / ${_lightboxImages.length}`;
