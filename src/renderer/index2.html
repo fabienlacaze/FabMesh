@@ -697,7 +697,6 @@
                         <button id="ws-mesh-detail-synth-btn" class="ghost-btn tool-btn" title="Ajoute du vrai détail (rendu → SDXL → re-bake, ~2 min)">&#10024; Détail++ (IA)</button>
                         <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint the WHOLE texture with the 3D Native PBR engine (best quality, ~90s)">&#11088; Re-texture all (AI)</button>
                         <button id="ws-mesh-region-retex-btn" class="ghost-btn tool-btn" title="Re-texture only ONE part (AI detects it) with a prompt — geometry stays intact">&#127912; Re-texture a region (AI)</button>
-                        <button id="ws-mesh-clone3d-btn" class="ghost-btn tool-btn" title="Clone une zone de la texture vers une autre directement sur le mesh 3D (comme le tampon de clonage 2D)">&#129657; Tampon de clonage 3D</button>
                         <button id="ws-mesh-segment-btn" class="ghost-btn tool-btn" title="Split the mesh into semantic parts (head/torso/arms/legs — wheel/chassis/cabin). Runs locally on your GPU (SAMPart3D), ~6-10 min. Adds a colored, separable parts version.">&#9986; Segment parts (AI)</button>
                         <button id="ws-mesh-name-btn" class="ghost-btn tool-btn" title="Name the parts (wheel / turret / cannon — arm / leg / head) with AI. Requires a segmented mesh.">&#127991; Name the zones (AI)</button>
                       </div>
@@ -708,6 +707,7 @@
                         <button id="ws-mesh-sculpt-btn" class="ghost-btn tool-btn">&#9997; Sculpt</button>
                         <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
+                        <button id="ws-mesh-clone3d-btn" class="ghost-btn tool-btn" title="Clone une zone de la texture vers une autre directement sur le mesh 3D (comme le tampon de clonage 2D)">&#129657; Tampon de clonage 3D</button>
                         <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh">&#127919; Align Texture</button>
                         <button id="ws-mesh-material-btn" class="ghost-btn tool-btn" title="Adjust material brightness, saturation, contrast, emissive, metallic, roughness">&#10024; Material adjust</button>
                       </div>
@@ -1801,7 +1801,7 @@
             <button id="pe-toggle-emissive" class="ghost-btn pe-emissive-only" style="padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;" title="Show/hide the emissive texture on the mesh">💡 Emissive ON</button>
             <button id="pe-load-image-layer" class="ghost-btn pe-emissive-only" style="padding:6px; font-size:11px;" title="Re-project the emissive layer painted on the source image">⬇ Load from image layer</button>
             <button id="pe-clear" class="ghost-btn" style="padding:6px; font-size:11px;">↺ Clear all</button>
-            <div style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">
+            <div class="pe-emissive-only" style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">
               Output: <code>T_emissive</code> 1024×1024 PNG embedded in the GLB.
             </div>
           </div>

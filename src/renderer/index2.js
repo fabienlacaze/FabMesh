@@ -11110,6 +11110,21 @@ const peState = {
   cloneSrcCanvas: null,
 };
 function _peClamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+// Throttle the (expensive) CanvasTexture→GPU re-upload during a paint stroke:
+// mark entries dirty, but only flag needsUpdate ~18×/s. _peFlushDirty() forces
+// the final upload at stroke end so the result is never left stale.
+const _peDirtyEntries = new Set();
+let _peLastFlush = 0;
+function _peMarkDirty(entry) {
+  _peDirtyEntries.add(entry);
+  let now = 0; try { now = performance.now(); } catch (_) {}
+  if (now - _peLastFlush >= 55) _peFlushDirty();
+}
+function _peFlushDirty() {
+  try { _peLastFlush = performance.now(); } catch (_) {}
+  _peDirtyEntries.forEach((e) => { e.texture.needsUpdate = true; });
+  _peDirtyEntries.clear();
+}
 const PE_HISTORY_MAX = 30;
 function _peSnapshotAll() {
   if (!peState.canvases) return null;
@@ -11276,7 +11291,9 @@ function _pcSetupCloneCanvas() {
     const mats = Array.isArray(m) ? m : [m];
     const mat0 = mats.find((mm) => mm && mm.map && mm.map.image) || mats[0];
     const img = mat0 && mat0.map && mat0.map.image;
-    const sz = (img && img.width) ? Math.min(4096, img.width) : PE_TEX_SIZE;
+    // Cap at 2048: a 4096² CanvasTexture re-uploaded to the GPU every frame
+    // froze the machine. 2048 keeps good fidelity while the upload stays cheap.
+    const sz = (img && img.width) ? Math.min(2048, img.width) : PE_TEX_SIZE;
     const canvas = document.createElement('canvas');
     canvas.width = sz; canvas.height = sz;
     const ctx = canvas.getContext('2d');
@@ -11340,7 +11357,7 @@ function _pcStampClone(clientX, clientY, isStart) {
   ctx.fillStyle = pattern;
   if (!uvAttr || !posAttr) {
     ctx.fillRect(dpx - r, dpy - r, r * 2, r * 2);
-    ctx.restore(); entry.texture.needsUpdate = true; return;
+    ctx.restore(); _peMarkDirty(entry); return;
   }
   const localHit = mesh.worldToLocal(hit.point.clone());
   const cam = peState.camera;
@@ -11364,7 +11381,7 @@ function _pcStampClone(clientX, clientY, isStart) {
     ctx.closePath(); ctx.fill();
   }
   ctx.restore();
-  entry.texture.needsUpdate = true;
+  _peMarkDirty(entry);
 }
 
 async function _peLoadMesh(meshPath) {
@@ -11837,6 +11854,17 @@ function openPaintEmissive(opts = {}) {
       preview.style.borderColor = peState.brushMode === 'erase' ? '#ff4466' : peState.brushColor;
       preview.style.display = 'block';
     };
+    // Coalesce raw pointermove events into ONE stamp per animation frame — a
+    // high-poly mesh iterates every triangle per stamp, so processing 100+
+    // raw events/s froze the machine. One stamp/frame is smooth and enough.
+    let _pendPos = null, _pendRaf = 0;
+    const _flushStamp = () => {
+      _pendRaf = 0;
+      if (!_pendPos || !peState.isPainting) return;
+      const px = _pendPos.x, py = _pendPos.y; _pendPos = null;
+      if (peState.cloneMode) _pcStampClone(px, py, false);
+      else _peStampAtPointer(px, py);
+    };
     const down = (e) => {
       if (e.button !== 0) return;
       if (peState.cloneMode && (e.ctrlKey || e.metaKey)) { _pcSetSource(e.clientX, e.clientY); return; }
@@ -11849,12 +11877,15 @@ function openPaintEmissive(opts = {}) {
       updateBrushPreview(e);
       if (peState.loupeOn) _peUpdateLoupe(e);
       if (!peState.isPainting) return;
-      if (peState.cloneMode) _pcStampClone(e.clientX, e.clientY, false);
-      else _peStampAtPointer(e.clientX, e.clientY);
+      _pendPos = { x: e.clientX, y: e.clientY };
+      if (!_pendRaf) _pendRaf = requestAnimationFrame(_flushStamp);
     };
     const up = (e) => {
       if (peState.isPainting) {
         peState.isPainting = false;
+        if (_pendRaf) { cancelAnimationFrame(_pendRaf); _pendRaf = 0; }
+        _pendPos = null;
+        _peFlushDirty();   // force the final full-res upload at stroke end
         _peHistoryPush();
       }
       try { cv.releasePointerCapture(e.pointerId); } catch {}
