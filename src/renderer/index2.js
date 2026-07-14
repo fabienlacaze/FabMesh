@@ -2952,7 +2952,13 @@ function showStep1Preview(imgPath) {
   const expandBtn = document.getElementById('ws-image-expand-btn');
   if (expandBtn) {
     expandBtn.classList.remove('hidden');
-    expandBtn.onclick = (e) => { e.stopPropagation(); openLightbox(imgPath); };
+    expandBtn.onclick = (e) => {
+      e.stopPropagation();
+      // Open the image CURRENTLY displayed — a selected construction stage or
+      // multi-view, not the base version — so fullscreen matches the preview.
+      const pp = state.currentProject;
+      openLightbox((pp && (pp._activeStage || pp._activeMultiview)) || imgPath);
+    };
   }
   // Update navigation arrows + multiview bar
   _updateImageNav();
