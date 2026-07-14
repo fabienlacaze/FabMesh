@@ -1,5 +1,31 @@
 # FabMesh Agent Log
 
+## 2026-07-14 (construction-stages → révélation verticale DÉTERMINISTE, sans GPU)
+
+L'approche `/mask_inpaint` (voir entrée précédente) ne marchait qu'à moitié : sur les
+premières étapes le masque était ~97% blanc → la route bascule en branche "globale"
+et REGÉNÈRE un bâtiment complet au lieu d'un chantier ; sur les étapes hautes elle
+inventait des tiges/antennes parasites. Seule l'étape ~33% (bande d'échafaudage de
+toiture avec du bâti fini dessous) était correcte.
+
+Nouvelle approche = révélation verticale 100% déterministe, SANS inpaint/GPU :
+- `_makeRevealStage(imagePath, outPath, keepFrac)` : sous la ligne de construction =
+  image FINALE EXACTE ; au-dessus = fond de l'image (partie pas encore bâtie). Le
+  bâtiment "monte du sol" et reste STRICTEMENT identique (c'est l'image finale révélée).
+- Bord jagged/feather à profil basse-fréquence FIXE (seed 1234) → lit comme des murs
+  en cours de montage, et le même profil glisse vers le haut quand keepFrac croît →
+  parfaitement cohérent entre étapes. RGBA : révèle sur transparence ; RGB : sur la
+  couleur de fond détectée aux coins. Paths via argv (injection-safe).
+- Suppression de la dépendance SDXL/masque/seed pour les étapes : INSTANTANÉ, plus de
+  château régénéré ni d'antennes, et règle la lenteur (20 étapes = quasi immédiat).
+- Contrat JSON, layout `<stem>_stages/stage_i.png`, étape N-1 = copie exacte, et
+  l'event `construction-stage-progress` inchangés. (`_makeRevealMask`,
+  `_constructionStagePrompt`, `_lerp` supprimés — remplacés.)
+- Recherche menée en parallèle (workflow) : pour un rendu "chantier" réaliste, la voie
+  dédiée = image-to-video First-Last-Frame (Wan2.2 Apache-2.0 / LTX-Video, gratuits,
+  EU-OK, RTX 5080) — piste "niveau supérieur" non implémentée (fond = image finale
+  comme END frame). Web = à porter (équivalent canvas JS, desktop d'abord).
+
 ## 2026-07-14 (construction-stages → VERTICAL REVEAL bottom-up, plus /mask_inpaint seed)
 
 Le handler `generate-construction-stages` (src/main/main.js) faisait un img2img
