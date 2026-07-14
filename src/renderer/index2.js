@@ -11333,6 +11333,26 @@ function _pcSetSource(clientX, clientY) {
   if (!hit) { showToast('Vise le mesh pour définir la source.', 'error', 2000); return; }
   peState.cloneSource = { mesh: hit.object, u: _peClamp01(hit.uv.x), v: _peClamp01(hit.uv.y) };
   peState.cloneOffset = null;
+  // Green source marker on the mesh (the 3D equivalent of the 2D clone's green
+  // source ring) so the user sees exactly where the clone is copying FROM.
+  try {
+    if (!peState.cloneSrcMarker && peState.scene) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0x22dd55, depthTest: false, transparent: true, opacity: 0.9 });
+      peState.cloneSrcMarker = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 20), mat);
+      peState.cloneSrcMarker.renderOrder = 999;
+      peState.scene.add(peState.cloneSrcMarker);
+    }
+    if (peState.cloneSrcMarker) {
+      peState.cloneSrcMarker.visible = true;
+      peState.cloneSrcMarker.position.copy(hit.point);
+      // Size the marker to the brush footprint in world units.
+      const cam = peState.camera;
+      const camDist = cam.position.distanceTo(hit.point);
+      const viewH = peState.renderer.domElement.clientHeight || 600;
+      const unitsPerPx = (2 * camDist * Math.tan((cam.fov * Math.PI / 180) / 2)) / viewH;
+      peState.cloneSrcMarker.scale.setScalar(Math.max(peState.brushSize * 0.5 * unitsPerPx, 1e-4));
+    }
+  } catch (_) {}
   showToast('Source définie — clic gauche + glisser pour cloner.', 'success', 1800);
 }
 
@@ -11915,6 +11935,7 @@ function openPaintEmissive(opts = {}) {
     if (restore) _peRestoreMaterials();
     const preview = document.getElementById('pe-brush-preview');
     if (preview) preview.style.display = 'none';
+    if (peState.cloneSrcMarker) peState.cloneSrcMarker.visible = false;
   };
   $('pe-cancel').onclick = () => close(true);
   $('pe-apply-device').onclick = async () => {
