@@ -10103,10 +10103,10 @@ const MESH_TOOL_SCHEMAS = {
     needsImage: true,
     params: [
       { id: 'preset', label: 'Quality preset', type: 'select', default: 'fast',
-        options: [['fast','Fast (12 steps · 2048px · ~90s)'],
-                  ['balanced','Balanced (24 steps · 2048px · ~130s)'],
-                  ['quality','Quality (32 steps · 4096px · ~3min)'],
-                  ['ultra_8k','Ultra 8K (32 steps · 4096→8192px · ~5min)']] },
+        options: [['fast','Fast (12 steps · 2048px)'],
+                  ['balanced','Balanced (24 steps · 2048px)'],
+                  ['quality','Quality (32 steps · 4096px)'],
+                  ['ultra_8k','Ultra 8K (32 steps · 4096→8192px)']] },
       { id: 'seed', label: 'Variation (seed)', type: 'number', min: 0, max: 999999, step: 1, default: 42, randomize: true },
     ],
     // preset + seed flow as real CLI params: runMeshTool → mesh-tool IPC →
