@@ -2967,6 +2967,9 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 }
 
 /* GPU mini monitor inside the job details modal */
+/* The GPU monitor floats top-right (absolute) — keep the head text clear of it
+   so long job subtitles wrap instead of running underneath the stats box. */
+.job-details-head-text { padding-right: 150px; overflow-wrap: anywhere; }
 .job-gpu-monitor {
   position: absolute;
   top: 18px;
