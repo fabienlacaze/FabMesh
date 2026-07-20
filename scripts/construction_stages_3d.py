@@ -106,19 +106,34 @@ except Exception as e:
     print(f"[3d] wood texture skipped ({e}) — flat colours fallback", flush=True)
 
 def texturize(wood_parts):
-    """Merge all wooden parts into one mesh mapped with the style-matched wood
-    texture (world-position UVs → continuous grain). Fallback: keep flat colours."""
+    """Map the style-matched wood texture PER PIECE, grain running ALONG each
+    piece's dominant axis (PCA) — poles get vertical grain, beams/planks get grain
+    along their length (realistic), with a per-piece offset so pieces sample
+    different plank rows. Fallback: keep flat colours."""
     ms = [p for p in wood_parts if isinstance(p, trimesh.Trimesh) and len(p.faces)]
     if WOOD_TEX is None or not ms:
         return wood_parts
-    merged = trimesh.util.concatenate(ms)
-    v = merged.vertices
-    s = max(0.35 * R, 1e-6)
-    uv = np.column_stack([(v[:, 0] + v[:, 2]) / s, v[:, 1] / s])
     mat = trimesh.visual.material.PBRMaterial(
         baseColorTexture=WOOD_TEX, metallicFactor=0.0, roughnessFactor=0.9)
-    merged.visual = trimesh.visual.TextureVisuals(uv=uv, material=mat)
-    return [merged]
+    s = max(0.5 * R, 1e-6)
+    out = []
+    for p in ms:
+        c = p.vertices.mean(0)
+        v = p.vertices - c
+        try:
+            _w, E = np.linalg.eigh(np.cov(v.T))
+            a1, a2 = E[:, -1], E[:, -2]              # dominant + secondary axes
+        except Exception:
+            a1, a2 = np.array([0., 1., 0.]), np.array([1., 0., 0.])
+        voff = (abs(c[0] * 57.1 + c[1] * 93.7 + c[2] * 131.3)) % 1.0
+        uv = np.column_stack([(v @ a1) / s, (v @ a2) / s + voff])
+        q = p.copy()
+        q.visual = trimesh.visual.TextureVisuals(uv=uv, material=mat)
+        out.append(q)
+    try:
+        return [trimesh.util.concatenate(out)]        # one textured mesh (shared material)
+    except Exception:
+        return out
 
 def contour_at(y):
     """Building cross-section outline points at height y (world XZ), ordered."""
