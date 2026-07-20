@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-07-20 (construction 3D → worker de FABRICATION de meshes d'étapes)
+
+Décision user: fabriquer de VRAIS meshes 3D par étape (style Manor Lords, exportables),
+pas un effet viewer. Nouveau scripts/construction_stages_3d.py (trimesh, pur CPU, ~qq s):
+- COQUE: faces sous la ligne (filtre par face → texture TRELLIS préservée) + cap de
+  coupe (section→triangulation, try/except).
+- OSSATURE: poutres verticales le long du CONTOUR réel du bâtiment à la ligne (section
+  trimesh) + anneau haut → charpente de l'étage suivant, fabriquée sans avoir été modélisée.
+- ÉCHAFAUDAGE 3D: cage modulaire bbox (poteaux/lisses/planches cylindres+box, bois).
+- stage_i.glb par étape, étape finale = copie exacte. Testé sur le château (5 étapes,
+  111k→483k faces). RESTE: câblage app (bouton + versioning + sélecteur 3D), texture
+  du module 2D sur l'échafaudage, grue optionnelle.
+
 - (worker construction_stages.py)
 - **fix échelle/clip**
 - **fix échelles alignées**
