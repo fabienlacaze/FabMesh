@@ -17,9 +17,23 @@ ys = np.arange(H, dtype=np.float32).reshape(H, 1)
 am = (alpha0 > 16).astype(np.uint8) * 255
 k = max(3, int(0.045 * DIM)) | 1
 amd = cv2.dilate(am, np.ones((k, k), np.uint8), 1)
-upE = max(1, int(0.09 * DIM)); ext = amd.copy(); ext[:-upE] = np.maximum(ext[:-upE], amd[upE:]); amd = ext
-canny = cv2.dilate(cv2.Canny(amd, 40, 120), np.ones((3, 3), np.uint8), 1)
-sil = Image.fromarray(np.stack([canny] * 3, -1), "RGB")
+upE = max(1, int(0.09 * DIM))
+# ControlNet guide = a DRAWN scaffold grid spanning the FULL building width (poles +
+# ledgers + diagonals). SDXL renders photoreal wood on this grid → I control the width
+# and layout, SDXL controls the realism. Fixes the too-narrow central scaffold.
+xs_any = np.where(amd.max(0) > 0)[0]
+x0, x1 = int(xs_any.min()), int(xs_any.max())
+ytop = max(0, Rtop - upE); ybot = min(H - 1, Rbase)
+grid = np.zeros((H, W), np.uint8)
+bay = max(40, int((x1 - x0) / 6)); lift = max(40, int((ybot - ytop) / 4))
+xs_p = list(range(x0, x1 + 1, bay)) + [x1]; ys_l = list(range(ytop, ybot + 1, lift)) + [ybot]
+for x in xs_p: cv2.line(grid, (x, ytop), (x, ybot), 255, 3)                 # vertical standards
+for y in ys_l: cv2.line(grid, (x0, y), (x1, y), 255, 3)                     # horizontal ledgers
+for i in range(len(xs_p) - 1):                                             # diagonal braces (alt bays → less uniform)
+    if i % 2: continue
+    for j in range(len(ys_l) - 1):
+        cv2.line(grid, (xs_p[i], ys_l[j + 1]), (xs_p[i + 1], ys_l[j]), 255, 2)
+sil = Image.fromarray(np.stack([grid] * 3, -1), "RGB")
 cols = (amd.max(0) > 0).reshape(1, W).astype(np.float32)
 clip = np.zeros((H, W), np.float32); clip[: min(H, Rbase + int(0.03 * H)), :] = cols
 
@@ -40,7 +54,7 @@ PROMPT = ("dense wooden construction scaffolding structure wrapping the building
 NEG = "castle, stone building, wall, blurry, low quality, flat, cartoon, toy, solid wall"
 print("[v3] generating the single coherent scaffold…", flush=True)
 scaf = pipe(prompt=PROMPT, negative_prompt=NEG, image=sil, ip_adapter_image=ip_ref,
-            num_inference_steps=26, guidance_scale=5.5, controlnet_conditioning_scale=0.7,
+            num_inference_steps=26, guidance_scale=5.5, controlnet_conditioning_scale=0.6,
             generator=torch.Generator("cuda").manual_seed(3)).images[0]
 s = np.asarray(scaf.resize((DIM, DIM)).convert("RGB")).astype(np.float32)
 # wood-colour key → isolate the scaffold; clip to building columns (top→base)
