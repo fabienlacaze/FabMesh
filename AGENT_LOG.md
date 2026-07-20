@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-07-15 (construction-stages → PERCÉE échafaudage réaliste : reveal + ControlNet silhouette + IP-Adapter)
+
+Après échec de toutes les voies (SDXL band-inpaint = enfantin, LTX-Video = refuse/flou,
+ControlNet sur arêtes complètes = refait le bâtiment), technique VALIDÉE (worker POC =
+scripts/construction_stages.py, non encore câblé — commité pour backup/point de départ) :
+- bâtiment révélé RGBA (sol ancré sur base bbox) ;
+- échafaudage bois généré au STYLE du château via RealVisXL_V4.0 (modèle app) + ControlNet-
+  canny sur la SILHOUETTE EXTÉRIEURE SEULE dilatée ~4.5% (overhang) + étendue haut ~9%
+  (pas de coupe) + IP-Adapter(château, scale 0.45) pour le style ;
+- détourage par COULEUR BOIS (R-B>12) + morpho + connected-comp → enlève ciel/sol ;
+- clip = colonnes du bâtiment × (haut→base) → ne coupe jamais le sommet ;
+- composite sur le bâtiment. ~15s/étape. Recette complète en mémoire
+  (project_construction_stages_engine). RESTE : câbler dans generate-construction-stages
+  (main.js) + versioning + repli. LTX-Video 2B validé aussi pour le "build-rise" photoréaliste.
+
 ## 2026-07-14 (construction-stages → échafaudage PHOTORÉALISTE via SDXL band-inpaint)
 
 Choix user = photoréaliste plutôt que le treillis procédural (jugé "pas réaliste").
