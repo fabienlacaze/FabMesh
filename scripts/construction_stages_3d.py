@@ -2,15 +2,25 @@
 style, auto-manufactured). For each stage p: solid = bottom p% of the mesh (face
 filter → texture preserved) + cap; timber FRAME above the build line (beams along
 the building's own cross-section contour); modular SCAFFOLD cage around the
-footprint. Args: <mesh.glb> <out_dir> <N>. Writes stage_0..N-1.glb (last = exact copy).
-Pure geometry (no GPU)."""
+footprint. Args: <mesh.glb> <out_dir> <N> [scaffold_mat] [frame_mat] [planks_mat]
+[formwork_mat] — materials in {wood, metal, bamboo, aluminium}; roles not given
+inherit scaffold_mat (AUTO mode = one arg, MANUAL mode = four args).
+Writes stage_0..N-1.glb (last = exact copy). Pure geometry (no GPU except textures)."""
 import sys, os, shutil
 import numpy as np
 import trimesh
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 N = int(sys.argv[3]) if len(sys.argv) > 3 else 5
-MATERIAL = (sys.argv[4] if len(sys.argv) > 4 else 'wood').lower()
+# Per-component materials. argv[4]=scaffold (also the base default), argv[5]=frame,
+# argv[6]=planks, argv[7]=formwork. Unspecified roles inherit the scaffold material:
+# AUTO mode passes only argv[4] (one preset everywhere); MANUAL mode passes all four.
+def _arg(i, d):
+    return (sys.argv[i].lower() if len(sys.argv) > i and sys.argv[i] else d)
+SC_MAT = _arg(4, 'wood')          # échafaudage
+FR_MAT = _arg(5, SC_MAT)          # charpente
+PL_MAT = _arg(6, SC_MAT)          # planches (plancher de travail)
+FW_MAT = _arg(7, SC_MAT)          # coffrage
 os.makedirs(OUT, exist_ok=True)
 
 # Scaffold MATERIAL library (user-selectable: wood / metal / bamboo / …). Each
@@ -42,12 +52,18 @@ MATS = {
         'neg': "wood, brown, grain, stone, rust, blurry, text",
         'hue': None, 'sat': (0, 22), 'metal': 0.95, 'rough': 0.28},
 }
-MAT = MATS.get(MATERIAL, MATS['wood'])
-WOODS = MAT['palette']
-WOOD = WOODS[0]                # beams
-WOOD2 = WOODS[1]               # scaffold poles/planks
+def _mat_cfg(m):
+    return MATS.get(m, MATS['wood'])
+# WOOD/WOOD2/WOODS are the ACTIVE palette; set_palette() switches it per component
+# right before that component's geometry is built, so flat-colour fallbacks match.
+WOODS = _mat_cfg(SC_MAT)['palette']
+WOOD = WOODS[0]               # beams
+WOOD2 = WOODS[1]              # scaffold poles/planks
 def wood(p):                  # deterministic shade per position (name kept for reuse)
     return WOODS[int(abs(p[0] * 73.7 + p[1] * 179.3 + p[2] * 283.1)) % len(WOODS)]
+def set_palette(m):
+    global WOODS, WOOD, WOOD2
+    WOODS = _mat_cfg(m)['palette']; WOOD = WOODS[0]; WOOD2 = WOODS[1]
 
 scene = trimesh.load(SRC)
 if isinstance(scene, trimesh.Scene):
@@ -94,57 +110,71 @@ try:
 except Exception:
     pass
 
-# STYLE-MATCHED wood texture (user request): generate ONE wood-planks texture in the
+# STYLE-MATCHED textures (user request): each material gets ONE tiling texture in the
 # BUILDING'S OWN style via RealVisXL + IP-Adapter (style ref = the mesh's baked
 # texture → realistic building gives realistic wood, Minecraft-style gives blocky
-# wood). Optional: falls back to flat wood colours if GPU/models unavailable.
-WOOD_TEX = None
-try:
-    if _img is not None and os.environ.get('FABMESH_NO_WOOD_TEX') != '1':
-        import torch
-        from diffusers import StableDiffusionXLPipeline, AutoencoderKL
-        _vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
-        _pipe = StableDiffusionXLPipeline.from_pretrained(
-            "SG161222/RealVisXL_V4.0", vae=_vae, torch_dtype=torch.float16)
-        _pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models",
-                              weight_name="ip-adapter_sdxl.safetensors")
-        # LOW IP scale: transfer the mesh's RENDERING STYLE (realistic grain vs
-        # blocky Minecraft vs hand-painted strokes) but NOT its palette — the wood
-        # must stay wood (user: pas la couleur, le style).
-        _pipe.set_ip_adapter_scale(0.3)
-        _pipe.enable_model_cpu_offload()
-        WOOD_TEX = _pipe(
-            prompt=MAT['prompt'],
-            negative_prompt=MAT['neg'],
-            ip_adapter_image=_img.convert('RGB').resize((1024, 1024)),
-            width=1024, height=1024, num_inference_steps=20, guidance_scale=5.5,
-            generator=torch.Generator("cuda").manual_seed(7)).images[0]
-        # HUE/SAT LOCK: keep the generated detail/style but clamp the palette to the
-        # chosen material (wood stays wood, metal stays grey, bamboo stays yellow).
-        _hsv = np.asarray(WOOD_TEX.convert('HSV')).copy()
-        if MAT['hue'] is not None:
-            _hsv[..., 0] = MAT['hue']
-        _slo, _shi = MAT['sat']
-        _hsv[..., 1] = np.clip(_hsv[..., 1].astype(int), _slo, _shi).astype(np.uint8)
-        from PIL import Image as _PILImage
-        WOOD_TEX = _PILImage.fromarray(_hsv, 'HSV').convert('RGB')
-        WOOD_TEX.save(os.path.join(OUT, "_wood_tex.png"))
-        del _pipe, _vae
-        torch.cuda.empty_cache()
-        print("[3d] style-matched wood texture generated", flush=True)
-except Exception as e:
-    print(f"[3d] wood texture skipped ({e}) — flat colours fallback", flush=True)
+# wood). ONE texture per DISTINCT material (cached); the pipe is loaded once and
+# reused. Optional: falls back to flat material colours if GPU/models unavailable.
+_PIPE = None; _PIPE_TRIED = False; _TEX = {}
+def gen_tex(material):
+    """Style-matched tiling texture for `material` (cached per material). Returns a
+    PIL image or None (→ flat-colour fallback)."""
+    global _PIPE, _PIPE_TRIED
+    if material in _TEX:
+        return _TEX[material]
+    cfg = _mat_cfg(material)
+    tex = None
+    try:
+        if _img is not None and os.environ.get('FABMESH_NO_WOOD_TEX') != '1':
+            import torch
+            if not _PIPE_TRIED:
+                _PIPE_TRIED = True
+                from diffusers import StableDiffusionXLPipeline, AutoencoderKL
+                _vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+                _PIPE = StableDiffusionXLPipeline.from_pretrained(
+                    "SG161222/RealVisXL_V4.0", vae=_vae, torch_dtype=torch.float16)
+                _PIPE.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models",
+                                      weight_name="ip-adapter_sdxl.safetensors")
+                # LOW IP scale: transfer the mesh's RENDERING STYLE (realistic grain
+                # vs blocky Minecraft vs hand-painted) but NOT its palette — the
+                # material must stay itself (user: pas la couleur, le style).
+                _PIPE.set_ip_adapter_scale(0.3)
+                _PIPE.enable_model_cpu_offload()
+            if _PIPE is not None:
+                img = _PIPE(
+                    prompt=cfg['prompt'],
+                    negative_prompt=cfg['neg'],
+                    ip_adapter_image=_img.convert('RGB').resize((1024, 1024)),
+                    width=1024, height=1024, num_inference_steps=20, guidance_scale=5.5,
+                    generator=torch.Generator("cuda").manual_seed(7)).images[0]
+                # HUE/SAT LOCK: keep the generated detail/style but clamp the palette
+                # to the material (wood stays wood, metal stays grey, bamboo yellow).
+                _hsv = np.asarray(img.convert('HSV')).copy()
+                if cfg['hue'] is not None:
+                    _hsv[..., 0] = cfg['hue']
+                _slo, _shi = cfg['sat']
+                _hsv[..., 1] = np.clip(_hsv[..., 1].astype(int), _slo, _shi).astype(np.uint8)
+                from PIL import Image as _PILImage
+                tex = _PILImage.fromarray(_hsv, 'HSV').convert('RGB')
+                tex.save(os.path.join(OUT, f"_tex_{material}.png"))
+                print(f"[3d] style-matched texture generated: {material}", flush=True)
+    except Exception as e:
+        print(f"[3d] texture skipped for {material} ({e}) — flat colours", flush=True)
+    _TEX[material] = tex
+    return tex
 
-def texturize(wood_parts):
-    """Map the style-matched wood texture PER PIECE, grain running ALONG each
+def texturize(wood_parts, material):
+    """Map the style-matched texture of `material` PER PIECE, grain running ALONG each
     piece's dominant axis (PCA) — poles get vertical grain, beams/planks get grain
     along their length (realistic), with a per-piece offset so pieces sample
     different plank rows. Fallback: keep flat colours."""
     ms = [p for p in wood_parts if isinstance(p, trimesh.Trimesh) and len(p.faces)]
-    if WOOD_TEX is None or not ms:
+    tex = gen_tex(material)
+    if tex is None or not ms:
         return wood_parts
+    cfg = _mat_cfg(material)
     mat = trimesh.visual.material.PBRMaterial(
-        baseColorTexture=WOOD_TEX, metallicFactor=MAT['metal'], roughnessFactor=MAT['rough'])
+        baseColorTexture=tex, metallicFactor=cfg['metal'], roughnessFactor=cfg['rough'])
     s = max(0.35 * R, 1e-6)
     out = []
     for p in ms:
@@ -352,7 +382,7 @@ for i in range(N):
     solid.update_faces(below)
     solid.remove_unreferenced_vertices()
     parts = [solid] if len(solid.faces) else []
-    woodp = []                                        # all wooden parts (→ texturize)
+    woodp = []                                        # plank floor parts (→ texturize PL_MAT)
     # CAP the cut so the hollow shell doesn't show an empty box
     try:
         sec = mesh.section(plane_origin=[0, yline, 0], plane_normal=[0, 1, 0])
@@ -370,6 +400,7 @@ for i in range(N):
     # cross-section → the hollow interior is never visible, and it reads as the
     # construction deck. Boards are clipped to the building outline (even-odd test),
     # so nothing overhangs past towers/walls.
+    set_palette(PL_MAT)
     try:
         from matplotlib.path import Path as MplPath
         loops2 = contour_at(yline)
@@ -398,10 +429,16 @@ for i in range(N):
                         k2 += 1
     except Exception:
         pass
-    woodp += formwork_at(yline)                       # coffrage: hides the jagged cut
-    woodp += frame_at(yline, frameH=0.10 * H)        # the rising timber frame
-    woodp += scaffold_to(yline)                       # scaffold up to the build level
-    parts += texturize(woodp)                         # style-matched wood (or flat fallback)
+    # PER-COMPONENT materials: each structural role is built with ITS palette and
+    # texturized with ITS style-matched texture (groups sharing a material could be
+    # merged, but per-role merge keeps the code simple and adds only ~3 draw calls).
+    set_palette(FW_MAT); fwp = formwork_at(yline)     # coffrage: hides the jagged cut
+    set_palette(FR_MAT); frp = frame_at(yline, frameH=0.10 * H)  # rising timber frame
+    set_palette(SC_MAT); scp = scaffold_to(yline)     # scaffold up to the build level
+    parts += texturize(woodp, PL_MAT)                 # work-floor planks
+    parts += texturize(fwp, FW_MAT)
+    parts += texturize(frp, FR_MAT)
+    parts += texturize(scp, SC_MAT)
     out_scene = trimesh.Scene()
     for k, g in enumerate(parts): out_scene.add_geometry(g, node_name=f"g{k}")
     out_scene.export(out)

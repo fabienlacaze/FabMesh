@@ -4716,10 +4716,17 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
 // versions by list-meshes, which only scans flat files).
 ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
   try {
-    const { meshPath, stageCount, material } = (opts || {});
+    const { meshPath, stageCount, material, materials } = (opts || {});
     if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
     const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 5));
-    const mat = ['wood', 'metal', 'bamboo', 'aluminium'].includes(material) ? material : 'wood';
+    const ALLOWED = ['wood', 'metal', 'bamboo', 'aluminium'];
+    const clean = (m, d) => (ALLOWED.includes(m) ? m : d);
+    // AUTO mode: `material` (one preset everywhere). MANUAL mode: `materials`
+    // = { scaffold, frame, planks, formwork } — unset roles inherit scaffold.
+    const scafMat = clean((materials && materials.scaffold) || material, 'wood');
+    const frameMat = clean(materials && materials.frame, scafMat);
+    const planksMat = clean(materials && materials.planks, scafMat);
+    const formworkMat = clean(materials && materials.formwork, scafMat);
     // Strip any prior _chantier3d suffix so repeated studies don't stack suffixes.
     const stem = path.basename(meshPath, path.extname(meshPath)).replace(/_chantier3d_\d+$/i, '');
     // NEW mesh version so the ORIGINAL stays untouched (same rule as the 2D
@@ -4733,7 +4740,7 @@ ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
     fs.mkdirSync(outDir, { recursive: true });
     const script = path.join(SCRIPTS_DIR, 'construction_stages_3d.py');
     const ok = await new Promise((resolve) => {
-      execFile(_aiPython(), [script, meshPath, outDir, String(n), mat],
+      execFile(_aiPython(), [script, meshPath, outDir, String(n), scafMat, frameMat, planksMat, formworkMat],
         { timeout: 600000, maxBuffer: 64 * 1024 * 1024 }, (error) => resolve(!error));
     });
     if (!ok) return { success: false, error: '3D stages worker failed' };

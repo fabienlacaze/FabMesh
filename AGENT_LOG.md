@@ -1,5 +1,7 @@
 # FabMesh Agent Log
 
+- 2026-07-20 (construction 3D) - MATÉRIAUX PAR COMPOSANT + mode Auto/Manuel (demande user): dropdown « Material mode » — Auto = un preset partout (comportement d'avant), Manuel = 4 selects (échafaudage / charpente / planches de travail / coffrage). Worker: args 4-7 = scaffold/frame/planks/formwork (les rôles absents héritent du scaffold), `set_palette(mat)` bascule la palette AVANT chaque builder (fallback couleurs plates cohérent), `gen_tex(mat)` = une texture style-matchée par matériau DISTINCT (cache `_TEX`, pipe SDXL chargé une seule fois), `texturize(parts, mat)` par groupe de rôle (PBR metal/rough du matériau). main.js: opts.materials {scaffold,frame,planks,formwork} validés + 4 args CLI. i18n: entrées FR (Mode matériaux, Échafaudage, Charpente, Planches de travail, Coffrage…). Testé flat-colors: château 3 étapes métal/bois/bambou/alu → rendu vérifié, chaque rôle a bien sa palette.
+
 - (construction 3D) - CHOIX DU MATÉRIAU d'échafaudage (demande user): bois / métal (acier galvanisé) / aluminium / bambou. Dict MATS (palette + prompt texture + hue/sat lock + PBR metal/rough), 4e arg CLI du worker, passé par le handler (validé), dropdown bs3d-material dans la popup. Texture toujours style-matchée au mesh via IP-Adapter. Métal testé (PBR métallique argenté).
 
 ## 2026-07-20 (construction 3D → worker de FABRICATION de meshes d'étapes)

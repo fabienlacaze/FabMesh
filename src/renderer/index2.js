@@ -3722,6 +3722,14 @@ document.getElementById('bs3d-count')?.addEventListener('input', (e) => {
 document.getElementById('bs3d-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-stages3d-options')?.classList.add('hidden');
 });
+// AUTO (one preset everywhere) vs MANUAL (per-component material) toggle
+document.getElementById('bs3d-mat-mode')?.addEventListener('change', (e) => {
+  const manual = e.target.value === 'manual';
+  const autoRow = document.getElementById('bs3d-mat-auto-row');
+  const manualRows = document.getElementById('bs3d-mat-manual-rows');
+  if (autoRow) autoRow.style.display = manual ? 'none' : '';
+  if (manualRows) { manualRows.classList.toggle('hidden', !manual); manualRows.style.display = manual ? 'grid' : 'none'; }
+});
 document.getElementById('bs3d-start')?.addEventListener('click', () => {
   document.getElementById('modal-stages3d-options')?.classList.add('hidden');
   const p = state.currentProject;
@@ -3735,8 +3743,15 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
     { 'Étapes': count, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
   (async () => {
     try {
+      const manual = document.getElementById('bs3d-mat-mode')?.value === 'manual';
       const material = document.getElementById('bs3d-material')?.value || 'wood';
-      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: count, material });
+      const materials = manual ? {
+        scaffold: document.getElementById('bs3d-mat-scaffold')?.value || 'wood',
+        frame: document.getElementById('bs3d-mat-frame')?.value || 'wood',
+        planks: document.getElementById('bs3d-mat-planks')?.value || 'wood',
+        formwork: document.getElementById('bs3d-mat-formwork')?.value || 'wood',
+      } : null;
+      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: count, material, materials });
       if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
         completeJob(job.id, true);
         // The study created its OWN new mesh version (r.versionMeshPath) — the

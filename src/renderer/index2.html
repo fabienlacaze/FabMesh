@@ -1505,13 +1505,58 @@
           </label>
           <input type="range" id="bs3d-count" min="2" max="20" value="5" />
           <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">From 2 to 20. Geometric fabrication (~1 s per stage).</small>
-          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">Scaffold material</label>
-          <select id="bs3d-material" class="modal-select" style="width:100%;">
-            <option value="wood" selected>&#127959;&#65039; Wood</option>
-            <option value="metal">&#128296; Metal (galvanized steel)</option>
-            <option value="aluminium">&#10024; Aluminium</option>
-            <option value="bamboo">&#127793; Bamboo</option>
+          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">Material mode</label>
+          <select id="bs3d-mat-mode" class="modal-select" style="width:100%;">
+            <option value="auto" selected>&#9889; Auto (one preset for everything)</option>
+            <option value="manual">&#128295; Manual (choose each component)</option>
           </select>
+          <div id="bs3d-mat-auto-row">
+            <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px; display:block;">Scaffold material</label>
+            <select id="bs3d-material" class="modal-select" style="width:100%;">
+              <option value="wood" selected>&#127959;&#65039; Wood</option>
+              <option value="metal">&#128296; Metal (galvanized steel)</option>
+              <option value="aluminium">&#10024; Aluminium</option>
+              <option value="bamboo">&#127793; Bamboo</option>
+            </select>
+          </div>
+          <div id="bs3d-mat-manual-rows" class="hidden" style="display:none; grid-template-columns:1fr 1fr; gap:8px 12px;">
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Scaffolding</label>
+              <select id="bs3d-mat-scaffold" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Frame</label>
+              <select id="bs3d-mat-frame" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Work planks</label>
+              <select id="bs3d-mat-planks" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Formwork</label>
+              <select id="bs3d-mat-formwork" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+          </div>
           <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">The texture adapts to the building's render style.</small>
         </div>
         <div class="modal-actions">
