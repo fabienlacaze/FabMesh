@@ -8385,6 +8385,17 @@ async function showStep2Preview(mesh) {
           b.classList.toggle('stage-active', _normPath(b.dataset.path) === mp));
       } else {
         bar.classList.add('hidden'); bar.innerHTML = '';
+        // Disk fallback (survives app restarts): if a <stem>_stages3d folder
+        // exists for this mesh, rebind and show the bar.
+        if (API.checkStages3dDir) {
+          API.checkStages3dDir(mesh.path).then((info) => {
+            if (info && info.exists && (info.stages || []).length >= 2 &&
+                p && _normPath(p.previewMeshPath || '') === mp) {
+              p._meshStages = info.stages;
+              _showMeshStagesBar(info.stages);
+            }
+          }).catch(() => {});
+        }
       }
     }
   } catch (_) {}

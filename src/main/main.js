@@ -4748,6 +4748,28 @@ ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
   }
 });
 
+// Disk fallback: does a 3D construction-stages folder exist for a mesh? Lets the
+// mesh stages bar re-appear after an app restart (association is otherwise
+// in-memory only; the GLBs persist in MESHES_DIR/<stem>_stages3d/).
+ipcMain.handle('check-stages3d-dir', async (_event, meshPath) => {
+  try {
+    if (!meshPath) return { exists: false };
+    const stem = path.basename(meshPath, path.extname(meshPath));
+    const dir = path.join(MESHES_DIR, `${stem}_stages3d`);
+    if (!fs.existsSync(dir)) return { exists: false };
+    const files = fs.readdirSync(dir).filter(f => /^stage_\d+\.glb$/i.test(f));
+    if (files.length < 2) return { exists: false };
+    const sorted = files
+      .map(f => ({ index: parseInt(f.match(/stage_(\d+)/i)[1], 10), path: path.join(dir, f) }))
+      .sort((a, b) => a.index - b.index);
+    const stages = sorted.map(s => ({
+      index: s.index, path: s.path,
+      progress: sorted.length <= 1 ? 1 : s.index / (sorted.length - 1),
+    }));
+    return { exists: true, dir, stages, count: stages.length };
+  } catch (_) { return { exists: false }; }
+});
+
 // Disk fallback: does a construction-stages folder already exist for an image?
 // Lets the stages bar re-appear after a reload / image-version switch.
 ipcMain.handle('check-stages-dir', async (_event, imagePath) => {
