@@ -5,8 +5,9 @@ Après chaque modification testable (feature finie, fix validé, refactor
 qui compile), créer immédiatement un commit avec message clair, sans
 demander confirmation.
 
-Ne pas push sauf demande explicite — le user fait `git push` quand il
-veut publier.
+PUSH SYSTÉMATIQUE après chaque commit (`git push` immédiat, sans
+demander). Règle changée le 2026-07-20 à la demande du user — l'ancienne
+règle « ne pas push » est abandonnée.
 
 Ne pas attendre que plusieurs changements s'accumulent : un commit par
 unité logique de travail (1 fix = 1 commit, 1 feature = 1 commit).
@@ -36,10 +37,13 @@ du process main + stdout des subprocess Python.
 
 ## Backups avant modifs lourdes
 Avant un changement structurel (refactor architecture, switch de modèle,
-modification d'un script Python sensible), créer une branche backup:
+modification d'un script Python sensible), et quand le user demande un
+« backup », créer une branche backup ET LA PUSHER sur GitHub (un backup
+non pushé ne sert à rien — exigence user):
 ```bash
 git checkout -b backup-<short-desc>-$(date +%Y%m%d-%H%M%S)
-git checkout master
+git push -u origin HEAD
+git checkout <branche-de-travail>
 ```
 
 ## Deploy cloud — TOUJOURS rebuild avant wrangler deploy
@@ -59,5 +63,5 @@ Pattern: `cd cloud && npm run build && npx wrangler deploy`.
 - **Sûr (commit auto OK)**: fix bug ciblé, ajout d'un slider/bouton,
   ajustement de paramètres (ip_scale, prompt, etc.), update doc.
 - **Demander confirmation**: refactor large, suppression de fichiers,
-  changement de licence ou dépendance lourde, push, destruction de
-  branches.
+  changement de licence ou dépendance lourde, destruction de branches.
+  (Le push n'est PLUS soumis à confirmation — voir Auto-commit.)
