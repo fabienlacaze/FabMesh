@@ -127,13 +127,24 @@ def texturize(wood_parts):
             a1, a2 = np.array([0., 1., 0.]), np.array([1., 0., 0.])
         voff = (abs(c[0] * 57.1 + c[1] * 93.7 + c[2] * 131.3)) % 1.0
         uv = np.column_stack([(v @ a1) / s, (v @ a2) / s + voff])
-        q = p.copy()
-        q.visual = trimesh.visual.TextureVisuals(uv=uv, material=mat)
-        out.append(q)
+        out.append((p, uv))
+    # MANUAL merge (vertices/faces/uv stacked by hand): trimesh.concatenate would
+    # re-pack textures into an atlas and destroy tiled (out-of-[0,1]) UVs → the
+    # striped/flickering moiré. One mesh, one material, REPEAT wrapping preserved.
     try:
-        return [trimesh.util.concatenate(out)]        # one textured mesh (shared material)
+        vs, fs, uvs, offv = [], [], [], 0
+        for p, uv in out:
+            vs.append(p.vertices); fs.append(p.faces + offv); uvs.append(uv)
+            offv += len(p.vertices)
+        big = trimesh.Trimesh(np.vstack(vs), np.vstack(fs), process=False)
+        big.visual = trimesh.visual.TextureVisuals(uv=np.vstack(uvs), material=mat)
+        return [big]
     except Exception:
-        return out
+        res = []
+        for p, uv in out:
+            q = p.copy(); q.visual = trimesh.visual.TextureVisuals(uv=uv, material=mat)
+            res.append(q)
+        return res
 
 def contour_at(y):
     """Building cross-section outline points at height y (world XZ), ordered."""
