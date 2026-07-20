@@ -1205,6 +1205,9 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   overflow-x: auto;
   scrollbar-width: thin;
 }
+/* Mesh-viewer stage bars sit at the TOP so they never cover the viewer toolbar
+   (Iso/Pivot/Fil/PBR…) which lives at the bottom. */
+#ws-mesh-stages-bar, #lb3d-stages-bar { bottom: auto; top: 10px; }
 .stages-bar::-webkit-scrollbar { height: 4px; }
 .stages-bar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 4px; }
 .stage-btn {

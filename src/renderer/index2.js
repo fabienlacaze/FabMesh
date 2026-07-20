@@ -3735,9 +3735,19 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
       const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: count });
       if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
         completeJob(job.id, true);
-        p._meshStages = r.stages;
-        _showMeshStagesBar(r.stages);
-        showToast(`${r.stages.length} étapes 3D fabriquées — clique les vignettes pour naviguer`, 'success', 3000);
+        // The study created its OWN new mesh version (r.versionMeshPath) — the
+        // source version stays untouched. Reload picks it up; pin selection to it.
+        await reloadCurrentProject();
+        const np = state.currentProject;
+        if (np) {
+          np._meshStages = r.stages;
+          if (r.versionMeshPath) {
+            np.previewMeshPath = r.versionMeshPath;
+            try { showStep2Preview({ path: r.versionMeshPath, filename: String(r.versionMeshPath).split(/[\\/]/).pop() }); } catch (_) {}
+          }
+          _showMeshStagesBar(r.stages);
+        }
+        showToast(`Nouvelle version « chantier 3D » — ${r.stages.length} étapes, clique les vignettes`, 'success', 3000);
       } else {
         completeJob(job.id, false);
         customError((r && r.error) || 'unknown', 'Étapes de construction 3D — échec');
@@ -4517,6 +4527,31 @@ let _lb3dIndex = 0;
 let _lb3dKind = 'mesh'; // 'mesh' or 'rig' — controls Use button label
 
 async function openMeshLightbox(meshPath, kind) {
+  // Construction-3D stages: if this mesh belongs to a chantier-3D set (cover or a
+  // stage), show the stage thumbnails inside the fullscreen viewer too.
+  try {
+    const p0 = state.currentProject;
+    const bar = document.getElementById('lb3d-stages-bar');
+    if (bar) {
+      const st = (p0 && p0._meshStages) || null;
+      const match = st && (st.some(s => _normPath(s.path) === _normPath(meshPath)) ||
+                           _normPath(p0.previewMeshPath || '') === _normPath(meshPath));
+      if (match) {
+        const last = st.length - 1;
+        bar.innerHTML = '';
+        for (const s of st) {
+          const b = document.createElement('button');
+          b.className = 'stage-btn' + (_normPath(s.path) === _normPath(meshPath) ? ' stage-active' : '');
+          b.dataset.path = s.path;
+          const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
+          b.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%')}</span>`;
+          b.onclick = (ev) => { ev.stopPropagation(); openMeshLightbox(s.path, kind); };
+          bar.appendChild(b);
+        }
+        bar.classList.remove('hidden');
+      } else { bar.classList.add('hidden'); bar.innerHTML = ''; }
+    }
+  } catch (_) {}
   console.log('[lb3d] openMeshLightbox', { meshPath, kind });
   if (!meshPath) {
     customError('No mesh path provided', 'Lightbox error');

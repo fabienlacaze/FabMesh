@@ -4720,7 +4720,13 @@ ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
     if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
     const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 5));
     const stem = path.basename(meshPath, path.extname(meshPath));
-    const outDir = path.join(MESHES_DIR, `${stem}_stages3d`);
+    // NEW mesh version so the ORIGINAL stays untouched (same rule as the 2D
+    // stages): cover = copy of the finished mesh, stages bound to the new stem.
+    const ts = Date.now();
+    const newStem = `${stem}_chantier3d_${ts}`;
+    const versionMeshPath = path.join(MESHES_DIR, newStem + '.glb');
+    fs.copyFileSync(meshPath, versionMeshPath);
+    const outDir = path.join(MESHES_DIR, `${newStem}_stages3d`);
     try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
     fs.mkdirSync(outDir, { recursive: true });
     const script = path.join(SCRIPTS_DIR, 'construction_stages_3d.py');
@@ -4735,7 +4741,7 @@ ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
       if (!fs.existsSync(sp)) return { success: false, error: `stage ${i} missing` };
       stages.push({ index: i, path: sp, progress: n <= 1 ? 1 : i / (n - 1) });
     }
-    return { success: true, dir: outDir, stages, count: n };
+    return { success: true, versionMeshPath, dir: outDir, stages, count: n };
   } catch (e) {
     return { success: false, error: e.message };
   }
