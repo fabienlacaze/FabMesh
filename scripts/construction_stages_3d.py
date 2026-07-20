@@ -126,7 +126,9 @@ def texturize(wood_parts):
         except Exception:
             a1, a2 = np.array([0., 1., 0.]), np.array([1., 0., 0.])
         voff = (abs(c[0] * 57.1 + c[1] * 93.7 + c[2] * 131.3)) % 1.0
-        uv = np.column_stack([(v @ a1) / s, (v @ a2) / s + voff])
+        # v nearly CONSTANT per piece (stays inside one plank row of the texture)
+        # → no seam-crossing stripes across the piece; u runs along the grain.
+        uv = np.column_stack([(v @ a1) / s, voff + (v @ a2) / (s * 6.0)])
         out.append((p, uv))
     # MANUAL merge (vertices/faces/uv stacked by hand): trimesh.concatenate would
     # re-pack textures into an atlas and destroy tiled (out-of-[0,1]) UVs → the
@@ -215,18 +217,26 @@ def formwork_at(yline):
             pts.append([q[0], q[2]])
         n2 = len(pts)
         if n2 < 3: continue
+        cxz = np.array([c[0], c[2]])
         for k in range(n2):
             a = pts[k]; b = pts[(k + 1) % n2]
             seg = np.hypot(b[0] - a[0], b[1] - a[1])
             if seg < 1e-6 or seg > step * 3: continue
-            panel = trimesh.creation.box(extents=[seg * 1.08, y1 - y0, thick])
+            # per-panel thickness jitter + NO overlap (1.0 length): adjacent
+            # coplanar overlapping panels caused constant z-fighting flicker.
+            tj = thick * (1.0 + ((abs(a[0] * 41.3 + a[1] * 67.7)) % 1.0) * 0.35)
+            panel = trimesh.creation.box(extents=[seg * 1.0, y1 - y0, tj])
             ang = np.arctan2(b[1] - a[1], b[0] - a[0])
             panel.apply_transform(trimesh.transformations.rotation_matrix(-ang, [0, 1, 0]))
             panel.apply_translation([(a[0] + b[0]) / 2, (y0 + y1) / 2, (a[1] + b[1]) / 2])
             panel.visual = trimesh.visual.ColorVisuals(panel, face_colors=wood([a[0], y0, a[1]]))
             parts.append(panel)
-            for yw in (y0 + POLE_R, y1 - POLE_R):     # walers (rails haut/bas)
-                bb = beam([a[0], yw, a[1]], [b[0], yw, b[1]], r=POLE_R * 0.7)
+            # walers pushed OUT in front of the panels (not inside their plane)
+            for yw in (y0 + POLE_R, y1 - POLE_R):
+                m2 = (np.array([a[0], a[1]]) + np.array([b[0], b[1]])) / 2
+                nrm2 = m2 - cxz; nl2 = np.linalg.norm(nrm2)
+                dx, dz = ((nrm2 / nl2) * (thick * 1.2)) if nl2 > 1e-6 else (0, 0)
+                bb = beam([a[0] + dx, yw, a[1] + dz], [b[0] + dx, yw, b[1] + dz], r=POLE_R * 0.7)
                 if bb is not None: parts.append(bb)
     return parts
 
@@ -348,7 +358,7 @@ for i in range(N):
                         xa, xb = xs_all[k2], xs_all[j2]
                         if xb - xa > plankW:
                             bd = trimesh.creation.box(extents=[xb - xa, POLE_R * 1.2, plankW * 0.92])
-                            bd.apply_translation([(xa + xb) / 2, yline + POLE_R * 0.7, zc + plankW / 2])
+                            bd.apply_translation([(xa + xb) / 2, yline + POLE_R * 1.3, zc + plankW / 2])
                             bd.visual = trimesh.visual.ColorVisuals(bd, face_colors=wood([xa, yline, zc]))
                             woodp.append(bd)
                         k2 = j2 + 1
