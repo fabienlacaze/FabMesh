@@ -4719,7 +4719,8 @@ ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
     const { meshPath, stageCount } = (opts || {});
     if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
     const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 5));
-    const stem = path.basename(meshPath, path.extname(meshPath));
+    // Strip any prior _chantier3d suffix so repeated studies don't stack suffixes.
+    const stem = path.basename(meshPath, path.extname(meshPath)).replace(/_chantier3d_\d+$/i, '');
     // NEW mesh version so the ORIGINAL stays untouched (same rule as the 2D
     // stages): cover = copy of the finished mesh, stages bound to the new stem.
     const ts = Date.now();

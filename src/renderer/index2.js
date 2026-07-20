@@ -3725,8 +3725,11 @@ document.getElementById('bs3d-cancel')?.addEventListener('click', () => {
 document.getElementById('bs3d-start')?.addEventListener('click', () => {
   document.getElementById('modal-stages3d-options')?.classList.add('hidden');
   const p = state.currentProject;
-  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  let mp = p && (p.previewMeshPath || p.selectedMeshPath);
   if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  // If a construction STAGE is displayed, study from its COVER mesh instead —
+  // otherwise the new version's cover would be the scaffolded half-building.
+  mp = String(mp).replace(/_stages3d[\\\/]stage_\d+\.glb$/i, '.glb');
   const count = Math.max(2, Math.min(20, parseInt(document.getElementById('bs3d-count')?.value, 10) || 5));
   const job = pushJob(`Étapes de construction 3D: ${p.name}`, null,
     { 'Étapes': count, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
