@@ -60,9 +60,9 @@ for i in range(N):
     keep_i = max(prog, 0.05)
     bline = Rbase - keep_i * (Rbase - Rtop)
     b_a = np.clip((ys - bline) / max(1.0, 0.02 * H), 0, 1) * (alpha0.astype(np.float32) / 255.0)
-    s_line = bline - 0.08 * H                                   # scaffold caps a bit above the build line
-    s_rev = np.clip((ys - s_line) / max(1.0, 0.03 * H), 0, 1)
-    s_a = wood_mask * s_rev                                     # same scaffold, revealed to this level
+    # FULL scaffold at every non-final stage (it's erected up-front, the building grows
+    # inside it, it comes down only at the finished stage) → coherent AND never cut in height.
+    s_a = wood_mask.copy()
     comp = rgb0.astype(np.float32) * b_a[..., None]
     comp = comp * (1 - s_a[..., None]) + s * s_a[..., None]
     out_a = (np.maximum(b_a, s_a) * 255).astype(np.uint8)
