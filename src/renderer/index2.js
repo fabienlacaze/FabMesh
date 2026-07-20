@@ -2628,7 +2628,9 @@ async function renderImageVersions(p) {
 document.getElementById('ws-use-for-3d-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.previewImagePath) return;
-  p.selectedImagePath = p.previewImagePath;
+  // Use the image CURRENTLY displayed — a selected construction stage or multi-view
+  // angle, not the version cover — so the 3D is generated from what the user sees.
+  p.selectedImagePath = (p._activeStage || p._activeMultiview || p.previewImagePath);
   // Auto-attach the back photo if 2-view was generated for this image.
   if (p._backPhotos && p._backPhotos[p.selectedImagePath]) {
     p.backImagePath = p._backPhotos[p.selectedImagePath];
