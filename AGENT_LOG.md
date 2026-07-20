@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-07-20 (construction-stages → INTÉGRATION du worker modulaire)
+
+`generate-construction-stages` (main.js) appelle désormais le worker
+scripts/construction_stages.py (modulaire varié) via `_runConstructionWorker`
+(execFile, timeout 15min, parse stdout "stage N" → construction-stage-progress).
+Le worker génère toutes les étapes en 1 passe (charge modèles 1×). Versioning
+`_chantier_` conservé. Repli: si une étape manque → `_makeRevealStage`
+(déterministe) ; étape finale → copie exacte. Ancien chemin SDXL band-inpaint
+(_makeScaffoldPrep/_finalizeScaffoldStage) retiré de la boucle (fonctions laissées).
+Testé live: worker OK (modules _mod_*.png générés), 5 étapes, nouvelle version. ~75s.
+
 ## 2026-07-15 (construction-stages → PERCÉE échafaudage réaliste : reveal + ControlNet silhouette + IP-Adapter)
 
 Après échec de toutes les voies (SDXL band-inpaint = enfantin, LTX-Video = refuse/flou,

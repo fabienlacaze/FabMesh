@@ -4639,6 +4639,32 @@ print("OK")
   });
 }
 
+// Run the modular scaffold worker (scripts/construction_stages.py): it loads the
+// RealVisXL + ControlNet + IP-Adapter models ONCE, generates varied wooden scaffold
+// modules in the castle's style, and tiles them per stage — writing every stage_i.png
+// into outDir in a single process. Parses stdout for per-stage progress. Resolves true
+// on success; on any failure the caller falls back to the deterministic reveal.
+function _runConstructionWorker(imagePath, outDir, n, event) {
+  return new Promise((resolve) => {
+    const script = path.join(SCRIPTS_DIR, 'construction_stages.py');
+    if (!fs.existsSync(script)) return resolve(false);
+    let proc;
+    try {
+      proc = execFile(_aiPython(), [script, imagePath, outDir, String(n)],
+        { timeout: 900000, maxBuffer: 64 * 1024 * 1024 }, (error) => resolve(!error));
+    } catch (e) { return resolve(false); }
+    try {
+      proc.stdout?.on('data', (d) => {
+        const sm = String(d).match(/stage (\d+)/);
+        if (sm) {
+          const done = parseInt(sm[1], 10) + 1;
+          try { event.sender.send('construction-stage-progress', { stage: Math.min(done, n), total: n }); } catch (_) {}
+        }
+      });
+    } catch (_) {}
+  });
+}
+
 ipcMain.handle('generate-construction-stages', async (event, opts) => {
   try {
     const { imagePath, prompt, stageCount } = (opts || {});
@@ -4660,42 +4686,23 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
     const outDir = path.join(dir, newStem + '_stages');
     try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
     fs.mkdirSync(outDir, { recursive: true });
+    // MODULAR scaffold: one worker pass generates every stage (building revealed +
+    // varied wooden scaffold modules tiled in the castle's style). Any stage the
+    // worker didn't produce falls back to the deterministic reveal so the timeline
+    // is always complete.
+    await _runConstructionWorker(imagePath, outDir, n, event);
     const stages = [];
     for (let i = 0; i < n; i++) {
       const progress = n <= 1 ? 1 : i / (n - 1);   // 0 (site) .. 1 (final)
       const outPath = path.join(outDir, `stage_${i}.png`);
-      if (i === n - 1) {
-        // Final stage = the finished image, EXACT (progress==1, nothing to build).
-        fs.copyFileSync(imagePath, outPath);
-      } else {
-        // PHOTOREAL scaffolding: deterministic vertical reveal (building rises
-        // from the ground, stays identical) + SDXL band-inpaint that paints a
-        // realistic wooden scaffold ONLY in a thin band at the build line (small
-        // mask → reliable, never regenerates the building). Falls back to the
-        // procedural scaffold if SDXL is unavailable so the timeline never breaks.
-        const keepFrac = Math.max(progress, 0.03);
-        const pfx = path.join(outDir, `.p${i}`);
-        const revealWhite = pfx + '_rw.png', maskP = pfx + '_m.png';
-        const alphaP = pfx + '_a.png', inpP = pfx + '_ip.png';
-        let done = false;
-        if (await _makeScaffoldPrep(imagePath, revealWhite, maskP, alphaP, keepFrac)) {
-          await ensureSdxlServer();
-          if (sdxlReady) {
-            const prompt = progress < 0.35
-              ? 'medieval castle construction site, wooden crates and barrels, stacks of timber planks, piles of stone blocks, gravel and rubble, raw building materials, wooden scaffolding, Roman-style wooden treadwheel crane, human-powered squirrel-cage timber crane, bare earth, photorealistic, highly detailed'
-              : 'dense wooden construction scaffolding, grid of vertical wooden poles and horizontal wooden planks, Roman-style wooden treadwheel crane, human-powered squirrel-cage timber crane made of wooden beams, timber work platform and walkways, scaffolding on the building facade, medieval construction site, photorealistic, detailed wood texture';
-            const r = await sdxlServerCall('/mask_inpaint', { input: revealWhite, mask: maskP, prompt, output: inpP, seed: 424242 });
-            if (r.ok && fs.existsSync(inpP)) done = await _finalizeScaffoldStage(inpP, alphaP, maskP, outPath);
-          }
-        }
-        if (!done) {                                   // fallback: procedural scaffold
-          const ok = await _makeRevealStage(imagePath, outPath, keepFrac);
+      if (!fs.existsSync(outPath)) {
+        if (i === n - 1) { try { fs.copyFileSync(imagePath, outPath); } catch (_) {} }
+        else {
+          const ok = await _makeRevealStage(imagePath, outPath, Math.max(progress, 0.03));
           if (!ok) { try { fs.copyFileSync(imagePath, outPath); } catch (_) {} }
         }
-        for (const f of [revealWhite, maskP, alphaP, inpP]) { try { fs.rmSync(f, { force: true }); } catch (_) {} }
       }
       stages.push({ index: i, path: outPath, progress });
-      try { event.sender.send('construction-stage-progress', { stage: i + 1, total: n }); } catch (_) {}
     }
     return { success: true, versionImagePath, dir: outDir, stages, count: n };
   } catch (e) {
