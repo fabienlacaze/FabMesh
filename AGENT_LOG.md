@@ -2,6 +2,8 @@
 
 - (worker construction_stages.py)
 - **fix échelle/clip**
+- **fix échelles alignées**
+- **fix échelles alignées** : pick(r,c) ne dépend QUE de la colonne (c*13+1)%4 → chaque colonne = une variante uniforme → les modules ÉCHELLE forment des colonnes verticales continues (plus de bouts d'échelle décousus). Cohérent entre étapes (indépendant de r).
 - **fix images OPAQUES** : si l'image n'a pas de vraie transparence (alpha.min>=200), détourer le bâtiment par la couleur de fond des coins (morpho open/close) au lieu de croire que tout est bâtiment → l'échafaudage se confine au bâtiment (fini le scaffold sur tout le cadre / dépassement / base sous le bâtiment). build_alpha remplace alpha0 partout (bbox, IP-ref, révélation).
  : TILE = (X1-X0)/9 (~9 travées → échelle module = échelle bâtiment, fini l'échafaudage géant) + clip aux bornes du bâtiment [X0,X1]×[0,Rbase] appliqué à sa → ne dépasse plus du cadre + base alignée sur la base du bâtiment.
 

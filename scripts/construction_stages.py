@@ -82,7 +82,7 @@ for ki, kind in enumerate(KINDS):
     mods.append(np.asarray(Image.fromarray(rgba, "RGBA").resize((TILE, TILE))).astype(np.float32))
 
 OV = int(TILE * 0.12); STEP = TILE - OV
-def pick(r, c): return (r * 7 + c * 13 + 1) % len(mods)      # deterministic variant per cell
+def pick(r, c): return (c * 13 + 1) % len(mods)              # variant per COLUMN → ladders/braces run continuously top-to-bottom (vertically aligned)
 
 def build_scaffold(top_y):
     canvas = np.zeros((H, W, 4), np.float32); r = 0; y = Rbase - TILE
