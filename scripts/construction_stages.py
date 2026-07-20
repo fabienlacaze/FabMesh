@@ -73,9 +73,12 @@ for i in range(N):
     keep_i = max(prog, 0.05)
     bline = Rbase - keep_i * (Rbase - Rtop)
     b_a = np.clip((ys - bline) / max(1.0, 0.02 * H), 0, 1) * (alpha0.astype(np.float32) / 255.0)
-    # FULL scaffold at every non-final stage (it's erected up-front, the building grows
-    # inside it, it comes down only at the finished stage) → coherent AND never cut in height.
-    s_a = wood_mask.copy()
+    # scaffold built PROGRESSIVELY with the building: reveal the SAME scaffold up to
+    # ~the current build level, with a GENEROUS feather at the top so the poles taper
+    # off (being erected) instead of a hard slice. Same scaffold → coherent; it grows
+    # stage by stage → credible ("built little by little during construction").
+    s_line = bline - 0.04 * H                       # scaffold reaches a bit above the build line
+    s_a = wood_mask * np.clip((ys - s_line) / max(1.0, 0.11 * H), 0.0, 1.0)
     comp = rgb0.astype(np.float32) * b_a[..., None]
     comp = comp * (1 - s_a[..., None]) + s * s_a[..., None]
     out_a = (np.maximum(b_a, s_a) * 255).astype(np.uint8)
