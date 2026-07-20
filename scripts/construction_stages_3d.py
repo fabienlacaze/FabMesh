@@ -115,26 +115,22 @@ def texturize(wood_parts):
         return wood_parts
     mat = trimesh.visual.material.PBRMaterial(
         baseColorTexture=WOOD_TEX, metallicFactor=0.0, roughnessFactor=0.9)
-    s = max(0.5 * R, 1e-6)
+    s = max(0.35 * R, 1e-6)
     out = []
     for p in ms:
-        c = p.vertices.mean(0)
-        v = p.vertices - c
+        vv = p.vertices                              # WORLD coords: the V7 mapping
+        # V7 look (rich, sharp, continuous): u=(x+z)/s, v=y/s. Its ONLY flaw was
+        # VERTICAL pieces (grain across). Fix: detect vertical pieces (PCA) and
+        # rotate their UVs 90° so the grain runs along them too. Nothing else.
         try:
-            _w, E = np.linalg.eigh(np.cov(v.T))
-            a1, a2 = E[:, -1], E[:, -2]              # dominant + secondary axes
+            vc = vv - vv.mean(0)
+            _w, E = np.linalg.eigh(np.cov(vc.T))
+            vertical = abs(E[:, -1][1]) > 0.7
         except Exception:
-            a1, a2 = np.array([0., 1., 0.]), np.array([1., 0., 0.])
-        voff = (abs(c[0] * 57.1 + c[1] * 93.7 + c[2] * 131.3)) % 1.0
-        # SWAPPED axes (user fix, validated empirically): the piece's LONG axis
-        # drives texture V and the across axis drives U — with the V7 planks
-        # texture this puts the wood grain ALONG every long piece. Across stays
-        # nearly constant (one plank row per piece) + per-piece offset.
-        # per-piece NORMALIZED along-axis: each piece spans ~85% of the texture over
-        # its own length → sharp (no giant magnification blur), ≤1 seam crossed.
-        along = v @ a1
-        la = float(along.max() - along.min())
-        uv = np.column_stack([voff + (v @ a2) / (s * 6.0), along / max(la, 1e-9) * 0.85])
+            vertical = False
+        u = (vv[:, 0] + vv[:, 2]) / s
+        w = vv[:, 1] / s
+        uv = np.column_stack([w, u]) if vertical else np.column_stack([u, w])
         out.append((p, uv))
     # MANUAL merge (vertices/faces/uv stacked by hand): trimesh.concatenate would
     # re-pack textures into an atlas and destroy tiled (out-of-[0,1]) UVs → the
