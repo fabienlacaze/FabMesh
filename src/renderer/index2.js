@@ -8368,6 +8368,26 @@ async function showStep2Preview(mesh) {
   // Track which mesh is currently previewed
   const p = state.currentProject;
   if (p) p.previewMeshPath = mesh.path;
+  // Construction-3D stages bar: only meaningful while the displayed mesh belongs
+  // to the chantier set (a stage or its cover version) — hide it on any other
+  // version, re-show it when coming back.
+  try {
+    const bar = document.getElementById('ws-mesh-stages-bar');
+    if (bar) {
+      const st = p && p._meshStages;
+      const mp = _normPath(String(mesh.path || ''));
+      const isStage = !!(st && st.some(s => _normPath(s.path) === mp));
+      const isCover = !!(st && st.length &&
+        _normPath(st[0].path).indexOf(mp.replace(/\.glb$/i, '_stages3d')) === 0);
+      if (isStage || isCover) {
+        _showMeshStagesBar(st);
+        bar.querySelectorAll('.stage-btn').forEach(b =>
+          b.classList.toggle('stage-active', _normPath(b.dataset.path) === mp));
+      } else {
+        bar.classList.add('hidden'); bar.innerHTML = '';
+      }
+    }
+  } catch (_) {}
   // Show the "use for rig" bar — always clickable, even when already selected
   const useRigBar = document.getElementById('ws-use-for-rig-bar');
   if (useRigBar) {
