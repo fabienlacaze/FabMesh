@@ -86,8 +86,8 @@ try:
         _pipe.set_ip_adapter_scale(0.3)
         _pipe.enable_model_cpu_offload()
         WOOD_TEX = _pipe(
-            prompt="seamless texture of a continuous wooden plank surface, rich straight horizontal wood grain with wood knots and natural imperfections, warm brown timber, highly detailed, no gaps",
-            negative_prompt="plank seams, gaps, stripes, tiles, grid, grey, gray, metal, steel, stone, building, wall, window, blurry, text",
+            prompt="seamless tiling texture of brown wooden planks and timber beams, warm brown wood grain, flat top-down surface",
+            negative_prompt="grey, gray, metal, steel, stone, building, wall, window, blurry, text",
             ip_adapter_image=_img.convert('RGB').resize((1024, 1024)),
             width=1024, height=1024, num_inference_steps=20, guidance_scale=5.5,
             generator=torch.Generator("cuda").manual_seed(7)).images[0]
@@ -98,26 +98,6 @@ try:
         _hsv[..., 1] = np.clip(_hsv[..., 1].astype(int) + 70, 70, 190).astype(np.uint8)
         from PIL import Image as _PILImage
         WOOD_TEX = _PILImage.fromarray(_hsv, 'HSV').convert('RGB')
-        # KEEP THE KNOTS, KILL THE SEAMS: SDXL boards come with dark seam lines
-        # (the stripe source). Auto-crop the widest single-board band between
-        # seams and mirror-tile it vertically → rich knotty grain, zero seams.
-        try:
-            _arr = np.asarray(WOOD_TEX).astype(float)
-            _lum = _arr.mean(axis=(1, 2))
-            _th = _lum.mean() - 1.0 * _lum.std()
-            _seam = np.where(_lum < _th)[0]
-            _edges = np.r_[0, _seam, len(_lum) - 1]
-            _gaps = np.diff(_edges)
-            _gi = int(np.argmax(_gaps))
-            _a, _b = int(_edges[_gi]) + 6, int(_edges[_gi + 1]) - 6
-            if _b - _a > 80:
-                _band = _arr[_a:_b]
-                _mir = np.concatenate([_band, _band[::-1]], axis=0)
-                _reps = int(np.ceil(1024 / _mir.shape[0])) + 1
-                WOOD_TEX = _PILImage.fromarray(
-                    np.tile(_mir, (_reps, 1, 1))[:1024].astype(np.uint8))
-        except Exception:
-            pass
         WOOD_TEX.save(os.path.join(OUT, "_wood_tex.png"))
         del _pipe, _vae
         torch.cuda.empty_cache()
@@ -146,9 +126,11 @@ def texturize(wood_parts):
         except Exception:
             a1, a2 = np.array([0., 1., 0.]), np.array([1., 0., 0.])
         voff = (abs(c[0] * 57.1 + c[1] * 93.7 + c[2] * 131.3)) % 1.0
-        # v nearly CONSTANT per piece (stays inside one plank row of the texture)
-        # → no seam-crossing stripes across the piece; u runs along the grain.
-        uv = np.column_stack([(v @ a1) / (s * 2.0), voff + (v @ a2) / (s * 6.0)])
+        # SWAPPED axes (user fix, validated empirically): the piece's LONG axis
+        # drives texture V and the across axis drives U — with the V7 planks
+        # texture this puts the wood grain ALONG every long piece. Across stays
+        # nearly constant (one plank row per piece) + per-piece offset.
+        uv = np.column_stack([voff + (v @ a2) / (s * 6.0), (v @ a1) / (s * 2.0)])
         out.append((p, uv))
     # MANUAL merge (vertices/faces/uv stacked by hand): trimesh.concatenate would
     # re-pack textures into an atlas and destroy tiled (out-of-[0,1]) UVs → the
