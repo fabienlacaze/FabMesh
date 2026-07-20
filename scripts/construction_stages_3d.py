@@ -202,6 +202,38 @@ for i in range(N):
                 parts.append(cap)
     except Exception:
         pass
+    # WOODEN WORK FLOOR over the cut (user request): plank boards covering the real
+    # cross-section → the hollow interior is never visible, and it reads as the
+    # construction deck. Boards are clipped to the building outline (even-odd test),
+    # so nothing overhangs past towers/walls.
+    try:
+        from matplotlib.path import Path as MplPath
+        loops2 = contour_at(yline)
+        paths2 = [MplPath(np.column_stack([l[:, 0], l[:, 2]])) for l in loops2 if len(l) >= 3]
+        if paths2:
+            plankW = max(0.018 * R, 1e-4)
+            xs_all = np.arange(minB[0], maxB[0], plankW * 0.5)
+            for zc in np.arange(minB[2], maxB[2], plankW):
+                pts2 = np.column_stack([xs_all, np.full(len(xs_all), zc)])
+                cnt = np.zeros(len(pts2), int)
+                for pa in paths2: cnt += pa.contains_points(pts2).astype(int)
+                inside = (cnt % 2) == 1
+                k2 = 0
+                while k2 < len(inside):
+                    if inside[k2]:
+                        j2 = k2
+                        while j2 + 1 < len(inside) and inside[j2 + 1]: j2 += 1
+                        xa, xb = xs_all[k2], xs_all[j2]
+                        if xb - xa > plankW:
+                            bd = trimesh.creation.box(extents=[xb - xa, POLE_R * 1.2, plankW * 0.92])
+                            bd.apply_translation([(xa + xb) / 2, yline + POLE_R * 0.7, zc + plankW / 2])
+                            bd.visual = trimesh.visual.ColorVisuals(bd, face_colors=wood([xa, yline, zc]))
+                            parts.append(bd)
+                        k2 = j2 + 1
+                    else:
+                        k2 += 1
+    except Exception:
+        pass
     parts += frame_at(yline, frameH=0.10 * H)        # the rising timber frame
     parts += scaffold_to(yline)                       # scaffold up to the build level
     out_scene = trimesh.Scene()
