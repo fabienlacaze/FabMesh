@@ -1,5 +1,8 @@
 # FabMesh Agent Log
 
+- (worker construction_stages.py)
+- **fix échelle/clip** : TILE = (X1-X0)/9 (~9 travées → échelle module = échelle bâtiment, fini l'échafaudage géant) + clip aux bornes du bâtiment [X0,X1]×[0,Rbase] appliqué à sa → ne dépasse plus du cadre + base alignée sur la base du bâtiment.
+
 ## 2026-07-20 (construction-stages → INTÉGRATION du worker modulaire)
 
 `generate-construction-stages` (main.js) appelle désormais le worker

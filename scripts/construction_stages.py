@@ -13,6 +13,10 @@ H, W = DIM, DIM
 rows = np.where((alpha0 > 16).any(1))[0]; Rtop, Rbase = int(rows.min()), int(rows.max())
 xs_any = np.where((alpha0 > 16).any(0))[0]; X0, X1 = int(xs_any.min()), int(xs_any.max())
 ys = np.arange(H, dtype=np.float32).reshape(H, 1)
+# Keep the scaffold WITHIN the building bounds: x in [X0,X1] (no horizontal overshoot
+# off the frame) and rows down to the building base Rbase (base aligned with building).
+clip = np.zeros((H, W), np.float32)
+clip[: min(H, Rbase + int(0.008 * H)), X0: X1 + 1] = 1.0
 MOD = 768
 
 def guide(kind):
@@ -46,7 +50,7 @@ PROMPT = ("one section of wooden construction scaffolding, vertical wooden poles
           "wooden planks with a wooden brace, isolated on plain white background, photorealistic")
 NEG = "castle, building, stone wall, blurry, cartoon, toy, flat, mesh"
 
-TILE = max(80, int((X1 - X0) / 4))
+TILE = max(50, int((X1 - X0) / 9))     # ~9 bays across → module scale matches the building
 KINDS = ["diag", "x", "ladder", "platform"]
 mods = []
 for ki, kind in enumerate(KINDS):
@@ -86,7 +90,7 @@ for i in range(N):
         src.save(os.path.join(OUT, f"stage_{i}.png")); continue
     keep = max(prog, 0.05); bline = Rbase - keep * (Rbase - Rtop)
     b_a = np.clip((ys - bline) / max(1., 0.02 * H), 0, 1) * (alpha0.astype(np.float32) / 255.)
-    scaf = build_scaffold(int(bline - 0.04 * H)); sa = scaf[..., 3] / 255.0
+    scaf = build_scaffold(int(bline - 0.04 * H)); sa = (scaf[..., 3] / 255.0) * clip
     comp = rgb0.astype(np.float32) * b_a[..., None]
     comp = comp * (1 - sa[..., None]) + scaf[..., :3] * sa[..., None]
     out_a = (np.maximum(b_a, sa) * 255).astype(np.uint8)
