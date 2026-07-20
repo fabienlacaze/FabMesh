@@ -15,6 +15,7 @@ scripts/construction_stages.py, non encore câblé — commité pour backup/poin
   (project_construction_stages_engine). RESTE : câbler dans generate-construction-stages
   (main.js) + versioning + repli. LTX-Video 2B validé aussi pour le "build-rise" photoréaliste.
 
+- **v3g CRÉDIBLE+LARGE** : la grille dense (v3f) donnait un treillis 2D plat. Fix = guide ÉPURÉ (quelques poteaux + 3 niveaux, SANS diagonales) + controlnet 0.4 → SDXL imagine un vrai échafaudage 3D volumétrique qui suit la largeur. Crédible ET pleine largeur.
 - **v3f LARGEUR** (retour user) : guide ControlNet = GRILLE d'échafaudage DESSINÉE (poteaux+lisses+diagonales quinconce) sur toute la largeur bbox du bâtiment → SDXL la rend en bois photoréaliste (controlnet_scale 0.6) → couvre tout le bâtiment (tours comprises). Je contrôle largeur/layout, SDXL le réalisme.
 - **v3b NON COUPÉ** : échafaudage COMPLET affiché à chaque étape non-finale (érigé d'emblée, bâtiment monte dedans, retiré au final) → cohérent + jamais coupé en hauteur.
 - **v3 COHÉRENCE** (retour user) : échafaudage généré 1 seule fois (bâtiment complet) puis révélé progressivement → le MÊME échafaudage grandit d'étape en étape (1 appel SDXL, plus rapide). scripts/construction_stages.py mis à jour.
