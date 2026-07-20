@@ -4054,3 +4054,49 @@ details.stage-generating > summary .stage-icon-gear {
   .modal-with-image > * { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
   .modal-image-side { width: 100% !important; max-width: 100% !important; }
 }
+
+/* ── Construction stages bars (2D images + 3D chantier meshes) ─────────── */
+.stages-bar {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  background: rgba(0,0,0,0.7);
+  border-radius: 8px;
+  padding: 4px 6px;
+  z-index: 12;
+  backdrop-filter: blur(4px);
+  max-width: 92%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+/* Mesh-viewer stage bars sit at the TOP so they never cover the viewer
+   toolbar (Iso/Pivot/Wire/PBR…) which lives at the bottom. */
+#ws-mesh-stages-bar, #lb3d-stages-bar { bottom: auto; top: 10px; }
+.stages-bar::-webkit-scrollbar { height: 4px; }
+.stages-bar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 4px; }
+.stage-btn {
+  flex: 0 0 auto;
+  min-width: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 5px 9px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.62);
+  cursor: pointer;
+  border-radius: 5px;
+  transition: all 0.15s;
+}
+.stage-btn:hover { background: rgba(255,255,255,0.12); color: white; }
+.stage-btn.stage-active {
+  background: rgba(245,158,11,0.3);
+  color: #f59e0b;
+}
+.stage-num { font-size: 14px; font-weight: 700; line-height: 1; }
+.stage-lbl { font-size: 8px; letter-spacing: 0.3px; opacity: 0.85; }

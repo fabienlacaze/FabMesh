@@ -879,7 +879,10 @@
     if (dict) {
       // Match the icon-STRIPPED core FIRST so curated (icon-less) dict entries beat any
       // stale full-string auto cache entry that used to shadow them ('Sharpen'->'épingle').
-      const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
+      // Core may start with a LETTER or DIGIT ("🏗️ 3D construction stages"):
+      // requiring a letter made the match fail on digit-led labels, so the FULL
+      // string (icon included) fell through to auto-translate → icon lost.
+      const m = key.match(/^([^\p{L}\p{N}]+)([\p{L}\p{N}][\s\S]*)$/u);
       const core = m ? m[2] : key;
       const prefix = m ? m[1] : '';
       if (dict[core]) {

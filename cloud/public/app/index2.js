@@ -3917,6 +3917,31 @@ let _lb3dIndex = 0;
 let _lb3dKind = 'mesh'; // 'mesh' or 'rig' — controls Use button label
 
 async function openMeshLightbox(meshPath, kind) {
+  // Construction-3D stages: if this mesh belongs to a chantier-3D set (cover or a
+  // stage), show the stage thumbnails inside the fullscreen viewer too.
+  try {
+    const p0 = state.currentProject;
+    const bar = document.getElementById('lb3d-stages-bar');
+    if (bar) {
+      const st = (p0 && p0._meshStages) || null;
+      const match = st && (st.some(s => _normPath(s.path) === _normPath(meshPath)) ||
+                           _normPath(p0.previewMeshPath || '') === _normPath(meshPath));
+      if (match) {
+        const last = st.length - 1;
+        bar.innerHTML = '';
+        for (const s of st) {
+          const b = document.createElement('button');
+          b.className = 'stage-btn' + (_normPath(s.path) === _normPath(meshPath) ? ' stage-active' : '');
+          b.dataset.path = s.path;
+          const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
+          b.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%')}</span>`;
+          b.onclick = (ev) => { ev.stopPropagation(); openMeshLightbox(s.path, kind); };
+          bar.appendChild(b);
+        }
+        bar.classList.remove('hidden');
+      } else { bar.classList.add('hidden'); bar.innerHTML = ''; }
+    }
+  } catch (_) {}
   console.log('[lb3d] openMeshLightbox', { meshPath, kind });
   if (!meshPath) {
     customError('No mesh path provided', 'Lightbox error');
@@ -7468,6 +7493,37 @@ async function showStep2Preview(mesh) {
   // Track which mesh is currently previewed
   const p = state.currentProject;
   if (p) p.previewMeshPath = mesh.path;
+  // Construction-3D stages bar: only meaningful while the displayed mesh belongs
+  // to the chantier set (a stage or its cover version) — hide it on any other
+  // version, re-show it when coming back. Cloud: the disk fallback queries R2.
+  try {
+    const bar = document.getElementById('ws-mesh-stages-bar');
+    if (bar) {
+      const st = p && p._meshStages;
+      const mp = _normPath(String(mesh.path || ''));
+      const isStage = !!(st && st.some(s => _normPath(s.path) === mp));
+      const isCover = !!(st && st.length &&
+        _normPath(st[0].path).indexOf(mp.replace(/\.glb$/i, '_stages3d')) === 0);
+      if (isStage || isCover) {
+        _showMeshStagesBar(st);
+        bar.querySelectorAll('.stage-btn').forEach(b =>
+          b.classList.toggle('stage-active', _normPath(b.dataset.path) === mp));
+      } else {
+        bar.classList.add('hidden'); bar.innerHTML = '';
+        // R2 fallback (survives page reloads): if a stages3d set exists for
+        // this chantier mesh, rebind and show the bar.
+        if (API.checkStages3dDir) {
+          API.checkStages3dDir(mesh.path).then((info) => {
+            if (info && info.exists && (info.stages || []).length >= 2 &&
+                p && _normPath(p.previewMeshPath || '') === mp) {
+              p._meshStages = info.stages;
+              _showMeshStagesBar(info.stages);
+            }
+          }).catch(() => {});
+        }
+      }
+    }
+  } catch (_) {}
   // Show the "use for rig" bar — always clickable, even when already selected
   const useRigBar = document.getElementById('ws-use-for-rig-bar');
   if (useRigBar) {
@@ -10778,6 +10834,110 @@ function _atSetCameraView(view) {
   atState.controls.update();
 }
 document.getElementById('ws-mesh-aligntex-btn')?.addEventListener('click', openAlignTexture);
+
+// ============================================================
+// 3D CONSTRUCTION STAGES (chantier 3D) — cloud port of the desktop
+// feature: fabricate real per-stage meshes via Modal, stage bar in the
+// viewer + fullscreen, versioned like desktop (<stem>_chantier3d_<ts>).
+// ============================================================
+document.getElementById('ws-mesh-stages3d-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Generate or select a mesh first.', 'error'); return; }
+  document.getElementById('modal-stages3d-options')?.classList.remove('hidden');
+});
+document.getElementById('bs3d-count')?.addEventListener('input', (e) => {
+  const el = document.getElementById('bs3d-count-val');
+  if (el) el.textContent = e.target.value;
+});
+document.getElementById('bs3d-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-stages3d-options')?.classList.add('hidden');
+});
+// AUTO (one preset everywhere) vs MANUAL (per-component material) toggle
+document.getElementById('bs3d-mat-mode')?.addEventListener('change', (e) => {
+  const manual = e.target.value === 'manual';
+  const autoRow = document.getElementById('bs3d-mat-auto-row');
+  const manualRows = document.getElementById('bs3d-mat-manual-rows');
+  if (autoRow) autoRow.style.display = manual ? 'none' : '';
+  if (manualRows) { manualRows.classList.toggle('hidden', !manual); manualRows.style.display = manual ? 'grid' : 'none'; }
+});
+document.getElementById('bs3d-start')?.addEventListener('click', () => {
+  document.getElementById('modal-stages3d-options')?.classList.add('hidden');
+  const p = state.currentProject;
+  let mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Generate or select a mesh first.', 'error'); return; }
+  // If a construction STAGE is displayed, study from its COVER mesh instead —
+  // cloud stages live under .../stages3d/<stem>/stage_N.glb (URL form).
+  if (/\/stages3d\//i.test(String(mp))) {
+    showToast('Select the building version (not a stage) first.', 'error'); return;
+  }
+  const count = Math.max(2, Math.min(12, parseInt(document.getElementById('bs3d-count')?.value, 10) || 5));
+  const job = pushJob(`3D construction stages: ${p.name}`, null,
+    { 'Stages': count, Source: String(mp).split(/[\\/]/).pop().split('?')[0] }, count * 8000, { projectName: p.name });
+  (async () => {
+    try {
+      const manual = document.getElementById('bs3d-mat-mode')?.value === 'manual';
+      const material = document.getElementById('bs3d-material')?.value || 'wood';
+      const materials = manual ? {
+        scaffold: document.getElementById('bs3d-mat-scaffold')?.value || 'wood',
+        frame: document.getElementById('bs3d-mat-frame')?.value || 'wood',
+        planks: document.getElementById('bs3d-mat-planks')?.value || 'wood',
+        formwork: document.getElementById('bs3d-mat-formwork')?.value || 'wood',
+      } : null;
+      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: count, material, materials, projectName: p.name });
+      if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
+        completeJob(job.id, true);
+        // The study created its OWN new mesh version (r.versionMeshPath) — the
+        // source version stays untouched. Reload picks it up; pin selection to it.
+        await reloadCurrentProject();
+        const np = state.currentProject;
+        if (np) {
+          np._meshStages = r.stages;
+          if (r.versionMeshPath) {
+            np.previewMeshPath = r.versionMeshPath;
+            try { showStep2Preview({ path: r.versionMeshPath, filename: String(r.versionMeshPath).split(/[\\/]/).pop() }); } catch (_) {}
+          }
+          _showMeshStagesBar(r.stages);
+        }
+        showToast(`New "chantier 3D" version — ${r.stages.length} stages, click the thumbnails`, 'success', 3000);
+      } else {
+        completeJob(job.id, false);
+        customError((r && r.error) || 'unknown', '3D construction stages — failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      customError(e?.message || String(e), '3D construction stages — error');
+    }
+  })();
+});
+function _showMeshStagesBar(stages) {
+  const bar = document.getElementById('ws-mesh-stages-bar');
+  if (!bar || !Array.isArray(stages) || stages.length < 2) return;
+  const last = stages.length - 1;
+  bar.innerHTML = '';
+  for (const s of stages) {
+    const btn = document.createElement('button');
+    btn.className = 'stage-btn' + (s.index === last ? ' stage-active' : '');
+    btn.dataset.path = s.path;
+    const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
+    const lbl = s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%');
+    btn.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${lbl}</span>`;
+    bar.appendChild(btn);
+  }
+  bar.classList.remove('hidden');
+}
+document.getElementById('ws-mesh-stages-bar')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.stage-btn');
+  if (!btn) return;
+  const bar = document.getElementById('ws-mesh-stages-bar');
+  bar.querySelectorAll('.stage-btn').forEach(b => b.classList.remove('stage-active'));
+  btn.classList.add('stage-active');
+  const p = state.currentProject; const mp = btn.dataset.path;
+  if (p && mp) {
+    p.previewMeshPath = mp;   // tools operate on the displayed stage
+    showStep2Preview({ path: mp, filename: mp.split(/[\\/]/).pop() });
+  }
+});
 
 // ============================================================
 // PAINT EMISSIVE TOOL — raycast-driven painting onto a separate

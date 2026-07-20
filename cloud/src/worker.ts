@@ -7228,6 +7228,166 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   }
 }
 
+/** POST /api/construction-stages-3d — fabricate REAL 3D construction-stage
+ *  meshes (Manor Lords style) on Modal CPU (trimesh), then mirror every
+ *  stage GLB to R2 one at a time (a 5-stage castle is ~200MB total, far
+ *  beyond one Worker JSON response). Mirrors the desktop handler
+ *  generate-construction-stages-3d: also writes a version copy of the
+ *  source mesh named <stem>_chantier3d_<ts>.glb so the stage set is
+ *  attached to a NEW mesh version, like on desktop. */
+async function handleConstructionStages3d(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_MESH_START_URL) return err(503, 'construction backend unavailable');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(503, 'R2 binding required');
+
+  const { meshUrl, meshId, stageCount, materials, projectName } = await req.json() as {
+    meshUrl?: string; meshId?: string; stageCount?: number;
+    materials?: Record<string, string> | string; projectName?: string;
+  };
+  const projectSlug = ((projectName || 'untitled').toString()
+    .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled');
+  const n = Math.max(2, Math.min(Number(stageCount) || 5, 12));
+  // materials: string (AUTO) or {scaffold, frame, planks, formwork} (MANUAL)
+  const MAT_OK = new Set(['wood', 'metal', 'bamboo', 'aluminium']);
+  let mats: Record<string, string> = {};
+  if (typeof materials === 'string') {
+    mats = { scaffold: materials.toLowerCase() };
+  } else if (materials && typeof materials === 'object') {
+    for (const k of ['scaffold', 'frame', 'planks', 'formwork']) {
+      const v = String((materials as Record<string, unknown>)[k] ?? '').toLowerCase();
+      if (v) mats[k] = v;
+    }
+  }
+  for (const k of Object.keys(mats)) if (!MAT_OK.has(mats[k])) delete mats[k];
+
+  let finalUrl = meshUrl ?? '';
+  if (!finalUrl && meshId) {
+    const { data } = await supabaseAdmin(env)
+      .from('jobs').select('mesh_url').eq('id', meshId).eq('user_id', user.id).maybeSingle();
+    finalUrl = (data as { mesh_url?: string } | null)?.mesh_url ?? '';
+  }
+  if (!finalUrl) return err(400, 'meshUrl or meshId required');
+  if (!isTrustedAssetHost(env, finalUrl)) return err(400, 'meshUrl host not allowed');
+
+  // CPU-only Modal op, but N stages of work — charge 2× a simple mesh op.
+  const COST_PER = (await getPrice(env, 'mesh_op_simple')) * 2;
+  const estimatedTotal = 0.01;
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal, user.id);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false, error: 'daily Cloud GPU budget reached.' }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, COST_PER);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — construction stages cost ${COST_PER}` }, { status: 402 });
+  }
+
+  const opStart = Date.now();
+  try {
+    // 1. Fabricate all stages on Modal (parked on its Volume).
+    const r = await fetch(env.MODAL_MESH_START_URL!, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: env.MODAL_SHARED_SECRET ?? '',
+        op_type: 'construction3d',
+        mesh_url: finalUrl,
+        params: { stage_count: n, materials: mats },
+      }),
+      signal: AbortSignal.timeout(290_000),
+    });
+    if (!r.ok) throw new Error(`Modal construction3d HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const start = await r.json() as { ok?: boolean; job_id?: string; count?: number };
+    if (!start.ok || !start.job_id || !start.count) throw new Error('Modal construction3d bad response');
+
+    // 2. Version copy of the source mesh (same pattern as desktop:
+    //    <stem>_chantier3d_<ts>.glb) — R2-internal copy, no Modal.
+    const srcKey = r2PathFromPublicUrl(env, finalUrl);
+    const srcName = (finalUrl.split('/').pop() || 'mesh.glb').replace(/\.(glb|gltf)$/i, '');
+    const stem = srcName.replace(/_chantier3d_\d+$/i, '');
+    const ts = Date.now();
+    const newStem = `${stem}_chantier3d_${ts}`;
+    let versionUrl: string | null = null;
+    if (srcKey) {
+      const srcObj = await env.MESHES.get(srcKey);
+      if (srcObj) {
+        const vKey = `${user.id}/mesh-op/${projectSlug}/${newStem}.glb`;
+        await env.MESHES.put(vKey, srcObj.body, { httpMetadata: { contentType: 'model/gltf-binary' } });
+        versionUrl = await signedR2Url(env, vKey, 'mesh');
+      }
+    }
+
+    // 3. Pull stages ONE per request and mirror to R2.
+    const stageUrls: string[] = [];
+    for (let i = 0; i < start.count; i++) {
+      const fr = await fetch(env.MODAL_MESH_START_URL!.replace(/\/mesh_start$/, '/c3d_fetch'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET ?? '', job_id: start.job_id, index: i }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!fr.ok) throw new Error(`c3d_fetch ${i} HTTP ${fr.status}`);
+      const fd = await fr.json() as { ready?: boolean; glb_base64?: string };
+      if (!fd.ready || !fd.glb_base64) throw new Error(`stage ${i} not on Volume`);
+      const bin = atob(fd.glb_base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+      const key = `${user.id}/stages3d/${newStem}/stage_${i}.glb`;
+      await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
+      stageUrls.push(await signedR2Url(env, key, 'mesh'));
+    }
+
+    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+                       COST_PER, opStart, Date.now(), 'succeeded',
+                       { op_type: 'construction3d', stages: start.count });
+    return json({
+      ok: true, success: true,
+      versionMeshPath: versionUrl || finalUrl,
+      dir: `${user.id}/stages3d/${newStem}`,
+      stages: stageUrls,
+      count: stageUrls.length,
+      creditsRemaining: remaining,
+    });
+  } catch (e) {
+    await addCredits(env, user.id, COST_PER);
+    await refundModalSpend(env, estimatedTotal);
+    const errMsg = e instanceof Error ? e.message : String(e);
+    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+                       0, opStart, Date.now(), 'failed',
+                       { op_type: 'construction3d', error: errMsg });
+    console.error('[construction-stages-3d]', errMsg, e);
+    return err(502, 'construction stages failed (credits refunded)');
+  }
+}
+
+/** GET /api/stages3d-list?stem=<newStem> — list the stage GLBs previously
+ *  fabricated for a chantier3d mesh version (cloud port of the desktop's
+ *  check-stages3d-dir disk fallback). */
+async function handleStages3dList(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(503, 'R2 binding required');
+  const stem = (new URL(req.url).searchParams.get('stem') || '')
+    .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 200);
+  if (!stem) return err(400, 'stem required');
+  const listed = await env.MESHES.list({ prefix: `${user.id}/stages3d/${stem}/`, limit: 50 });
+  const items: Array<{ index: number; url: string }> = [];
+  for (const obj of listed.objects) {
+    const m = obj.key.match(/stage_(\d+)\.glb$/i);
+    if (!m) continue;
+    items.push({ index: Number(m[1]), url: await signedR2Url(env, obj.key, 'mesh') });
+  }
+  items.sort((a, b) => a.index - b.index);
+  return json({ ok: true, success: true, stages: items.map(i => i.url), count: items.length });
+}
+
 /** POST /api/mesh-op/client-result — accepts a GLB that the renderer
  *  produced 100% client-side (three.js Smooth / Decimate / Subdivide /
  *  Fix Normals / Fill Holes / Center JS implementations). No Modal
@@ -11998,6 +12158,8 @@ export default {
         if (pathname === '/api/landmarks'             && method === 'POST') return await handleLandmarks(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
+        if (pathname === '/api/construction-stages-3d' && method === 'POST') return await handleConstructionStages3d(req, env);
+        if (pathname === '/api/stages3d-list'         && method === 'GET')  return await handleStages3dList(req, env);
         if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname.startsWith('/api/history/')      && method === 'GET') {

@@ -4,6 +4,31 @@
 (function () {
   if (!window.FabI18n || !window.FabI18n.register) return;
   window.FabI18n.register('fr', {
+  // ---- 3D construction stages (Études de construction 3D) ----
+  "3D construction stages": "Études de construction 3D",
+  "3D construction study": "Études de construction 3D",
+  "Fabricate the 3D meshes of the construction stages (sliced building + timber frame + scaffolding), navigable and exportable. The final mesh stays intact as the last stage.":
+    "Fabrique les meshes 3D des étapes de construction (bâtiment tranché + charpente + échafaudage), navigables et exportables. Le mesh final reste intact et sert de dernière étape.",
+  "Number of stages": "Nombre d'étapes",
+  "From 2 to 12. Cloud fabrication (~1 min).": "De 2 à 12. Fabrication cloud (~1 min).",
+  "Scaffold material": "Matériau de l'échafaudage",
+  "Material mode": "Mode matériaux",
+  "Auto (one preset for everything)": "Auto (un preset pour tout)",
+  "Manual (choose each component)": "Manuel (choisir chaque composant)",
+  "Scaffolding": "Échafaudage",
+  "Frame": "Charpente",
+  "Work planks": "Planches de travail",
+  "Formwork": "Coffrage",
+  "Wood": "Bois",
+  "Metal (galvanized steel)": "Métal (acier galvanisé)",
+  "Bamboo": "Bambou",
+  "Cloud version uses flat material colours (style-matched textures are Desktop).":
+    "La version cloud utilise des couleurs de matériau unies (les textures stylisées sont sur Desktop).",
+  "Fabricate": "Fabriquer",
+  "Fabricate the 3D meshes of the construction stages (sliced building + frame + scaffolding), navigable and exportable":
+    "Fabrique les meshes 3D des étapes de construction (bâtiment tranché + charpente + échafaudage), navigables et exportables",
+  "Generate or select a mesh first.": "Génère ou choisis un mesh d'abord.",
+  "Select the building version (not a stage) first.": "Sélectionne d'abord la version du bâtiment (pas une étape).",
   "Gallery (all runs)": "Galerie (toutes les exécutions)",
   "Set PIN & Unlock": "Définir le PIN et déverrouiller",
   "Drag to set max GPU usage": "Glissez pour définir l'utilisation max du GPU",

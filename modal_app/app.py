@@ -257,7 +257,10 @@ image = (
     # nvdiffrast + o-voxel CUDA stack for 30-60min for nothing.
     # Same logic for trimesh: needed by mesh_start's op_type dispatch
     # (smooth/decimate/center/fix_normals/fill_holes) but pure CPU.
-    .pip_install("opencv-python-headless", "trimesh>=4.0", "scipy>=1.10")
+    # mapbox_earcut: polygon triangulation engine for trimesh — needed by
+    # construction3d's cross-section cap (planar.triangulate()); without it
+    # the cap silently degrades to open cuts.
+    .pip_install("opencv-python-headless", "trimesh>=4.0", "scipy>=1.10", "mapbox_earcut")
     .add_local_python_source("modal_app")
     .add_local_file(
         "modal_app/back_tpose_skeleton.png",
@@ -1649,6 +1652,42 @@ def mesh_router():
 
         op_type = (payload.get("op_type") or "generate").strip().lower()
 
+        # ── 3D construction stages (CPU trimesh, multi-GLB output) ──
+        # Fabricates N stage meshes and parks them on the Volume; the
+        # Worker then pulls them ONE per request via /c3d_fetch (a 5-stage
+        # castle is ~200MB total — far beyond a single JSON response).
+        # Runs inline in a thread: ~10-60s CPU, no GPU.
+        if op_type == "construction3d":
+            import asyncio, base64
+            from modal_app._construction3d import build_stages
+            mesh_url = (payload.get("mesh_url") or "").strip()
+            if not mesh_url:
+                raise HTTPException(status_code=400, detail="mesh_url required")
+            import urllib.request
+            try:
+                req = urllib.request.Request(mesh_url, headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    src = r.read()
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"mesh download: {e}")
+            params = payload.get("params") or {}
+            try:
+                stages = await asyncio.to_thread(
+                    build_stages, src,
+                    int(params.get("stage_count") or 5),
+                    params.get("materials"))
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"construction3d: {e}")
+            job_id = uuid.uuid4().hex
+            sizes = []
+            for i, blob in enumerate(stages):
+                with open(f"/data/{job_id}_c3d_{i}.glb", "wb") as f:
+                    f.write(blob)
+                sizes.append(len(blob))
+            mesh_output_volume.commit()
+            return {"ok": True, "job_id": job_id, "count": len(stages), "sizes": sizes}
+
         # ── Synchronous CPU mesh edits ──────────────────────────────
         if op_type != "generate" and op_type != "cancel":
             from modal_app._mesh_op import OPS, run as run_mesh_op
@@ -1751,6 +1790,30 @@ def mesh_router():
                 "bytes": len(glb),
             }
         return {"ready": False}
+
+    @api.post("/c3d_fetch")
+    async def c3d_fetch(request: Request):
+        """Fetch ONE construction stage parked on the Volume by a previous
+        op_type=construction3d call — one GLB per response (a full stage
+        set would blow the Worker's memory). Files are deleted lazily by
+        the Volume's normal retention; no explicit GC here."""
+        import base64
+        payload = await _read_json(request)
+        _check_auth(payload)
+        job_id = (payload.get("job_id") or "").strip()
+        index = payload.get("index")
+        if not job_id or index is None:
+            raise HTTPException(status_code=400, detail="job_id and index required")
+        if not str(job_id).isalnum():
+            raise HTTPException(status_code=400, detail="bad job_id")
+        mesh_output_volume.reload()
+        out_path = f"/data/{job_id}_c3d_{int(index)}.glb"
+        if not os.path.isfile(out_path):
+            return {"ready": False}
+        with open(out_path, "rb") as f:
+            glb = f.read()
+        return {"ready": True, "glb_base64": base64.b64encode(glb).decode("ascii"),
+                "bytes": len(glb)}
 
     @api.get("/healthz")
     async def healthz():

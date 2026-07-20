@@ -641,6 +641,7 @@
                 <div class="step-preview-col">
                   <div class="step-card-preview" id="step2-preview">
                     <canvas id="ws-mesh-canvas"></canvas>
+                    <div id="ws-mesh-stages-bar" class="stages-bar hidden"></div>
                     <div class="preview-placeholder" id="step2-placeholder">No mesh yet</div>
                     <button id="ws-mesh-expand-btn" class="preview-expand-btn hidden" title="View 3D fullscreen">&#x26F6;</button>
                     <div id="ws-mesh-toolbar" class="mesh-toolbar hidden">
@@ -714,6 +715,7 @@
                         <button id="ws-mesh-sculpt-btn" class="ghost-btn tool-btn">&#9997; Sculpt</button>
                         <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
+                        <button id="ws-mesh-stages3d-btn" class="ghost-btn tool-btn" title="Fabricate the 3D meshes of the construction stages (sliced building + frame + scaffolding), navigable and exportable">&#127959;&#65039; 3D construction stages</button>
                         <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh (desktop only)" style="display:none">&#127919; Align Texture</button>
                         <button id="ws-mesh-paint-mesh-btn" class="ghost-btn tool-btn" title="Paint directly on the mesh — toggle 💡 Emissive inside for the glow layer">&#127912; Paint Mesh</button>
                         <button id="ws-mesh-material-btn" class="ghost-btn tool-btn" title="Adjust material brightness, saturation, contrast, emissive, metallic, roughness">&#10024; Material adjust</button>
@@ -1269,6 +1271,7 @@
       <button id="lightbox-3d-prev" class="lightbox-nav prev" title="Previous (←)">&#10094;</button>
       <button id="lightbox-3d-next" class="lightbox-nav next" title="Next (→)">&#10095;</button>
       <div id="lightbox-3d-info" class="viewer-info-overlay"></div>
+      <div id="lb3d-stages-bar" class="stages-bar hidden"></div>
       <canvas id="lightbox-3d-canvas"></canvas>
       <div id="lightbox-3d-bottom">
         <div id="lightbox-3d-filename"></div>
@@ -2375,6 +2378,76 @@
          Two tabs in one modal, both produce 1 + N new image
          versions from the currently-selected source photo.
          ============================================================ -->
+    <div id="modal-stages3d-options" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>&#127959;&#65039; 3D construction study</h2>
+        <p class="modal-subtitle">Fabricate the 3D meshes of the construction stages (sliced building + timber frame + scaffolding), navigable and exportable. The final mesh stays intact as the last stage.</p>
+        <div style="display:flex; flex-direction:column; gap:8px; margin:16px 0;">
+          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">
+            Number of stages <span id="bs3d-count-val" class="slider-val">5</span>
+          </label>
+          <input type="range" id="bs3d-count" min="2" max="12" value="5" />
+          <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">From 2 to 12. Cloud fabrication (~1 min).</small>
+          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">Material mode</label>
+          <select id="bs3d-mat-mode" class="modal-select" style="width:100%;">
+            <option value="auto" selected>&#9889; Auto (one preset for everything)</option>
+            <option value="manual">&#128295; Manual (choose each component)</option>
+          </select>
+          <div id="bs3d-mat-auto-row">
+            <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px; display:block;">Scaffold material</label>
+            <select id="bs3d-material" class="modal-select" style="width:100%;">
+              <option value="wood" selected>&#127959;&#65039; Wood</option>
+              <option value="metal">&#128296; Metal (galvanized steel)</option>
+              <option value="aluminium">&#10024; Aluminium</option>
+              <option value="bamboo">&#127793; Bamboo</option>
+            </select>
+          </div>
+          <div id="bs3d-mat-manual-rows" class="hidden" style="display:none; grid-template-columns:1fr 1fr; gap:8px 12px;">
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Scaffolding</label>
+              <select id="bs3d-mat-scaffold" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Frame</label>
+              <select id="bs3d-mat-frame" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Work planks</label>
+              <select id="bs3d-mat-planks" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Formwork</label>
+              <select id="bs3d-mat-formwork" class="modal-select" style="width:100%;">
+                <option value="wood" selected>&#127959;&#65039; Wood</option>
+                <option value="metal">&#128296; Metal (galvanized steel)</option>
+                <option value="aluminium">&#10024; Aluminium</option>
+                <option value="bamboo">&#127793; Bamboo</option>
+              </select>
+            </div>
+          </div>
+          <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">Cloud version uses flat material colours (style-matched textures are Desktop).</small>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="bs3d-cancel">Cancel</button>
+          <button class="primary-btn" id="bs3d-start">Fabricate</button>
+        </div>
+      </div>
+    </div>
     <div id="variant-modal" class="modal-overlay hidden">
       <div class="modal-card modal-card-wide">
         <div style="display:flex; justify-content:space-between; align-items:center;">

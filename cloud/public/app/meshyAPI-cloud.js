@@ -2135,6 +2135,53 @@
     // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
     // Supports: smooth, decimate, center, fix_normals, fill_holes.
     // Anything else returns Desktop-only (Blender etc.).
+    // 3D construction stages (cloud port of the desktop worker
+    // scripts/construction_stages_3d.py via Modal CPU). meshPath on cloud
+    // IS a URL. materials: string (AUTO) or {scaffold, frame, planks,
+    // formwork} (MANUAL). Note: cloud v1 renders flat per-material
+    // palettes (no SDXL style-matched texture pass yet).
+    generateConstructionStages3d: async ({ meshPath, meshUrl, stageCount, material, materials, projectName } = {}) => {
+      const url = meshUrl || meshPath;
+      if (!url) return { success: false, error: 'meshPath or meshUrl required' };
+      try {
+        const r = await postJSON('/api/construction-stages-3d', {
+          meshUrl: url,
+          stageCount: Number(stageCount) || 5,
+          materials: materials || material || 'wood',
+          projectName: projectName || window.state?.currentProject?.name || null,
+        });
+        if (r?.success) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          // Same shape as the desktop handler: stages = [{index, path, progress}]
+          const n2 = (r.stages || []).length;
+          const stages = (r.stages || []).map((u, i) => ({
+            index: i, path: u, progress: n2 > 1 ? i / (n2 - 1) : 1 }));
+          return { success: true, versionMeshPath: r.versionMeshPath, dir: r.dir,
+                   stages, count: r.count || 0 };
+        }
+        return { success: false, error: r?.error || 'unknown' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+
+    // Cloud port of the desktop check-stages3d-dir (disk fallback): list
+    // the stage GLBs stored in R2 for a chantier3d mesh version.
+    checkStages3dDir: async (meshPath) => {
+      try {
+        const name = String(meshPath || '').split('?')[0].split('/').pop() || '';
+        const stem = decodeURIComponent(name).replace(/\.(glb|gltf)$/i, '');
+        if (!/_chantier3d_\d+$/i.test(stem)) return { success: false, stages: [] };
+        const r = await getJSON('/api/stages3d-list?stem=' + encodeURIComponent(stem));
+        if (r?.success && r.stages?.length) {
+          const n2 = r.stages.length;
+          const stages = r.stages.map((u, i) => ({
+            index: i, path: u, progress: n2 > 1 ? i / (n2 - 1) : 1 }));
+          // exists: desktop disk-fallback contract (showStep2Preview hook)
+          return { success: true, exists: true, stages, count: r.count };
+        }
+        return { success: false, exists: false, stages: [] };
+      } catch (e) { return { success: false, stages: [], error: String(e) }; }
+    },
+
     meshTool: async ({ operation, meshPath, meshUrl, meshId, imagePath, params, projectName } = {}) => {
       // 'retexture' is the desktop's quick re-texture (UV reproject via
       // Blender). Cloud has no Blender → we do a best-effort
