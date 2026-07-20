@@ -20,6 +20,19 @@
 
   const I18N = {
     fr: {
+      // ---- 3D construction stages (Études de construction 3D) ----
+      '3D construction stages': 'Études de construction 3D',
+      '3D construction study': 'Études de construction 3D',
+      "Fabricate the 3D meshes of the construction stages (sliced building + timber frame + scaffolding), navigable and exportable. The final mesh stays intact as the last stage.":
+        "Fabrique les meshes 3D des étapes de construction (bâtiment tranché + charpente + échafaudage), navigables et exportables. Le mesh final reste intact et sert de dernière étape.",
+      'Number of stages': "Nombre d'étapes",
+      'From 2 to 20. Geometric fabrication (~1 s per stage).': 'De 2 à 20. Fabrication géométrique (~1 s/étape).',
+      'Scaffold material': "Matériau de l'échafaudage",
+      'Wood': 'Bois', 'Metal (galvanized steel)': 'Métal (acier galvanisé)', 'Bamboo': 'Bambou',
+      "The texture adapts to the building's render style.": "La texture s'adapte au style de rendu du bâtiment.",
+      'Fabricate': 'Fabriquer',
+      'Fabricate the 3D meshes of the construction stages (sliced building + frame + scaffolding), navigable and exportable':
+        "Fabrique les meshes 3D des étapes de construction (bâtiment tranché + charpente + échafaudage), navigables et exportables",
       // ---- Uninstall popup ----
       'Uninstall MyFabmesh.AI': 'Désinstaller MyFabmesh.AI',
       'This removes the app. Optionally, also delete:': "Ceci retire l'application. En option, supprimer aussi :",
