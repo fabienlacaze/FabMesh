@@ -1,7 +1,9 @@
 # FabMesh Agent Log
 
 - (worker construction_stages.py)
-- **fix échelle/clip** : TILE = (X1-X0)/9 (~9 travées → échelle module = échelle bâtiment, fini l'échafaudage géant) + clip aux bornes du bâtiment [X0,X1]×[0,Rbase] appliqué à sa → ne dépasse plus du cadre + base alignée sur la base du bâtiment.
+- **fix échelle/clip**
+- **fix images OPAQUES** : si l'image n'a pas de vraie transparence (alpha.min>=200), détourer le bâtiment par la couleur de fond des coins (morpho open/close) au lieu de croire que tout est bâtiment → l'échafaudage se confine au bâtiment (fini le scaffold sur tout le cadre / dépassement / base sous le bâtiment). build_alpha remplace alpha0 partout (bbox, IP-ref, révélation).
+ : TILE = (X1-X0)/9 (~9 travées → échelle module = échelle bâtiment, fini l'échafaudage géant) + clip aux bornes du bâtiment [X0,X1]×[0,Rbase] appliqué à sa → ne dépasse plus du cadre + base alignée sur la base du bâtiment.
 
 ## 2026-07-20 (construction-stages → INTÉGRATION du worker modulaire)
 

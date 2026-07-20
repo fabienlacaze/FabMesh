@@ -10,8 +10,24 @@ DIM = 1024
 src = Image.open(SRC).convert("RGBA").resize((DIM, DIM))
 A = np.asarray(src).astype(np.uint8); rgb0, alpha0 = A[..., :3], A[..., 3]
 H, W = DIM, DIM
-rows = np.where((alpha0 > 16).any(1))[0]; Rtop, Rbase = int(rows.min()), int(rows.max())
-xs_any = np.where((alpha0 > 16).any(0))[0]; X0, X1 = int(xs_any.min()), int(xs_any.max())
+# Robust BUILDING mask: use the alpha channel when the image is really transparent,
+# else key out the (opaque) background colour from the corners. Without this an opaque
+# black-bg image reads as "building everywhere" → scaffold covers the whole frame.
+if int(alpha0.min()) < 200:
+    build_alpha = alpha0.astype(np.float32)
+else:
+    corners = np.concatenate([rgb0[:8, :8].reshape(-1, 3), rgb0[:8, -8:].reshape(-1, 3),
+                              rgb0[-8:, :8].reshape(-1, 3), rgb0[-8:, -8:].reshape(-1, 3)])
+    bgc = np.median(corners, axis=0)
+    m = (np.abs(rgb0.astype(np.float32) - bgc.reshape(1, 1, 3)).max(2) > 30).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((11, 11), np.uint8))
+    build_alpha = (m * 255).astype(np.float32)
+# Tight bbox on the SOLID building so the scaffold's bounds/base match the visible
+# building — no side overshoot, base aligned.
+solid = build_alpha > 128
+rows = np.where(solid.any(1))[0]; Rtop, Rbase = int(rows.min()), int(rows.max())
+xs_any = np.where(solid.any(0))[0]; X0, X1 = int(xs_any.min()), int(xs_any.max())
 ys = np.arange(H, dtype=np.float32).reshape(H, 1)
 # Keep the scaffold WITHIN the building bounds: x in [X0,X1] (no horizontal overshoot
 # off the frame) and rows down to the building base Rbase (base aligned with building).
@@ -44,7 +60,7 @@ pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
     "SG161222/RealVisXL_V4.0", controlnet=cn, vae=vae, torch_dtype=torch.float16)
 pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter_sdxl.safetensors")
 pipe.set_ip_adapter_scale(0.4); pipe.enable_model_cpu_offload()
-ipn = rgb0.astype(np.float32) * (alpha0[..., None] / 255.) + 255. * (1 - alpha0[..., None] / 255.)
+ipn = rgb0.astype(np.float32) * (build_alpha[..., None] / 255.) + 255. * (1 - build_alpha[..., None] / 255.)
 ip_ref = Image.fromarray(ipn.clip(0, 255).astype(np.uint8), "RGB")
 PROMPT = ("one section of wooden construction scaffolding, vertical wooden poles and horizontal "
           "wooden planks with a wooden brace, isolated on plain white background, photorealistic")
@@ -89,7 +105,7 @@ for i in range(N):
     if i == N - 1:
         src.save(os.path.join(OUT, f"stage_{i}.png")); continue
     keep = max(prog, 0.05); bline = Rbase - keep * (Rbase - Rtop)
-    b_a = np.clip((ys - bline) / max(1., 0.02 * H), 0, 1) * (alpha0.astype(np.float32) / 255.)
+    b_a = np.clip((ys - bline) / max(1., 0.02 * H), 0, 1) * (build_alpha / 255.)
     scaf = build_scaffold(int(bline - 0.04 * H)); sa = (scaf[..., 3] / 255.0) * clip
     comp = rgb0.astype(np.float32) * b_a[..., None]
     comp = comp * (1 - sa[..., None]) + scaf[..., :3] * sa[..., None]
