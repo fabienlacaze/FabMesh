@@ -86,8 +86,8 @@ try:
         _pipe.set_ip_adapter_scale(0.3)
         _pipe.enable_model_cpu_offload()
         WOOD_TEX = _pipe(
-            prompt="seamless tiling texture of brown wooden planks and timber beams, warm brown wood grain, flat top-down surface",
-            negative_prompt="grey, gray, metal, steel, stone, building, wall, window, blurry, text",
+            prompt="seamless texture of a single continuous wooden plank surface, straight horizontal wood grain, warm brown wood, uniform, no gaps",
+            negative_prompt="plank seams, gaps, stripes, tiles, grid, grey, gray, metal, steel, stone, building, wall, window, blurry, text",
             ip_adapter_image=_img.convert('RGB').resize((1024, 1024)),
             width=1024, height=1024, num_inference_steps=20, guidance_scale=5.5,
             generator=torch.Generator("cuda").manual_seed(7)).images[0]
@@ -128,7 +128,7 @@ def texturize(wood_parts):
         voff = (abs(c[0] * 57.1 + c[1] * 93.7 + c[2] * 131.3)) % 1.0
         # v nearly CONSTANT per piece (stays inside one plank row of the texture)
         # → no seam-crossing stripes across the piece; u runs along the grain.
-        uv = np.column_stack([(v @ a1) / s, voff + (v @ a2) / (s * 6.0)])
+        uv = np.column_stack([(v @ a1) / (s * 2.0), voff + (v @ a2) / (s * 6.0)])
         out.append((p, uv))
     # MANUAL merge (vertices/faces/uv stacked by hand): trimesh.concatenate would
     # re-pack textures into an atlas and destroy tiled (out-of-[0,1]) UVs → the
