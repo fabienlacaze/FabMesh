@@ -3706,6 +3706,62 @@ document.getElementById('ws-stages-bar')?.addEventListener('click', (e) => {
   if (imgEl) imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
 });
 
+// ===== 3D construction stages: fabricate staged GLBs (sliced shell + frame +
+// scaffold) from the displayed mesh, then switch stages via a bar over the mesh
+// preview (mirrors the image stages bar). CPU-only worker → no GPU gate.
+document.getElementById('ws-mesh-stages3d-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  const job = pushJob(`Étapes de construction 3D: ${p.name}`, null,
+    { Source: String(mp).split(/[\\/]/).pop() }, 60000, { projectName: p.name });
+  (async () => {
+    try {
+      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: 5 });
+      if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
+        completeJob(job.id, true);
+        p._meshStages = r.stages;
+        _showMeshStagesBar(r.stages);
+        showToast(`${r.stages.length} étapes 3D fabriquées — clique les vignettes pour naviguer`, 'success', 3000);
+      } else {
+        completeJob(job.id, false);
+        customError((r && r.error) || 'unknown', 'Étapes de construction 3D — échec');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      customError(e?.message || String(e), 'Étapes de construction 3D — erreur');
+    }
+  })();
+});
+function _showMeshStagesBar(stages) {
+  const bar = document.getElementById('ws-mesh-stages-bar');
+  if (!bar || !Array.isArray(stages) || stages.length < 2) return;
+  const last = stages.length - 1;
+  bar.innerHTML = '';
+  for (const s of stages) {
+    const btn = document.createElement('button');
+    btn.className = 'stage-btn' + (s.index === last ? ' stage-active' : '');
+    btn.dataset.path = s.path;
+    const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
+    const lbl = s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%');
+    btn.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${lbl}</span>`;
+    bar.appendChild(btn);
+  }
+  bar.classList.remove('hidden');
+}
+document.getElementById('ws-mesh-stages-bar')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.stage-btn');
+  if (!btn) return;
+  const bar = document.getElementById('ws-mesh-stages-bar');
+  bar.querySelectorAll('.stage-btn').forEach(b => b.classList.remove('stage-active'));
+  btn.classList.add('stage-active');
+  const p = state.currentProject; const mp = btn.dataset.path;
+  if (p && mp) {
+    p.previewMeshPath = mp;   // tools operate on the displayed stage
+    showStep2Preview({ path: mp, filename: mp.split(/[\\/]/).pop() });
+  }
+});
+
 // Refresh the stages bar for the current preview image (mirrors
 // _checkMultiviewForCurrentImage): in-memory cache first, disk fallback next.
 async function _checkStagesForCurrentImage() {

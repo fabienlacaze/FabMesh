@@ -153,6 +153,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   generateMultiview: (opts) => ipcRenderer.invoke('generate-multiview', opts),
   checkMultiviewDir: (imagePath) => ipcRenderer.invoke('check-multiview-dir', imagePath),
   generateConstructionStages: (opts) => ipcRenderer.invoke('generate-construction-stages', opts),
+  generateConstructionStages3d: (opts) => ipcRenderer.invoke('generate-construction-stages-3d', opts),
   checkStagesDir: (imagePath) => ipcRenderer.invoke('check-stages-dir', imagePath),
   onConstructionStageProgress: (cb) => ipcRenderer.on('construction-stage-progress', (e, data) => cb(data)),
   duplicateImageVersion: (opts) => ipcRenderer.invoke('duplicate-image-version', opts),

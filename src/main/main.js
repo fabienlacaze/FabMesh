@@ -4710,6 +4710,37 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
   }
 });
 
+// 3D construction stages — fabricate REAL staged GLBs from a finished mesh
+// (scripts/construction_stages_3d.py: sliced shell + timber frame + scaffold cage).
+// Stages live in MESHES_DIR/<stem>_stages3d/ (subfolder → not picked up as mesh
+// versions by list-meshes, which only scans flat files).
+ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
+  try {
+    const { meshPath, stageCount } = (opts || {});
+    if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
+    const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 5));
+    const stem = path.basename(meshPath, path.extname(meshPath));
+    const outDir = path.join(MESHES_DIR, `${stem}_stages3d`);
+    try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
+    fs.mkdirSync(outDir, { recursive: true });
+    const script = path.join(SCRIPTS_DIR, 'construction_stages_3d.py');
+    const ok = await new Promise((resolve) => {
+      execFile(_aiPython(), [script, meshPath, outDir, String(n)],
+        { timeout: 600000, maxBuffer: 64 * 1024 * 1024 }, (error) => resolve(!error));
+    });
+    if (!ok) return { success: false, error: '3D stages worker failed' };
+    const stages = [];
+    for (let i = 0; i < n; i++) {
+      const sp = path.join(outDir, `stage_${i}.glb`);
+      if (!fs.existsSync(sp)) return { success: false, error: `stage ${i} missing` };
+      stages.push({ index: i, path: sp, progress: n <= 1 ? 1 : i / (n - 1) });
+    }
+    return { success: true, dir: outDir, stages, count: n };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Disk fallback: does a construction-stages folder already exist for an image?
 // Lets the stages bar re-appear after a reload / image-version switch.
 ipcMain.handle('check-stages-dir', async (_event, imagePath) => {
