@@ -66,6 +66,50 @@ try:
 except Exception:
     pass
 
+# STYLE-MATCHED wood texture (user request): generate ONE wood-planks texture in the
+# BUILDING'S OWN style via RealVisXL + IP-Adapter (style ref = the mesh's baked
+# texture → realistic building gives realistic wood, Minecraft-style gives blocky
+# wood). Optional: falls back to flat wood colours if GPU/models unavailable.
+WOOD_TEX = None
+try:
+    if _img is not None and os.environ.get('FABMESH_NO_WOOD_TEX') != '1':
+        import torch
+        from diffusers import StableDiffusionXLPipeline, AutoencoderKL
+        _vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+        _pipe = StableDiffusionXLPipeline.from_pretrained(
+            "SG161222/RealVisXL_V4.0", vae=_vae, torch_dtype=torch.float16)
+        _pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models",
+                              weight_name="ip-adapter_sdxl.safetensors")
+        _pipe.set_ip_adapter_scale(0.5)
+        _pipe.enable_model_cpu_offload()
+        WOOD_TEX = _pipe(
+            prompt="seamless tiling texture of rough wooden planks and timber beams, flat top-down surface, wood grain",
+            negative_prompt="building, wall, stone, window, blurry, text",
+            ip_adapter_image=_img.convert('RGB').resize((1024, 1024)),
+            width=1024, height=1024, num_inference_steps=20, guidance_scale=5.0,
+            generator=torch.Generator("cuda").manual_seed(7)).images[0]
+        WOOD_TEX.save(os.path.join(OUT, "_wood_tex.png"))
+        del _pipe, _vae
+        torch.cuda.empty_cache()
+        print("[3d] style-matched wood texture generated", flush=True)
+except Exception as e:
+    print(f"[3d] wood texture skipped ({e}) — flat colours fallback", flush=True)
+
+def texturize(wood_parts):
+    """Merge all wooden parts into one mesh mapped with the style-matched wood
+    texture (world-position UVs → continuous grain). Fallback: keep flat colours."""
+    ms = [p for p in wood_parts if isinstance(p, trimesh.Trimesh) and len(p.faces)]
+    if WOOD_TEX is None or not ms:
+        return wood_parts
+    merged = trimesh.util.concatenate(ms)
+    v = merged.vertices
+    s = max(0.35 * R, 1e-6)
+    uv = np.column_stack([(v[:, 0] + v[:, 2]) / s, v[:, 1] / s])
+    mat = trimesh.visual.material.PBRMaterial(
+        baseColorTexture=WOOD_TEX, metallicFactor=0.0, roughnessFactor=0.9)
+    merged.visual = trimesh.visual.TextureVisuals(uv=uv, material=mat)
+    return [merged]
+
 def contour_at(y):
     """Building cross-section outline points at height y (world XZ), ordered."""
     try:
@@ -189,6 +233,7 @@ for i in range(N):
     solid.update_faces(below)
     solid.remove_unreferenced_vertices()
     parts = [solid] if len(solid.faces) else []
+    woodp = []                                        # all wooden parts (→ texturize)
     # CAP the cut so the hollow shell doesn't show an empty box
     try:
         sec = mesh.section(plane_origin=[0, yline, 0], plane_normal=[0, 1, 0])
@@ -228,14 +273,15 @@ for i in range(N):
                             bd = trimesh.creation.box(extents=[xb - xa, POLE_R * 1.2, plankW * 0.92])
                             bd.apply_translation([(xa + xb) / 2, yline + POLE_R * 0.7, zc + plankW / 2])
                             bd.visual = trimesh.visual.ColorVisuals(bd, face_colors=wood([xa, yline, zc]))
-                            parts.append(bd)
+                            woodp.append(bd)
                         k2 = j2 + 1
                     else:
                         k2 += 1
     except Exception:
         pass
-    parts += frame_at(yline, frameH=0.10 * H)        # the rising timber frame
-    parts += scaffold_to(yline)                       # scaffold up to the build level
+    woodp += frame_at(yline, frameH=0.10 * H)        # the rising timber frame
+    woodp += scaffold_to(yline)                       # scaffold up to the build level
+    parts += texturize(woodp)                         # style-matched wood (or flat fallback)
     out_scene = trimesh.Scene()
     for k, g in enumerate(parts): out_scene.add_geometry(g, node_name=f"g{k}")
     out_scene.export(out)
