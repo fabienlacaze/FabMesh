@@ -110,41 +110,69 @@ def frame_at(yline, frameH):
     return parts
 
 def scaffold_to(topY):
-    """Modular scaffold cage around the footprint bbox up to topY: standards every
-    bay on the 4 sides, ledgers per lift, planks (thin boxes) per lift."""
+    """PHYSICALLY-CREDIBLE scaffold: standards follow the BUILDING'S OWN footprint
+    contour (offset ~0.5m out, hugging towers/facades — not a distant AABB box);
+    ledgers/planks/braces are PER-BAY between neighbouring posts (real timber
+    lengths, nothing spans a whole facade); base pads under every post."""
     parts = []
-    m = 0.05 * R                                     # offset out from the facade
-    x0, x1 = minB[0] - m, maxB[0] + m
-    z0, z1 = minB[2] - m, maxB[2] + m
-    bay = max(0.14 * R, 1e-3); lift = 0.16 * H
+    bay = max(0.12 * R, 1e-3); lift = 0.16 * H
     top = min(topY + 0.10 * H, maxY + 0.05 * H)
-    xs = list(np.arange(x0, x1 + bay * 0.5, bay))
-    zs = list(np.arange(z0, z1 + bay * 0.5, bay))
-    posts = [(x, z0) for x in xs] + [(x, z1) for x in xs] + \
-            [(x0, z) for z in zs[1:-1]] + [(x1, z) for z in zs[1:-1]]
-    for (x, z) in posts:
-        b = beam([x, minY, z], [x, top, z])           # varied wood shade per pole
-        if b is not None: parts.append(b)
-    # X cross-braces on the two long sides, alternate bays (breaks uniformity)
-    for zz in (z0, z1):
-        for k in range(0, len(xs) - 1, 2):
-            for (ya, yb) in [(minY, min(minY + lift, top))]:
-                b1 = beam([xs[k], ya, zz], [xs[k + 1], yb, zz], r=POLE_R * 0.7)
-                b2 = beam([xs[k + 1], ya, zz], [xs[k], yb, zz], r=POLE_R * 0.7)
-                for bb in (b1, b2):
-                    if bb is not None: parts.append(bb)
+    off = 0.045 * R                                  # working gap facade↔scaffold
+    loops = contour_at(minY + 0.06 * H)
+    def area(l):                                     # shoelace on XZ
+        x, z = l[:, 0], l[:, 2]
+        return 0.5 * abs(np.dot(x, np.roll(z, 1)) - np.dot(z, np.roll(x, 1)))
+    loops = [l for l in loops if area(l) > 0.02 * SX * SZ]
+    posts_pts = []
+    for loop in loops:
+        c = loop.mean(axis=0)
+        d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(loop, axis=0), axis=1))]
+        if d[-1] < bay: continue
+        ring = []
+        for t in np.arange(0, d[-1] - bay * 0.4, bay):
+            i = min(int(np.searchsorted(d, t)), len(loop) - 1)
+            p = loop[i]
+            n = p - c; n[1] = 0
+            nl = np.linalg.norm(n)
+            if nl < 1e-6: continue
+            q = p + (n / nl) * off
+            ring.append([q[0], q[2]])
+        if len(ring) >= 3: posts_pts.append(ring)
+    if not posts_pts:                                # fallback: AABB ring
+        m = off
+        x0, x1, z0, z1 = minB[0] - m, maxB[0] + m, minB[2] - m, maxB[2] + m
+        ring = [[x, z0] for x in np.arange(x0, x1, bay)] + [[x1, z] for z in np.arange(z0, z1, bay)] + \
+               [[x, z1] for x in np.arange(x1, x0, -bay)] + [[x0, z] for z in np.arange(z1, z0, -bay)]
+        posts_pts = [ring]
     lifts = np.arange(minY + lift, top, lift)
-    for y in lifts:
-        for (a, bpt) in [((x0, z0), (x1, z0)), ((x0, z1), (x1, z1)),
-                         ((x0, z0), (x0, z1)), ((x1, z0), (x1, z1))]:
-            bb = beam([a[0], y, a[1]], [bpt[0], y, bpt[1]], r=POLE_R * 0.8, color=WOOD2)
-            if bb is not None: parts.append(bb)
-        # walk planks on the two long sides
-        for zz in (z0, z1):
-            pl = trimesh.creation.box(extents=[x1 - x0, POLE_R * 1.2, 0.03 * R])
-            pl.apply_translation([(x0 + x1) / 2, y + POLE_R, zz])
-            pl.visual = trimesh.visual.ColorVisuals(pl, face_colors=WOOD2)
-            parts.append(pl)
+    for ring in posts_pts:
+        n = len(ring)
+        for k, (x, z) in enumerate(ring):
+            b = beam([x, minY, z], [x, top, z])       # standard (varied shade)
+            if b is not None: parts.append(b)
+            pad = trimesh.creation.box(extents=[POLE_R * 5, POLE_R * 1.6, POLE_R * 5])
+            pad.apply_translation([x, minY + POLE_R * 0.8, z])
+            pad.visual = trimesh.visual.ColorVisuals(pad, face_colors=WOOD)
+            parts.append(pad)                          # base pad (sits on ground)
+        for y in lifts:
+            for k in range(n):
+                a = ring[k]; bq = ring[(k + 1) % n]
+                seg = np.hypot(bq[0] - a[0], bq[1] - a[1])
+                if seg > bay * 2.6: continue           # never span a huge gap
+                bb = beam([a[0], y, a[1]], [bq[0], y, bq[1]], r=POLE_R * 0.8, color=WOOD2)
+                if bb is not None: parts.append(bb)    # ledger per bay
+                # walk plank per bay (box laid on the ledger)
+                mx, mz = (a[0] + bq[0]) / 2, (a[1] + bq[1]) / 2
+                pl = trimesh.creation.box(extents=[seg * 0.98, POLE_R * 1.1, POLE_R * 4.5])
+                ang = np.arctan2(bq[1] - a[1], bq[0] - a[0])
+                Rm = trimesh.transformations.rotation_matrix(-ang, [0, 1, 0])
+                pl.apply_transform(Rm); pl.apply_translation([mx, y + POLE_R, mz])
+                pl.visual = trimesh.visual.ColorVisuals(pl, face_colors=wood([mx, y, mz]))
+                parts.append(pl)
+                if (k % 2) == 0:                       # diagonal brace, alternate bays
+                    yb = min(y + lift, top)
+                    d1 = beam([a[0], y, a[1]], [bq[0], yb, bq[1]], r=POLE_R * 0.6)
+                    if d1 is not None: parts.append(d1)
     return parts
 
 for i in range(N):
