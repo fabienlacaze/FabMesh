@@ -944,7 +944,10 @@
       // icon-STRIPPED core FIRST. Curated dict entries are keyed without the icon, so this
       // must beat any stale full-string auto-translate cache entry (keyed WITH the icon),
       // which used to shadow curated translations (e.g. "Sharpen texture"->"épingle").
-      const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
+      // Core may start with a LETTER or DIGIT ("🏗️ 3D construction stages"):
+      // requiring a letter made the match fail on digit-led labels, so the FULL
+      // string (icon included) fell through to auto-translate → icon lost.
+      const m = key.match(/^([^\p{L}\p{N}]+)([\p{L}\p{N}][\s\S]*)$/u);
       const core = m ? m[2] : key;
       const prefix = m ? m[1] : '';
       if (dict[core]) {
