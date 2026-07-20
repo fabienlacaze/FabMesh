@@ -130,7 +130,11 @@ def texturize(wood_parts):
         # drives texture V and the across axis drives U — with the V7 planks
         # texture this puts the wood grain ALONG every long piece. Across stays
         # nearly constant (one plank row per piece) + per-piece offset.
-        uv = np.column_stack([voff + (v @ a2) / (s * 6.0), (v @ a1) / (s * 2.0)])
+        # per-piece NORMALIZED along-axis: each piece spans ~85% of the texture over
+        # its own length → sharp (no giant magnification blur), ≤1 seam crossed.
+        along = v @ a1
+        la = float(along.max() - along.min())
+        uv = np.column_stack([voff + (v @ a2) / (s * 6.0), along / max(la, 1e-9) * 0.85])
         out.append((p, uv))
     # MANUAL merge (vertices/faces/uv stacked by hand): trimesh.concatenate would
     # re-pack textures into an atlas and destroy tiled (out-of-[0,1]) UVs → the
