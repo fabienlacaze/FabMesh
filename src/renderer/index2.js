@@ -3735,7 +3735,8 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
     { 'Étapes': count, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
   (async () => {
     try {
-      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: count });
+      const material = document.getElementById('bs3d-material')?.value || 'wood';
+      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: count, material });
       if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
         completeJob(job.id, true);
         // The study created its OWN new mesh version (r.versionMeshPath) — the

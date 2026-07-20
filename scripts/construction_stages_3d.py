@@ -10,15 +10,43 @@ import trimesh
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 N = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+MATERIAL = (sys.argv[4] if len(sys.argv) > 4 else 'wood').lower()
 os.makedirs(OUT, exist_ok=True)
 
-WOOD = [140, 98, 55, 255]      # beams (default)
-WOOD2 = [168, 124, 76, 255]    # scaffold poles/planks (default)
-# Varied wood shades → beams don't look uniform; picked deterministically by
-# position so the SAME beam keeps the SAME shade across stages.
-WOODS = [[140, 98, 55, 255], [168, 124, 76, 255], [122, 86, 48, 255],
-         [152, 110, 66, 255], [176, 136, 88, 255]]
-def wood(p):
+# Scaffold MATERIAL library (user-selectable: wood / metal / bamboo / …). Each
+# defines a colour palette, an SDXL texture prompt (style-matched to the mesh via
+# IP-Adapter), an HSV hue lock, and PBR metal/roughness.
+MATS = {
+    'wood': {
+        'palette': [[140, 98, 55, 255], [168, 124, 76, 255], [122, 86, 48, 255],
+                    [152, 110, 66, 255], [176, 136, 88, 255]],
+        'prompt': "seamless tiling texture of brown wooden planks and timber beams, warm brown wood grain, flat top-down surface",
+        'neg': "grey, gray, metal, steel, stone, building, wall, window, blurry, text",
+        'hue': 16, 'sat': (70, 190), 'metal': 0.0, 'rough': 0.9},
+    'metal': {
+        'palette': [[176, 180, 188, 255], [150, 155, 164, 255], [196, 200, 206, 255],
+                    [132, 138, 148, 255], [166, 172, 180, 255]],
+        'prompt': "seamless tiling texture of galvanized steel scaffolding tubes, brushed metal surface, silver grey metal",
+        'neg': "wood, brown, plank, grain, stone, building, blurry, text",
+        'hue': None, 'sat': (0, 30), 'metal': 0.9, 'rough': 0.35},
+    'bamboo': {
+        'palette': [[196, 176, 96, 255], [176, 158, 84, 255], [206, 190, 112, 255],
+                    [160, 148, 78, 255], [188, 172, 100, 255]],
+        'prompt': "seamless tiling texture of bamboo poles lashed together, natural bamboo culms with nodes, yellow green bamboo",
+        'neg': "metal, steel, stone, brick, building, blurry, text",
+        'hue': 34, 'sat': (60, 170), 'metal': 0.0, 'rough': 0.7},
+    'aluminium': {
+        'palette': [[205, 208, 213, 255], [186, 190, 197, 255], [218, 221, 226, 255],
+                    [170, 175, 183, 255], [198, 202, 209, 255]],
+        'prompt': "seamless tiling texture of anodized aluminium scaffold profiles, smooth light metal surface",
+        'neg': "wood, brown, grain, stone, rust, blurry, text",
+        'hue': None, 'sat': (0, 22), 'metal': 0.95, 'rough': 0.28},
+}
+MAT = MATS.get(MATERIAL, MATS['wood'])
+WOODS = MAT['palette']
+WOOD = WOODS[0]                # beams
+WOOD2 = WOODS[1]               # scaffold poles/planks
+def wood(p):                  # deterministic shade per position (name kept for reuse)
     return WOODS[int(abs(p[0] * 73.7 + p[1] * 179.3 + p[2] * 283.1)) % len(WOODS)]
 
 scene = trimesh.load(SRC)
@@ -86,16 +114,18 @@ try:
         _pipe.set_ip_adapter_scale(0.3)
         _pipe.enable_model_cpu_offload()
         WOOD_TEX = _pipe(
-            prompt="seamless tiling texture of brown wooden planks and timber beams, warm brown wood grain, flat top-down surface",
-            negative_prompt="grey, gray, metal, steel, stone, building, wall, window, blurry, text",
+            prompt=MAT['prompt'],
+            negative_prompt=MAT['neg'],
             ip_adapter_image=_img.convert('RGB').resize((1024, 1024)),
             width=1024, height=1024, num_inference_steps=20, guidance_scale=5.5,
             generator=torch.Generator("cuda").manual_seed(7)).images[0]
-        # HUE LOCK: keep the generated detail/style (value channel) but clamp the
-        # colour to warm wood so it can never drift to grey/metal.
+        # HUE/SAT LOCK: keep the generated detail/style but clamp the palette to the
+        # chosen material (wood stays wood, metal stays grey, bamboo stays yellow).
         _hsv = np.asarray(WOOD_TEX.convert('HSV')).copy()
-        _hsv[..., 0] = 16                                     # wood hue
-        _hsv[..., 1] = np.clip(_hsv[..., 1].astype(int) + 70, 70, 190).astype(np.uint8)
+        if MAT['hue'] is not None:
+            _hsv[..., 0] = MAT['hue']
+        _slo, _shi = MAT['sat']
+        _hsv[..., 1] = np.clip(_hsv[..., 1].astype(int), _slo, _shi).astype(np.uint8)
         from PIL import Image as _PILImage
         WOOD_TEX = _PILImage.fromarray(_hsv, 'HSV').convert('RGB')
         WOOD_TEX.save(os.path.join(OUT, "_wood_tex.png"))
@@ -114,7 +144,7 @@ def texturize(wood_parts):
     if WOOD_TEX is None or not ms:
         return wood_parts
     mat = trimesh.visual.material.PBRMaterial(
-        baseColorTexture=WOOD_TEX, metallicFactor=0.0, roughnessFactor=0.9)
+        baseColorTexture=WOOD_TEX, metallicFactor=MAT['metal'], roughnessFactor=MAT['rough'])
     s = max(0.35 * R, 1e-6)
     out = []
     for p in ms:

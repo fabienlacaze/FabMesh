@@ -1,5 +1,7 @@
 # FabMesh Agent Log
 
+- (construction 3D) - CHOIX DU MATÉRIAU d'échafaudage (demande user): bois / métal (acier galvanisé) / aluminium / bambou. Dict MATS (palette + prompt texture + hue/sat lock + PBR metal/rough), 4e arg CLI du worker, passé par le handler (validé), dropdown bs3d-material dans la popup. Texture toujours style-matchée au mesh via IP-Adapter. Métal testé (PBR métallique argenté).
+
 ## 2026-07-20 (construction 3D → worker de FABRICATION de meshes d'étapes)
 
 - POLISH: popup + slider 2-20 étapes (modal-stages3d-options, comme le 2D) ; diversité matériaux/formes: 5 nuances de bois déterministes par position, charpente en MADRIERS carrés + diagonales (vs poteaux ronds échafaudage), croix de contreventement sur les longs côtés, cap couleur = moyenne de la texture du bâtiment (matière assortie).
