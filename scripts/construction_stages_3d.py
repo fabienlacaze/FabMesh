@@ -96,6 +96,7 @@ def beam(p0, p1, r=None, color=None, shape='cyl'):
     c.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], (p1 - p0) / L))
     c.apply_translation(p0)
     c.visual = trimesh.visual.ColorVisuals(c, face_colors=(color or wood(p0)))
+    c.metadata['grain'] = ((p1 - p0) / L).tolist()   # authored grain for texturize
     return c
 
 # Cap colour matched to the BUILDING's own material (mean texture colour) so the
@@ -115,17 +116,40 @@ except Exception:
 # texture → realistic building gives realistic wood, Minecraft-style gives blocky
 # wood). ONE texture per DISTINCT material (cached); the pipe is loaded once and
 # reused. Optional: falls back to flat material colours if GPU/models unavailable.
-_PIPE = None; _PIPE_TRIED = False; _TEX = {}
+_PIPE = None; _PIPE_TRIED = False; _TEX = {}; _GRAIN = {}
+def _grain_axis(img):
+    """Which IMAGE axis the texture's grain/fibre runs along: 'y' (vertical planks/
+    tubes/culms) or 'x' (horizontal). SDXL's output orientation VARIES with the
+    IP-Adapter style ref, so it must be measured, not assumed: grain lines along Y
+    produce most brightness variation along X (plank seams), and vice-versa."""
+    g = np.asarray(img.convert('L'), float)
+    # Variance of the MEAN column/row profiles: long coherent structures (planks,
+    # tubes, culms) dominate; fine detail (thin rails, knots) averages out —
+    # a plain gradient-energy test mis-reads grid-like metal textures.
+    vx = g.mean(axis=0).std()                # high ⇔ vertical structures
+    vy = g.mean(axis=1).std()                # high ⇔ horizontal structures
+    return 'y' if vx > vy else 'x'
+
 def gen_tex(material):
     """Style-matched tiling texture for `material` (cached per material). Returns a
-    PIL image or None (→ flat-colour fallback)."""
+    PIL image or None (→ flat-colour fallback). Also measures the texture's grain
+    axis into _GRAIN[material]."""
     global _PIPE, _PIPE_TRIED
     if material in _TEX:
         return _TEX[material]
     cfg = _mat_cfg(material)
     tex = None
+    # Debug/trial override: one fixed texture file for every material — lets the
+    # orientation logic be exercised without the SDXL generation cost.
+    _dbg = os.environ.get('FABMESH_TEX_FILE')
+    if _dbg:
+        try:
+            from PIL import Image as _PILImage
+            tex = _PILImage.open(_dbg).convert('RGB')
+        except Exception as e:
+            print(f"[3d] FABMESH_TEX_FILE unreadable ({e})", flush=True)
     try:
-        if _img is not None and os.environ.get('FABMESH_NO_WOOD_TEX') != '1':
+        if tex is None and _img is not None and os.environ.get('FABMESH_NO_WOOD_TEX') != '1':
             import torch
             if not _PIPE_TRIED:
                 _PIPE_TRIED = True
@@ -161,6 +185,9 @@ def gen_tex(material):
     except Exception as e:
         print(f"[3d] texture skipped for {material} ({e}) — flat colours", flush=True)
     _TEX[material] = tex
+    if tex is not None:
+        _GRAIN[material] = _grain_axis(tex)
+        print(f"[3d] texture grain axis for {material}: {_GRAIN[material]}", flush=True)
     return tex
 
 def texturize(wood_parts, material):
@@ -176,21 +203,59 @@ def texturize(wood_parts, material):
     mat = trimesh.visual.material.PBRMaterial(
         baseColorTexture=tex, metallicFactor=cfg['metal'], roughnessFactor=cfg['rough'])
     s = max(0.35 * R, 1e-6)
+    # Which IMAGE axis the grain runs along in THIS texture (measured, it varies
+    # between SDXL generations): the along-piece coordinate goes on that axis.
+    axis = _GRAIN.get(material, 'x')
     out = []
     for p in ms:
-        vv = p.vertices                              # WORLD coords: the V7 mapping
-        # V7 look (rich, sharp, continuous): u=(x+z)/s, v=y/s. Its ONLY flaw was
-        # VERTICAL pieces (grain across). Fix: detect vertical pieces (PCA) and
-        # rotate their UVs 90° so the grain runs along them too. Nothing else.
+        vv = p.vertices                              # WORLD coords: the V7 scale/look
+        # AUTHORED grain: every builder tags its piece with the true long-axis
+        # direction (metadata['grain']) — beams know p1-p0, formwork boards are
+        # vertical, planks follow their bay. PCA only as fallback (it guesses
+        # wrong on diagonals and near-square panels).
+        d = None
         try:
-            vc = vv - vv.mean(0)
-            _w, E = np.linalg.eigh(np.cov(vc.T))
-            vertical = abs(E[:, -1][1]) > 0.7
+            g = p.metadata.get('grain') if isinstance(getattr(p, 'metadata', None), dict) else None
+            if g is not None:
+                d = np.asarray(g, float)
+                nl = np.linalg.norm(d)
+                d = d / nl if nl > 1e-6 else None
         except Exception:
-            vertical = False
-        u = (vv[:, 0] + vv[:, 2]) / s
-        w = vv[:, 1] / s
-        uv = np.column_stack([w, u]) if vertical else np.column_stack([u, w])
+            d = None
+        if d is None:
+            try:
+                vc = vv - vv.mean(0)
+                _w, E = np.linalg.eigh(np.cov(vc.T))
+                d = E[:, -1]
+            except Exception:
+                d = np.array([0.0, 1.0, 0.0])
+        t = vv @ d / s                               # position ALONG the grain
+        # Cross coordinate from an ORTHONORMAL frame ⊥ d — a raw world axis (old
+        # V7 y or x+z) shears the texture on diagonals (chevron artefact) and is
+        # CONSTANT on the top face of flat planks (stretched cross-banding).
+        up = np.array([0.0, 1.0, 0.0]) if abs(d[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+        n1 = up - (up @ d) * d
+        nl = np.linalg.norm(n1)
+        n1 = n1 / nl if nl > 1e-6 else np.array([1.0, 0.0, 0.0])
+        n2 = np.cross(d, n1)
+        ctr = vv.mean(0)
+        a1 = (vv - ctr) @ n1
+        a2 = (vv - ctr) @ n2
+        e1 = float(np.abs(a1).max()) + 1e-9
+        e2 = float(np.abs(a2).max()) + 1e-9
+        if max(e1, e2) / min(e1, e2) > 2.5:
+            # FLAT board/panel (plank, deck, formwork): planar map across the width
+            c = (a2 if e2 > e1 else a1) / s
+        else:
+            # STICK (pole, beam, brace): wrap around the cross-section, seam at the
+            # bottom (θ=±π is opposite n1, which points up) — no face is constant.
+            r = np.sqrt(a1 ** 2 + a2 ** 2)
+            rm = max(float(r.mean()), 1e-9)
+            c = np.arctan2(a2, a1) * rm / s
+        # per-piece plank-column offset: neighbours sample different texture rows
+        c = c + ((abs(ctr[0] * 73.7 + ctr[1] * 179.3 + ctr[2] * 283.1)) % 1.0)
+        # grain axis 'y' → along-piece coord on texture V; 'x' → on texture U
+        uv = np.column_stack([c, t]) if axis == 'y' else np.column_stack([t, c])
         out.append((p, uv))
     # MANUAL merge (vertices/faces/uv stacked by hand): trimesh.concatenate would
     # re-pack textures into an atlas and destroy tiled (out-of-[0,1]) UVs → the
@@ -245,11 +310,20 @@ def frame_at(yline, frameH):
             b = beam([a[0], yline, a[2]], [c2[0], yline + frameH, c2[2]],
                      r=POLE_R * 0.7, shape='box')
             if b is not None: parts.append(b)
-        # top ring following the contour (coarse)
-        for i in range(0, len(loop) - 1, max(1, len(loop) // 60)):
-            j = min(i + max(1, len(loop) // 60), len(loop) - 1)
-            b = beam([loop[i][0], yline + frameH, loop[i][2]],
-                     [loop[j][0], yline + frameH, loop[j][2]], r=POLE_R * 0.8, shape='box')
+        # top ring following the contour — resampled by ARC LENGTH so every segment
+        # is a real beam (index-stepping made confetti pieces SHORTER than their
+        # own width on small tower loops → grain read as running across them).
+        rstep = max(0.05 * R, step * 0.5)
+        ring_pts = []
+        for tt in np.arange(0, d[-1], rstep):
+            i = min(int(np.searchsorted(d, tt)), len(loop) - 1)
+            ring_pts.append(loop[i])
+        for k in range(len(ring_pts)):
+            pA = ring_pts[k]; pB = ring_pts[(k + 1) % len(ring_pts)]
+            seg = np.linalg.norm(np.asarray(pB) - np.asarray(pA))
+            if seg < POLE_R * 3 or seg > rstep * 2.5: continue
+            b = beam([pA[0], yline + frameH, pA[2]],
+                     [pB[0], yline + frameH, pB[2]], r=POLE_R * 0.8, shape='box')
             if b is not None: parts.append(b)
     return parts
 
@@ -262,7 +336,9 @@ def formwork_at(yline):
     # Band spans BELOW the line enough to swallow the triangle-jagged cut edge
     # (face filter keeps faces under yline → jags extend downward), and a bit above.
     y0, y1 = yline - 0.06 * H, yline + 0.035 * H
-    off = 0.012 * R; thick = POLE_R * 1.6
+    # offset must clear protruding stonework (machicolation corbels poked THROUGH
+    # the band at 0.012R → stone arches bled across the wooden panels)
+    off = 0.024 * R; thick = POLE_R * 1.6
     step = 0.045 * R
     loops = contour_at(max(minY + 0.02 * H, yline - 0.04 * H))
     for loop in loops:
@@ -292,6 +368,7 @@ def formwork_at(yline):
             panel.apply_transform(trimesh.transformations.rotation_matrix(-ang, [0, 1, 0]))
             panel.apply_translation([(a[0] + b[0]) / 2, (y0 + y1) / 2, (a[1] + b[1]) / 2])
             panel.visual = trimesh.visual.ColorVisuals(panel, face_colors=wood([a[0], y0, a[1]]))
+            panel.metadata['grain'] = [0.0, 1.0, 0.0]   # formwork boards run vertical
             parts.append(panel)
             # walers pushed OUT in front of the panels (not inside their plane)
             for yw in (y0 + POLE_R, y1 - POLE_R):
@@ -346,6 +423,7 @@ def scaffold_to(topY):
             pad = trimesh.creation.box(extents=[POLE_R * 5, POLE_R * 1.6, POLE_R * 5])
             pad.apply_translation([x, minY + POLE_R * 0.8, z])
             pad.visual = trimesh.visual.ColorVisuals(pad, face_colors=WOOD)
+            pad.metadata['grain'] = [1.0, 0.0, 0.0]    # near-square: any horizontal
             parts.append(pad)                          # base pad (sits on ground)
         for y in lifts:
             for k in range(n):
@@ -361,6 +439,7 @@ def scaffold_to(topY):
                 Rm = trimesh.transformations.rotation_matrix(-ang, [0, 1, 0])
                 pl.apply_transform(Rm); pl.apply_translation([mx, y + POLE_R, mz])
                 pl.visual = trimesh.visual.ColorVisuals(pl, face_colors=wood([mx, y, mz]))
+                pl.metadata['grain'] = [(bq[0] - a[0]) / seg, 0.0, (bq[1] - a[1]) / seg]
                 parts.append(pl)
                 if (k % 2) == 0:                       # diagonal brace, alternate bays
                     yb = min(y + lift, top)
@@ -423,6 +502,7 @@ for i in range(N):
                             bd = trimesh.creation.box(extents=[xb - xa, POLE_R * 1.2, plankW * 0.92])
                             bd.apply_translation([(xa + xb) / 2, yline + POLE_R * 1.3, zc + plankW / 2])
                             bd.visual = trimesh.visual.ColorVisuals(bd, face_colors=wood([xa, yline, zc]))
+                            bd.metadata['grain'] = [1.0, 0.0, 0.0]   # floor boards run along X
                             woodp.append(bd)
                         k2 = j2 + 1
                     else:
