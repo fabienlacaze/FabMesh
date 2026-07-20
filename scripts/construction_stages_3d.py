@@ -12,8 +12,14 @@ SRC, OUT = sys.argv[1], sys.argv[2]
 N = int(sys.argv[3]) if len(sys.argv) > 3 else 5
 os.makedirs(OUT, exist_ok=True)
 
-WOOD = [140, 98, 55, 255]      # beams
-WOOD2 = [168, 124, 76, 255]    # scaffold poles/planks
+WOOD = [140, 98, 55, 255]      # beams (default)
+WOOD2 = [168, 124, 76, 255]    # scaffold poles/planks (default)
+# Varied wood shades → beams don't look uniform; picked deterministically by
+# position so the SAME beam keeps the SAME shade across stages.
+WOODS = [[140, 98, 55, 255], [168, 124, 76, 255], [122, 86, 48, 255],
+         [152, 110, 66, 255], [176, 136, 88, 255]]
+def wood(p):
+    return WOODS[int(abs(p[0] * 73.7 + p[1] * 179.3 + p[2] * 283.1)) % len(WOODS)]
 
 scene = trimesh.load(SRC)
 if isinstance(scene, trimesh.Scene):
@@ -30,17 +36,35 @@ SX, SZ = (maxB[0] - minB[0]), (maxB[2] - minB[2])
 R = float(max(SX, SZ))
 POLE_R = 0.006 * R             # beam/pole radius
 
-def beam(p0, p1, r=None, color=WOOD):
-    """Cylinder between two 3D points (a wooden beam)."""
+def beam(p0, p1, r=None, color=None, shape='cyl'):
+    """Wooden beam between two 3D points. shape='cyl' (round pole, scaffolding) or
+    'box' (square timber, building frame) — shape variety reads more real."""
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
     L = np.linalg.norm(p1 - p0)
     if L < 1e-6: return None
-    c = trimesh.creation.cylinder(radius=(r or POLE_R), height=L, sections=8)
-    c.apply_translation([0, 0, L / 2])
+    rr = (r or POLE_R)
+    if shape == 'box':
+        c = trimesh.creation.box(extents=[rr * 2.2, rr * 2.2, L])
+        c.apply_translation([0, 0, L / 2])
+    else:
+        c = trimesh.creation.cylinder(radius=rr, height=L, sections=8)
+        c.apply_translation([0, 0, L / 2])
     c.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], (p1 - p0) / L))
     c.apply_translation(p0)
-    c.visual = trimesh.visual.ColorVisuals(c, face_colors=color)
+    c.visual = trimesh.visual.ColorVisuals(c, face_colors=(color or wood(p0)))
     return c
+
+# Cap colour matched to the BUILDING's own material (mean texture colour) so the
+# cut cross-section reads as the same stone/wood as the building.
+CAPC = [120, 112, 100, 255]
+try:
+    _mat = mesh.visual.material
+    _img = getattr(_mat, 'baseColorTexture', None) or getattr(_mat, 'image', None)
+    if _img is not None:
+        _avg = np.asarray(_img.convert('RGB').resize((64, 64))).reshape(-1, 3).mean(0)
+        CAPC = [int(_avg[0] * 0.9), int(_avg[1] * 0.9), int(_avg[2] * 0.9), 255]
+except Exception:
+    pass
 
 def contour_at(y):
     """Building cross-section outline points at height y (world XZ), ordered."""
@@ -65,16 +89,23 @@ def frame_at(yline, frameH):
         # resample the loop at ~step spacing
         d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(loop, axis=0), axis=1))]
         if d[-1] < step: continue
+        studs = []
         for t in np.arange(0, d[-1], step):
             i = np.searchsorted(d, t); i = min(i, len(loop) - 1)
             p = loop[i]
-            b = beam([p[0], yline, p[2]], [p[0], yline + frameH, p[2]])
+            b = beam([p[0], yline, p[2]], [p[0], yline + frameH, p[2]], shape='box')
+            if b is not None: parts.append(b); studs.append(p)
+        # diagonal braces between alternate studs (timber-frame look)
+        for k in range(0, len(studs) - 1, 2):
+            a, c2 = studs[k], studs[k + 1]
+            b = beam([a[0], yline, a[2]], [c2[0], yline + frameH, c2[2]],
+                     r=POLE_R * 0.7, shape='box')
             if b is not None: parts.append(b)
         # top ring following the contour (coarse)
         for i in range(0, len(loop) - 1, max(1, len(loop) // 60)):
             j = min(i + max(1, len(loop) // 60), len(loop) - 1)
             b = beam([loop[i][0], yline + frameH, loop[i][2]],
-                     [loop[j][0], yline + frameH, loop[j][2]], r=POLE_R * 0.8)
+                     [loop[j][0], yline + frameH, loop[j][2]], r=POLE_R * 0.8, shape='box')
             if b is not None: parts.append(b)
     return parts
 
@@ -92,8 +123,16 @@ def scaffold_to(topY):
     posts = [(x, z0) for x in xs] + [(x, z1) for x in xs] + \
             [(x0, z) for z in zs[1:-1]] + [(x1, z) for z in zs[1:-1]]
     for (x, z) in posts:
-        b = beam([x, minY, z], [x, top, z], color=WOOD2)
+        b = beam([x, minY, z], [x, top, z])           # varied wood shade per pole
         if b is not None: parts.append(b)
+    # X cross-braces on the two long sides, alternate bays (breaks uniformity)
+    for zz in (z0, z1):
+        for k in range(0, len(xs) - 1, 2):
+            for (ya, yb) in [(minY, min(minY + lift, top))]:
+                b1 = beam([xs[k], ya, zz], [xs[k + 1], yb, zz], r=POLE_R * 0.7)
+                b2 = beam([xs[k + 1], ya, zz], [xs[k], yb, zz], r=POLE_R * 0.7)
+                for bb in (b1, b2):
+                    if bb is not None: parts.append(bb)
     lifts = np.arange(minY + lift, top, lift)
     for y in lifts:
         for (a, bpt) in [((x0, z0), (x1, z0)), ((x0, z1), (x1, z1)),
@@ -131,7 +170,7 @@ for i in range(N):
             if len(f2):
                 cap = trimesh.Trimesh(np.column_stack([v2, np.zeros(len(v2))]), f2)
                 cap.apply_transform(T)
-                cap.visual = trimesh.visual.ColorVisuals(cap, face_colors=[120, 112, 100, 255])
+                cap.visual = trimesh.visual.ColorVisuals(cap, face_colors=CAPC)
                 parts.append(cap)
     except Exception:
         pass

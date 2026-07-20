@@ -1494,6 +1494,23 @@
          CONSTRUCTION STAGES MODAL — build a construction timeline
          (2..20 stages) from the final building image via img2img.
          ============================================================ -->
+    <div id="modal-stages3d-options" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>&#127959;&#65039; Étapes de construction 3D</h2>
+        <p class="modal-subtitle">Fabrique les meshes 3D des étapes (bâtiment tranché + charpente + échafaudage), navigables et exportables. Le mesh final reste intact et sert de dernière étape.</p>
+        <div style="display:flex; flex-direction:column; gap:8px; margin:16px 0;">
+          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">
+            Nombre d'étapes <span id="bs3d-count-val" class="slider-val">5</span>
+          </label>
+          <input type="range" id="bs3d-count" min="2" max="20" value="5" />
+          <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">De 2 à 20. Fabrication géométrique (~1 s/étape), sans GPU.</small>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="bs3d-cancel">Annuler</button>
+          <button class="primary-btn" id="bs3d-start">Fabriquer</button>
+        </div>
+      </div>
+    </div>
     <div id="modal-buildstages-options" class="modal-overlay hidden">
       <div class="modal-card">
         <h2>&#127959;&#65039; Étapes de construction</h2>

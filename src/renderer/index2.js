@@ -3713,11 +3713,26 @@ document.getElementById('ws-mesh-stages3d-btn')?.addEventListener('click', () =>
   const p = state.currentProject;
   const mp = p && (p.previewMeshPath || p.selectedMeshPath);
   if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  document.getElementById('modal-stages3d-options')?.classList.remove('hidden');
+});
+document.getElementById('bs3d-count')?.addEventListener('input', (e) => {
+  const el = document.getElementById('bs3d-count-val');
+  if (el) el.textContent = e.target.value;
+});
+document.getElementById('bs3d-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-stages3d-options')?.classList.add('hidden');
+});
+document.getElementById('bs3d-start')?.addEventListener('click', () => {
+  document.getElementById('modal-stages3d-options')?.classList.add('hidden');
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  const count = Math.max(2, Math.min(20, parseInt(document.getElementById('bs3d-count')?.value, 10) || 5));
   const job = pushJob(`Étapes de construction 3D: ${p.name}`, null,
-    { Source: String(mp).split(/[\\/]/).pop() }, 60000, { projectName: p.name });
+    { 'Étapes': count, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
   (async () => {
     try {
-      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: 5 });
+      const r = await API.generateConstructionStages3d({ meshPath: mp, stageCount: count });
       if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
         completeJob(job.id, true);
         p._meshStages = r.stages;

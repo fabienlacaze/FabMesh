@@ -2,6 +2,7 @@
 
 ## 2026-07-20 (construction 3D → worker de FABRICATION de meshes d'étapes)
 
+- POLISH: popup + slider 2-20 étapes (modal-stages3d-options, comme le 2D) ; diversité matériaux/formes: 5 nuances de bois déterministes par position, charpente en MADRIERS carrés + diagonales (vs poteaux ronds échafaudage), croix de contreventement sur les longs côtés, cap couleur = moyenne de la texture du bâtiment (matière assortie).
 - CÂBLAGE APP fait: handler IPC `generate-construction-stages-3d` (main.js, stages → MESHES_DIR/<stem>_stages3d/, hors versions car list-meshes scan plat) + preload `generateConstructionStages3d` + bouton `ws-mesh-stages3d-btn` (Manual tools) + barre `ws-mesh-stages-bar` sur le viewer mesh (clic → showStep2Preview du stage, previewMeshPath suit). Testé end-to-end via control_api: 5 GLB OK.
 Décision user: fabriquer de VRAIS meshes 3D par étape (style Manor Lords, exportables),
 pas un effet viewer. Nouveau scripts/construction_stages_3d.py (trimesh, pur CPU, ~qq s):
