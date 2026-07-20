@@ -80,14 +80,24 @@ try:
             "SG161222/RealVisXL_V4.0", vae=_vae, torch_dtype=torch.float16)
         _pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models",
                               weight_name="ip-adapter_sdxl.safetensors")
-        _pipe.set_ip_adapter_scale(0.5)
+        # LOW IP scale: transfer the mesh's RENDERING STYLE (realistic grain vs
+        # blocky Minecraft vs hand-painted strokes) but NOT its palette — the wood
+        # must stay wood (user: pas la couleur, le style).
+        _pipe.set_ip_adapter_scale(0.3)
         _pipe.enable_model_cpu_offload()
         WOOD_TEX = _pipe(
-            prompt="seamless tiling texture of rough wooden planks and timber beams, flat top-down surface, wood grain",
-            negative_prompt="building, wall, stone, window, blurry, text",
+            prompt="seamless tiling texture of brown wooden planks and timber beams, warm brown wood grain, flat top-down surface",
+            negative_prompt="grey, gray, metal, steel, stone, building, wall, window, blurry, text",
             ip_adapter_image=_img.convert('RGB').resize((1024, 1024)),
-            width=1024, height=1024, num_inference_steps=20, guidance_scale=5.0,
+            width=1024, height=1024, num_inference_steps=20, guidance_scale=5.5,
             generator=torch.Generator("cuda").manual_seed(7)).images[0]
+        # HUE LOCK: keep the generated detail/style (value channel) but clamp the
+        # colour to warm wood so it can never drift to grey/metal.
+        _hsv = np.asarray(WOOD_TEX.convert('HSV')).copy()
+        _hsv[..., 0] = 16                                     # wood hue
+        _hsv[..., 1] = np.clip(_hsv[..., 1].astype(int) + 70, 70, 190).astype(np.uint8)
+        from PIL import Image as _PILImage
+        WOOD_TEX = _PILImage.fromarray(_hsv, 'HSV').convert('RGB')
         WOOD_TEX.save(os.path.join(OUT, "_wood_tex.png"))
         del _pipe, _vae
         torch.cuda.empty_cache()
@@ -151,6 +161,47 @@ def frame_at(yline, frameH):
             b = beam([loop[i][0], yline + frameH, loop[i][2]],
                      [loop[j][0], yline + frameH, loop[j][2]], r=POLE_R * 0.8, shape='box')
             if b is not None: parts.append(b)
+    return parts
+
+def formwork_at(yline):
+    """CLOSED formwork band (coffrage) wrapping the building at the build line:
+    continuous vertical wooden panels following the contour all around (offset
+    hugging the wall), with top/bottom rails — hides the raw cut/junction between
+    the sliced shell and the frame, on every side."""
+    parts = []
+    # Band spans BELOW the line enough to swallow the triangle-jagged cut edge
+    # (face filter keeps faces under yline → jags extend downward), and a bit above.
+    y0, y1 = yline - 0.06 * H, yline + 0.035 * H
+    off = 0.012 * R; thick = POLE_R * 1.6
+    step = 0.045 * R
+    loops = contour_at(max(minY + 0.02 * H, yline - 0.04 * H))
+    for loop in loops:
+        c = loop.mean(axis=0)
+        d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(loop, axis=0), axis=1))]
+        if d[-1] < step * 2: continue
+        pts = []
+        for t in np.arange(0, d[-1], step):
+            i = min(int(np.searchsorted(d, t)), len(loop) - 1)
+            p = loop[i]
+            n = p - c; n[1] = 0
+            nl = np.linalg.norm(n)
+            q = p + (n / nl) * off if nl > 1e-6 else p
+            pts.append([q[0], q[2]])
+        n2 = len(pts)
+        if n2 < 3: continue
+        for k in range(n2):
+            a = pts[k]; b = pts[(k + 1) % n2]
+            seg = np.hypot(b[0] - a[0], b[1] - a[1])
+            if seg < 1e-6 or seg > step * 3: continue
+            panel = trimesh.creation.box(extents=[seg * 1.08, y1 - y0, thick])
+            ang = np.arctan2(b[1] - a[1], b[0] - a[0])
+            panel.apply_transform(trimesh.transformations.rotation_matrix(-ang, [0, 1, 0]))
+            panel.apply_translation([(a[0] + b[0]) / 2, (y0 + y1) / 2, (a[1] + b[1]) / 2])
+            panel.visual = trimesh.visual.ColorVisuals(panel, face_colors=wood([a[0], y0, a[1]]))
+            parts.append(panel)
+            for yw in (y0 + POLE_R, y1 - POLE_R):     # walers (rails haut/bas)
+                bb = beam([a[0], yw, a[1]], [b[0], yw, b[1]], r=POLE_R * 0.7)
+                if bb is not None: parts.append(bb)
     return parts
 
 def scaffold_to(topY):
@@ -279,6 +330,7 @@ for i in range(N):
                         k2 += 1
     except Exception:
         pass
+    woodp += formwork_at(yline)                       # coffrage: hides the jagged cut
     woodp += frame_at(yline, frameH=0.10 * H)        # the rising timber frame
     woodp += scaffold_to(yline)                       # scaffold up to the build level
     parts += texturize(woodp)                         # style-matched wood (or flat fallback)
