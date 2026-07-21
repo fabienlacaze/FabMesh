@@ -347,6 +347,8 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             # dedicated anti-cluster negative. Kept < 77 CLIP tokens.
             negative_prompt = (
                 "blurry, low quality, text, watermark, deformed, cropped, "
+                "cut off, out of frame, partial building, close-up, "
+                "building touching frame edges, "
                 "village, town, city, cityscape, suburb, neighborhood, "
                 "multiple buildings, rows of houses, many houses, "
                 "housing development, street, aerial view, bird's eye view, "
