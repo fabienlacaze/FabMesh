@@ -13385,6 +13385,7 @@ async function _meInitViewport() {
   canvas.addEventListener('mousedown', _meMouseDown);
   canvas.addEventListener('mousemove', _meMouseMove);
   canvas.addEventListener('mouseup', _meMouseUp);
+  canvas.addEventListener('mouseleave', () => { const c = document.getElementById('me-brush-cursor'); if (c) c.style.display = 'none'; });
   // Finish a lasso even if the button is released OUTSIDE the canvas.
   window.addEventListener('mouseup', () => { if (meState.lassoing) _meLassoFinish(); });
 }
@@ -13434,6 +13435,9 @@ function _meLoadMesh(meshPath) {
       meState.mesh.traverse(child => {
         if (child.isMesh && child.geometry) {
           child.geometry.computeVertexNormals();
+          // BVH so the paint/select brush visits only in-radius vertices instead
+          // of scanning all N (the O(N)-per-stamp full scan was the paint lag).
+          try { child.geometry.computeBoundsTree?.(); } catch (_) {}
         }
       });
     }, (err) => {
@@ -13655,6 +13659,31 @@ function _meUpdateLoupe(e) {
 }
 
 let _meLastBrushTime = 0;
+// Collect the vertex indices whose triangles fall within brush radius of ANY
+// brush point, using the geometry's BVH. Returns a Set, or null if no BVH (then
+// the caller full-scans). This turns the per-stamp cost from O(all verts) into
+// O(verts under the brush) — the fix for the "paint lags like crazy" report.
+const _meSphere = new THREE.Sphere();
+function _meVertsNearPoints(geom, pts, r) {
+  const bvh = geom.boundsTree;
+  if (!bvh) return null;
+  const set = new Set();
+  const index = geom.index;
+  for (const pt of pts) {
+    _meSphere.center.set(pt.x, pt.y, pt.z); _meSphere.radius = r;
+    bvh.shapecast({
+      intersectsBounds: (box) => _meSphere.intersectsBox(box),
+      intersectsTriangle: (_tri, triIndex) => {
+        const b = triIndex * 3;
+        if (index) { set.add(index.getX(b)); set.add(index.getX(b + 1)); set.add(index.getX(b + 2)); }
+        else { set.add(b); set.add(b + 1); set.add(b + 2); }
+        return false;
+      },
+    });
+  }
+  return set;
+}
+
 function _meMouseMove(e) {
   _meUpdateLoupe(e);   // magnifier tracks the cursor regardless of tool
   // Move gizmo active: let TransformControls handle everything.
@@ -13663,9 +13692,12 @@ function _meMouseMove(e) {
   if (meState.lassoing) { _meLassoMove(e); return; }
   // Dragging a symmetry-plane gizmo handle takes priority over the brush.
   if (meState.draggingPlane) { _meDragPlaneAxis(e); return; }
-  // Always update cursor position (cheap, no raycasting)
+  // Brush ring — only for the actual brush tools (paint/sculpt/select) and NOT
+  // while the colour pipette is armed. Otherwise it lingered as a stuck orange
+  // circle over the whole UI. Hidden on canvas leave (see _meLoadMesh binding).
   const cursor = document.getElementById('me-brush-cursor');
-  if (cursor) {
+  const brushMode = (meState.mode === 'paint' || meState.mode === 'sculpt' || meState.mode === 'select');
+  if (cursor && brushMode && !meState.pickMode) {
     // Size the ring to the REAL brush footprint in screen pixels (was a fixed
     // *500 that ignored zoom). Project the world-space brush radius at the
     // camera→target depth: pxPerWorld = canvasHeight / (2*dist*tan(fov/2)).
@@ -13684,6 +13716,8 @@ function _meMouseMove(e) {
     cursor.style.left = (e.clientX - screenSize / 2) + 'px';
     cursor.style.top = (e.clientY - screenSize / 2) + 'px';
     cursor.style.display = 'block';
+  } else if (cursor) {
+    cursor.style.display = 'none';
   }
   if (!meState.painting) return;
   // Throttle: max 15fps for brush (raycasting is expensive)
@@ -14184,7 +14218,8 @@ function _meApplyBrush(hit) {
     const colorAttr = geom.attributes.color;
     const c = new THREE.Color(meState.color);
     const pts = _meBrushPoints(point);  // main point + symmetry mirrors
-    for (let i = 0; i < pos.count; i++) {
+    const cand = _meVertsNearPoints(geom, pts, r);   // BVH: only in-radius verts
+    const paintVert = (i) => {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
       let distSq = Infinity;  // nearest brush point (main or mirrored)
       for (const pt of pts) {
@@ -14193,7 +14228,7 @@ function _meApplyBrush(hit) {
         const d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < distSq) distSq = d2;
       }
-      if (distSq > rSq) continue;
+      if (distSq > rSq) return;
       const dist = Math.sqrt(distSq);
       const falloff = 1 - (dist / r);
       const blend = falloff * falloff * strength;
@@ -14203,7 +14238,9 @@ function _meApplyBrush(hit) {
         cg * (1 - blend) + c.g * blend,
         cb * (1 - blend) + c.b * blend
       );
-    }
+    };
+    if (cand) { for (const i of cand) paintVert(i); }
+    else { for (let i = 0; i < pos.count; i++) paintVert(i); }
     colorAttr.needsUpdate = true;
   } else if (meState.mode === 'select') {
     const geom = hit.object.geometry;
@@ -14220,7 +14257,8 @@ function _meApplyBrush(hit) {
     const colorAttr = geom.attributes.color;
     const sel = _meSelMap(geom);   // index -> saved (paint) colour under the selection
     const pts = _meBrushPoints(point);  // main point + symmetry mirrors
-    for (let i = 0; i < pos.count; i++) {
+    const cand = _meVertsNearPoints(geom, pts, r);   // BVH: only in-radius verts
+    const selVert = (i) => {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
       let inBrush = false;
       for (const pt of pts) {
@@ -14228,17 +14266,16 @@ function _meApplyBrush(hit) {
         if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
         if (dx * dx + dy * dy + dz * dz <= rSq) { inBrush = true; break; }
       }
-      if (!inBrush) continue;
+      if (!inBrush) return;
       if (meState.selectErase) {
-        // Deselect: restore the painted colour we saved (NOT gray) so vertex
-        // paint survives an erase.
         if (sel.has(i)) { const o = sel.get(i); colorAttr.setXYZ(i, o[0], o[1], o[2]); sel.delete(i); }
       } else {
-        // Select: remember the current (painted) colour, then show cyan.
         if (!sel.has(i)) sel.set(i, [colorAttr.getX(i), colorAttr.getY(i), colorAttr.getZ(i)]);
         colorAttr.setXYZ(i, 0.0, 1.0, 1.0);
       }
-    }
+    };
+    if (cand) { for (const i of cand) selVert(i); }
+    else { for (let i = 0; i < pos.count; i++) selVert(i); }
     colorAttr.needsUpdate = true;
   }
 }
@@ -14740,6 +14777,7 @@ document.getElementById('me-paint-pick')?.addEventListener('click', async () => 
   // meshes). Fall back to the mesh vertex-colour pick mode if unavailable.
   if (typeof window.EyeDropper === 'function') {
     try {
+      const _c = document.getElementById('me-brush-cursor'); if (_c) _c.style.display = 'none';
       const res = await new window.EyeDropper().open();
       if (res && res.sRGBHex) {
         meState.color = res.sRGBHex;
