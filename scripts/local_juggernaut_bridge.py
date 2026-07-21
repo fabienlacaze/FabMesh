@@ -465,13 +465,17 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                 _s2 = next((x['score'] for x in _r2 if x['label'] == 'nsfw'), 0)
                 _nsfw_score = max(_s1, _s2)
                 _is_blocked = _nsfw_score > 0.5
-                # Fallback: skin ratio for cases both models miss
-                if not _is_blocked:
+                # Fallback: skin ratio — ONLY for LIVING subjects. Beige/tan stone,
+                # wood, sand and brick on buildings/vehicles/props legitimately trip
+                # the skin heuristic (an architectural arch got a false "NSFW"),
+                # so it's gated to character/creature/animal and the threshold is
+                # raised (0.35 → 0.55) to only fire on genuinely skin-dominated frames.
+                if not _is_blocked and _asset_type in ('character', 'creature', 'animal', 'humanoid'):
                     _arr = _np2.array(gen_img.convert('RGB').resize((256, 256))).astype(float)
                     _rv, _gv, _bv = _arr[:,:,0], _arr[:,:,1], _arr[:,:,2]
                     _skin = ((_rv>95)&(_gv>40)&(_bv>20)&(_rv>_gv)&(_rv>_bv)&((_rv-_gv)>15)&(_arr.max(2)-_arr.min(2)>15))
                     _skin_ratio = float(_skin.sum()) / (256*256)
-                    if _skin_ratio > 0.35:
+                    if _skin_ratio > 0.55:
                         _is_blocked = True
                         print(f"LOCAL_REALVIS: skin ratio {_skin_ratio:.0%} -> blocked", flush=True)
                 if _is_blocked:

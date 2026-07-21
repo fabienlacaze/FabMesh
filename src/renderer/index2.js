@@ -13480,6 +13480,9 @@ function _meSnapshot() {
         // Capture the index too — Delete rewrites it, so without this undo
         // can't bring deleted faces back.
         index: c.geometry.index ? c.geometry.index.array.slice() : null,
+        // Capture the SELECTION so undo restores it as a real selection (was
+        // wiped on restore → the reverted state looked selected but wasn't).
+        selSaved: c.geometry._selSaved ? new Map(c.geometry._selSaved) : null,
       });
     }
   });
@@ -13495,10 +13498,10 @@ function _meRestore(snapshot) {
       geom.attributes.color.needsUpdate = true;
     }
     if (s.index) geom.setIndex(new THREE.BufferAttribute(s.index, 1));
-    // Selection + adjacency caches reference indices/positions that just
-    // changed — drop them so they rebuild, and the restored faces aren't
-    // left "selected".
-    geom._selSaved = new Map();
+    // Restore the SELECTION captured in this snapshot (indices match the restored
+    // geometry) so undo brings back a REAL, actionable selection. Adjacency caches
+    // are position-derived → drop them to rebuild.
+    geom._selSaved = s.selSaved ? new Map(s.selSaved) : new Map();
     geom._posGroups = null;
     geom._posKeyByIndex = null;
     geom.computeVertexNormals();
