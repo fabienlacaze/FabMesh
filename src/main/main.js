@@ -4806,10 +4806,11 @@ ipcMain.handle('mesh-resize', async (_event, { meshPath, sx, sy, sz } = {}) => {
 // stages handler: a NEW mesh version is created so the original stays intact.
 ipcMain.handle('generate-explode-3d', async (event, opts) => {
   try {
-    const { meshPath, fragments } = (opts || {});
+    const { meshPath, fragments, fill } = (opts || {});
     if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
     if (!isPathAllowed(meshPath)) return { success: false, error: 'Mesh path not allowed' };
     const frags = Math.max(4, Math.min(200, parseInt(fragments, 10) || 24));
+    const fillArg = (fill === false) ? '0' : '1';   // solidify shards by default
     // ONE parts-mesh (shards named part_XX) — the viewer's live explode slider
     // (same as segmented meshes) blasts them apart. New version, original intact.
     const stem = path.basename(meshPath, path.extname(meshPath)).replace(/_explode_\d+$/i, '');
@@ -4818,7 +4819,7 @@ ipcMain.handle('generate-explode-3d', async (event, opts) => {
     if (!fs.existsSync(script)) return { success: false, error: 'explode_mesh_3d.py not found' };
     safeSend('ai3d-progress', '[Explode] Fracturing mesh into shards…');
     const ok = await new Promise((resolve) => {
-      const proc = execFile(_aiPython(), [script, meshPath, outPath, String(frags)],
+      const proc = execFile(_aiPython(), [script, meshPath, outPath, String(frags), fillArg],
         { timeout: 600000, maxBuffer: 64 * 1024 * 1024 }, (error) => resolve(!error));
       proc.stdout?.on('data', d => safeSend('ai3d-progress', `[Explode] ${d.toString()}`));
       proc.stderr?.on('data', d => safeSend('ai3d-progress', `[Explode] ${d.toString()}`));

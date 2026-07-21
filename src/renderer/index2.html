@@ -1576,7 +1576,10 @@
             Fragments <span id="ex3d-frags-val" class="slider-val">24</span>
           </label>
           <input type="range" id="ex3d-frags" min="6" max="80" value="24" />
-          <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">Geometric fabrication (~5 s). More fragments = finer shatter.</small>
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-1); margin-top:8px;">
+            <input type="checkbox" id="ex3d-fill" checked /> Fill interior (solid shards)
+          </label>
+          <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">Geometric fabrication (~5 s). More fragments = finer shatter. Fill interior gives the shards thickness so they read as solid debris (not hollow shells).</small>
         </div>
         <div class="modal-actions">
           <button class="ghost-btn" id="ex3d-cancel">Cancel</button>

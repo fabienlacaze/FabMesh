@@ -3733,11 +3733,12 @@ document.getElementById('ex3d-start')?.addEventListener('click', () => {
   const mp = p && (p.previewMeshPath || p.selectedMeshPath);
   if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
   const fragments = Math.max(6, Math.min(80, parseInt(document.getElementById('ex3d-frags')?.value, 10) || 24));
+  const fill = document.getElementById('ex3d-fill')?.checked !== false;
   const job = pushJob(`Explosion 3D: ${p.name}`, null,
-    { Éclats: fragments, Source: String(mp).split(/[\\/]/).pop() }, 6000, { projectName: p.name });
+    { Éclats: fragments, Plein: fill ? 'oui' : 'non', Source: String(mp).split(/[\\/]/).pop() }, 6000, { projectName: p.name });
   (async () => {
     try {
-      const r = await API.generateExplode3d({ meshPath: String(mp), fragments });
+      const r = await API.generateExplode3d({ meshPath: String(mp), fragments, fill });
       if (r && r.success && r.newPath) {
         completeJob(job.id, true);
         await reloadCurrentProject();
@@ -3833,11 +3834,25 @@ function _rzUpdateReadout() {
   }
 }
 
-function _rzOnScaleChange() { _rzBuildRulers(); _rzUpdateReadout(); }
+function _rzOnScaleChange() {
+  // Uniform mode keeps ALL gizmo handles visible (see _rzSetUniform) and enforces
+  // the lock here: whichever axis the user dragged is copied to the other two.
+  const uni = document.getElementById('rz-uniform')?.checked;
+  if (uni && rzState.model) {
+    const s = rzState.model.scale, last = rzState.lastScale || { x: 1, y: 1, z: 1 };
+    const dx = Math.abs(s.x - last.x), dy = Math.abs(s.y - last.y), dz = Math.abs(s.z - last.z);
+    let v = s.x;
+    if (dy >= dx && dy >= dz) v = s.y; else if (dz >= dx && dz >= dy) v = s.z;
+    if (v > 1e-4) s.set(v, v, v);
+  }
+  if (rzState.model) { const s = rzState.model.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z }; }
+  _rzBuildRulers(); _rzUpdateReadout();
+}
 
 function _rzSetUniform(on) {
   if (!rzState.gizmo) return;
-  rzState.gizmo.showX = rzState.gizmo.showY = rzState.gizmo.showZ = !on;  // only the XYZ handle when uniform
+  rzState.gizmo.showX = rzState.gizmo.showY = rzState.gizmo.showZ = true;   // gizmo always fully visible
+  if (rzState.model) { const s = rzState.model.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z }; }
 }
 
 function _rzApplyDimInput(axis, value) {
@@ -3918,16 +3933,22 @@ function openResizeTool() {
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
-    model.position.sub(center);                 // centre at origin so scaling stays centred
-    rzState.model = model; rzState.orig = size.clone();
-    scene.add(model);
+    // Put the mesh in a PIVOT group offset so the mesh centre sits at the group
+    // origin. Scaling the GROUP then scales around the mesh centre → the mesh
+    // never drifts and the origin-centred rulers stay aligned at any scale.
+    model.position.sub(center);
+    const pivot = new THREE.Group();
+    pivot.add(model);
+    rzState.model = pivot; rzState.orig = size.clone();
+    rzState.lastScale = { x: 1, y: 1, z: 1 };
+    scene.add(pivot);
     const diag = size.length() || 1;
     camera.position.set(diag * 0.9, diag * 0.7, diag * 1.4);
     camera.near = diag / 1000; camera.far = diag * 100; camera.updateProjectionMatrix();
     controls.target.set(0, 0, 0); controls.update();
-    // scale gizmo
+    // scale gizmo (attached to the pivot — all axis handles always visible)
     const gizmo = new TransformControls(camera, renderer.domElement);
-    gizmo.setMode('scale'); gizmo.setSize(0.9); gizmo.attach(model);
+    gizmo.setMode('scale'); gizmo.setSize(0.95); gizmo.attach(pivot);
     gizmo.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
     gizmo.addEventListener('objectChange', _rzOnScaleChange);
     scene.add(gizmo.getHelper ? gizmo.getHelper() : gizmo);
@@ -11165,6 +11186,24 @@ function openMeshToolModal(toolName) {
       }
       body.appendChild(wrap);
     });
+    // "↺ Reset" — restore every param to its default (e.g. zero the pivot X/Y/Z
+    // offsets) and re-preview. Shown for tools that have sliders.
+    if (schema.params.some((s) => s.type === 'range')) {
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'secondary-btn';
+      resetBtn.style.cssText = 'margin-top:6px; padding:6px 8px; font-size:12px; width:100%;';
+      resetBtn.textContent = '↺ ' + _i18nT('Reset offsets');
+      resetBtn.onclick = () => {
+        body.querySelectorAll('[data-param-id]').forEach((el) => {
+          const spec = schema.params.find((s) => s.id === el.dataset.paramId);
+          if (!spec) return;
+          if (el.type === 'checkbox') el.checked = !!spec.default;
+          else el.value = String(spec.default);
+          el.dispatchEvent(new Event('input', { bubbles: true }));   // reuse listeners: updates label + preview
+        });
+      };
+      body.appendChild(resetBtn);
+    }
   }
 
   const close = () => {

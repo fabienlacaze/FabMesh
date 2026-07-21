@@ -49,7 +49,11 @@
         "Fracture le mesh en éclats. Crée une nouvelle version dont le viewer a un slider d'explosion en direct (le même contrôle que les meshes segmentés) — glisse-le pour écarter les éclats en continu. Texture préservée.",
       'Fragments': 'Éclats',
       'Geometric fabrication (~5 s). More fragments = finer shatter.': 'Fabrication géométrique (~5 s). Plus d\'éclats = éclatement plus fin.',
+      'Fill interior (solid shards)': "Remplir l'intérieur (éclats pleins)",
+      'Geometric fabrication (~5 s). More fragments = finer shatter. Fill interior gives the shards thickness so they read as solid debris (not hollow shells).':
+        "Fabrication géométrique (~5 s). Plus d'éclats = éclatement plus fin. Remplir l'intérieur donne de l'épaisseur aux éclats pour qu'ils ressemblent à de vrais débris pleins (pas des coques creuses).",
       'Detonate': 'Faire exploser',
+      'Reset offsets': 'Réinitialiser les décalages',
       // ---- Resize / dimension ----
       'Resize / dimension': 'Redimensionner',
       'Drag the gizmo to scale (uniform, or one axis at a time), or type target dimensions. The rulers show the live size. Apply bakes a new scaled version — texture preserved.':
