@@ -12,6 +12,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { Viewer3D } from './lib/Viewer3D.js';
 
 const API = window.meshyAPI;
@@ -3337,6 +3338,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     pivot: 'bottom', // 'bottom' | 'center' | 'top'
     showPivot: false,
     landmarksVisible: true, // toggled by the lm-show toolbar button
+    segColors: true, // segmented/fractured mesh: show part colours (vs texture)
   };
 
   const BG_COLORS = {
@@ -3702,6 +3704,94 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     viewer.controls.update();
   }
 
+  // ── Explode (segmented / fractured meshes: named part_XX submeshes) ──
+  // Blast each part outward from the model centre — same control the desktop
+  // uses for segmented meshes AND the explosion tool's part_XX output.
+  function _explodeSetup(model) {
+    if (!model) return null;
+    if (model.userData._explode) return model.userData._explode;
+    model.updateWorldMatrix(true, true);
+    const meshes = [];
+    model.traverse(o => { if (o.isMesh && o.geometry) meshes.push(o); });
+    if (meshes.length < 2) { model.userData._explode = { parts: [], spread: 0 }; return model.userData._explode; }
+    const gbox = new THREE.Box3().setFromObject(model);
+    const gc = gbox.getCenter(new THREE.Vector3());
+    const spread = gbox.getSize(new THREE.Vector3()).length() * 0.5;
+    const parts = [];
+    const tmp = new THREE.Box3(), pc = new THREE.Vector3();
+    for (const m of meshes) {
+      tmp.setFromObject(m); tmp.getCenter(pc);
+      const dir = pc.clone().sub(gc);
+      if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0); else dir.normalize();
+      const parent = m.parent || model;
+      const q = new THREE.Quaternion(); parent.getWorldQuaternion(q).invert();
+      const s = new THREE.Vector3(); parent.getWorldScale(s);
+      const invScale = 1 / (Math.max(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z)) || 1);
+      parts.push({ mesh: m, base: m.position.clone(), dir: dir.applyQuaternion(q), invScale });
+    }
+    model.userData._explode = { parts, spread };
+    return model.userData._explode;
+  }
+  function applyExplode(viewer, factor01) {
+    const model = viewer && viewer.model;
+    const e = _explodeSetup(model);
+    if (!e || !e.parts.length) return;
+    const f = Math.max(0, Math.min(1, factor01));
+    for (const p of e.parts) {
+      p.mesh.position.copy(p.base).addScaledVector(p.dir, f * e.spread * p.invScale);
+    }
+  }
+  // Toggle segmentation part colours by material SWAP. ON => each part gets a
+  // distinct solid colour (part map). OFF => restore the original textured material.
+  function applySegColors(viewer, show) {
+    const model = viewer && viewer.model;
+    if (!model) return;
+    let seq = 0;
+    model.traverse(o => {
+      if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+      let pi = seq++;
+      const mm = /part[_-]?(\d+)/i.exec(o.name || (o.parent && o.parent.name) || '');
+      if (mm) pi = parseInt(mm[1], 10);
+      if (!o.userData._segTexMat) o.userData._segTexMat = o.material;
+      if (!o.userData._segColorMat) {
+        const col = new THREE.Color().setHSL((pi * 0.61803398875) % 1, 0.85, 0.5);
+        o.userData._segColorMat = new THREE.MeshStandardMaterial({
+          color: col, roughness: 0.85, metalness: 0.0,
+          emissive: col.clone().multiplyScalar(0.12),
+        });
+      }
+      const target = show ? o.userData._segColorMat : o.userData._segTexMat;
+      target.transparent = false; target.opacity = 1; target.depthWrite = true; target.needsUpdate = true;
+      o.material = target;
+    });
+  }
+  // Only show the explode/segcolors controls for a SEGMENTED or fractured mesh:
+  // _isSegmented flag OR >=2 part_XX submeshes. Reset per model.
+  function refreshExplodeUI(viewer) {
+    const wrap = toolbarEl.querySelector('[data-explode-wrap]');
+    if (!wrap) return;
+    const model = viewer && viewer.model;
+    let nParts = 0;
+    if (model) model.traverse(o => {
+      if (o.isMesh && o.geometry && /part[_-]?\d+/i.test(o.name || (o.parent && o.parent.name) || '')) nParts++;
+    });
+    const seg = !!(model && model.userData && model.userData._isSegmented) || nParts >= 2;
+    wrap.style.display = seg ? 'inline-flex' : 'none';
+    const sl = wrap.querySelector('input[data-act="explode"]');
+    if (sl) { sl.value = 0; sl.style.setProperty('--val', '0%'); }
+    const segBtn = wrap.querySelector('button[data-act="segcolors"]');
+    if (segBtn) segBtn.classList.toggle('active', state.segColors !== false);
+    if (seg) {
+      model.traverse(o => {
+        if (o.isMesh && o.geometry && !o.geometry.getAttribute('normal')) {
+          o.geometry.computeVertexNormals();
+        }
+      });
+      applyExplode(viewer, 0);
+      applySegColors(viewer, state.segColors !== false);
+    }
+  }
+
   // Event bindings on the toolbar
   toolbarEl.querySelectorAll('button[data-act], select[data-act], input[data-act]').forEach(el => {
     const act = el.dataset.act;
@@ -3718,6 +3808,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
         if (act === 'shadows') { state.shadows = !state.shadows; el.classList.toggle('active', state.shadows); applyShadows(viewer); return; }
         if (act === 'xray') { state.xray = !state.xray; el.classList.toggle('active', state.xray); applyXray(viewer); return; }
         if (act === 'pivot-show') { state.showPivot = !state.showPivot; el.classList.toggle('active', state.showPivot); ensurePivotAxes(viewer); return; }
+        if (act === 'segcolors') { state.segColors = state.segColors === false ? true : false; el.classList.toggle('active', state.segColors); applySegColors(viewer, state.segColors); return; }
         if (act === 'lm-show') {
           // Toggle visibility of all placed landmark markers (in every scene —
           // the markers object is a global map, each entry is a THREE.Mesh that
@@ -3760,6 +3851,13 @@ function createMeshViewerControls(toolbarEl, getViewer) {
         state.light = parseInt(el.value) / 100;
         applyLight(viewer);
       });
+    } else if (el.type === 'range' && act === 'explode') {
+      el.addEventListener('input', () => {
+        el.style.setProperty('--val', el.value + '%');
+        const viewer = getViewer();
+        if (!viewer) return;
+        applyExplode(viewer, (parseFloat(el.value) || 0) / 100);
+      });
     }
   });
 
@@ -3778,6 +3876,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
       applyShadows(viewer);
       applyPivot(viewer);
       ensurePivotAxes(viewer);
+      refreshExplodeUI(viewer);
     }
   };
 }
@@ -10916,6 +11015,308 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
     }
   })();
 });
+
+// ============================================================
+// EXPLOSION / DESTRUCTION 3D — cloud port. Fracture the mesh into named shards
+// (part_XX) via Modal (/api/mesh-op op_type='explode'); the viewer's live
+// explode slider blasts the shards outward. Creates a NEW mesh version.
+// ============================================================
+document.getElementById('ws-mesh-explode-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Generate or select a mesh first.', 'error'); return; }
+  document.getElementById('modal-explode-options')?.classList.remove('hidden');
+});
+document.getElementById('ex3d-frags')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-frags-val'); if (el) el.textContent = e.target.value; });
+document.getElementById('ex3d-cancel')?.addEventListener('click', () => { document.getElementById('modal-explode-options')?.classList.add('hidden'); });
+document.getElementById('ex3d-start')?.addEventListener('click', () => {
+  document.getElementById('modal-explode-options')?.classList.add('hidden');
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Generate or select a mesh first.', 'error'); return; }
+  const fragments = Math.max(6, Math.min(80, parseInt(document.getElementById('ex3d-frags')?.value, 10) || 24));
+  const job = pushJob(`Explosion 3D: ${p.name}`, null,
+    { Shards: fragments, Source: String(mp).split(/[\\/]/).pop().split('?')[0] }, 8000, { projectName: p.name });
+  (async () => {
+    try {
+      const r = await API.generateExplode3d({ meshPath: String(mp), fragments, projectName: p.name });
+      if (r && r.success && r.newPath) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+        const np = state.currentProject;
+        if (np) { np.previewMeshPath = r.newPath; try { showStep2Preview({ path: r.newPath, filename: r.filename }); } catch (_) {} }
+        showToast('New "explosion" version — use the viewer explode slider.', 'success', 3200);
+      } else {
+        completeJob(job.id, false);
+        customError((r && r.error) || 'unknown', 'Explosion 3D — failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      customError(e?.message || String(e), 'Explosion 3D — error');
+    }
+  })();
+});
+// ============================================================
+// RESIZE / DIMENSION tool — cloud port. Interactive scale gizmo + rulers.
+// Orbit the mesh, drag the scale gizmo (uniform or per-axis) or type target
+// dimensions; on-screen rulers show the live size. Apply bakes a new scaled
+// version (texture preserved) via /api/mesh-op op_type='resize'. Self-contained
+// THREE modal (own renderer) — independent of the main Viewer3D.
+// ============================================================
+const rzState = {
+  renderer: null, scene: null, camera: null, controls: null, gizmo: null,
+  model: null, orig: null, rulers: null, labels: {}, raf: null, meshPath: null,
+  ro: null, editing: false,
+};
+
+function _rzDims() {
+  const s = rzState.model.scale, o = rzState.orig;
+  return { x: o.x * s.x, y: o.y * s.y, z: o.z * s.z };
+}
+
+// Mesh units are treated as METERS (glTF standard). The unit selector only
+// changes DISPLAY + the meaning of typed target dimensions.
+const RZ_UNITS = {
+  cm: { f: 100, s: 'cm', d: 1 }, mm: { f: 1000, s: 'mm', d: 0 },
+  m: { f: 1, s: 'm', d: 3 }, in: { f: 39.3701, s: 'in', d: 2 },
+};
+function _rzUnit() { return RZ_UNITS[document.getElementById('rz-unit')?.value] || RZ_UNITS.cm; }
+
+function _rzBuildRulers() {
+  if (!rzState.scene) return;
+  if (rzState.rulers) { rzState.scene.remove(rzState.rulers); rzState.rulers.traverse(n => { n.geometry?.dispose?.(); n.material?.dispose?.(); }); }
+  const g = new THREE.Group();
+  const d = _rzDims();
+  const hx = d.x / 2, hy = d.y / 2, hz = d.z / 2;
+  const box = new THREE.Box3(new THREE.Vector3(-hx, -hy, -hz), new THREE.Vector3(hx, hy, hz));
+  const bh = new THREE.Box3Helper(box, 0x5a6580); bh.material.transparent = true; bh.material.opacity = 0.6; g.add(bh);
+  const mk = (a, b, color) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+    return new THREE.Line(geo, new THREE.LineBasicMaterial({ color, linewidth: 2 }));
+  };
+  const tick = (p, dir, len, color) => {
+    const a = p.clone().addScaledVector(dir, -len), b = p.clone().addScaledVector(dir, len);
+    return mk(a, b, color);
+  };
+  const off = Math.max(hx, hy, hz) * 0.06 + 1e-4;
+  const y0 = -hy - off, z0 = hz + off;
+  g.add(mk(new THREE.Vector3(-hx, y0, z0), new THREE.Vector3(hx, y0, z0), 0xff5a5a));
+  const x0 = -hx - off;
+  g.add(mk(new THREE.Vector3(x0, -hy, z0), new THREE.Vector3(x0, hy, z0), 0x5ad07a));
+  const x1 = hx + off;
+  g.add(mk(new THREE.Vector3(x1, y0, -hz), new THREE.Vector3(x1, y0, hz), 0x6aa6ff));
+  for (let i = 0; i <= 10; i++) {
+    const tx = -hx + (d.x) * i / 10; g.add(tick(new THREE.Vector3(tx, y0, z0), new THREE.Vector3(0, 1, 0), off * 0.5, 0xff5a5a));
+    const ty = -hy + (d.y) * i / 10; g.add(tick(new THREE.Vector3(x0, ty, z0), new THREE.Vector3(1, 0, 0), off * 0.5, 0x5ad07a));
+    const tz = -hz + (d.z) * i / 10; g.add(tick(new THREE.Vector3(x1, y0, tz), new THREE.Vector3(1, 0, 0), off * 0.5, 0x6aa6ff));
+  }
+  g._mid = {
+    x: new THREE.Vector3(0, y0, z0), y: new THREE.Vector3(x0, 0, z0), z: new THREE.Vector3(x1, y0, 0),
+  };
+  rzState.rulers = g;
+  rzState.scene.add(g);
+}
+
+function _rzUpdateReadout() {
+  const d = _rzDims(); const u = _rzUnit();
+  const ro = document.getElementById('rz-readout');
+  const f = (v) => (v * u.f).toFixed(u.d);
+  if (ro) ro.innerHTML = `<span style="color:#ff8a8a">W ${f(d.x)}</span>  ·  <span style="color:#8ae0a2">H ${f(d.y)}</span>  ·  <span style="color:#9ac2ff">D ${f(d.z)}</span>  <span style="opacity:.65">${u.s}</span>`;
+  if (!rzState.editing) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v * u.f).toFixed(u.d); };
+    set('rz-dim-x', d.x); set('rz-dim-y', d.y); set('rz-dim-z', d.z);
+  }
+}
+
+function _rzOnScaleChange() {
+  // Fires WHILE the gizmo is dragged — do NOT mutate the scale here (that fought
+  // the gizmo and made the viewer flicker); just refresh rulers + readout.
+  _rzBuildRulers(); _rzUpdateReadout();
+}
+
+function _rzEnforceUniform() {
+  // Called on gizmo drag-end. If Uniform is on, copy whichever axis the user
+  // changed most to the other two, in ONE clean step (no flicker).
+  if (!rzState.model) return;
+  if (document.getElementById('rz-uniform')?.checked) {
+    const s = rzState.model.scale, last = rzState.lastScale || { x: 1, y: 1, z: 1 };
+    const dx = Math.abs(s.x - last.x), dy = Math.abs(s.y - last.y), dz = Math.abs(s.z - last.z);
+    let v = s.x;
+    if (dy >= dx && dy >= dz) v = s.y; else if (dz >= dx && dz >= dy) v = s.z;
+    if (v > 1e-4) s.set(v, v, v);
+  }
+  const s = rzState.model.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z };
+  _rzBuildRulers(); _rzUpdateReadout();
+}
+
+function _rzSetUniform(on) {
+  if (!rzState.gizmo) return;
+  rzState.gizmo.showX = rzState.gizmo.showY = rzState.gizmo.showZ = true;   // gizmo always fully visible
+  if (rzState.model) { const s = rzState.model.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z }; }
+}
+
+function _rzApplyDimInput(axis, value) {
+  const u = _rzUnit();
+  const v = Number(value) / u.f;   // display unit → mesh units (metres)
+  if (!isFinite(v) || v <= 0) return;
+  const o = rzState.orig, m = rzState.model;
+  const uni = document.getElementById('rz-uniform')?.checked;
+  const factor = v / (axis === 'x' ? o.x : axis === 'y' ? o.y : o.z);
+  if (uni) m.scale.setScalar(factor);
+  else m.scale[axis] = factor;
+  _rzOnScaleChange();
+}
+
+function _rzLabelsTick() {
+  if (!rzState.rulers || !rzState.rulers._mid || !rzState.camera) return;
+  const vp = document.getElementById('rz-viewport'); if (!vp) return;
+  const w = vp.clientWidth, h = vp.clientHeight, d = _rzDims(), u = _rzUnit();
+  const place = (key, val, color) => {
+    let el = rzState.labels[key];
+    if (!el) {
+      el = document.createElement('div');
+      el.style.cssText = 'position:absolute; transform:translate(-50%,-50%); font:600 12px monospace; padding:1px 5px; border-radius:5px; background:rgba(0,0,0,0.6); pointer-events:none; white-space:nowrap;';
+      vp.appendChild(el); rzState.labels[key] = el;
+    }
+    const p = rzState.rulers._mid[key].clone().project(rzState.camera);
+    el.style.left = ((p.x * 0.5 + 0.5) * w) + 'px';
+    el.style.top = ((-p.y * 0.5 + 0.5) * h) + 'px';
+    el.style.color = color; el.textContent = (val * u.f).toFixed(u.d) + ' ' + u.s;
+  };
+  place('x', d.x, '#ff8a8a'); place('y', d.y, '#8ae0a2'); place('z', d.z, '#9ac2ff');
+}
+
+function _rzCleanup() {
+  if (rzState.raf) cancelAnimationFrame(rzState.raf); rzState.raf = null;
+  try { rzState.ro?.disconnect?.(); } catch (_) {} rzState.ro = null;
+  try { rzState.controls?.dispose?.(); } catch (_) {}
+  try { if (rzState.gizmo) { rzState.gizmo.detach(); rzState.gizmo.dispose?.(); } } catch (_) {}
+  try { rzState.renderer?.dispose?.(); } catch (_) {}
+  for (const k in rzState.labels) { try { rzState.labels[k].remove(); } catch (_) {} }
+  rzState.labels = {};
+  if (rzState.scene) { try { rzState.scene.traverse(n => { n.geometry?.dispose?.(); if (n.material) { (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => m.dispose?.()); } }); } catch (_) {} }
+  rzState.renderer = rzState.scene = rzState.camera = rzState.controls = rzState.gizmo = rzState.model = rzState.rulers = null;
+}
+
+function openResizeTool() {
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Generate or select a mesh first.', 'error'); return; }
+  rzState.meshPath = String(mp);
+  const modal = document.getElementById('modal-resize');
+  const canvas = document.getElementById('rz-canvas');
+  const vp = document.getElementById('rz-viewport');
+  if (!modal || !canvas || !vp) return;
+  modal.classList.remove('hidden');
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0b14);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 5000);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.15));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(3, 5, 4); scene.add(dl);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  Object.assign(rzState, { renderer, scene, camera, controls });
+
+  const resize = () => {
+    const w = vp.clientWidth || 640, h = vp.clientHeight || 420;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  resize();
+  rzState.ro = new ResizeObserver(resize); rzState.ro.observe(vp);
+
+  // Cloud: meshPath IS a URL (R2) — load it directly (no file:/// prefix).
+  const url = String(rzState.meshPath);
+  new GLTFLoader().load(url, (gltf) => {
+    const model = gltf.scene || gltf.scenes[0];
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    // PIVOT group centred on the mesh so scaling stays centred (rulers aligned).
+    model.position.sub(center);
+    const pivot = new THREE.Group();
+    pivot.add(model);
+    rzState.model = pivot; rzState.orig = size.clone();
+    rzState.lastScale = { x: 1, y: 1, z: 1 };
+    scene.add(pivot);
+    const diag = size.length() || 1;
+    camera.position.set(diag * 0.9, diag * 0.7, diag * 1.4);
+    camera.near = diag / 1000; camera.far = diag * 100; camera.updateProjectionMatrix();
+    controls.target.set(0, 0, 0); controls.update();
+    const gizmo = new TransformControls(camera, renderer.domElement);
+    gizmo.setMode('scale'); gizmo.setSize(0.95); gizmo.attach(pivot);
+    gizmo.addEventListener('dragging-changed', (e) => {
+      controls.enabled = !e.value;
+      if (e.value) {
+        const s = pivot.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z };
+      } else {
+        _rzEnforceUniform();
+      }
+    });
+    gizmo.addEventListener('objectChange', _rzOnScaleChange);
+    scene.add(gizmo.getHelper ? gizmo.getHelper() : gizmo);
+    rzState.gizmo = gizmo;
+    _rzSetUniform(document.getElementById('rz-uniform')?.checked);
+    _rzBuildRulers(); _rzUpdateReadout();
+  }, undefined, (err) => {
+    showToast('Mesh load failed: ' + (err?.message || err), 'error');
+  });
+
+  const loop = () => {
+    rzState.raf = requestAnimationFrame(loop);
+    controls.update(); _rzLabelsTick();
+    renderer.render(scene, camera);
+  };
+  loop();
+}
+
+document.getElementById('ws-mesh-resize-btn')?.addEventListener('click', openResizeTool);
+document.getElementById('rz-uniform')?.addEventListener('change', (e) => _rzSetUniform(e.target.checked));
+document.getElementById('rz-unit')?.addEventListener('change', () => { if (rzState.model) _rzUpdateReadout(); });
+['x', 'y', 'z'].forEach((ax) => {
+  const el = document.getElementById('rz-dim-' + ax);
+  el?.addEventListener('focus', () => { rzState.editing = true; });
+  el?.addEventListener('blur', () => { rzState.editing = false; });
+  el?.addEventListener('change', (e) => { _rzApplyDimInput(ax, e.target.value); });
+});
+document.getElementById('rz-reset')?.addEventListener('click', () => { if (rzState.model) { rzState.model.scale.set(1, 1, 1); _rzOnScaleChange(); } });
+document.getElementById('rz-x2')?.addEventListener('click', () => { if (rzState.model) { rzState.model.scale.multiplyScalar(2); _rzOnScaleChange(); } });
+document.getElementById('rz-half')?.addEventListener('click', () => { if (rzState.model) { rzState.model.scale.multiplyScalar(0.5); _rzOnScaleChange(); } });
+function _rzCloseModal() { document.getElementById('modal-resize')?.classList.add('hidden'); _rzCleanup(); }
+document.getElementById('rz-cancel')?.addEventListener('click', _rzCloseModal);
+document.getElementById('rz-close')?.addEventListener('click', _rzCloseModal);
+document.getElementById('rz-apply')?.addEventListener('click', () => {
+  if (!rzState.model || !rzState.meshPath) return;
+  const s = rzState.model.scale;
+  const sx = s.x, sy = s.y, sz = s.z;
+  if (Math.abs(sx - 1) < 1e-4 && Math.abs(sy - 1) < 1e-4 && Math.abs(sz - 1) < 1e-4) {
+    showToast('No size change.', 'info'); return;
+  }
+  const mp = rzState.meshPath;
+  _rzCloseModal();
+  const p = state.currentProject;
+  const job = pushJob(`Resize: ${p?.name || ''}`, null, { Scale: `${sx.toFixed(2)}×${sy.toFixed(2)}×${sz.toFixed(2)}` }, 4000, { projectName: p?.name });
+  (async () => {
+    try {
+      const r = await API.resizeMesh({ meshPath: mp, sx, sy, sz, projectName: p?.name });
+      if (r && r.success && r.newPath) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+        const np = state.currentProject;
+        if (np) { np.previewMeshPath = r.newPath; try { showStep2Preview({ path: r.newPath, filename: r.filename }); } catch (_) {} }
+        showToast('New resized version created.', 'success', 2500);
+      } else {
+        completeJob(job.id, false);
+        customError((r && r.error) || 'unknown', 'Resize — failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      customError(e?.message || String(e), 'Resize — error');
+    }
+  })();
+});
+
 function _showMeshStagesBar(stages) {
   const bar = document.getElementById('ws-mesh-stages-bar');
   if (!bar || !Array.isArray(stages) || stages.length < 2) return;

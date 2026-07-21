@@ -2182,6 +2182,55 @@
       } catch (e) { return { success: false, stages: [], error: String(e) }; }
     },
 
+    // Resize / dimension tool (per-axis scale) — cloud port of the desktop
+    // scripts/scale_mesh.py via /api/mesh-op op_type='resize'. meshPath on cloud
+    // IS a URL. Returns { success, newPath } like the desktop mesh-resize handler.
+    resizeMesh: async ({ meshPath, meshUrl, sx, sy, sz, projectName } = {}) => {
+      const url = meshUrl || meshPath;
+      if (!url) return { success: false, error: 'meshPath or meshUrl required' };
+      try {
+        const r = await postJSON('/api/mesh-op', {
+          meshUrl: url, opType: 'resize',
+          params: { sx: Number(sx) || 1, sy: Number(sy) || 1, sz: Number(sz) || 1 },
+          projectName: projectName || window.state?.currentProject?.name || null,
+        });
+        if (r?.success || r?.ok) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          const np = r.newPath || r.path || r.mesh_url;
+          return { success: true, newPath: np, path: np,
+                   filename: String(np || '').split('?')[0].split('/').pop() || 'resized.glb' };
+        }
+        return { success: false, error: r?.error || 'resize failed' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+
+    // Explosion / destruction tool — cloud port of the desktop
+    // scripts/explode_mesh_3d.py via /api/mesh-op op_type='explode'. Outputs ONE
+    // GLB with part_XX submeshes driven by the viewer's explode slider (no baked
+    // stages). `fill` is accepted for desktop parity but ignored (thin shards).
+    generateExplode3d: async ({ meshPath, meshUrl, fragments, projectName } = {}) => {
+      const url = meshUrl || meshPath;
+      if (!url) return { success: false, error: 'meshPath or meshUrl required' };
+      try {
+        const r = await postJSON('/api/mesh-op', {
+          meshUrl: url, opType: 'explode',
+          params: { fragments: Number(fragments) || 24 },
+          projectName: projectName || window.state?.currentProject?.name || null,
+        });
+        if (r?.success || r?.ok) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          const np = r.newPath || r.path || r.mesh_url;
+          return { success: true, newPath: np, path: np, operation: 'explode',
+                   filename: String(np || '').split('?')[0].split('/').pop() || 'explode.glb' };
+        }
+        return { success: false, error: r?.error || 'explode failed' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+
+    // The cloud explosion outputs a SINGLE parts-mesh (no baked stage GLBs on
+    // disk), so there is nothing to poll — return the no-stages contract.
+    checkExplodeDir: async () => ({ success: false, exists: false, stages: [] }),
+
     meshTool: async ({ operation, meshPath, meshUrl, meshId, imagePath, params, projectName } = {}) => {
       // 'retexture' is the desktop's quick re-texture (UV reproject via
       // Blender). Cloud has no Blender → we do a best-effort

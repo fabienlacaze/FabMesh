@@ -625,6 +625,93 @@ def watertight(glb_bytes: bytes, resolution: int = 128) -> bytes:
     return _export(trimesh.Scene(wt))
 
 
+def resize(glb_bytes: bytes, sx: float = 1.0, sy: float = 1.0, sz: float = 1.0) -> bytes:
+    """Per-axis scale baked into the geometry (texture/UVs preserved). Mirror of
+    the desktop scripts/scale_mesh.py — the manual Resize / dimension tool."""
+    import numpy as np
+    # guard against degenerate scales
+    sx = max(1e-3, min(float(sx), 1000.0))
+    sy = max(1e-3, min(float(sy), 1000.0))
+    sz = max(1e-3, min(float(sz), 1000.0))
+    scene = _load_scene(glb_bytes)
+    M = np.diag([sx, sy, sz, 1.0])
+    scene.apply_transform(M)   # scene or mesh: scales geometry, keeps UVs
+    return _export(scene)
+
+
+def explode(glb_bytes: bytes, fragments: int = 24) -> bytes:
+    """Fracture the mesh into surface-Voronoi shards, exported as ONE GLB whose
+    shards are named submeshes part_00, part_01, … at their ORIGINAL positions —
+    so the viewer's live explode slider (same control as segmented meshes) can
+    blast them outward with no baked stages. Texture preserved: each shard keeps
+    the original vertices/UVs and shares the baked texture (no re-bake); face
+    colour fallback otherwise. Mirror of desktop scripts/explode_mesh_3d.py.
+    Pure geometry, deterministic (seed 1234)."""
+    import numpy as np
+    import trimesh
+    frags = max(4, min(int(fragments), 200))
+    rng = np.random.RandomState(1234)
+
+    scene = _load_scene(glb_bytes)
+    geoms = _meshes(scene)
+    mesh = geoms[0] if len(geoms) == 1 else trimesh.util.concatenate(geoms)
+    mesh = mesh.copy()
+
+    V = np.asarray(mesh.vertices)
+    F = np.asarray(mesh.faces)
+
+    # Texture (preferred) or per-face colours (fallback) — carried onto every shard.
+    TEX = None; UV = None; FACE_COLORS = None
+    try:
+        vis = mesh.visual
+        if isinstance(vis, trimesh.visual.TextureVisuals) and vis.uv is not None:
+            UV = np.asarray(vis.uv)
+            m = getattr(vis, 'material', None)
+            TEX = getattr(m, 'baseColorTexture', None) or getattr(m, 'image', None)
+        if TEX is None:
+            fc = getattr(vis, 'face_colors', None)
+            if fc is not None and len(fc) == len(F):
+                FACE_COLORS = np.asarray(fc)
+    except Exception:
+        pass
+    if TEX is None and FACE_COLORS is None:
+        FACE_COLORS = np.tile([170, 170, 175, 255], (len(F), 1)).astype(np.uint8)
+
+    MAT = trimesh.visual.material.PBRMaterial(baseColorTexture=TEX) if TEX is not None else None
+
+    # Fracture: assign each face to its nearest random seed (surface Voronoi).
+    fc_centroids = V[F].mean(axis=1)
+    k = min(frags, len(F))
+    seed_idx = rng.choice(len(F), k, replace=False)
+    seeds = fc_centroids[seed_idx]
+    try:
+        from scipy.spatial import cKDTree
+        labels = cKDTree(seeds).query(fc_centroids)[1]
+    except Exception:
+        d = np.linalg.norm(fc_centroids[:, None, :] - seeds[None, :, :], axis=2)
+        labels = d.argmin(axis=1)
+
+    out = trimesh.Scene()
+    n = 0
+    for lab in np.unique(labels):
+        face_ids = np.where(labels == lab)[0]
+        if len(face_ids) == 0:
+            continue
+        faces_k = F[face_ids]
+        uniq, inv = np.unique(faces_k, return_inverse=True)
+        inv = np.asarray(inv).ravel()   # numpy 2.x may return inv with input shape
+        shard = trimesh.Trimesh(V[uniq], inv.reshape(-1, 3), process=False)
+        if MAT is not None and UV is not None:
+            shard.visual = trimesh.visual.TextureVisuals(uv=UV[uniq], material=MAT)
+        elif FACE_COLORS is not None:
+            shard.visual = trimesh.visual.ColorVisuals(shard, face_colors=FACE_COLORS[face_ids])
+        name = f"part_{n:02d}"
+        out.add_geometry(shard, node_name=name, geom_name=name)
+        n += 1
+
+    return _export(out)
+
+
 OPS = {
     'smooth':          smooth,
     'decimate':        decimate,
@@ -637,6 +724,8 @@ OPS = {
     'material':        normalize_material,
     'material_adjust': material_adjust,  # 6-slider PBR tweak (mirror of scripts/mesh_material_adjust.py)
     'retex_swap':      retex_swap_atlas,
+    'resize':          resize,     # per-axis scale (manual Resize/dimension tool)
+    'explode':         explode,    # Voronoi fracture -> part_XX submeshes (explode slider)
 }
 
 
@@ -669,6 +758,13 @@ def run(op_type: str, glb_bytes: bytes, params: dict | None = None):
             metallic=float(p.get('metallic', 0.0)),
             roughness=float(p.get('roughness', 0.7)),
             hue_shift=float(p.get('hue_shift', 0.0))), None
+    if op_type == 'resize':
+        return resize(glb_bytes,
+                      sx=float(p.get('sx', 1.0)),
+                      sy=float(p.get('sy', 1.0)),
+                      sz=float(p.get('sz', 1.0))), None
+    if op_type == 'explode':
+        return explode(glb_bytes, fragments=int(p.get('fragments', 24))), None
     if op_type == 'fill_holes':
         # fill_holes already returns (bytes, stats_dict).
         return fill_holes(glb_bytes)
