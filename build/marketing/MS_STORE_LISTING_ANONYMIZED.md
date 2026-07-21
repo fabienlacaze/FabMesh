@@ -56,6 +56,50 @@ MyFabmesh.AI is currently in free public beta. Report issues at github.com/fabie
 Made with care in France by Ayros Studio.
 ```
 
+## Description — French (France) listing (à coller dans une listing « Français (France) »)
+
+```
+Transformez n'importe quelle image de référence en maillage 3D texturé, prêt pour le jeu, en 60 à 120 secondes — le tout sur votre propre GPU NVIDIA. Aucun envoi dans le cloud, aucun abonnement mensuel : vos assets ne quittent jamais votre machine.
+
+MyFabmesh.AI réunit l'IA image-vers-3D de pointe dans une seule application Windows, pensée pour les développeurs de jeux indépendants, les artistes 3D, les passionnés et les architectes. Déposez une photo ou un concept art généré par IA, et récupérez un maillage GLB propre, prêt pour Unreal Engine, Blender, Unity, Godot ou n'importe quel pipeline 3D standard.
+
+FONCTIONNALITÉS CLÉS
+
+• Image-vers-3D en un clic — détourage automatique, rectification de la vue, génération du maillage et projection de texture. Aucune compétence en modélisation 3D requise.
+
+• Éditez chaque étape — retouchez la photo d'entrée (masque, inpainting, tampon, flou), affinez la géométrie du maillage, peignez ou lissez les textures, le tout dans la même application.
+
+• Génération 100 % locale — vos images de référence, vos prompts et vos maillages ne touchent jamais Internet. Fonctionne hors ligne après le téléchargement des modèles au premier lancement.
+
+• Préréglages intelligents par type d'asset — Personnage, Créature, Véhicule, Bâtiment, Arme, Accessoire, Environnement, Icône — chaque préréglage adapte le pipeline (mode de rectification, génération de vue arrière, inpainting du visage, lissage de texture) aux bons réglages par défaut.
+
+• Génération de vue arrière multi-vues — pour les personnages et créatures, génère une vue arrière cohérente pour que le maillage final soit cohérent à 360°, pas seulement de face.
+
+• Sortie prête pour le jeu — GLB / glTF avec textures PBR, dépliage UV, décimation contrôlée (100k / 500k / 1,5M triangles selon le mode de qualité).
+
+• Scriptable depuis Claude Code, VS Code ou tout IDE compatible MCP via le serveur MCP intégré — automatisez vos générations par lots.
+
+• Trois modes de qualité — Lite (~60 s, 100k tris, 8 Go VRAM), Standard (~90 s, 500k tris, 12 Go VRAM), Full (~180 s, 1,5M tris, 16 Go+ VRAM).
+
+CONFIGURATION REQUISE
+
+• Windows 10 ou Windows 11 (64 bits)
+• GPU NVIDIA avec au moins 8 Go de VRAM (RTX 2060 minimum, RTX 4070+ recommandé). Les GPU AMD et Intel ne sont pas pris en charge — utilisez notre future version Cloud à la place.
+• 16 Go de RAM minimum (32 Go recommandés)
+• 30 Go d'espace disque libre
+• Connexion Internet uniquement au premier lancement (télécharge les modèles IA intégrés)
+
+VOS MAILLAGES, VOTRE PROPRIÉTÉ
+
+Tous les modèles IA intégrés sont utilisables commercialement (licences MIT / Apache 2.0 / BSD / OpenRAIL++-M). Les maillages que vous générez sont 100 % à vous, exploitables commercialement — dans vos jeux, votre portfolio, vos impressions 3D, vos travaux clients.
+
+BÊTA PUBLIQUE
+
+MyFabmesh.AI est actuellement en bêta publique gratuite. Signalez les problèmes sur github.com/fabienlacaze/MyFabmesh/issues. Les rapports de plantage sont envoyés de façon anonyme (aucune donnée personnelle, aucun identifiant machine — voir notre politique de confidentialité sur https://fabienlacaze.github.io/MyFabmesh/privacy.html).
+
+Conçu avec soin en France par Ayros Studio.
+```
+
 ## Diff summary vs current Store listing
 
 Removed words (avoid stack leakage):
