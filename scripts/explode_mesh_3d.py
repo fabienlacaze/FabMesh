@@ -53,6 +53,7 @@ MAT = trimesh.visual.material.PBRMaterial(baseColorTexture=TEX) if TEX is not No
 
 # ---- fill-interior prep: a dark "stone interior" colour + a texel that samples it
 R = float(np.max(mesh.bounds[1] - mesh.bounds[0])) or 1.0
+CENTER_G = mesh.bounds.mean(axis=0)                  # global centre (normal orientation)
 DARK_UV = np.array([0.0, 0.0])
 DARK_COL = np.array([60, 58, 55, 255], np.uint8)
 if FILL:
@@ -89,7 +90,14 @@ def solidify(sv, sf, suv, scol):
         return None
     Nv = len(sv)
     diag = float(np.linalg.norm(sv.max(0) - sv.min(0))) or 1.0
-    th = min(0.06 * diag, 0.02 * R)                 # thickness (never too fat)
+    th = min(0.05 * diag, 0.015 * R)                # thickness (never too fat)
+    # Orient every vertex normal OUTWARD (away from the mesh centre). TRELLIS
+    # shells can have inconsistent winding → vn may point inward, which would
+    # push the inner shell OUT IN FRONT of the textured face and hide it (all
+    # black). Flipping to outward guarantees the inner shell goes toward the core.
+    outv = sv - CENTER_G
+    s = np.sign((vn * outv).sum(axis=1)); s[s == 0] = 1.0
+    vn = vn * s[:, None]
     inner = sv - vn * th
     verts = np.vstack([sv, inner])
     inner_f = sf[:, ::-1] + Nv                       # inner shell, flipped

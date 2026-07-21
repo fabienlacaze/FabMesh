@@ -3835,17 +3835,24 @@ function _rzUpdateReadout() {
 }
 
 function _rzOnScaleChange() {
-  // Uniform mode keeps ALL gizmo handles visible (see _rzSetUniform) and enforces
-  // the lock here: whichever axis the user dragged is copied to the other two.
-  const uni = document.getElementById('rz-uniform')?.checked;
-  if (uni && rzState.model) {
+  // Fires continuously WHILE the gizmo is dragged. Do NOT mutate the scale here
+  // (that fought the gizmo and made the viewer flicker) — just refresh the rulers
+  // + readout. Uniform lock is applied on drag END via _rzEnforceUniform().
+  _rzBuildRulers(); _rzUpdateReadout();
+}
+
+function _rzEnforceUniform() {
+  // Called on gizmo drag-end (mouse up). If Uniform is on, copy whichever axis
+  // the user changed most to the other two, in ONE clean step (no flicker).
+  if (!rzState.model) return;
+  if (document.getElementById('rz-uniform')?.checked) {
     const s = rzState.model.scale, last = rzState.lastScale || { x: 1, y: 1, z: 1 };
     const dx = Math.abs(s.x - last.x), dy = Math.abs(s.y - last.y), dz = Math.abs(s.z - last.z);
     let v = s.x;
     if (dy >= dx && dy >= dz) v = s.y; else if (dz >= dx && dz >= dy) v = s.z;
     if (v > 1e-4) s.set(v, v, v);
   }
-  if (rzState.model) { const s = rzState.model.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z }; }
+  const s = rzState.model.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z };
   _rzBuildRulers(); _rzUpdateReadout();
 }
 
@@ -3949,7 +3956,14 @@ function openResizeTool() {
     // scale gizmo (attached to the pivot — all axis handles always visible)
     const gizmo = new TransformControls(camera, renderer.domElement);
     gizmo.setMode('scale'); gizmo.setSize(0.95); gizmo.attach(pivot);
-    gizmo.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+    gizmo.addEventListener('dragging-changed', (e) => {
+      controls.enabled = !e.value;
+      if (e.value) {                                  // drag START: snapshot scale
+        const s = pivot.scale; rzState.lastScale = { x: s.x, y: s.y, z: s.z };
+      } else {                                        // drag END: apply uniform lock cleanly
+        _rzEnforceUniform();
+      }
+    });
     gizmo.addEventListener('objectChange', _rzOnScaleChange);
     scene.add(gizmo.getHelper ? gizmo.getHelper() : gizmo);
     rzState.gizmo = gizmo;
@@ -11186,9 +11200,8 @@ function openMeshToolModal(toolName) {
       }
       body.appendChild(wrap);
     });
-    // "↺ Reset" — restore every param to its default (e.g. zero the pivot X/Y/Z
-    // offsets) and re-preview. Shown for tools that have sliders.
-    if (schema.params.some((s) => s.type === 'range')) {
+    // "↺ Reset offsets" — pivot tool ONLY: zero the X/Y/Z offsets and re-preview.
+    if (toolName === 'set_pivot') {
       const resetBtn = document.createElement('button');
       resetBtn.className = 'secondary-btn';
       resetBtn.style.cssText = 'margin-top:6px; padding:6px 8px; font-size:12px; width:100%;';
@@ -14720,7 +14733,19 @@ document.getElementById('me-sel-duplicate')?.addEventListener('click', () => {
 });
 
 // --- Extra Paint tools: Pick / Fill / Smooth / Reset ---
-document.getElementById('me-paint-pick')?.addEventListener('click', () => {
+document.getElementById('me-paint-pick')?.addEventListener('click', async () => {
+  // Prefer the Chromium EyeDropper (samples ANY on-screen pixel incl. textured
+  // meshes). Fall back to the mesh vertex-colour pick mode if unavailable.
+  if (typeof window.EyeDropper === 'function') {
+    try {
+      const res = await new window.EyeDropper().open();
+      if (res && res.sRGBHex) {
+        meState.color = res.sRGBHex;
+        const inp = document.getElementById('me-paint-color'); if (inp) inp.value = res.sRGBHex;
+      }
+      return;
+    } catch (_) { /* user pressed Esc — cancelled */ return; }
+  }
   meState.pickMode = !meState.pickMode;
   document.getElementById('me-paint-pick')?.classList.toggle('tool-active', meState.pickMode);
 });
