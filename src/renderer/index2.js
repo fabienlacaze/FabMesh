@@ -18048,6 +18048,14 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
   linkSite?.addEventListener('click', (e) => { e.preventDefault(); open('https://fabienlacaze.github.io/MyFabmesh/'); });
   linkGH?.addEventListener('click',   (e) => { e.preventDefault(); open('https://github.com/fabienlacaze/MyFabmesh'); });
   linkFAQ?.addEventListener('click',  (e) => { e.preventDefault(); open('https://fabienlacaze.github.io/MyFabmesh/#faq'); });
+  // Bundled legal notices — open in the OS text viewer (shipped via extraResources).
+  const openLegal = (which) => {
+    if (window.wizardAPI?.openLegal) window.wizardAPI.openLegal(which).then((r) => {
+      if (r && !r.ok) showToast('Could not open document (' + (r.error || 'missing') + ')', 'error');
+    });
+  };
+  document.getElementById('about-link-licenses')?.addEventListener('click', (e) => { e.preventDefault(); openLegal('licenses'); });
+  document.getElementById('about-link-eula')?.addEventListener('click', (e) => { e.preventDefault(); openLegal('eula'); });
 
   const show = async () => {
     modal.classList.remove('hidden');

@@ -115,12 +115,20 @@
         ]
       },
       {
-        "from": "build/vc_redist.x64.exe",
-        "to": "vc_redist.x64.exe"
-      },
-      {
         "from": "build/sentry-dsn.txt",
         "to": "sentry-dsn.txt"
+      },
+      {
+        "from": "THIRD_PARTY_LICENSES.txt",
+        "to": "THIRD_PARTY_LICENSES.txt"
+      },
+      {
+        "from": "EULA.txt",
+        "to": "EULA.txt"
+      },
+      {
+        "from": "LICENSE.txt",
+        "to": "LICENSE.txt"
       }
     ],
     "win": {

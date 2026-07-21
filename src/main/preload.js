@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('wizardAPI', {
   onTestLog: (cb) => ipcRenderer.on('wizard:test-log', (_e, line) => cb(line)),
   completeSetup: (state) => ipcRenderer.invoke('wizard:complete', state),
   openExternal: (url) => ipcRenderer.invoke('wizard:open-external', url),
+  openLegal: (which) => ipcRenderer.invoke('app:open-legal', which),
   getVersion: () => ipcRenderer.invoke('wizard:get-version'),
   resetSetup: () => ipcRenderer.invoke('wizard:reset-setup'),
   getMode: () => ipcRenderer.invoke('wizard:get-mode'),

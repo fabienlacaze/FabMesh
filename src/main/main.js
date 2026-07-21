@@ -8156,6 +8156,28 @@ ipcMain.handle('wizard:open-external', async (_e, url) => {
   }
 });
 
+// Opens one of the bundled legal notices (shipped via extraResources at
+// resourcesPath in packaged builds, repo root in dev) in the OS default
+// text viewer. Whitelisted filenames only — never an arbitrary path.
+ipcMain.handle('app:open-legal', async (_e, which) => {
+  const FILES = {
+    licenses: 'THIRD_PARTY_LICENSES.txt',
+    eula: 'EULA.txt',
+    license: 'LICENSE.txt',
+  };
+  const name = FILES[String(which || '').toLowerCase()];
+  if (!name) return { ok: false, error: 'unknown legal doc' };
+  const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
+  const file = path.join(base, name);
+  try {
+    if (!fs.existsSync(file)) return { ok: false, error: 'not bundled' };
+    const err = await shell.openPath(file);   // '' on success
+    return err ? { ok: false, error: err } : { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // Opens the MyFabmesh.AI website in the user's default browser.
 // Called when the user clicks the brand in the main app header.
 ipcMain.handle('app:open-website', async () => {
