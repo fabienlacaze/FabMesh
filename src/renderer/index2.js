@@ -13665,6 +13665,11 @@ let _meLastBrushTime = 0;
 // O(verts under the brush) — the fix for the "paint lags like crazy" report.
 const _meSphere = new THREE.Sphere();
 function _meVertsNearPoints(geom, pts, r) {
+  // Lazy-build the BVH if the load-time build was skipped/failed, so the brush
+  // ALWAYS gets the fast in-radius path (the "paint lags like crazy" fix).
+  if (!geom.boundsTree && geom.computeBoundsTree) {
+    try { geom.computeBoundsTree(); } catch (_) {}
+  }
   const bvh = geom.boundsTree;
   if (!bvh) return null;
   const set = new Set();
@@ -14241,6 +14246,15 @@ function _meApplyBrush(hit) {
     };
     if (cand) { for (const i of cand) paintVert(i); }
     else { for (let i = 0; i < pos.count; i++) paintVert(i); }
+    // Upload ONLY the touched index range to the GPU (not all N colours) — the
+    // full re-upload per stamp was a hidden cost on dense meshes.
+    if (cand && cand.size) {
+      let lo = Infinity, hi = -1;
+      for (const i of cand) { if (i < lo) lo = i; if (i > hi) hi = i; }
+      const start = lo * 3, count = (hi - lo + 1) * 3;
+      if (colorAttr.addUpdateRange) { colorAttr.clearUpdateRanges && colorAttr.clearUpdateRanges(); colorAttr.addUpdateRange(start, count); }
+      else if (colorAttr.updateRange) { colorAttr.updateRange.offset = start; colorAttr.updateRange.count = count; }
+    }
     colorAttr.needsUpdate = true;
   } else if (meState.mode === 'select') {
     const geom = hit.object.geometry;
