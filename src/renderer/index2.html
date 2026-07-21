@@ -700,6 +700,7 @@
                         <button id="ws-mesh-region-retex-btn" class="ghost-btn tool-btn" title="Re-texture only ONE part (AI detects it) with a prompt — geometry stays intact">&#127912; Re-texture a region (AI)</button>
                         <button id="ws-mesh-segment-btn" class="ghost-btn tool-btn" title="Split the mesh into semantic parts (head/torso/arms/legs — wheel/chassis/cabin). Runs locally on your GPU (SAMPart3D), ~6-10 min. Adds a colored, separable parts version.">&#9986; Segment parts (AI)</button>
                         <button id="ws-mesh-name-btn" class="ghost-btn tool-btn" title="Name the parts (wheel / turret / cannon — arm / leg / head) with AI. Requires a segmented mesh.">&#127991; Name the zones (AI)</button>
+                        <button id="ws-mesh-explode-btn" class="ghost-btn tool-btn" title="Fracture the mesh into shards and blast them outward over navigable stages (explosion / destruction). Texture preserved, exportable.">&#128165; Explode / destroy</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -710,7 +711,7 @@
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
                         <button id="ws-mesh-clone3d-btn" class="ghost-btn tool-btn" title="Clone une zone de la texture vers une autre directement sur le mesh 3D (comme le tampon de clonage 2D)">&#129657; Tampon de clonage 3D</button>
                         <button id="ws-mesh-stages3d-btn" class="ghost-btn tool-btn" title="Fabricate the 3D meshes of the construction stages (sliced building + frame + scaffolding), navigable and exportable">&#127959;&#65039; 3D construction stages</button>
-                        <button id="ws-mesh-explode-btn" class="ghost-btn tool-btn" title="Fracture the mesh into shards and blast them outward over navigable stages (explosion / destruction). Texture preserved, exportable.">&#128165; Explode / destroy</button>
+                        <button id="ws-mesh-resize-btn" class="ghost-btn tool-btn" title="Resize / dimension the mesh with a scale gizmo and on-screen rulers (uniform or per-axis). Bakes a new scaled version.">&#128207; Resize / dimension</button>
                         <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh">&#127919; Align Texture</button>
                         <button id="ws-mesh-material-btn" class="ghost-btn tool-btn" title="Adjust material brightness, saturation, contrast, emissive, metallic, roughness">&#10024; Material adjust</button>
                       </div>
@@ -1588,6 +1589,43 @@
         <div class="modal-actions">
           <button class="ghost-btn" id="ex3d-cancel">Cancel</button>
           <button class="primary-btn" id="ex3d-start">Detonate</button>
+        </div>
+      </div>
+    </div>
+    <div id="modal-resize" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width:1100px; width:94vw;">
+        <button class="about-close" id="rz-close" aria-label="Close" style="position:absolute; top:12px; right:14px;">&times;</button>
+        <h2>&#128207; Resize / dimension</h2>
+        <p class="modal-subtitle">Drag the gizmo to scale (uniform, or one axis at a time), or type target dimensions. The rulers show the live size. Apply bakes a new scaled version — texture preserved.</p>
+        <div style="display:flex; gap:16px; margin-top:12px; flex-wrap:wrap;">
+          <div id="rz-viewport" style="position:relative; flex:1 1 560px; min-width:320px; height:56vh; background:#0b0b14; border-radius:10px; overflow:hidden;">
+            <canvas id="rz-canvas" style="width:100%; height:100%; display:block;"></canvas>
+            <div id="rz-readout" style="position:absolute; top:10px; left:12px; font-size:12px; line-height:1.5; color:#dfe6ff; background:rgba(0,0,0,0.55); padding:8px 10px; border-radius:8px; pointer-events:none; font-family:monospace;">…</div>
+            <div id="rz-hint" style="position:absolute; bottom:10px; left:12px; font-size:11px; color:#8a93b2; pointer-events:none;">Drag gizmo · orbit with right-drag · wheel to zoom</div>
+          </div>
+          <div style="flex:0 0 240px; display:flex; flex-direction:column; gap:12px;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-1);">
+              <input type="checkbox" id="rz-uniform" checked /> Uniform scale (lock ratio)
+            </label>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Width (X)</label>
+              <input type="number" id="rz-dim-x" class="modal-select" step="0.001" style="width:100%;" />
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Height (Y)</label>
+              <input type="number" id="rz-dim-y" class="modal-select" step="0.001" style="width:100%;" />
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Depth (Z)</label>
+              <input type="number" id="rz-dim-z" class="modal-select" step="0.001" style="width:100%;" />
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="ghost-btn" id="rz-reset" style="flex:1;">Reset</button>
+              <button class="ghost-btn" id="rz-x2" style="flex:1;" title="Double uniform size">×2</button>
+              <button class="ghost-btn" id="rz-half" style="flex:1;" title="Halve uniform size">÷2</button>
+            </div>
+            <small class="modal-subtitle" style="font-size:12px;">Dimensions are in the mesh's own units. Scaling stays proportional when Uniform is on.</small>
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:14px;">
+          <button class="ghost-btn" id="rz-cancel">Cancel</button>
+          <button class="primary-btn" id="rz-apply">Apply</button>
         </div>
       </div>
     </div>

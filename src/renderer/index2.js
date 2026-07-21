@@ -3766,6 +3766,230 @@ document.getElementById('ex3d-start')?.addEventListener('click', () => {
     }
   })();
 });
+
+// ============================================================
+// RESIZE / DIMENSION tool — interactive scale gizmo + rulers.
+// Manual tool: orbit the mesh, drag the scale gizmo (uniform or per-axis) or
+// type target dimensions; on-screen rulers show the live size. Apply bakes a
+// new scaled mesh version (texture preserved) via the mesh-resize worker.
+// ============================================================
+const rzState = {
+  renderer: null, scene: null, camera: null, controls: null, gizmo: null,
+  model: null, orig: null, rulers: null, labels: {}, raf: null, meshPath: null,
+  ro: null, editing: false,
+};
+
+function _rzDims() {
+  // current world dimensions = original dims × the model's live scale
+  const s = rzState.model.scale, o = rzState.orig;
+  return { x: o.x * s.x, y: o.y * s.y, z: o.z * s.z };
+}
+
+function _rzBuildRulers() {
+  if (!rzState.scene) return;
+  if (rzState.rulers) { rzState.scene.remove(rzState.rulers); rzState.rulers.traverse(n => { n.geometry?.dispose?.(); n.material?.dispose?.(); }); }
+  const g = new THREE.Group();
+  const d = _rzDims();
+  const hx = d.x / 2, hy = d.y / 2, hz = d.z / 2;
+  // bounding box wireframe (centred at origin — the model is centred there)
+  const box = new THREE.Box3(new THREE.Vector3(-hx, -hy, -hz), new THREE.Vector3(hx, hy, hz));
+  const bh = new THREE.Box3Helper(box, 0x5a6580); bh.material.transparent = true; bh.material.opacity = 0.6; g.add(bh);
+  const mk = (a, b, color) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+    return new THREE.Line(geo, new THREE.LineBasicMaterial({ color, linewidth: 2 }));
+  };
+  const tick = (p, dir, len, color) => {
+    const a = p.clone().addScaledVector(dir, -len), b = p.clone().addScaledVector(dir, len);
+    return mk(a, b, color);
+  };
+  const off = Math.max(hx, hy, hz) * 0.06 + 1e-4;
+  // Horizontal ruler (X, red): front-bottom edge
+  const y0 = -hy - off, z0 = hz + off;
+  g.add(mk(new THREE.Vector3(-hx, y0, z0), new THREE.Vector3(hx, y0, z0), 0xff5a5a));
+  // Vertical ruler (Y, green): front-left edge
+  const x0 = -hx - off;
+  g.add(mk(new THREE.Vector3(x0, -hy, z0), new THREE.Vector3(x0, hy, z0), 0x5ad07a));
+  // Depth ruler (Z, blue): bottom-right edge
+  const x1 = hx + off;
+  g.add(mk(new THREE.Vector3(x1, y0, -hz), new THREE.Vector3(x1, y0, hz), 0x6aa6ff));
+  // tick marks (10 per ruler)
+  for (let i = 0; i <= 10; i++) {
+    const tx = -hx + (d.x) * i / 10; g.add(tick(new THREE.Vector3(tx, y0, z0), new THREE.Vector3(0, 1, 0), off * 0.5, 0xff5a5a));
+    const ty = -hy + (d.y) * i / 10; g.add(tick(new THREE.Vector3(x0, ty, z0), new THREE.Vector3(1, 0, 0), off * 0.5, 0x5ad07a));
+    const tz = -hz + (d.z) * i / 10; g.add(tick(new THREE.Vector3(x1, y0, tz), new THREE.Vector3(1, 0, 0), off * 0.5, 0x6aa6ff));
+  }
+  g._mid = {
+    x: new THREE.Vector3(0, y0, z0), y: new THREE.Vector3(x0, 0, z0), z: new THREE.Vector3(x1, y0, 0),
+  };
+  rzState.rulers = g;
+  rzState.scene.add(g);
+}
+
+function _rzUpdateReadout() {
+  const d = _rzDims();
+  const ro = document.getElementById('rz-readout');
+  if (ro) ro.innerHTML = `<span style="color:#ff8a8a">W ${d.x.toFixed(3)}</span>  ·  <span style="color:#8ae0a2">H ${d.y.toFixed(3)}</span>  ·  <span style="color:#9ac2ff">D ${d.z.toFixed(3)}</span>`;
+  if (!rzState.editing) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v.toFixed(3); };
+    set('rz-dim-x', d.x); set('rz-dim-y', d.y); set('rz-dim-z', d.z);
+  }
+}
+
+function _rzOnScaleChange() { _rzBuildRulers(); _rzUpdateReadout(); }
+
+function _rzSetUniform(on) {
+  if (!rzState.gizmo) return;
+  rzState.gizmo.showX = rzState.gizmo.showY = rzState.gizmo.showZ = !on;  // only the XYZ handle when uniform
+}
+
+function _rzApplyDimInput(axis, value) {
+  const v = Number(value); if (!isFinite(v) || v <= 0) return;
+  const o = rzState.orig, m = rzState.model;
+  const uni = document.getElementById('rz-uniform')?.checked;
+  const factor = v / (axis === 'x' ? o.x : axis === 'y' ? o.y : o.z);
+  if (uni) m.scale.setScalar(factor);
+  else m.scale[axis] = factor;
+  _rzOnScaleChange();
+}
+
+function _rzLabelsTick() {
+  // Project each ruler midpoint to screen and place its dimension label there.
+  if (!rzState.rulers || !rzState.rulers._mid || !rzState.camera) return;
+  const vp = document.getElementById('rz-viewport'); if (!vp) return;
+  const w = vp.clientWidth, h = vp.clientHeight, d = _rzDims();
+  const place = (key, val, color) => {
+    let el = rzState.labels[key];
+    if (!el) {
+      el = document.createElement('div');
+      el.style.cssText = 'position:absolute; transform:translate(-50%,-50%); font:600 12px monospace; padding:1px 5px; border-radius:5px; background:rgba(0,0,0,0.6); pointer-events:none; white-space:nowrap;';
+      vp.appendChild(el); rzState.labels[key] = el;
+    }
+    const p = rzState.rulers._mid[key].clone().project(rzState.camera);
+    el.style.left = ((p.x * 0.5 + 0.5) * w) + 'px';
+    el.style.top = ((-p.y * 0.5 + 0.5) * h) + 'px';
+    el.style.color = color; el.textContent = val.toFixed(3);
+  };
+  place('x', d.x, '#ff8a8a'); place('y', d.y, '#8ae0a2'); place('z', d.z, '#9ac2ff');
+}
+
+function _rzCleanup() {
+  if (rzState.raf) cancelAnimationFrame(rzState.raf); rzState.raf = null;
+  try { rzState.ro?.disconnect?.(); } catch (_) {} rzState.ro = null;
+  try { rzState.controls?.dispose?.(); } catch (_) {}
+  try { if (rzState.gizmo) { rzState.gizmo.detach(); rzState.gizmo.dispose?.(); } } catch (_) {}
+  try { rzState.renderer?.dispose?.(); } catch (_) {}
+  for (const k in rzState.labels) { try { rzState.labels[k].remove(); } catch (_) {} }
+  rzState.labels = {};
+  if (rzState.scene) { try { rzState.scene.traverse(n => { n.geometry?.dispose?.(); if (n.material) { (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => m.dispose?.()); } }); } catch (_) {} }
+  rzState.renderer = rzState.scene = rzState.camera = rzState.controls = rzState.gizmo = rzState.model = rzState.rulers = null;
+}
+
+function openResizeTool() {
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  rzState.meshPath = String(mp);
+  const modal = document.getElementById('modal-resize');
+  const canvas = document.getElementById('rz-canvas');
+  const vp = document.getElementById('rz-viewport');
+  if (!modal || !canvas || !vp) return;
+  modal.classList.remove('hidden');
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0b14);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 5000);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.15));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(3, 5, 4); scene.add(dl);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  Object.assign(rzState, { renderer, scene, camera, controls });
+
+  const resize = () => {
+    const w = vp.clientWidth || 640, h = vp.clientHeight || 420;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  resize();
+  rzState.ro = new ResizeObserver(resize); rzState.ro.observe(vp);
+
+  const url = 'file:///' + rzState.meshPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  new GLTFLoader().load(url, (gltf) => {
+    const model = gltf.scene || gltf.scenes[0];
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    model.position.sub(center);                 // centre at origin so scaling stays centred
+    rzState.model = model; rzState.orig = size.clone();
+    scene.add(model);
+    const diag = size.length() || 1;
+    camera.position.set(diag * 0.9, diag * 0.7, diag * 1.4);
+    camera.near = diag / 1000; camera.far = diag * 100; camera.updateProjectionMatrix();
+    controls.target.set(0, 0, 0); controls.update();
+    // scale gizmo
+    const gizmo = new TransformControls(camera, renderer.domElement);
+    gizmo.setMode('scale'); gizmo.setSize(0.9); gizmo.attach(model);
+    gizmo.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+    gizmo.addEventListener('objectChange', _rzOnScaleChange);
+    scene.add(gizmo.getHelper ? gizmo.getHelper() : gizmo);
+    rzState.gizmo = gizmo;
+    _rzSetUniform(document.getElementById('rz-uniform')?.checked);
+    _rzBuildRulers(); _rzUpdateReadout();
+  }, undefined, (err) => {
+    showToast('Chargement du mesh échoué: ' + (err?.message || err), 'error');
+  });
+
+  const loop = () => {
+    rzState.raf = requestAnimationFrame(loop);
+    controls.update(); _rzLabelsTick();
+    renderer.render(scene, camera);
+  };
+  loop();
+}
+
+document.getElementById('ws-mesh-resize-btn')?.addEventListener('click', openResizeTool);
+document.getElementById('rz-uniform')?.addEventListener('change', (e) => _rzSetUniform(e.target.checked));
+['x', 'y', 'z'].forEach((ax) => {
+  const el = document.getElementById('rz-dim-' + ax);
+  el?.addEventListener('focus', () => { rzState.editing = true; });
+  el?.addEventListener('blur', () => { rzState.editing = false; });
+  el?.addEventListener('change', (e) => { _rzApplyDimInput(ax, e.target.value); });
+});
+document.getElementById('rz-reset')?.addEventListener('click', () => { if (rzState.model) { rzState.model.scale.set(1, 1, 1); _rzOnScaleChange(); } });
+document.getElementById('rz-x2')?.addEventListener('click', () => { if (rzState.model) { rzState.model.scale.multiplyScalar(2); _rzOnScaleChange(); } });
+document.getElementById('rz-half')?.addEventListener('click', () => { if (rzState.model) { rzState.model.scale.multiplyScalar(0.5); _rzOnScaleChange(); } });
+function _rzCloseModal() { document.getElementById('modal-resize')?.classList.add('hidden'); _rzCleanup(); }
+document.getElementById('rz-cancel')?.addEventListener('click', _rzCloseModal);
+document.getElementById('rz-close')?.addEventListener('click', _rzCloseModal);
+document.getElementById('rz-apply')?.addEventListener('click', () => {
+  if (!rzState.model || !rzState.meshPath) return;
+  const s = rzState.model.scale;
+  const sx = s.x, sy = s.y, sz = s.z;
+  if (Math.abs(sx - 1) < 1e-4 && Math.abs(sy - 1) < 1e-4 && Math.abs(sz - 1) < 1e-4) {
+    showToast('Aucun changement de taille.', 'info'); return;
+  }
+  const mp = rzState.meshPath;
+  _rzCloseModal();
+  const p = state.currentProject;
+  const job = pushJob(`Redimensionnement: ${p?.name || ''}`, null, { Échelle: `${sx.toFixed(2)}×${sy.toFixed(2)}×${sz.toFixed(2)}` }, 4000, { projectName: p?.name });
+  (async () => {
+    try {
+      const r = await API.resizeMesh({ meshPath: mp, sx, sy, sz });
+      if (r && r.success && r.newPath) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+        const np = state.currentProject;
+        if (np) { np.previewMeshPath = r.newPath; try { showStep2Preview({ path: r.newPath, filename: r.filename }); } catch (_) {} }
+        showToast('Nouvelle version redimensionnée créée.', 'success', 2500);
+      } else {
+        completeJob(job.id, false);
+        customError((r && r.error) || 'unknown', 'Redimensionnement — échec');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      customError(e?.message || String(e), 'Redimensionnement — erreur');
+    }
+  })();
+});
 document.getElementById('bs3d-count')?.addEventListener('input', (e) => {
   const el = document.getElementById('bs3d-count-val');
   if (el) el.textContent = e.target.value;
@@ -3828,20 +4052,53 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
     }
   })();
 });
+// Stage-bar labels depend on the kind: explosion stages read INTACT→EXPLOSÉ,
+// construction stages read CHANTIER→FINAL (detected from the stage folder name).
+function _stageKindLabels(stages) {
+  const explode = /_explode_stages/i.test(String((stages && stages[0] && stages[0].path) || ''));
+  return explode ? { first: 'INTACT', last: 'EXPLOSÉ' } : { first: 'CHANTIER', last: 'FINAL' };
+}
+let _scrubTimer = null;
+function _scrubLoadStage(path) {
+  // Debounce the (heavy) GLB load while the user drags the scrubber.
+  if (_scrubTimer) clearTimeout(_scrubTimer);
+  _scrubTimer = setTimeout(() => {
+    try { showStep2Preview({ path, filename: path.split(/[\\/]/).pop() }); } catch (_) {}
+  }, 130);
+}
 function _showMeshStagesBar(stages) {
   const bar = document.getElementById('ws-mesh-stages-bar');
   if (!bar || !Array.isArray(stages) || stages.length < 2) return;
   const last = stages.length - 1;
+  const L = _stageKindLabels(stages);
+  bar.style.flexDirection = 'column';
   bar.innerHTML = '';
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; gap:2px; align-items:center; justify-content:center;';
   for (const s of stages) {
     const btn = document.createElement('button');
     btn.className = 'stage-btn' + (s.index === last ? ' stage-active' : '');
     btn.dataset.path = s.path;
     const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
-    const lbl = s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%');
+    const lbl = s.index === last ? L.last : (s.index === 0 ? L.first : pct + '%');
     btn.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${lbl}</span>`;
-    bar.appendChild(btn);
+    row.appendChild(btn);
   }
+  bar.appendChild(row);
+  // Scrubber slider — drag to move continuously through the stages (snaps to the
+  // nearest stage; the actual GLB load is debounced so dragging stays smooth).
+  const sld = document.createElement('input');
+  sld.type = 'range'; sld.min = '0'; sld.max = String(last); sld.step = '1'; sld.value = String(last);
+  sld.className = 'stage-scrubber';
+  sld.style.cssText = 'width:100%; margin-top:5px; accent-color:#f59e0b; cursor:ew-resize;';
+  sld.addEventListener('input', () => {
+    const i = parseInt(sld.value, 10);
+    const s = stages[i]; if (!s) return;
+    row.querySelectorAll('.stage-btn').forEach((b, k) => b.classList.toggle('stage-active', k === i));
+    const p = state.currentProject;
+    if (p && s.path) { p.previewMeshPath = s.path; _scrubLoadStage(s.path); }
+  });
+  bar.appendChild(sld);
   bar.classList.remove('hidden');
 }
 document.getElementById('ws-mesh-stages-bar')?.addEventListener('click', (e) => {
@@ -3850,6 +4107,9 @@ document.getElementById('ws-mesh-stages-bar')?.addEventListener('click', (e) => 
   const bar = document.getElementById('ws-mesh-stages-bar');
   bar.querySelectorAll('.stage-btn').forEach(b => b.classList.remove('stage-active'));
   btn.classList.add('stage-active');
+  // keep the scrubber in sync when a discrete stage button is clicked
+  const idx = Array.from(bar.querySelectorAll('.stage-btn')).indexOf(btn);
+  const sld = bar.querySelector('.stage-scrubber'); if (sld && idx >= 0) sld.value = String(idx);
   const p = state.currentProject; const mp = btn.dataset.path;
   if (p && mp) {
     p.previewMeshPath = mp;   // tools operate on the displayed stage
@@ -4608,16 +4868,36 @@ async function openMeshLightbox(meshPath, kind) {
                            _normPath(p0.previewMeshPath || '') === _normPath(meshPath));
       if (match) {
         const last = st.length - 1;
+        const L = _stageKindLabels(st);
+        let curIdx = st.findIndex(s => _normPath(s.path) === _normPath(meshPath));
+        if (curIdx < 0) curIdx = last;
+        bar.style.flexDirection = 'column';
         bar.innerHTML = '';
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; gap:2px; align-items:center; justify-content:center;';
         for (const s of st) {
           const b = document.createElement('button');
           b.className = 'stage-btn' + (_normPath(s.path) === _normPath(meshPath) ? ' stage-active' : '');
           b.dataset.path = s.path;
           const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
-          b.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${s.index === last ? 'FINAL' : (s.index === 0 ? 'CHANTIER' : pct + '%')}</span>`;
+          b.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${s.index === last ? L.last : (s.index === 0 ? L.first : pct + '%')}</span>`;
           b.onclick = (ev) => { ev.stopPropagation(); openMeshLightbox(s.path, kind); };
-          bar.appendChild(b);
+          row.appendChild(b);
         }
+        bar.appendChild(row);
+        // Scrubber slider (fullscreen viewer) — drag to move through the stages.
+        const sld = document.createElement('input');
+        sld.type = 'range'; sld.min = '0'; sld.max = String(last); sld.step = '1'; sld.value = String(curIdx);
+        sld.className = 'stage-scrubber';
+        sld.style.cssText = 'width:100%; margin-top:5px; accent-color:#f59e0b; cursor:ew-resize;';
+        let _lbScrub = null;
+        sld.addEventListener('input', () => {
+          const i = parseInt(sld.value, 10); const s = st[i]; if (!s) return;
+          if (_lbScrub) clearTimeout(_lbScrub);
+          _lbScrub = setTimeout(() => { try { openMeshLightbox(s.path, kind); } catch (_) {} }, 140);
+        });
+        sld.addEventListener('click', (ev) => ev.stopPropagation());
+        bar.appendChild(sld);
         bar.classList.remove('hidden');
       } else { bar.classList.add('hidden'); bar.innerHTML = ''; }
     }

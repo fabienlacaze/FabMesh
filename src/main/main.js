@@ -4778,6 +4778,29 @@ ipcMain.handle('check-stages3d-dir', async (_event, meshPath) => {
   } catch (_) { return { exists: false }; }
 });
 
+// RESIZE / DIMENSION — bake a per-axis scale into a new mesh version (texture
+// preserved). Driven by the interactive gizmo/ruler tool in the renderer.
+ipcMain.handle('mesh-resize', async (_event, { meshPath, sx, sy, sz } = {}) => {
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
+    if (!isPathAllowed(meshPath)) return { success: false, error: 'Mesh path not allowed' };
+    const cl = (v) => Math.max(0.001, Math.min(1000, Number(v) || 1));
+    const [ax, ay, az] = [cl(sx), cl(sy), cl(sz)];
+    const stem = path.basename(meshPath, path.extname(meshPath)).replace(/_resize_\d+$/i, '');
+    const outPath = path.join(MESHES_DIR, `${stem}_resize_${Date.now()}.glb`);
+    const script = path.join(SCRIPTS_DIR, 'scale_mesh.py');
+    if (!fs.existsSync(script)) return { success: false, error: 'scale_mesh.py not found' };
+    const ok = await new Promise((resolve) => {
+      execFile(_aiPython(), [script, meshPath, outPath, String(ax), String(ay), String(az)],
+        { timeout: 300000, maxBuffer: 64 * 1024 * 1024 }, (error) => resolve(!error));
+    });
+    if (!ok || !fs.existsSync(outPath)) return { success: false, error: 'Resize worker failed' };
+    return { success: true, newPath: outPath, filename: path.basename(outPath) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // EXPLOSION / DESTRUCTION 3D — fracture the mesh into Voronoi shards and project
 // them outward over N stages (navigable + exportable). Mirrors the construction
 // stages handler: a NEW mesh version is created so the original stays intact.

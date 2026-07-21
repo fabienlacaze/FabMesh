@@ -158,6 +158,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   checkStages3dDir: (meshPath) => ipcRenderer.invoke('check-stages3d-dir', meshPath),
   generateExplode3d: (opts) => ipcRenderer.invoke('generate-explode-3d', opts),
   checkExplodeDir: (meshPath) => ipcRenderer.invoke('check-explode-dir', meshPath),
+  resizeMesh: (opts) => ipcRenderer.invoke('mesh-resize', opts),
   checkStagesDir: (imagePath) => ipcRenderer.invoke('check-stages-dir', imagePath),
   onConstructionStageProgress: (cb) => ipcRenderer.on('construction-stage-progress', (e, data) => cb(data)),
   duplicateImageVersion: (opts) => ipcRenderer.invoke('duplicate-image-version', opts),

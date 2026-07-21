@@ -48,6 +48,17 @@
       'Fragments': 'Éclats',
       'Geometric fabrication (~5 s). More fragments = finer shatter.': 'Fabrication géométrique (~5 s). Plus d\'éclats = éclatement plus fin.',
       'Detonate': 'Faire exploser',
+      // ---- Resize / dimension ----
+      'Resize / dimension': 'Redimensionner',
+      'Drag the gizmo to scale (uniform, or one axis at a time), or type target dimensions. The rulers show the live size. Apply bakes a new scaled version — texture preserved.':
+        "Glisse le gizmo pour mettre à l'échelle (uniforme, ou un axe à la fois), ou saisis les dimensions cibles. Les règles montrent la taille en direct. Appliquer crée une nouvelle version redimensionnée — texture préservée.",
+      'Uniform scale (lock ratio)': "Échelle uniforme (verrouille le ratio)",
+      'Width (X)': 'Largeur (X)', 'Height (Y)': 'Hauteur (Y)', 'Depth (Z)': 'Profondeur (Z)',
+      'Reset': 'Réinitialiser',
+      'Dimensions are in the mesh\'s own units. Scaling stays proportional when Uniform is on.':
+        "Les dimensions sont dans les unités du mesh. La mise à l'échelle reste proportionnelle si Uniforme est activé.",
+      'Drag gizmo · orbit with right-drag · wheel to zoom': 'Glisse le gizmo · clic droit pour pivoter · molette pour zoomer',
+      'Apply': 'Appliquer',
       // ---- Uninstall popup ----
       'Uninstall MyFabmesh.AI': 'Désinstaller MyFabmesh.AI',
       'This removes the app. Optionally, also delete:': "Ceci retire l'application. En option, supprimer aussi :",
