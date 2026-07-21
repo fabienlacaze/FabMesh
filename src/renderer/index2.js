@@ -13352,11 +13352,17 @@ async function _meInitViewport() {
   }
 
   // Lights
-  meState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  // EVEN / shadow-free studio lighting (user: "pas d'ombres dans les viewers"):
+  // strong ambient + hemisphere with a LIGHT ground so no side stays black, plus
+  // two soft directionals from opposite sides for a hint of form (no hard shadow).
+  meState.scene.add(new THREE.HemisphereLight(0xffffff, 0xc8ccd8, 1.15));
+  meState.scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.45);
   dir.position.set(5, 8, 5);
   meState.scene.add(dir);
-  meState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  const dir2 = new THREE.DirectionalLight(0xffffff, 0.4);
+  dir2.position.set(-5, 4, -6);
+  meState.scene.add(dir2);
 
   // Grid
   meState.scene.add(new THREE.GridHelper(2, 20, 0x444466, 0x333355));
@@ -14246,15 +14252,6 @@ function _meApplyBrush(hit) {
     };
     if (cand) { for (const i of cand) paintVert(i); }
     else { for (let i = 0; i < pos.count; i++) paintVert(i); }
-    // Upload ONLY the touched index range to the GPU (not all N colours) — the
-    // full re-upload per stamp was a hidden cost on dense meshes.
-    if (cand && cand.size) {
-      let lo = Infinity, hi = -1;
-      for (const i of cand) { if (i < lo) lo = i; if (i > hi) hi = i; }
-      const start = lo * 3, count = (hi - lo + 1) * 3;
-      if (colorAttr.addUpdateRange) { colorAttr.clearUpdateRanges && colorAttr.clearUpdateRanges(); colorAttr.addUpdateRange(start, count); }
-      else if (colorAttr.updateRange) { colorAttr.updateRange.offset = start; colorAttr.updateRange.count = count; }
-    }
     colorAttr.needsUpdate = true;
   } else if (meState.mode === 'select') {
     const geom = hit.object.geometry;
