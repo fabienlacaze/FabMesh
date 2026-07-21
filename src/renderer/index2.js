@@ -14996,6 +14996,24 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
     if (outPath) {
       completeJob(job.id, true);
       try { await API.showInExplorer(outPath); } catch (e) {}
+      // For an Unreal FBX of an EXPLOSION mesh, show how to turn the shards into
+      // a playable Chaos destructible (Geometry Collection) — a GC .uasset can't
+      // be authored outside Unreal, so we document the 3-click in-editor bake.
+      if (format === 'fbx_unreal') {
+        const isExplode = /_explode_/i.test(String(sourcePath));
+        const steps =
+          (isExplode
+            ? 'FBX exporté (cm, chaque éclat = objet séparé). Pour une DESTRUCTION jouable dans UE5 :\n\n'
+            : 'FBX exporté pour Unreal (cm). Si ce mesh est fracturé (part_XX), pour une destruction Chaos :\n\n') +
+          '1. Importe le FBX. Dans le dialogue, DÉCOCHE « Combine Meshes » (chaque part_XX reste un Static Mesh séparé) ; Import Uniform Scale = 1.\n' +
+          '2. Glisse TOUS les part_XX dans le niveau (ils se réassemblent tout seuls).\n' +
+          '3. Sélectionne-les tous.\n' +
+          '4. Passe en mode Fracture (Shift+6) → section Generate → New → choisis un chemin → Create Geometry Collection.\n' +
+          '5. C\'est DÉJÀ fracturé (chaque éclat = un bone) — ne relance PAS de fracture Voronoï.\n' +
+          '6. Optionnel : Cluster → Auto Cluster, règle les Damage Thresholds, ajoute un Chaos Solver + active la simulation.\n\n' +
+          'Note : un Geometry Collection (.uasset) ne peut PAS être généré hors d\'Unreal — il se crée uniquement dans l\'éditeur (ces étapes).';
+        customError(steps, '\u{1F3AE} FBX Unreal — créer la destruction (Geometry Collection)');
+      }
     } else {
       completeJob(job.id, false);
       customError(r?.error || 'Export returned no output path', 'Export failed');
