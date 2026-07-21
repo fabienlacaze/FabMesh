@@ -10798,6 +10798,13 @@ function _mtCollectVals(body) {
 
 function _mtSchedulePreview() {
   if (mtState.previewTimer) clearTimeout(mtState.previewTimer);
+  // Cheap previews (the pivot gizmo just repositions — no geometry recompute)
+  // must feel LIVE: run synchronously so the gizmo tracks the slider frame by
+  // frame. The 80 ms debounce is only for heavy previews (smooth/decimate/
+  // subdivide/fill-holes recompute a dense geometry on the main thread) — there
+  // it kept dragging from freezing; on the pivot it just added a ~1 s lag.
+  const s = mtState.schema;
+  if (s && !s.heavyPreview && !s.preview) { _mtRunPreview(); return; }
   mtState.previewTimer = setTimeout(_mtRunPreview, 80);
 }
 
