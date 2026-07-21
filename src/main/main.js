@@ -4795,6 +4795,7 @@ ipcMain.handle('mesh-resize', async (_event, { meshPath, sx, sy, sz } = {}) => {
         { timeout: 300000, maxBuffer: 64 * 1024 * 1024 }, (error) => resolve(!error));
     });
     if (!ok || !fs.existsSync(outPath)) return { success: false, error: 'Resize worker failed' };
+    try { writeMeta(outPath, { kind: 'op', op: 'resize', parent: meshPath, params: { sx: ax, sy: ay, sz: az } }); } catch (_) {}
     return { success: true, newPath: outPath, filename: path.basename(outPath) };
   } catch (e) {
     return { success: false, error: e.message };
@@ -4825,6 +4826,9 @@ ipcMain.handle('generate-explode-3d', async (event, opts) => {
       proc.stderr?.on('data', d => safeSend('ai3d-progress', `[Explode] ${d.toString()}`));
     });
     if (!ok || !fs.existsSync(outPath)) return { success: false, error: 'Explosion worker failed' };
+    // Lineage sidecar (like segment): links the shard mesh to its PARENT mesh so
+    // it joins that mesh's project instead of becoming an orphan "…_explode" project.
+    try { writeMeta(outPath, { kind: 'op', op: 'explode', parent: meshPath, params: { fragments: frags } }); } catch (_) {}
     return { success: true, newPath: outPath, filename: path.basename(outPath), operation: 'explode' };
   } catch (e) {
     return { success: false, error: e.message };
