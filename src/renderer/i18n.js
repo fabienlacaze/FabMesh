@@ -45,6 +45,8 @@
       "Fracture the mesh into shards and blast them outward from the centre over navigable stages — a detonation of your model. The texture is preserved on every shard; each stage is exportable as GLB. The final mesh stays intact as stage 1.":
         "Fracture le mesh en éclats projetés depuis le centre sur des étapes navigables — une détonation de ton modèle. La texture est préservée sur chaque éclat ; chaque étape est exportable en GLB. Le mesh final reste intact en étape 1.",
       'Explosion strength': "Force de l'explosion",
+      'Fracture the mesh into shards. This creates a new version whose viewer has a live explode slider (the same control as segmented meshes) — drag it to blast the shards apart continuously. Texture preserved.':
+        "Fracture le mesh en éclats. Crée une nouvelle version dont le viewer a un slider d'explosion en direct (le même contrôle que les meshes segmentés) — glisse-le pour écarter les éclats en continu. Texture préservée.",
       'Fragments': 'Éclats',
       'Geometric fabrication (~5 s). More fragments = finer shatter.': 'Fabrication géométrique (~5 s). Plus d\'éclats = éclatement plus fin.',
       'Detonate': 'Faire exploser',
@@ -59,6 +61,9 @@
         "Les dimensions sont dans les unités du mesh. La mise à l'échelle reste proportionnelle si Uniforme est activé.",
       'Drag gizmo · orbit with right-drag · wheel to zoom': 'Glisse le gizmo · clic droit pour pivoter · molette pour zoomer',
       'Apply': 'Appliquer',
+      'Units': 'Unités',
+      'Centimeters (cm)': 'Centimètres (cm)', 'Millimeters (mm)': 'Millimètres (mm)',
+      'Meters (m)': 'Mètres (m)', 'Inches (in)': 'Pouces (in)',
       // ---- Uninstall popup ----
       'Uninstall MyFabmesh.AI': 'Désinstaller MyFabmesh.AI',
       'This removes the app. Optionally, also delete:': "Ceci retire l'application. En option, supprimer aussi :",
@@ -1105,10 +1110,17 @@
     let m = {};
     try { m = JSON.parse(localStorage.getItem(_AUTO_KEY + lang) || '{}') || {}; } catch (_) { m = {}; }
     _autoCache[lang] = m;
-    // Merge the auto cache, but NEVER over a curated register() entry — the cache may hold
-    // a stale/bad argos translation (e.g. 'Sharpen texture'->'aiguillage') that would shadow it.
+    // Merge the auto cache, but NEVER over a curated entry — neither a register()'d
+    // one NOR a hand-written top-level I18N[lang] entry. The cache may hold a stale/bad
+    // argos translation (e.g. 'history tracing'->'trafic d'histoire', or
+    // 'Sharpen texture'->'aiguillage') that would otherwise shadow the curated string.
+    // Rule: only fill GAPS — keys with no existing translation.
     const _base = I18N[lang] || (I18N[lang] = {});
-    for (const _k in m) { if (!(_curated[lang] && _curated[lang].has(_k))) _base[_k] = m[_k]; }
+    for (const _k in m) {
+      if (_curated[lang] && _curated[lang].has(_k)) continue;
+      if (_base[_k] !== undefined) continue;          // top-level curated entry — keep it
+      _base[_k] = m[_k];
+    }
     return m;
   }
   function _shouldAutoTranslate(key) {

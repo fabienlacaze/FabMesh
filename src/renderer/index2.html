@@ -1570,17 +1570,9 @@
     <div id="modal-explode-options" class="modal-overlay hidden">
       <div class="modal-card">
         <h2>&#128165; Explode / destroy</h2>
-        <p class="modal-subtitle">Fracture the mesh into shards and blast them outward from the centre over navigable stages — a detonation of your model. The texture is preserved on every shard; each stage is exportable as GLB. The final mesh stays intact as stage 1.</p>
+        <p class="modal-subtitle">Fracture the mesh into shards. This creates a new version whose viewer has a live explode slider (the same control as segmented meshes) — drag it to blast the shards apart continuously. Texture preserved.</p>
         <div style="display:flex; flex-direction:column; gap:8px; margin:16px 0;">
           <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">
-            Number of stages <span id="ex3d-count-val" class="slider-val">5</span>
-          </label>
-          <input type="range" id="ex3d-count" min="2" max="12" value="5" />
-          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">
-            Explosion strength <span id="ex3d-strength-val" class="slider-val">70%</span>
-          </label>
-          <input type="range" id="ex3d-strength" min="10" max="150" value="70" />
-          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">
             Fragments <span id="ex3d-frags-val" class="slider-val">24</span>
           </label>
           <input type="range" id="ex3d-frags" min="6" max="80" value="24" />
@@ -1607,6 +1599,15 @@
             <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-1);">
               <input type="checkbox" id="rz-uniform" checked /> Uniform scale (lock ratio)
             </label>
+            <div>
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; display:block; margin-bottom:4px;">Units</label>
+              <select id="rz-unit" class="modal-select" style="width:100%;">
+                <option value="cm" selected>Centimeters (cm)</option>
+                <option value="mm">Millimeters (mm)</option>
+                <option value="m">Meters (m)</option>
+                <option value="in">Inches (in)</option>
+              </select>
+            </div>
             <div style="display:flex; flex-direction:column; gap:8px;">
               <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Width (X)</label>
               <input type="number" id="rz-dim-x" class="modal-select" step="0.001" style="width:100%;" />

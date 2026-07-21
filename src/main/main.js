@@ -4806,61 +4806,28 @@ ipcMain.handle('mesh-resize', async (_event, { meshPath, sx, sy, sz } = {}) => {
 // stages handler: a NEW mesh version is created so the original stays intact.
 ipcMain.handle('generate-explode-3d', async (event, opts) => {
   try {
-    const { meshPath, stageCount, strength, fragments } = (opts || {});
+    const { meshPath, fragments } = (opts || {});
     if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
     if (!isPathAllowed(meshPath)) return { success: false, error: 'Mesh path not allowed' };
-    const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 5));
-    const str = Math.max(0, Math.min(150, parseInt(strength, 10) || 70));
     const frags = Math.max(4, Math.min(200, parseInt(fragments, 10) || 24));
+    // ONE parts-mesh (shards named part_XX) — the viewer's live explode slider
+    // (same as segmented meshes) blasts them apart. New version, original intact.
     const stem = path.basename(meshPath, path.extname(meshPath)).replace(/_explode_\d+$/i, '');
-    const ts = Date.now();
-    const newStem = `${stem}_explode_${ts}`;
-    const versionMeshPath = path.join(MESHES_DIR, newStem + '.glb');
-    fs.copyFileSync(meshPath, versionMeshPath);
-    const outDir = path.join(MESHES_DIR, `${newStem}_explode_stages`);
-    try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
-    fs.mkdirSync(outDir, { recursive: true });
+    const outPath = path.join(MESHES_DIR, `${stem}_explode_${Date.now()}.glb`);
     const script = path.join(SCRIPTS_DIR, 'explode_mesh_3d.py');
     if (!fs.existsSync(script)) return { success: false, error: 'explode_mesh_3d.py not found' };
     safeSend('ai3d-progress', '[Explode] Fracturing mesh into shards…');
     const ok = await new Promise((resolve) => {
-      const proc = execFile(_aiPython(), [script, meshPath, outDir, String(n), String(str), String(frags)],
+      const proc = execFile(_aiPython(), [script, meshPath, outPath, String(frags)],
         { timeout: 600000, maxBuffer: 64 * 1024 * 1024 }, (error) => resolve(!error));
       proc.stdout?.on('data', d => safeSend('ai3d-progress', `[Explode] ${d.toString()}`));
       proc.stderr?.on('data', d => safeSend('ai3d-progress', `[Explode] ${d.toString()}`));
     });
-    if (!ok) return { success: false, error: 'Explosion worker failed' };
-    const stages = [];
-    for (let i = 0; i < n; i++) {
-      const sp = path.join(outDir, `stage_${i}.glb`);
-      if (!fs.existsSync(sp)) return { success: false, error: `stage ${i} missing` };
-      stages.push({ index: i, path: sp, progress: n <= 1 ? 1 : i / (n - 1) });
-    }
-    return { success: true, versionMeshPath, dir: outDir, stages, count: n };
+    if (!ok || !fs.existsSync(outPath)) return { success: false, error: 'Explosion worker failed' };
+    return { success: true, newPath: outPath, filename: path.basename(outPath), operation: 'explode' };
   } catch (e) {
     return { success: false, error: e.message };
   }
-});
-
-// Disk fallback: does an explosion-stages folder exist for a mesh? Lets the mesh
-// stages bar re-appear after an app restart (GLBs persist in MESHES_DIR/<stem>_explode_stages/).
-ipcMain.handle('check-explode-dir', async (_event, meshPath) => {
-  try {
-    if (!meshPath) return { exists: false };
-    const stem = path.basename(meshPath, path.extname(meshPath));
-    const dir = path.join(MESHES_DIR, `${stem}_explode_stages`);
-    if (!fs.existsSync(dir)) return { exists: false };
-    const files = fs.readdirSync(dir).filter(f => /^stage_\d+\.glb$/i.test(f));
-    if (files.length < 2) return { exists: false };
-    const sorted = files
-      .map(f => ({ index: parseInt(f.match(/stage_(\d+)/i)[1], 10), path: path.join(dir, f) }))
-      .sort((a, b) => a.index - b.index);
-    const stages = sorted.map(s => ({
-      index: s.index, path: s.path,
-      progress: sorted.length <= 1 ? 1 : s.index / (sorted.length - 1),
-    }));
-    return { exists: true, dir, stages, count: stages.length };
-  } catch (_) { return { exists: false }; }
 });
 
 // Disk fallback: does a construction-stages folder already exist for an image?

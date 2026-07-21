@@ -3716,46 +3716,34 @@ document.getElementById('ws-mesh-stages3d-btn')?.addEventListener('click', () =>
   document.getElementById('modal-stages3d-options')?.classList.remove('hidden');
 });
 
-// EXPLOSION / DESTRUCTION 3D — fracture into shards + blast outward over stages.
-// Reuses the same navigable stage bar as the construction stages.
+// EXPLOSION / DESTRUCTION 3D — fracture into named shards (part_XX). Creates a
+// NEW mesh version; the viewer's live explode slider (same control as segmented
+// meshes) blasts the shards apart continuously — no baked stages.
 document.getElementById('ws-mesh-explode-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   const mp = p && (p.previewMeshPath || p.selectedMeshPath);
   if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
   document.getElementById('modal-explode-options')?.classList.remove('hidden');
 });
-document.getElementById('ex3d-count')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-count-val'); if (el) el.textContent = e.target.value; });
-document.getElementById('ex3d-strength')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-strength-val'); if (el) el.textContent = e.target.value + '%'; });
 document.getElementById('ex3d-frags')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-frags-val'); if (el) el.textContent = e.target.value; });
 document.getElementById('ex3d-cancel')?.addEventListener('click', () => { document.getElementById('modal-explode-options')?.classList.add('hidden'); });
 document.getElementById('ex3d-start')?.addEventListener('click', () => {
   document.getElementById('modal-explode-options')?.classList.add('hidden');
   const p = state.currentProject;
-  let mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
   if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
-  // If a stage is displayed, detonate from its COVER mesh (not the shattered stage).
-  mp = String(mp).replace(/_(explode|stages3d)[\\\/]stage_\d+\.glb$/i, '.glb');
-  const count = Math.max(2, Math.min(12, parseInt(document.getElementById('ex3d-count')?.value, 10) || 5));
-  const strength = Math.max(10, Math.min(150, parseInt(document.getElementById('ex3d-strength')?.value, 10) || 70));
   const fragments = Math.max(6, Math.min(80, parseInt(document.getElementById('ex3d-frags')?.value, 10) || 24));
   const job = pushJob(`Explosion 3D: ${p.name}`, null,
-    { 'Étapes': count, Force: strength + '%', Éclats: fragments, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
+    { Éclats: fragments, Source: String(mp).split(/[\\/]/).pop() }, 6000, { projectName: p.name });
   (async () => {
     try {
-      const r = await API.generateExplode3d({ meshPath: mp, stageCount: count, strength, fragments });
-      if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
+      const r = await API.generateExplode3d({ meshPath: String(mp), fragments });
+      if (r && r.success && r.newPath) {
         completeJob(job.id, true);
         await reloadCurrentProject();
         const np = state.currentProject;
-        if (np) {
-          np._meshStages = r.stages;
-          if (r.versionMeshPath) {
-            np.previewMeshPath = r.versionMeshPath;
-            try { showStep2Preview({ path: r.versionMeshPath, filename: String(r.versionMeshPath).split(/[\\/]/).pop() }); } catch (_) {}
-          }
-          _showMeshStagesBar(r.stages);
-        }
-        showToast(`Nouvelle version « explosion » — ${r.stages.length} étapes, clique les vignettes`, 'success', 3000);
+        if (np) { np.previewMeshPath = r.newPath; try { showStep2Preview({ path: r.newPath, filename: r.filename }); } catch (_) {} }
+        showToast('Version « explosion » créée — utilise le slider d\'explosion du viewer.', 'success', 3200);
       } else {
         completeJob(job.id, false);
         customError((r && r.error) || 'unknown', 'Explosion 3D — échec');
@@ -3784,6 +3772,15 @@ function _rzDims() {
   const s = rzState.model.scale, o = rzState.orig;
   return { x: o.x * s.x, y: o.y * s.y, z: o.z * s.z };
 }
+
+// Mesh units are treated as METERS (glTF standard). The unit selector only
+// changes DISPLAY + the meaning of typed target dimensions — it never rescales
+// unless the user types a value. f = mesh-unit→display factor, d = decimals.
+const RZ_UNITS = {
+  cm: { f: 100, s: 'cm', d: 1 }, mm: { f: 1000, s: 'mm', d: 0 },
+  m: { f: 1, s: 'm', d: 3 }, in: { f: 39.3701, s: 'in', d: 2 },
+};
+function _rzUnit() { return RZ_UNITS[document.getElementById('rz-unit')?.value] || RZ_UNITS.cm; }
 
 function _rzBuildRulers() {
   if (!rzState.scene) return;
@@ -3826,11 +3823,12 @@ function _rzBuildRulers() {
 }
 
 function _rzUpdateReadout() {
-  const d = _rzDims();
+  const d = _rzDims(); const u = _rzUnit();
   const ro = document.getElementById('rz-readout');
-  if (ro) ro.innerHTML = `<span style="color:#ff8a8a">W ${d.x.toFixed(3)}</span>  ·  <span style="color:#8ae0a2">H ${d.y.toFixed(3)}</span>  ·  <span style="color:#9ac2ff">D ${d.z.toFixed(3)}</span>`;
+  const f = (v) => (v * u.f).toFixed(u.d);
+  if (ro) ro.innerHTML = `<span style="color:#ff8a8a">W ${f(d.x)}</span>  ·  <span style="color:#8ae0a2">H ${f(d.y)}</span>  ·  <span style="color:#9ac2ff">D ${f(d.z)}</span>  <span style="opacity:.65">${u.s}</span>`;
   if (!rzState.editing) {
-    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v.toFixed(3); };
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v * u.f).toFixed(u.d); };
     set('rz-dim-x', d.x); set('rz-dim-y', d.y); set('rz-dim-z', d.z);
   }
 }
@@ -3843,7 +3841,9 @@ function _rzSetUniform(on) {
 }
 
 function _rzApplyDimInput(axis, value) {
-  const v = Number(value); if (!isFinite(v) || v <= 0) return;
+  const u = _rzUnit();
+  const v = Number(value) / u.f;   // display unit → mesh units (metres)
+  if (!isFinite(v) || v <= 0) return;
   const o = rzState.orig, m = rzState.model;
   const uni = document.getElementById('rz-uniform')?.checked;
   const factor = v / (axis === 'x' ? o.x : axis === 'y' ? o.y : o.z);
@@ -3856,7 +3856,7 @@ function _rzLabelsTick() {
   // Project each ruler midpoint to screen and place its dimension label there.
   if (!rzState.rulers || !rzState.rulers._mid || !rzState.camera) return;
   const vp = document.getElementById('rz-viewport'); if (!vp) return;
-  const w = vp.clientWidth, h = vp.clientHeight, d = _rzDims();
+  const w = vp.clientWidth, h = vp.clientHeight, d = _rzDims(), u = _rzUnit();
   const place = (key, val, color) => {
     let el = rzState.labels[key];
     if (!el) {
@@ -3867,7 +3867,7 @@ function _rzLabelsTick() {
     const p = rzState.rulers._mid[key].clone().project(rzState.camera);
     el.style.left = ((p.x * 0.5 + 0.5) * w) + 'px';
     el.style.top = ((-p.y * 0.5 + 0.5) * h) + 'px';
-    el.style.color = color; el.textContent = val.toFixed(3);
+    el.style.color = color; el.textContent = (val * u.f).toFixed(u.d) + ' ' + u.s;
   };
   place('x', d.x, '#ff8a8a'); place('y', d.y, '#8ae0a2'); place('z', d.z, '#9ac2ff');
 }
@@ -3948,6 +3948,7 @@ function openResizeTool() {
 
 document.getElementById('ws-mesh-resize-btn')?.addEventListener('click', openResizeTool);
 document.getElementById('rz-uniform')?.addEventListener('change', (e) => _rzSetUniform(e.target.checked));
+document.getElementById('rz-unit')?.addEventListener('change', () => { if (rzState.model) _rzUpdateReadout(); });
 ['x', 'y', 'z'].forEach((ax) => {
   const el = document.getElementById('rz-dim-' + ax);
   el?.addEventListener('focus', () => { rzState.editing = true; });
@@ -4058,23 +4059,12 @@ function _stageKindLabels(stages) {
   const explode = /_explode_stages/i.test(String((stages && stages[0] && stages[0].path) || ''));
   return explode ? { first: 'INTACT', last: 'EXPLOSÉ' } : { first: 'CHANTIER', last: 'FINAL' };
 }
-let _scrubTimer = null;
-function _scrubLoadStage(path) {
-  // Debounce the (heavy) GLB load while the user drags the scrubber.
-  if (_scrubTimer) clearTimeout(_scrubTimer);
-  _scrubTimer = setTimeout(() => {
-    try { showStep2Preview({ path, filename: path.split(/[\\/]/).pop() }); } catch (_) {}
-  }, 130);
-}
 function _showMeshStagesBar(stages) {
   const bar = document.getElementById('ws-mesh-stages-bar');
   if (!bar || !Array.isArray(stages) || stages.length < 2) return;
   const last = stages.length - 1;
   const L = _stageKindLabels(stages);
-  bar.style.flexDirection = 'column';
   bar.innerHTML = '';
-  const row = document.createElement('div');
-  row.style.cssText = 'display:flex; gap:2px; align-items:center; justify-content:center;';
   for (const s of stages) {
     const btn = document.createElement('button');
     btn.className = 'stage-btn' + (s.index === last ? ' stage-active' : '');
@@ -4082,23 +4072,8 @@ function _showMeshStagesBar(stages) {
     const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
     const lbl = s.index === last ? L.last : (s.index === 0 ? L.first : pct + '%');
     btn.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${lbl}</span>`;
-    row.appendChild(btn);
+    bar.appendChild(btn);
   }
-  bar.appendChild(row);
-  // Scrubber slider — drag to move continuously through the stages (snaps to the
-  // nearest stage; the actual GLB load is debounced so dragging stays smooth).
-  const sld = document.createElement('input');
-  sld.type = 'range'; sld.min = '0'; sld.max = String(last); sld.step = '1'; sld.value = String(last);
-  sld.className = 'stage-scrubber';
-  sld.style.cssText = 'width:100%; margin-top:5px; accent-color:#f59e0b; cursor:ew-resize;';
-  sld.addEventListener('input', () => {
-    const i = parseInt(sld.value, 10);
-    const s = stages[i]; if (!s) return;
-    row.querySelectorAll('.stage-btn').forEach((b, k) => b.classList.toggle('stage-active', k === i));
-    const p = state.currentProject;
-    if (p && s.path) { p.previewMeshPath = s.path; _scrubLoadStage(s.path); }
-  });
-  bar.appendChild(sld);
   bar.classList.remove('hidden');
 }
 document.getElementById('ws-mesh-stages-bar')?.addEventListener('click', (e) => {
@@ -4107,9 +4082,6 @@ document.getElementById('ws-mesh-stages-bar')?.addEventListener('click', (e) => 
   const bar = document.getElementById('ws-mesh-stages-bar');
   bar.querySelectorAll('.stage-btn').forEach(b => b.classList.remove('stage-active'));
   btn.classList.add('stage-active');
-  // keep the scrubber in sync when a discrete stage button is clicked
-  const idx = Array.from(bar.querySelectorAll('.stage-btn')).indexOf(btn);
-  const sld = bar.querySelector('.stage-scrubber'); if (sld && idx >= 0) sld.value = String(idx);
   const p = state.currentProject; const mp = btn.dataset.path;
   if (p && mp) {
     p.previewMeshPath = mp;   // tools operate on the displayed stage
@@ -4869,12 +4841,7 @@ async function openMeshLightbox(meshPath, kind) {
       if (match) {
         const last = st.length - 1;
         const L = _stageKindLabels(st);
-        let curIdx = st.findIndex(s => _normPath(s.path) === _normPath(meshPath));
-        if (curIdx < 0) curIdx = last;
-        bar.style.flexDirection = 'column';
         bar.innerHTML = '';
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex; gap:2px; align-items:center; justify-content:center;';
         for (const s of st) {
           const b = document.createElement('button');
           b.className = 'stage-btn' + (_normPath(s.path) === _normPath(meshPath) ? ' stage-active' : '');
@@ -4882,22 +4849,8 @@ async function openMeshLightbox(meshPath, kind) {
           const pct = Math.round((s.progress != null ? s.progress : s.index / last) * 100);
           b.innerHTML = `<span class="stage-num">${s.index + 1}</span><span class="stage-lbl">${s.index === last ? L.last : (s.index === 0 ? L.first : pct + '%')}</span>`;
           b.onclick = (ev) => { ev.stopPropagation(); openMeshLightbox(s.path, kind); };
-          row.appendChild(b);
+          bar.appendChild(b);
         }
-        bar.appendChild(row);
-        // Scrubber slider (fullscreen viewer) — drag to move through the stages.
-        const sld = document.createElement('input');
-        sld.type = 'range'; sld.min = '0'; sld.max = String(last); sld.step = '1'; sld.value = String(curIdx);
-        sld.className = 'stage-scrubber';
-        sld.style.cssText = 'width:100%; margin-top:5px; accent-color:#f59e0b; cursor:ew-resize;';
-        let _lbScrub = null;
-        sld.addEventListener('input', () => {
-          const i = parseInt(sld.value, 10); const s = st[i]; if (!s) return;
-          if (_lbScrub) clearTimeout(_lbScrub);
-          _lbScrub = setTimeout(() => { try { openMeshLightbox(s.path, kind); } catch (_) {} }, 140);
-        });
-        sld.addEventListener('click', (ev) => ev.stopPropagation());
-        bar.appendChild(sld);
         bar.classList.remove('hidden');
       } else { bar.classList.add('hidden'); bar.innerHTML = ''; }
     }
@@ -8735,16 +8688,16 @@ async function showStep2Preview(mesh) {
       } else {
         bar.classList.add('hidden'); bar.innerHTML = '';
         // Disk fallback (survives app restarts): a <stem>_stages3d (construction)
-        // OR <stem>_explode_stages (explosion) folder → rebind and show the bar.
-        (async () => {
-          let info = API.checkStages3dDir ? await API.checkStages3dDir(mesh.path) : null;
-          if (!(info && info.exists) && API.checkExplodeDir) info = await API.checkExplodeDir(mesh.path);
-          if (info && info.exists && (info.stages || []).length >= 2 &&
-              p && _normPath(p.previewMeshPath || '') === mp) {
-            p._meshStages = info.stages;
-            _showMeshStagesBar(info.stages);
-          }
-        })().catch(() => {});
+        // folder → rebind and show the stage bar.
+        if (API.checkStages3dDir) {
+          API.checkStages3dDir(mesh.path).then((info) => {
+            if (info && info.exists && (info.stages || []).length >= 2 &&
+                p && _normPath(p.previewMeshPath || '') === mp) {
+              p._meshStages = info.stages;
+              _showMeshStagesBar(info.stages);
+            }
+          }).catch(() => {});
+        }
       }
     }
   } catch (_) {}
