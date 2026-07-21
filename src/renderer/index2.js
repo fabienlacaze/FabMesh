@@ -10137,7 +10137,7 @@ const _LIVING_ASSETS = new Set(['character', 'creature', 'animal', 'insect', 'ot
 function _findRigForMesh(p, meshPath) {
   const rigs = (p && p.rigs) || [];
   if (!rigs.length) return null;
-  const base = (meshPath.split(/[\\/]/).pop() || '').replace(/_segment_.*$/i, '').replace(/\.[^.]+$/, '');
+  const base = (meshPath.split(/[\\/]/).pop() || '').replace(/_(segment|explode)_.*$/i, '').replace(/\.[^.]+$/, '');
   const key = base.slice(0, 24);
   const match = rigs.find((r) => (r.filename || '').includes(key));
   const newest = rigs.slice().sort((a, b) => new Date(b.created || b.mtime || 0) - new Date(a.created || a.mtime || 0))[0];
@@ -10250,7 +10250,9 @@ async function runNameParts() {
   const meshPath = p && (p.previewMeshPath || p.selectedMeshPath);
   if (!p || !meshPath) { showToast(_i18nT('Pick a mesh first.'), 'error'); return; }
   if (!API.nameParts) { showToast('Naming engine not available.', 'error'); return; }
-  if (!/_segment_/i.test(meshPath)) {
+  // A mesh with named part_XX submeshes qualifies — that's both the segmentation
+  // output (_segment_) AND the explosion output (_explode_ shards).
+  if (!/_(segment|explode)_/i.test(meshPath)) {
     showToast(_i18nT('Segment the mesh into parts first (scissors), then name the zones.'), 'info', 3800);
     return;
   }
