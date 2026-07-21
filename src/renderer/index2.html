@@ -710,6 +710,7 @@
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
                         <button id="ws-mesh-clone3d-btn" class="ghost-btn tool-btn" title="Clone une zone de la texture vers une autre directement sur le mesh 3D (comme le tampon de clonage 2D)">&#129657; Tampon de clonage 3D</button>
                         <button id="ws-mesh-stages3d-btn" class="ghost-btn tool-btn" title="Fabricate the 3D meshes of the construction stages (sliced building + frame + scaffolding), navigable and exportable">&#127959;&#65039; 3D construction stages</button>
+                        <button id="ws-mesh-explode-btn" class="ghost-btn tool-btn" title="Fracture the mesh into shards and blast them outward over navigable stages (explosion / destruction). Texture preserved, exportable.">&#128165; Explode / destroy</button>
                         <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh">&#127919; Align Texture</button>
                         <button id="ws-mesh-material-btn" class="ghost-btn tool-btn" title="Adjust material brightness, saturation, contrast, emissive, metallic, roughness">&#10024; Material adjust</button>
                       </div>
@@ -1562,6 +1563,31 @@
         <div class="modal-actions">
           <button class="ghost-btn" id="bs3d-cancel">Cancel</button>
           <button class="primary-btn" id="bs3d-start">Fabricate</button>
+        </div>
+      </div>
+    </div>
+    <div id="modal-explode-options" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>&#128165; Explode / destroy</h2>
+        <p class="modal-subtitle">Fracture the mesh into shards and blast them outward from the centre over navigable stages — a detonation of your model. The texture is preserved on every shard; each stage is exportable as GLB. The final mesh stays intact as stage 1.</p>
+        <div style="display:flex; flex-direction:column; gap:8px; margin:16px 0;">
+          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">
+            Number of stages <span id="ex3d-count-val" class="slider-val">5</span>
+          </label>
+          <input type="range" id="ex3d-count" min="2" max="12" value="5" />
+          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">
+            Explosion strength <span id="ex3d-strength-val" class="slider-val">70%</span>
+          </label>
+          <input type="range" id="ex3d-strength" min="10" max="150" value="70" />
+          <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">
+            Fragments <span id="ex3d-frags-val" class="slider-val">24</span>
+          </label>
+          <input type="range" id="ex3d-frags" min="6" max="80" value="24" />
+          <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">Geometric fabrication (~5 s). More fragments = finer shatter.</small>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="ex3d-cancel">Cancel</button>
+          <button class="primary-btn" id="ex3d-start">Detonate</button>
         </div>
       </div>
     </div>

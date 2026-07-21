@@ -38,6 +38,16 @@
       'Fabricate': 'Fabriquer',
       'Fabricate the 3D meshes of the construction stages (sliced building + frame + scaffolding), navigable and exportable':
         "Fabrique les meshes 3D des étapes de construction (bâtiment tranché + charpente + échafaudage), navigables et exportables",
+      // ---- Explosion / destruction 3D ----
+      'Explode / destroy': 'Explosion / destruction',
+      'Fracture the mesh into shards and blast them outward over navigable stages (explosion / destruction). Texture preserved, exportable.':
+        "Fracture le mesh en éclats projetés vers l'extérieur sur des étapes navigables (explosion / destruction). Texture préservée, exportable.",
+      "Fracture the mesh into shards and blast them outward from the centre over navigable stages — a detonation of your model. The texture is preserved on every shard; each stage is exportable as GLB. The final mesh stays intact as stage 1.":
+        "Fracture le mesh en éclats projetés depuis le centre sur des étapes navigables — une détonation de ton modèle. La texture est préservée sur chaque éclat ; chaque étape est exportable en GLB. Le mesh final reste intact en étape 1.",
+      'Explosion strength': "Force de l'explosion",
+      'Fragments': 'Éclats',
+      'Geometric fabrication (~5 s). More fragments = finer shatter.': 'Fabrication géométrique (~5 s). Plus d\'éclats = éclatement plus fin.',
+      'Detonate': 'Faire exploser',
       // ---- Uninstall popup ----
       'Uninstall MyFabmesh.AI': 'Désinstaller MyFabmesh.AI',
       'This removes the app. Optionally, also delete:': "Ceci retire l'application. En option, supprimer aussi :",

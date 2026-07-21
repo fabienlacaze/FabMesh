@@ -3715,6 +3715,57 @@ document.getElementById('ws-mesh-stages3d-btn')?.addEventListener('click', () =>
   if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
   document.getElementById('modal-stages3d-options')?.classList.remove('hidden');
 });
+
+// EXPLOSION / DESTRUCTION 3D — fracture into shards + blast outward over stages.
+// Reuses the same navigable stage bar as the construction stages.
+document.getElementById('ws-mesh-explode-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  document.getElementById('modal-explode-options')?.classList.remove('hidden');
+});
+document.getElementById('ex3d-count')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-count-val'); if (el) el.textContent = e.target.value; });
+document.getElementById('ex3d-strength')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-strength-val'); if (el) el.textContent = e.target.value + '%'; });
+document.getElementById('ex3d-frags')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-frags-val'); if (el) el.textContent = e.target.value; });
+document.getElementById('ex3d-cancel')?.addEventListener('click', () => { document.getElementById('modal-explode-options')?.classList.add('hidden'); });
+document.getElementById('ex3d-start')?.addEventListener('click', () => {
+  document.getElementById('modal-explode-options')?.classList.add('hidden');
+  const p = state.currentProject;
+  let mp = p && (p.previewMeshPath || p.selectedMeshPath);
+  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  // If a stage is displayed, detonate from its COVER mesh (not the shattered stage).
+  mp = String(mp).replace(/_(explode|stages3d)[\\\/]stage_\d+\.glb$/i, '.glb');
+  const count = Math.max(2, Math.min(12, parseInt(document.getElementById('ex3d-count')?.value, 10) || 5));
+  const strength = Math.max(10, Math.min(150, parseInt(document.getElementById('ex3d-strength')?.value, 10) || 70));
+  const fragments = Math.max(6, Math.min(80, parseInt(document.getElementById('ex3d-frags')?.value, 10) || 24));
+  const job = pushJob(`Explosion 3D: ${p.name}`, null,
+    { 'Étapes': count, Force: strength + '%', Éclats: fragments, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
+  (async () => {
+    try {
+      const r = await API.generateExplode3d({ meshPath: mp, stageCount: count, strength, fragments });
+      if (r && r.success && Array.isArray(r.stages) && r.stages.length >= 2) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+        const np = state.currentProject;
+        if (np) {
+          np._meshStages = r.stages;
+          if (r.versionMeshPath) {
+            np.previewMeshPath = r.versionMeshPath;
+            try { showStep2Preview({ path: r.versionMeshPath, filename: String(r.versionMeshPath).split(/[\\/]/).pop() }); } catch (_) {}
+          }
+          _showMeshStagesBar(r.stages);
+        }
+        showToast(`Nouvelle version « explosion » — ${r.stages.length} étapes, clique les vignettes`, 'success', 3000);
+      } else {
+        completeJob(job.id, false);
+        customError((r && r.error) || 'unknown', 'Explosion 3D — échec');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      customError(e?.message || String(e), 'Explosion 3D — erreur');
+    }
+  })();
+});
 document.getElementById('bs3d-count')?.addEventListener('input', (e) => {
   const el = document.getElementById('bs3d-count-val');
   if (el) el.textContent = e.target.value;
@@ -8393,25 +8444,27 @@ async function showStep2Preview(mesh) {
       const st = p && p._meshStages;
       const mp = _normPath(String(mesh.path || ''));
       const isStage = !!(st && st.some(s => _normPath(s.path) === mp));
+      const coverBase = mp.replace(/\.glb$/i, '');
       const isCover = !!(st && st.length &&
-        _normPath(st[0].path).indexOf(mp.replace(/\.glb$/i, '_stages3d')) === 0);
+        (_normPath(st[0].path).indexOf(coverBase + '_stages3d') === 0 ||
+         _normPath(st[0].path).indexOf(coverBase + '_explode_stages') === 0));
       if (isStage || isCover) {
         _showMeshStagesBar(st);
         bar.querySelectorAll('.stage-btn').forEach(b =>
           b.classList.toggle('stage-active', _normPath(b.dataset.path) === mp));
       } else {
         bar.classList.add('hidden'); bar.innerHTML = '';
-        // Disk fallback (survives app restarts): if a <stem>_stages3d folder
-        // exists for this mesh, rebind and show the bar.
-        if (API.checkStages3dDir) {
-          API.checkStages3dDir(mesh.path).then((info) => {
-            if (info && info.exists && (info.stages || []).length >= 2 &&
-                p && _normPath(p.previewMeshPath || '') === mp) {
-              p._meshStages = info.stages;
-              _showMeshStagesBar(info.stages);
-            }
-          }).catch(() => {});
-        }
+        // Disk fallback (survives app restarts): a <stem>_stages3d (construction)
+        // OR <stem>_explode_stages (explosion) folder → rebind and show the bar.
+        (async () => {
+          let info = API.checkStages3dDir ? await API.checkStages3dDir(mesh.path) : null;
+          if (!(info && info.exists) && API.checkExplodeDir) info = await API.checkExplodeDir(mesh.path);
+          if (info && info.exists && (info.stages || []).length >= 2 &&
+              p && _normPath(p.previewMeshPath || '') === mp) {
+            p._meshStages = info.stages;
+            _showMeshStagesBar(info.stages);
+          }
+        })().catch(() => {});
       }
     }
   } catch (_) {}
