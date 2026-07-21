@@ -877,6 +877,9 @@
     if (!key) return;
     let translated = orig;  // dict null = English (source) -> restore the cached original
     if (dict) {
+      // Already-translated text (a curated VALUE for this lang) must be left as-is
+      // — re-translating t()'s French output mangled it ("trafic d'histoire" bug).
+      if (_curatedValues[_lang] && _curatedValues[_lang].has(key)) return;
       // Match the icon-STRIPPED core FIRST so curated (icon-less) dict entries beat any
       // stale full-string auto cache entry that used to shadow them ('Sharpen'->'épingle').
       // Core may start with a LETTER or DIGIT ("🏗️ 3D construction stages"):
@@ -1010,6 +1013,12 @@
   // IPC bridge is absent (e.g. the web/cloud build has no local worker).
   const _AUTO_KEY = 'fabmesh.i18n.auto.v3.';   // v3: cache keyed by icon-stripped core; drop stale full-string caches that shadowed curated entries
   const _curated = {};   // per-lang Set of register()'d keys — the auto cache must never override these
+  // VALUES of every curated translation (computed BEFORE any auto-cache merge). Text
+  // that is ALREADY a curated translation must never be re-translated by the DOM
+  // walker: t() emits correct French, then the walker treated that French as English
+  // and mangled it via a self-referential auto-cache entry keyed by the FR.
+  const _curatedValues = {};
+  for (const _lg in I18N) { _curatedValues[_lg] = new Set(Object.values(I18N[_lg])); }
   const _autoCache = {};
   const _pendingAuto = new Set();
   const _triedAuto = new Set();
@@ -1020,7 +1029,15 @@
     try { m = JSON.parse(localStorage.getItem(_AUTO_KEY + lang) || '{}') || {}; } catch (_) { m = {}; }
     _autoCache[lang] = m;
     const _base = I18N[lang] || (I18N[lang] = {});
-    for (const _k in m) { if (!(_curated[lang] && _curated[lang].has(_k))) _base[_k] = m[_k]; }
+    let _purged = false;
+    for (const _k in m) {
+      if (_curated[lang] && _curated[lang].has(_k)) continue;
+      // Self-referential garbage: the KEY is itself a curated FR translation (the
+      // walker mis-translated t()'s output). Drop it from the cache for good.
+      if (_curatedValues[lang] && _curatedValues[lang].has(_k)) { delete m[_k]; _purged = true; continue; }
+      _base[_k] = m[_k];
+    }
+    if (_purged) { try { localStorage.setItem(_AUTO_KEY + lang, JSON.stringify(m)); } catch (_) {} }
     return m;
   }
   function _shouldAutoTranslate(key) {
@@ -1137,6 +1154,8 @@
       I18N[lang] = Object.assign(I18N[lang] || {}, map);
       (_curated[lang] = _curated[lang] || new Set());
       for (const k in map) _curated[lang].add(k);
+      (_curatedValues[lang] = _curatedValues[lang] || new Set());
+      for (const k in map) _curatedValues[lang].add(map[k]);
     },
     languages() { return ['en'].concat(Object.keys(I18N)); },
   };

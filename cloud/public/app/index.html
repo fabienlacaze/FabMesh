@@ -2596,6 +2596,7 @@
         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
           <button id="select-cut" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Cut the selection (transparent hole left behind)" disabled>&#9986; Cut</button>
           <button id="select-copy" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Copy the selection" disabled>&#128203; Copy</button>
+          <button id="select-delete" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px; color:#ff8080; border-color:rgba(255,80,80,0.4);" title="Delete the selection (transparent hole, no floating piece)" disabled>&#128465; Delete</button>
           <button id="select-drop" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Drop the floating piece here (Enter)" disabled>&#128204; Drop</button>
           <button id="select-deselect" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:12px;" title="Deselect / cancel move (Esc)" disabled>&#10006; Deselect</button>
           <span style="flex:1;"></span>
@@ -3033,7 +3034,7 @@
           <div id="me-paint-opts" style="display:none; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
             <input type="color" id="me-paint-color" value="#ff0000" style="width:36px; height:36px; border:none; cursor:pointer; border-radius:6px;" />
-            <button id="me-paint-pick" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Eyedropper — click then click the mesh to sample a colour">&#128302; Pick colour</button>
+            <button id="me-paint-pick" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Eyedropper — click then click the mesh to sample a colour"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle; margin-right:5px;"><path d="M17.66 5.41l.92.92-2.69 2.69-.92-.92 2.69-2.69M17.67 3c-.26 0-.51.1-.71.29l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.4.4-1.03.01-1.42l-2.34-2.34c-.2-.19-.45-.29-.71-.29z"/></svg>Pick colour</button>
           </div>
           <!-- Brush size -->
           <div style="display:flex; flex-direction:column; gap:2px;">

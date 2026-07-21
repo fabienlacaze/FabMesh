@@ -4445,7 +4445,7 @@ if (qualityEl && qualityLabel) {
 //  3. Negative prompt (local_juggernaut_bridge.py) blocks grid layouts.
 const ASSET_TYPE_PROMPTS = {
   character: 'isolated 3D character, full body, fully clothed, wearing a complete outfit, dressed in appropriate clothing, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, centered, clean silhouette, no text, no UI',
-  building: 'architectural building exterior, complete edifice, isolated, full structure, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI, not a village, not a town',
+  building: 'architectural building exterior, complete edifice, entire building visible from base to roof, wide establishing shot, long shot, distant camera, the whole structure fits inside the frame with clear margin on every side, building fills about 70 percent of frame, nothing cropped, not touching the frame edges, isolated, full structure, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI, not a village, not a town',
   vehicle: 'isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no rear view inset',
   weapon: 'isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI',
   prop: 'isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
@@ -9543,10 +9543,16 @@ function _mtCollectVals(body) {
 
 function _mtSchedulePreview() {
   if (mtState.previewTimer) clearTimeout(mtState.previewTimer);
+  // Gizmo tools (the pivot placer) just reposition the pivot — no geometry
+  // recompute — so run their preview SYNCHRONOUSLY: the gizmo/mesh then tracks
+  // the slider frame by frame instead of only updating when the drag pauses
+  // (the debounce reset on every move added a ~1 s lag on the pivot).
+  const s = mtState.schema;
+  if (s && s.useTransformGizmo && !s.expensivePreview) { _mtRunPreview(); return; }
   // Expensive preview (Decimate's quadric edge collapse) can take a
   // few seconds on 200K+ tris; use a longer debounce so a drag
   // doesn't fire ten compute passes back-to-back.
-  const delay = mtState.schema?.expensivePreview ? 400 : 80;
+  const delay = s?.expensivePreview ? 400 : 80;
   mtState.previewTimer = setTimeout(_mtRunPreview, delay);
 }
 
@@ -12807,11 +12813,17 @@ async function _meInitViewport() {
   }
 
   // Lights
-  meState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  // EVEN / shadow-free studio lighting (user: "pas d'ombres dans les viewers"):
+  // strong ambient + hemisphere with a LIGHT ground so no side stays black, plus
+  // two soft directionals from opposite sides for a hint of form (no hard shadow).
+  meState.scene.add(new THREE.HemisphereLight(0xffffff, 0xc8ccd8, 1.15));
+  meState.scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.45);
   dir.position.set(5, 8, 5);
   meState.scene.add(dir);
-  meState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  const dir2 = new THREE.DirectionalLight(0xffffff, 0.4);
+  dir2.position.set(-5, 4, -6);
+  meState.scene.add(dir2);
 
   // Grid
   meState.scene.add(new THREE.GridHelper(2, 20, 0x444466, 0x333355));
@@ -12840,6 +12852,7 @@ async function _meInitViewport() {
   canvas.addEventListener('mousedown', _meMouseDown);
   canvas.addEventListener('mousemove', _meMouseMove);
   canvas.addEventListener('mouseup', _meMouseUp);
+  canvas.addEventListener('mouseleave', () => { const c = document.getElementById('me-brush-cursor'); if (c) c.style.display = 'none'; });
 }
 
 function _meLoadMesh(meshPath) {
@@ -12923,6 +12936,9 @@ function _meSnapshot() {
         // Capture the index too — Delete rewrites it, so without this undo
         // can't bring deleted faces back.
         index: c.geometry.index ? c.geometry.index.array.slice() : null,
+        // Capture the SELECTION so undo restores it as a real selection (was
+        // wiped on restore → the reverted state looked selected but wasn't).
+        selSaved: c.geometry._selSaved ? new Map(c.geometry._selSaved) : null,
       });
     }
   });
@@ -12938,7 +12954,10 @@ function _meRestore(snapshot) {
       geom.attributes.color.needsUpdate = true;
     }
     if (s.index) geom.setIndex(new THREE.BufferAttribute(s.index, 1));
-    geom._selSaved = new Map();
+    // Restore the SELECTION captured in this snapshot (indices match the restored
+    // geometry) so undo brings back a REAL, actionable selection. Adjacency caches
+    // are position-derived → drop them to rebuild.
+    geom._selSaved = s.selSaved ? new Map(s.selSaved) : new Map();
     geom._posGroups = null;
     geom._posKeyByIndex = null;
     geom.computeVertexNormals();
@@ -13007,15 +13026,20 @@ function _meMouseDown(e) {
 
 let _meLastBrushTime = 0;
 function _meMouseMove(e) {
-  // Always update cursor position (cheap, no raycasting)
+  // Brush ring — only for the actual brush tools (paint/sculpt/select) and NOT
+  // while the colour pipette is armed. Otherwise it lingered as a stuck orange
+  // circle over the whole UI. Hidden on canvas leave (see mouseleave binding).
   const cursor = document.getElementById('me-brush-cursor');
-  if (cursor) {
+  const brushMode = (meState.mode === 'paint' || meState.mode === 'sculpt' || meState.mode === 'select');
+  if (cursor && brushMode && !meState.pickMode) {
     const screenSize = meState.brushRadius * 500;
     cursor.style.width = screenSize + 'px';
     cursor.style.height = screenSize + 'px';
     cursor.style.left = (e.clientX - screenSize / 2) + 'px';
     cursor.style.top = (e.clientY - screenSize / 2) + 'px';
     cursor.style.display = 'block';
+  } else if (cursor) {
+    cursor.style.display = 'none';
   }
   if (!meState.painting) return;
   // Throttle: max 15fps for brush (raycasting is expensive)

@@ -708,6 +708,7 @@
     var b;
     if ((b = document.getElementById('select-cut'))) b.disabled = !hasRect || hasFloat;
     if ((b = document.getElementById('select-copy'))) b.disabled = !hasRect || hasFloat;
+    if ((b = document.getElementById('select-delete'))) b.disabled = !hasRect || hasFloat;
     if ((b = document.getElementById('select-drop'))) b.disabled = !hasFloat;
     if ((b = document.getElementById('select-deselect'))) b.disabled = !hasRect && !hasFloat;
   }
@@ -747,6 +748,18 @@
     selState.rect = null;
     _selStatus(cut ? 'Cut — drag the piece where you want it, then Drop (or Save).'
                    : 'Copied — drag the piece where you want it, then Drop (or Save).');
+    _selDrawOverlay(); _selUpdateButtons();
+  }
+  function _selDelete() {
+    // Delete = clear the selected region (transparent hole) and drop the
+    // selection — no floating piece, no clipboard (unlike Cut).
+    if (!_selHasRect() || selState.float) return;
+    var s = _selRectNorm(selState.rect);
+    var rx = Math.round(s.x), ry = Math.round(s.y), rw = Math.round(s.w), rh = Math.round(s.h);
+    _selMgr.pushUndo();
+    _selMgr.ctx.clearRect(rx, ry, rw, rh);
+    selState.rect = null;
+    _selStatus('Deleted — save as a new version, or select another zone.');
     _selDrawOverlay(); _selUpdateButtons();
   }
   function _selDrop() {
@@ -824,6 +837,7 @@
 
     var b;
     if ((b = document.getElementById('select-cut'))) b.addEventListener('click', function () { _selCapture(true); });
+    if ((b = document.getElementById('select-delete'))) b.addEventListener('click', function () { _selDelete(); });
     if ((b = document.getElementById('select-copy'))) b.addEventListener('click', function () { _selCapture(false); });
     if ((b = document.getElementById('select-drop'))) b.addEventListener('click', function () { _selDrop(); });
     if ((b = document.getElementById('select-deselect'))) b.addEventListener('click', function () { _selDeselect(); });
