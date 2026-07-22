@@ -5598,6 +5598,29 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
   }
   if (!imageInput) return err(400, 'image required');
 
+  // Cost guard — background-remover is a PAID Replicate call. Without this it
+  // sat OUTSIDE the daily budget backstop (release-audit finding): an
+  // authenticated user could loop it unbounded. ~$0.02/call on Replicate;
+  // charge 1 credit and count it against the global + per-user caps.
+  const COST_PER = 1;
+  const ESTIMATED_USD = 0.02;
+  const remainingBudget = await checkAndIncrementDailySpend(env, ESTIMATED_USD, user.id);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: `daily Cloud GPU budget reached. Try again after midnight UTC.` }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundDailySpend(env, ESTIMATED_USD);
+    return json({ ok: false, success: false,
+      error: `you've reached the per-user daily generation limit.` }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, COST_PER);
+  if (remaining == null) {
+    await refundDailySpend(env, ESTIMATED_USD);
+    return json({ ok: false, success: false, error: `insufficient credits — remove background costs ${COST_PER} credit` }, { status: 402 });
+  }
+
   const replicate = replicateClient(env);
   const version = '851-labs/background-remover:a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc';
   try {
@@ -5633,6 +5656,9 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
 
     return json({ ok: true, success: true, url, path: url, newPath: url });
   } catch (e: unknown) {
+    // Refund the credit + roll back the daily-spend counters on failure.
+    await addCredits(env, user.id, COST_PER);
+    await refundDailySpend(env, ESTIMATED_USD);
     return err(502, 'background-remover failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 }

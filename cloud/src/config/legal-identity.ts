@@ -72,8 +72,13 @@ export const legalIdentity: LegalIdentity = {
   registeredOffice: TODO('adresse postale complète du siège social'),
   vatNumber: TODO('n° TVA intracommunautaire — ou « TVA non applicable, art. 293 B du CGI » si franchise en base'),
   publicationDirector: TODO('nom du directeur de la publication — ex. Fabien Lacaze'),
-  contactEmail: 'contact@myfabmesh.ai',
-  supportEmail: 'fabien65400@hotmail.fr',
+  // NOTE: the old value contact@myfabmesh.ai pointed at an UNREGISTERED domain
+  // (dead mailbox) — invalid as the public legal / DSA / DMCA contact. Must be a
+  // real, working, DEDICATED business mailbox (NOT the owner's personal address).
+  // Create a free dedicated inbox (e.g. a Gmail like myfabmesh.contact@gmail.com)
+  // and put it here + use it as the Brevo sender too.
+  contactEmail: TODO('adresse de contact dédiée — boîte pro dédiée (PAS l’adresse perso), ex. contact@<domaine> ou un Gmail dédié'),
+  supportEmail: TODO('adresse de support dédiée — même principe, boîte dédiée (PAS l’adresse perso)'),
   country: 'France',
   designatedAgent: TODO("nom de l'agent désigné DSA/DMCA — doit aussi être enregistré au U.S. Copyright Office avant distribution aux USA"),
   mediator: {
