@@ -1072,18 +1072,18 @@
    * for legacy local engines that have no equivalent cloud handler.
    * ────────────────────────────────────────────────────────────────── */
   function pruneEngineSelectors() {
-    // 3D engine — cloud only supports trellis2_native (via fishwowater/
+    // 3D engine — cloud only supports native_3d (via fishwowater/
     // trellis2).
     const eng3d = document.getElementById('ws-3d-engine');
     if (eng3d) {
       [...eng3d.options].forEach((opt) => {
-        if (opt.value !== 'trellis2_native') opt.remove();
+        if (opt.value !== 'native_3d') opt.remove();
       });
       // Relabel the lone remaining option so the user sees what the
       // cloud actually does, not the desktop "in one shot, local" copy.
       if (eng3d.options.length === 1) {
         eng3d.options[0].textContent = 'MyFabmesh.AI 3D Native (cloud GPU · ~100s · 1 credit)';
-        eng3d.value = 'trellis2_native';
+        eng3d.value = 'native_3d';
       }
     }
 
@@ -1093,7 +1093,7 @@
     const engImg = document.getElementById('ws-image-engine');
     if (engImg) {
       [...engImg.options].forEach((opt) => {
-        const keep = ['local-flux', 'cloud', 'realvis', ''].includes(opt.value);
+        const keep = ['img_balanced', 'cloud', 'realvis', ''].includes(opt.value);
         if (!keep) opt.remove();
       });
       if (engImg.options.length >= 1) {

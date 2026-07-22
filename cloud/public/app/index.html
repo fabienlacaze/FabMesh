@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- Cloud-relaxed CSP: needs to fetch /api/* on origin + connect to Replicate / R2 CDNs -->
+  <!-- Cloud-relaxed CSP: needs to fetch /api/* on origin + connect to external CDNs -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: https://replicate.delivery https://*.r2.cloudflarestorage.com https://*.r2.dev https://unpkg.com https://image.pollinations.ai https://text.pollinations.ai https://*.supabase.co; media-src 'self' blob: https:; frame-src 'self' blob:">
   <title>MyFabmesh.AI Cloud</title>
   <link rel="stylesheet" href="styles/main.css?v=mobile5">
@@ -172,7 +172,7 @@
                 <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
-                    <option value="local-flux" selected>Balanced (quality/speed)</option>
+                    <option value="img_balanced" selected>Balanced (quality/speed)</option>
                     <option value="local-lightning">Fast (Turbo &#9889; · ~4 steps)</option>
                   </select>
                 </div>
@@ -288,10 +288,10 @@
                     Construction stages (3 progressive versions)
                   </label>
                 </div>
-                <!-- Multi-view scope: TRELLIS-2 already textures from 1
+                <!-- Multi-view scope: the 3D engine already textures from 1
                      front photo, but additional reference views (back, sides,
                      top, bottom) reduce dorsal/lateral hallucinations during
-                     texturing. MV-Adapter generates the 6 views in a single
+                     texturing. the multi-view engine generates the 6 views in a single
                      pass so "back" and "back + sides + bottom" cost the same. -->
                 <!-- Extra views: auto-determined from asset type.
                      - character / creature / animal -> back photo (helps texturing)
@@ -483,7 +483,7 @@
                   <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-3d-engine">
-                      <option value="trellis2_native" selected>MyFabmesh.AI 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
+                      <option value="native_3d" selected>MyFabmesh.AI 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
                     </select>
                   </div>
                   <!-- Texture resolution (UNUSED by TRELLIS-2, only relevant for legacy engines)
@@ -2368,7 +2368,7 @@
             <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
             <label>Engine</label>
             <select id="mod-engine">
-              <option value="local-sdxl" selected>MyFabmesh.AI Image Engine (local)</option>
+              <option value="img_standard" selected>MyFabmesh.AI Image Engine (local)</option>
             </select>
             <label>Strength <span id="mod-strength-val" class="slider-val">35%</span></label>
             <input type="range" id="mod-strength" min="15" max="95" value="35" />

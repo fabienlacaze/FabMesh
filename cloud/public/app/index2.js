@@ -292,17 +292,17 @@ async function uploadClientMeshResult(bytes, opType, extra = {}) {
 // ============================================================
 // Map engine value (from <select>) to a human-readable label showing the
 // real underlying model. Legacy IDs (sf3d, local) are rerouted by
-// main.js to trellis2_native — labels kept for backward display on old
+// main.js to native_3d — labels kept for backward display on old
 // saved projects but the wording reflects the actual fallback.
 const ENGINE_LABELS = {
   // Image engines
-  'local-flux':     'Balanced (quality/speed)',
+  'img_balanced':     'Balanced (quality/speed)',
   'local-lightning':'Fast (Turbo ⚡ · ~4 steps)',
   // 3D engines — sf3d / local legacy IDs are silently rerouted to
   // the native engine at dispatch.
   'sf3d':           'MyFabmesh.AI 3D Native (rerouted)',
   'local':          'MyFabmesh.AI 3D Native (rerouted)',
-  'trellis2_native':'MyFabmesh.AI 3D Native',
+  'native_3d':'MyFabmesh.AI 3D Native',
   'trellis':        'MyFabmesh.AI 3D Engine',
 };
 function engineLabel(v) {
@@ -611,13 +611,13 @@ async function refreshProjectsPage() {
       // Remove trailing timestamp (_<10+ digits>)
       base = base.replace(/_\d{10,}$/, '');
     } while (base !== prev);
-    // Remove trailing engine suffix added by main.js: _sf3d / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai / _trellis2_native
+    // Remove trailing engine suffix added by main.js: _sf3d / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai / _native_3d
     // Optionally followed by arbitrary short tags like _apilive, _test, _v2,
     // each possibly followed by its own timestamp. This handles ad-hoc CLI
     // names like test_e2e_sf3d_apilive_1776274212 that would otherwise form
     // their own phantom projects.
     base = base.replace(
-      /_(sf3d|hunyuan|local|trellis2_native|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
+      /_(sf3d|hunyuan|local|native_3d|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
       ''
     );
     // Remove a trailing _<number> if any (legacy index naming)
@@ -2949,7 +2949,7 @@ _wsMvSync();
 // SF3D engine is selected.
 // ----------------------------------------------------------------
 function _ws3dEngineSync() {
-  const eng = document.getElementById('ws-3d-engine')?.value || 'trellis2_native';
+  const eng = document.getElementById('ws-3d-engine')?.value || 'native_3d';
   const qRow = document.getElementById('ws-3d-quality-row');
   const tRow = document.getElementById('ws-3d-triangles-row');
   const qHint = document.getElementById('ws-3d-quality-hint');
@@ -2962,9 +2962,9 @@ function _ws3dEngineSync() {
   if (tRow) tRow.style.display = legacy ? '' : 'none';
   if (qHint) qHint.style.display = legacy ? '' : 'none';
   if (sf3dHint) sf3dHint.style.display = legacy ? '' : 'none';
-  // Advanced TRELLIS-2 options apply to trellis2_native.
+  // Advanced TRELLIS-2 options apply to native_3d.
   if (trellis2Opts) trellis2Opts.style.display =
-    (eng === 'trellis2_native') ? '' : 'none';
+    (eng === 'native_3d') ? '' : 'none';
 }
 document.getElementById('ws-3d-engine')?.addEventListener('change', _ws3dEngineSync);
 _ws3dEngineSync();
@@ -4831,7 +4831,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   let perImage;
   if (engine === 'pollinations') perImage = 5000;
   else if (engine === 'local-sd') perImage = steps * 200 + 1500;
-  else perImage = steps * 600 + 5000; // local-flux RealVisXL
+  else perImage = steps * 600 + 5000; // img_balanced RealVisXL
   let totalImages = count;
   if (multiView) totalImages *= 3;
   if (buildStages) totalImages *= 3;
@@ -6373,7 +6373,7 @@ document.getElementById('ws-style-menu')?.addEventListener('click', async (e) =>
       sourceImageUrl: styleSource, projectName: styleProject,
     });
     try {
-      const r = await API.img2img({ imagePath: tgt, prompt: style, strength: 0.6, engine: 'local-sdxl' });
+      const r = await API.img2img({ imagePath: tgt, prompt: style, strength: 0.6, engine: 'img_standard' });
       if (r?.success) {
         // Remember which style was applied to this new image version.
         // Deliberately do NOT tag the source image — that would overwrite
@@ -7836,7 +7836,7 @@ const _OP_LABEL = {
 };
 const _OP_RE = /_(cntile|retexture|trellis2_retex|retex|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i;
 // MASQUAGE des noms d'IA internes à l'affichage (exigence produit) — miroir desktop.
-const _AI_NAME_RE = /(trellis2_native|trellis2|trellis|sf3d|hunyuan|triposg|hi3dgen|sampart3d|partsam|puppeteer|unirig|rokoko|anytop|realvisxl|realvis|hidream|dreamshaper|sdxl|esrgan|meshy)/gi;
+const _AI_NAME_RE = /(native_3d|trellis2|trellis|sf3d|hunyuan|triposg|hi3dgen|sampart3d|partsam|puppeteer|unirig|rokoko|anytop|realvisxl|realvis|hidream|dreamshaper|sdxl|esrgan|meshy)/gi;
 function _maskAiNames(s) {
   if (!s) return s;
   return String(s)
@@ -7910,7 +7910,7 @@ async function buildLineageTimeline(startPath, p) {
       const m2 = fname.match(/_rigged_([a-z0-9]+)_\d+/i); engine = m2 ? m2[1] : undefined;
     }
     if (kind === 'mesh' && !engine) {
-      const m3 = fname.match(/_(sf3d|hunyuan|trellis2_native|trellis2|trellis|triposg|hi3dgen|local|ai)_\d{10,}/i);
+      const m3 = fname.match(/_(sf3d|hunyuan|native_3d|trellis2|trellis|triposg|hi3dgen|local|ai)_\d{10,}/i);
       engine = m3 ? m3[1] : undefined;
     }
     steps.unshift({
@@ -8442,7 +8442,7 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   let expectedMs;
   if (engine === 'sf3d') {
     expectedMs = preset.expectedMs + triPreset.extraMs;
-  } else if (engine === 'trellis2_native') {
+  } else if (engine === 'native_3d') {
     // TRELLIS-2 native pipeline (single-shot mesh + PBR):
     //   - pipeline load: ~60s (cached after 1st run -> ~5s)
     //   - inference: ~15s on 1024 mode
@@ -13298,6 +13298,7 @@ function _meLoadMesh(meshPath) {
       meState.camera.position.set(0, size.y * 0.5, maxDim * 2);
       meState.controls.target.set(0, size.y * 0.5, 0);
 
+      _meEnsureBVH();   // start loading the BVH accelerator (async, graceful fallback)
       meState.mesh.traverse(child => {
         if (child.isMesh && child.geometry) {
           child.geometry.computeVertexNormals();
@@ -13570,6 +13571,46 @@ function _applyBrushAt(hit, point) {
   geom._normsDirty = true;
 }
 
+// three-mesh-bvh (loaded on demand from the CDN) accelerates the paint/select
+// brush from O(all verts) to O(verts under the brush) — the "paint lags like
+// crazy" fix. Gracefully degrades to the full scan if the module can't load
+// (paint still works, just slower — the app is never broken by a load failure).
+let _meBvhReady = null;
+function _meEnsureBVH() {
+  if (_meBvhReady) return _meBvhReady;
+  _meBvhReady = (async () => {
+    try {
+      const bvh = await import('https://unpkg.com/three-mesh-bvh@0.8.3/build/index.module.js');
+      THREE.BufferGeometry.prototype.computeBoundsTree = bvh.computeBoundsTree;
+      THREE.BufferGeometry.prototype.disposeBoundsTree = bvh.disposeBoundsTree;
+      THREE.Mesh.prototype.raycast = bvh.acceleratedRaycast;
+      return true;
+    } catch (e) { console.warn('[bvh] unavailable — brush uses full scan', e); return false; }
+  })();
+  return _meBvhReady;
+}
+const _meSphere = new THREE.Sphere();
+// Vertex indices whose triangles fall within radius r of (px,py,pz), via the
+// geometry BVH. Returns a Set, or null if no BVH (caller then full-scans).
+function _meVertsNearPoint(geom, px, py, pz, r) {
+  if (!geom.boundsTree && geom.computeBoundsTree) { try { geom.computeBoundsTree(); } catch (_) {} }
+  const bvh = geom.boundsTree;
+  if (!bvh) return null;
+  const set = new Set();
+  const index = geom.index;
+  _meSphere.center.set(px, py, pz); _meSphere.radius = r;
+  bvh.shapecast({
+    intersectsBounds: (box) => _meSphere.intersectsBox(box),
+    intersectsTriangle: (_tri, triIndex) => {
+      const b = triIndex * 3;
+      if (index) { set.add(index.getX(b)); set.add(index.getX(b + 1)); set.add(index.getX(b + 2)); }
+      else { set.add(b); set.add(b + 1); set.add(b + 2); }
+      return false;
+    },
+  });
+  return set;
+}
+
 function _meApplyBrush(hit) {
   const point = hit.point.clone();
   hit.object.worldToLocal(point);
@@ -13610,12 +13651,12 @@ function _meApplyBrush(hit) {
     }
     const colorAttr = geom.attributes.color;
     const c = new THREE.Color(meState.color);
-    for (let i = 0; i < pos.count; i++) {
+    const paintVert = (i) => {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
       const dx = vx - px, dy = vy - py, dz = vz - pz;
-      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) return;
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq > rSq) continue;
+      if (distSq > rSq) return;
       const dist = Math.sqrt(distSq);
       const falloff = 1 - (dist / r);
       const blend = falloff * falloff * strength;
@@ -13625,7 +13666,10 @@ function _meApplyBrush(hit) {
         cg * (1 - blend) + c.g * blend,
         cb * (1 - blend) + c.b * blend
       );
-    }
+    };
+    const cand = _meVertsNearPoint(geom, px, py, pz, r);   // BVH: only in-radius verts
+    if (cand) { for (const i of cand) paintVert(i); }
+    else { for (let i = 0; i < pos.count; i++) paintVert(i); }
     colorAttr.needsUpdate = true;
   } else if (meState.mode === 'select') {
     // Highlight face
@@ -13641,13 +13685,16 @@ function _meApplyBrush(hit) {
       hit.object.material.needsUpdate = true;
     }
     const colorAttr = geom.attributes.color;
-    for (let i = 0; i < pos.count; i++) {
+    const selVert = (i) => {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
       const dx = vx - px, dy = vy - py, dz = vz - pz;
-      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
-      if (dx * dx + dy * dy + dz * dz > rSq) continue;
+      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) return;
+      if (dx * dx + dy * dy + dz * dz > rSq) return;
       colorAttr.setXYZ(i, 1.0, 0.3, 0.1); // orange highlight
-    }
+    };
+    const cand = _meVertsNearPoint(geom, px, py, pz, r);   // BVH: only in-radius verts
+    if (cand) { for (const i of cand) selVert(i); }
+    else { for (let i = 0; i < pos.count; i++) selVert(i); }
     colorAttr.needsUpdate = true;
   }
 }
