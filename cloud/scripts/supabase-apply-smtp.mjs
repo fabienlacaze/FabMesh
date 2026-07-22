@@ -97,7 +97,7 @@ const body = {
   external_email_enabled: true,
   mailer_autoconfirm: false,
   smtp_host: smtp.host,
-  smtp_port: smtp.port,
+  smtp_port: String(smtp.port),   // Management API expects a string here
   smtp_user: smtp.user,
   smtp_pass: smtp.pass,
   smtp_admin_email: smtp.sender,
