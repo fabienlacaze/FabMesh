@@ -326,7 +326,7 @@
       'Test animation': 'Probar animación',
       // ---- Animation step ----
       'Generate animation clips for your rig via AI': 'Generar clips de animación para tu esqueleto mediante IA',
-      'AnyTop (skeleton-adaptive, BVH)': 'AnyTop (adaptable al esqueleto, BVH)',
+      'Generative motion (skeleton-adaptive, BVH)': 'Generative motion (adaptable al esqueleto, BVH)',
       'Animations': 'Animaciones',
       '(check 1+ types — each becomes a new version)': '(marca 1 o más tipos — cada uno será una nueva versión)',
       'Prompt': 'Prompt',

@@ -2008,7 +2008,7 @@
         error: `mesh-segment timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — the segmentation may have completed; refresh Projects to check.`,
       };
     },
-    // AnyTop animation on a rigged GLB via Modal — async spawn + poll.
+    // Generative motion animation on a rigged GLB via Modal — async spawn + poll.
     // Mirrors autoRigAI: spawn /api/animate, poll /api/animate-status
     // every 5s. Worker uploads the animated GLB to R2 on done; we push
     // it into state.currentProject.animations[].

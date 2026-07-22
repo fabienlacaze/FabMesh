@@ -882,9 +882,9 @@
         </article>
 
         <!-- ============================================================
-             STEP 4: ANIMATION (Seed3D Puppeteer animation mode)
+             STEP 4: ANIMATION (generative animation mode)
              Generate idle/walk/run/attack clips for the rigged mesh.
-             Backend: Modal Seed3D Puppeteer animation endpoint (TBD)
+             Backend: Modal generative animation endpoint (TBD)
              ============================================================ -->
         <article class="step-card disabled" id="step-card-animation" style="position:relative;">
           <header class="step-card-header">
@@ -901,7 +901,7 @@
               </summary>
               <div class="stage-body stage-create-with-source">
                 <div class="stage-create-form">
-                  <!-- Engine dropdown hidden: AnyTop is the only wired
+                  <!-- Engine dropdown hidden: Generative motion is the only wired
                        engine. Re-show when Procedural / Seed3D land. -->
                   <div class="form-row" style="display:none;">
                     <label>Engine</label>
@@ -940,7 +940,7 @@
                       <option value="idle" selected>Idle</option>
                     </select>
                   </div>
-                  <!-- Prompt + reference video hidden by default: AnyTop
+                  <!-- Prompt + reference video hidden by default: Generative motion
                        ignores text prompts (T5 is internal joint-name
                        embedding only), and the only video-conditioned
                        engine (Seed3D) is deferred. _wsAnimEngineSync()
@@ -1959,7 +1959,7 @@
 
     <!-- ============================================================
          GENERATE ANYTOP AI MODAL — multi-checkbox picker. Opens from
-         the Step 4 AI tools 'Generate AnyTop AI' button. Pre-checks
+         the Step 4 AI tools 'Generate Generative motion AI' button. Pre-checks
          the types that already have versions, generates a new batch
          (= new version) without leaving the Edit selected stage.
          ============================================================ -->
@@ -2461,7 +2461,7 @@
           <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">
             Number of stages <span id="bs3d-count-val" class="slider-val">5</span>
           </label>
-          <input type="range" id="bs3d-count" min="2" max="12" value="5" />
+          <input type="range" id="bs3d-count" min="2" max="20" value="5" />
           <small class="modal-subtitle" style="font-size:12px; margin-top:2px;">From 2 to 12. Cloud fabrication (~1 min).</small>
           <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; margin-top:10px;">Material mode</label>
           <select id="bs3d-mat-mode" class="modal-select" style="width:100%;">

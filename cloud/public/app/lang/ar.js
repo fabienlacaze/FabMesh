@@ -328,7 +328,7 @@
       'Test animation': 'اختبار التحريك',
       // ---- Animation step ----
       'Generate animation clips for your rig via AI': 'توليد مقاطع تحريك لهيكلك العظمي عبر الذكاء الاصطناعي',
-      'AnyTop (skeleton-adaptive, BVH)': 'AnyTop (متكيّف مع الهيكل العظمي، BVH)',
+      'Generative motion (skeleton-adaptive, BVH)': 'Generative motion (متكيّف مع الهيكل العظمي، BVH)',
       'Animations': 'التحريكات',
       '(check 1+ types — each becomes a new version)': '(اختر نوعًا واحدًا أو أكثر — يصبح كل منها نسخة جديدة)',
       'Prompt': 'الموجّه',

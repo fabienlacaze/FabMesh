@@ -328,7 +328,7 @@
     'Test animation': 'एनिमेशन परखें',
     // ---- Animation step ----
     'Generate animation clips for your rig via AI': 'AI के माध्यम से अपने रिग हेतु एनिमेशन क्लिप बनाएं',
-    'AnyTop (skeleton-adaptive, BVH)': 'AnyTop (कंकाल-अनुकूली, BVH)',
+    'Generative motion (skeleton-adaptive, BVH)': 'Generative motion (कंकाल-अनुकूली, BVH)',
     'Animations': 'एनिमेशन',
     '(check 1+ types — each becomes a new version)': '(1+ प्रकार चुनें — हर एक नया संस्करण बनता है)',
     'Prompt': 'प्रॉम्प्ट',

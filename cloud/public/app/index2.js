@@ -8311,7 +8311,7 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
       genBtn.disabled = false;
       genBtn.title = '';
     }
-    // Force the engine dropdown to AnyTop (the only wired engine) and
+    // Force the engine dropdown to Generative motion (the only wired engine) and
     // collapse the Seed3D / Procedural options behind a disabled state.
     const engineSel = document.getElementById('ws-anim-engine');
     if (engineSel && engineSel.value !== 'anytop') {
@@ -10976,7 +10976,7 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
   if (/\/stages3d\//i.test(String(mp))) {
     showToast('Select the building version (not a stage) first.', 'error'); return;
   }
-  const count = Math.max(2, Math.min(12, parseInt(document.getElementById('bs3d-count')?.value, 10) || 5));
+  const count = Math.max(2, Math.min(20, parseInt(document.getElementById('bs3d-count')?.value, 10) || 5));
   const job = pushJob(`3D construction stages: ${p.name}`, null,
     { 'Stages': count, Source: String(mp).split(/[\\/]/).pop().split('?')[0] }, count * 8000, { projectName: p.name });
   (async () => {
@@ -13701,7 +13701,20 @@ document.getElementById('me-strength')?.addEventListener('input', (e) => {
   meState.strength = parseInt(e.target.value) / 100;
   document.getElementById('me-strength-val').textContent = meState.strength.toFixed(2);
 });
-document.getElementById('me-paint-pick')?.addEventListener('click', () => {
+document.getElementById('me-paint-pick')?.addEventListener('click', async () => {
+  // Prefer the Chromium EyeDropper (samples ANY on-screen pixel incl. textured
+  // meshes). Fall back to the mesh vertex-colour pick mode if unavailable.
+  if (typeof window.EyeDropper === 'function') {
+    try {
+      const _c = document.getElementById('me-brush-cursor'); if (_c) _c.style.display = 'none';
+      const res = await new window.EyeDropper().open();
+      if (res && res.sRGBHex) {
+        meState.color = res.sRGBHex;
+        const inp = document.getElementById('me-paint-color'); if (inp) inp.value = res.sRGBHex;
+      }
+      return;
+    } catch (_) { /* user pressed Esc — cancelled */ return; }
+  }
   meState.pickMode = !meState.pickMode;
   document.getElementById('me-paint-pick')?.classList.toggle('tool-active', meState.pickMode);
 });
@@ -14438,6 +14451,24 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
         console.warn('[export] LICENSE sidecar failed:', licErr);
       }
       try { await API.showInExplorer(outPath); } catch (e) {}
+      // For an Unreal FBX of an EXPLOSION mesh, show how to turn the shards into
+      // a playable Chaos destructible (Geometry Collection) — a GC .uasset can't
+      // be authored outside Unreal, so we document the 3-click in-editor bake.
+      if (format === 'fbx_unreal') {
+        const isExplode = /_explode_/i.test(String(sourcePath));
+        const steps =
+          (isExplode
+            ? 'FBX exporté (cm, chaque éclat = objet séparé). Pour une DESTRUCTION jouable dans UE5 :\n\n'
+            : 'FBX exporté pour Unreal (cm). Si ce mesh est fracturé (part_XX), pour une destruction Chaos :\n\n') +
+          '1. Importe le FBX. Dans le dialogue, DÉCOCHE « Combine Meshes » (chaque part_XX reste un Static Mesh séparé) ; Import Uniform Scale = 1.\n' +
+          '2. Glisse TOUS les part_XX dans le niveau (ils se réassemblent tout seuls).\n' +
+          '3. Sélectionne-les tous.\n' +
+          '4. Passe en mode Fracture (Shift+6) → section Generate → New → choisis un chemin → Create Geometry Collection.\n' +
+          '5. C\'est DÉJÀ fracturé (chaque éclat = un bone) — ne relance PAS de fracture Voronoï.\n' +
+          '6. Optionnel : Cluster → Auto Cluster, règle les Damage Thresholds, ajoute un Chaos Solver + active la simulation.\n\n' +
+          'Note : un Geometry Collection (.uasset) ne peut PAS être généré hors d\'Unreal — il se crée uniquement dans l\'éditeur (ces étapes).';
+        customError(steps, '\u{1F3AE} FBX Unreal — créer la destruction (Geometry Collection)');
+      }
     } else {
       completeJob(job.id, false);
       customError(r?.error || 'Export returned no output path', 'Export failed');
@@ -15265,7 +15296,7 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
 });
 
 // ============================================================
-// STEP 4: ANIMATION (Seed3D Puppeteer / procedural / AnyTop)
+// STEP 4: ANIMATION (generative / procedural / Generative motion)
 // UI scaffold only — backend wiring TBD.
 // ============================================================
 // Anim engine dropdown drives which sub-fields are visible.
@@ -15274,7 +15305,7 @@ function _wsAnimEngineSync() {
   const animType = document.getElementById('ws-anim-type')?.value || 'idle';
   const promptRow = document.getElementById('ws-anim-prompt-row');
   const videoRow = document.getElementById('ws-anim-video-row');
-  // Prompt only when animType === 'custom'. AnyTop itself ignores
+  // Prompt only when animType === 'custom'. Generative motion itself ignores
   // free-text prompts at inference (T5 is for joint-name embedding only),
   // so the row stays hidden for the standard anim types.
   const showPrompt = (animType === 'custom');
@@ -15681,10 +15712,10 @@ function showStep4AnimPreview(anim) {
     // track's nodePath resolves correctly.
     if (gltf.animations?.length) {
       // The Puppeteer rig bakes procedural Idle/Walk/Run clips at
-      // indices [0..2]. Any AnyTop / FBX-retarget output is APPENDED
+      // indices [0..2]. Any Generative motion / FBX-retarget output is APPENDED
       // after them by scripts/anytop_retarget.py:1232. Picking
       // animations[0] showed the procedural Idle (which is broken on
-      // some rigs — orc-marron flips upside down) and made AnyTop
+      // some rigs — orc-marron flips upside down) and made Generative motion
       // output look broken even when it wasn't. Prefer the last clip
       // that isn't a procedural baseline name.
       const PROC_NAMES = new Set(['Idle', 'Walk', 'Run']);
@@ -15948,7 +15979,7 @@ document.querySelector('#ws-anim-toolbar [data-act="light"]')?.addEventListener(
   mv.exposure = (parseFloat(e.target.value) / 100) || 1;
 });
 
-// Generate AnyTop AI — opens the dedicated modal, pre-checks any
+// Generate Generative motion AI — opens the dedicated modal, pre-checks any
 // types the project already has, runs the same batch flow on confirm.
 // Stays inside the Edit selected stage so the user doesn't lose
 // context.
@@ -20143,7 +20174,7 @@ async function extractLandmarksFromRig() {
   // Fuzzy mapping from bone-name → landmark id. Supports the major
   // rig naming conventions:
   //  - Mixamo: mixamorig:Head, mixamorig:LeftArm, …
-  //  - Puppeteer/AnyTop: Head, Neck, Spine2, LeftShoulder, …
+  //  - Puppeteer/Generative motion: Head, Neck, Spine2, LeftShoulder, …
   //  - orc_m1 (Apovivor game): head, chest, belt, shoulder_l, …
   const BONE_RULES = [
     { id: 'head',       patterns: [/^head$/i, /skull/i, /mixamo.*head/i, /bip01.*head/i] },

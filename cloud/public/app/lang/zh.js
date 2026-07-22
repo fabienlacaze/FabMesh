@@ -328,7 +328,7 @@
       'Test animation': '测试动画',
       // ---- Animation step ----
       'Generate animation clips for your rig via AI': '通过 AI 为你的骨骼生成动画片段',
-      'AnyTop (skeleton-adaptive, BVH)': 'AnyTop（骨骼自适应，BVH）',
+      'Generative motion (skeleton-adaptive, BVH)': 'Generative motion（骨骼自适应，BVH）',
       'Animations': '动画',
       '(check 1+ types — each becomes a new version)': '（勾选 1 个以上类型——每个都会成为一个新版本）',
       'Prompt': '提示词',

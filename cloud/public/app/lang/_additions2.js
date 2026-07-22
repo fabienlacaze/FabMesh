@@ -1,5 +1,5 @@
 /* FabMesh i18n - de-branded engine/anim labels + operational job strings (2026-06-21).
- * AI model names (RealVisXL/SDXL-Lightning/HiDream/Rokoko/AnyTop/Seed3D) were removed
+ * AI model names (RealVisXL/SDXL-Lightning/HiDream/Rokoko/Generative motion/Seed3D) were removed
  * from the user-facing labels; this translates the MyFabmesh.AI-branded replacements.
  * Load AFTER lang/_additions.js. Regenerate via c:/tmp/gen_ops_additions.js. */
 (function () {
