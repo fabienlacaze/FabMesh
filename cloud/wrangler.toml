@@ -136,16 +136,16 @@ R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
 # cap allowed 1 mesh per day. $5 = ~10 meshes/day, matches expected
 # user volume. text2image + back-view live on Modal (own counter at
 # MAX_DAILY_MODAL_SPEND_USD), no impact here.
-MAX_DAILY_SPEND_USD = "5.00"
+MAX_DAILY_SPEND_USD = "4.00"
 # Daily Modal spend cap (GLOBAL, across ALL users). Was bumped to $20/day for
 # heavy dev/test; LOWERED to $10/day for commercial launch so a single bad day
 # can't run away. Raise again for heavy dev sessions if needed.
-MAX_DAILY_MODAL_SPEND_USD = "10.00"
+MAX_DAILY_MODAL_SPEND_USD = "6.00"
 # Per-user daily CALL cap. Was 1000 for heavy dev/test; LOWERED to 100 for
 # commercial launch to blunt abuse (a single account can't fire 1000 GPU jobs/
 # day). Combined with MAX_USER_DAILY_SPEND_USD below this bounds per-account
 # cost. Raise for dev sessions if it gets in the way.
-MAX_USER_DAILY_CALLS = "100"
+MAX_USER_DAILY_CALLS = "40"
 # ANTI-DoS PER-ACCOUNT $ CAP (new). Even with unlimited credits, one account
 # can never push more than this much ESTIMATED GPU cost per UTC day across all
 # Modal/Replicate endpoints. Counter: `_meta/userspend/<userId>/<YYYY-MM-DD>`.
