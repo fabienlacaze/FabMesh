@@ -1,1 +1,33 @@
 project_id = "ovoccoipeqmkfnugkmyh"
+
+# ── Auth email templates ────────────────────────────────────────────────────
+# Versions the branded 6-digit-CODE templates so they're reproducible instead of
+# pasted by hand. Apply them to the HOSTED project with:
+#     supabase link --project-ref ovoccoipeqmkfnugkmyh
+#     supabase config push
+# (or paste each file into Supabase dashboard > Authentication > Email Templates).
+#
+# The actual EMAIL SENDING (SMTP) is configured in the dashboard so no secret
+# lands in the repo — Authentication > Emails > SMTP Settings:
+#     host smtp.gmail.com  port 465  user <a gmail>  pass <gmail App Password>
+#     sender <the same gmail>   (free, works without owning a domain).
+# Every template shows {{ .Token }} (the 6-digit code) so users never need to
+# click a link — Outlook/Hotmail SafeLinks blocks Supabase links.
+[auth.email]
+enable_confirmations = true   # require email verification (the OTP flow LoginForm uses)
+
+[auth.email.template.confirmation]
+subject = "Your MyFabmesh.AI verification code"
+content_path = "./email-templates/confirm-signup.html"
+
+[auth.email.template.recovery]
+subject = "Reset your MyFabmesh.AI password"
+content_path = "./email-templates/reset-password.html"
+
+[auth.email.template.magic_link]
+subject = "Your MyFabmesh.AI sign-in code"
+content_path = "./email-templates/magic-link.html"
+
+[auth.email.template.email_change]
+subject = "Confirm your new MyFabmesh.AI email"
+content_path = "./email-templates/change-email.html"

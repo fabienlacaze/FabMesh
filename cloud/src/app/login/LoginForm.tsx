@@ -4,6 +4,33 @@ import { createBrowserClient } from '@supabase/ssr';
 
 const MOCK = process.env.NEXT_PUBLIC_MOCK === '1';
 
+/** Map raw Supabase/auth errors to clear, user-facing messages. Falls back to
+ *  the original text for anything unrecognized. The signup email-send failure
+ *  ("Error sending confirmation email") is the common one when the SMTP relay
+ *  is misconfigured — surface something actionable instead of the raw string. */
+function friendlyAuthError(raw: string): string {
+  const m = (raw || '').toLowerCase();
+  if (m.includes('sending') && m.includes('email')) {
+    return "We couldn't send the verification email right now (the email service is temporarily unavailable). Please try again in a minute — if it keeps failing, contact us.";
+  }
+  if (m.includes('already registered') || m.includes('already been registered') || m.includes('user already exists')) {
+    return 'This email is already registered — use "Sign in" instead (or reset your password).';
+  }
+  if (m.includes('invalid login credentials')) {
+    return 'Incorrect email or password.';
+  }
+  if (m.includes('email not confirmed')) {
+    return "Your email isn't verified yet — check your inbox (and spam) for the 6-digit code.";
+  }
+  if (m.includes('rate limit') || m.includes('too many') || m.includes('for security purposes')) {
+    return 'Too many attempts — please wait a minute and try again.';
+  }
+  if (m.includes('otp_expired') || (m.includes('token') && (m.includes('expired') || m.includes('invalid')))) {
+    return 'That code is invalid or has expired — request a new one.';
+  }
+  return raw;
+}
+
 /**
  * Email + password sign-in (the classic flow).
  *
@@ -86,7 +113,7 @@ export function LoginForm() {
       await persistSession(data.session);
       navigateAfterAuth();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyAuthError(err instanceof Error ? err.message : String(err)));
     } finally { setBusy(false); }
   }
 
@@ -128,7 +155,7 @@ export function LoginForm() {
       setMode('verify');
       setInfo('Account created. Check your inbox for a 6-digit code to verify your email.');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyAuthError(err instanceof Error ? err.message : String(err)));
     } finally { setBusy(false); }
   }
 
@@ -148,7 +175,7 @@ export function LoginForm() {
       await persistSession(res.data.session);
       navigateAfterAuth();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyAuthError(err instanceof Error ? err.message : String(err)));
     } finally { setBusy(false); }
   }
 
@@ -170,7 +197,7 @@ export function LoginForm() {
       // direct people to.
       setInfo(`We sent a 6-digit code to ${email}. Open the email (check spam too) and enter the code on the next screen.`);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyAuthError(err instanceof Error ? err.message : String(err)));
     } finally { setBusy(false); }
   }
 
