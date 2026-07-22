@@ -5770,7 +5770,7 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
     signal: AbortSignal.timeout(600_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] text2image dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
@@ -5870,7 +5870,7 @@ async function callModalBackView(env: Env, userId: string, input: {
     signal: AbortSignal.timeout(300_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal back-view HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU back-view HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] back-view dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
@@ -5929,7 +5929,7 @@ async function callModalMVAdapter(env: Env, userId: string, input: {
     signal: AbortSignal.timeout(420_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal mvadapter HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU multiview HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
 
   // Expected response shape (Modal side persists to R2 and returns URLs):
@@ -5943,11 +5943,11 @@ async function callModalMVAdapter(env: Env, userId: string, input: {
     error?: string;
   };
   if (payload.error) {
-    throw new Error(`Modal mvadapter error: ${payload.error}`);
+    throw new Error(`Cloud GPU multiview error: ${payload.error}`);
   }
   const views = Array.isArray(payload.views) ? payload.views : [];
   if (views.length !== 6) {
-    throw new Error(`Modal mvadapter expected 6 views, got ${views.length}`);
+    throw new Error(`Cloud GPU multiview expected 6 views, got ${views.length}`);
   }
   const back = views[2]; // VIEW_SLOTS[2] = (180, 0) = back
   if (!back || typeof back !== 'string') {
@@ -6000,7 +6000,7 @@ async function callModalTpose(env: Env, userId: string, input: {
     signal: AbortSignal.timeout(300_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal tpose HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU tpose HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] tpose dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
@@ -6102,7 +6102,7 @@ async function callModalImageOp(env: Env, userId: string, input: {
         `Please retry in 1-2 minutes — your credits were refunded.`
       );
     }
-    throw new Error(`Modal image_op (${input.op}) HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU image_op (${input.op}) HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] image_op op=${input.op} dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
@@ -6158,7 +6158,7 @@ async function callModalSheet(env: Env, userId: string, input: {
     signal: AbortSignal.timeout(300_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal sheet HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU sheet HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] sheet dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
@@ -6211,7 +6211,7 @@ async function callModalRectify(env: Env, userId: string, input: {
     signal: AbortSignal.timeout(480_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal rectify HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU rectify HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] rectify dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
@@ -6291,7 +6291,7 @@ async function callModalMeshStart(env: Env, input: {
     signal: AbortSignal.timeout(240_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal mesh-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU mesh-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   return await r.json() as { job_id: string };
 }
@@ -6316,7 +6316,7 @@ async function callModalMeshStatus(env: Env, jobId: string): Promise<ModalMeshSt
     signal: AbortSignal.timeout(30_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal mesh-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Cloud GPU mesh-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   return await r.json() as ModalMeshStatusResp;
 }
@@ -6364,7 +6364,7 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
     },
   );
   if (!createRes.ok) {
-    throw new Error(`Replicate create HTTP ${createRes.status}: ${await createRes.text()}`);
+    throw new Error(`Cloud GPU create HTTP ${createRes.status}: ${await createRes.text()}`);
   }
   const created = await createRes.json() as { id: string; output?: string | string[]; status: string; error?: string };
 
@@ -6397,7 +6397,7 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
     if (created.status === 'succeeded') {
       outputUrl = Array.isArray(created.output) ? created.output[0] : created.output;
     } else if (created.status === 'failed') {
-      throw new Error(`Replicate failed: ${created.error || 'unknown'}`);
+      throw new Error(`Cloud GPU failed: ${created.error || 'unknown'}`);
     } else {
       // HARD CAP on poll count: subrequest budget on Workers is 50
       // (free) / 1000 (paid). We use at most MAX_POLLS = 20 polls so
@@ -6419,13 +6419,13 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
           break;
         }
         if (p.status === 'failed' || p.status === 'canceled') {
-          throw new Error(`Replicate ${p.status}: ${p.error || 'unknown'}`);
+          throw new Error(`Cloud GPU ${p.status}: ${p.error || 'unknown'}`);
         }
       }
       if (!outputUrl) {
         // Timeout: cancel so the prediction doesn't keep burning GPU.
         await cancelPrediction();
-        throw new Error(`Replicate timeout after ${(60 + MAX_POLLS * POLL_INTERVAL_MS / 1000)}s`);
+        throw new Error(`Cloud GPU timeout after ${(60 + MAX_POLLS * POLL_INTERVAL_MS / 1000)}s`);
       }
     }
     if (!outputUrl) throw new Error('Replicate succeeded but no output URL');
@@ -7215,7 +7215,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
       }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!r.ok) throw new Error(`Modal mesh_op HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    if (!r.ok) throw new Error(`Cloud GPU mesh_op HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const data = await r.json() as { glb_base64?: string; stats?: Record<string, unknown> };
     if (!data.glb_base64) throw new Error('Modal mesh_op missing glb_base64');
 
@@ -7331,7 +7331,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
       }),
       signal: AbortSignal.timeout(290_000),
     });
-    if (!r.ok) throw new Error(`Modal construction3d HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    if (!r.ok) throw new Error(`Cloud GPU construction3d HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const start = await r.json() as { ok?: boolean; job_id?: string; count?: number };
     if (!start.ok || !start.job_id || !start.count) throw new Error('Modal construction3d bad response');
 
@@ -7985,7 +7985,7 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
       signal: AbortSignal.timeout(30_000),
     });
     if (!r.ok) {
-      throw new Error(`Modal rig-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      throw new Error(`Cloud GPU rig-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     }
     const j = await r.json() as { job_id?: string };
     jobId = String(j?.job_id || '').trim();
@@ -8111,7 +8111,7 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
       signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
-      throw new Error(`Modal rig-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      throw new Error(`Cloud GPU rig-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     }
     modalResp = await r.json() as typeof modalResp;
   } catch (e: unknown) {
@@ -8309,7 +8309,7 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
       signal: AbortSignal.timeout(30_000),
     });
     if (!r.ok) {
-      throw new Error(`Modal segment-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      throw new Error(`Cloud GPU segment-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     }
     const j = await r.json() as { job_id?: string };
     jobId = String(j?.job_id || '').trim();
@@ -8412,7 +8412,7 @@ async function handleMeshSegmentStatus(req: Request, env: Env): Promise<Response
       signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
-      throw new Error(`Modal segment-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      throw new Error(`Cloud GPU segment-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     }
     modalResp = await r.json() as typeof modalResp;
   } catch (e: unknown) {
@@ -9447,7 +9447,7 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
       signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
-      throw new Error(`Modal anim-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      throw new Error(`Cloud GPU anim-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     }
     modalResp = await r.json() as typeof modalResp;
   } catch (e: unknown) {
@@ -9725,7 +9725,7 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
       signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
-      throw new Error(`Modal fbx-retarget-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      throw new Error(`Cloud GPU fbx-retarget-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     }
     modalResp = await r.json() as typeof modalResp;
   } catch (e: unknown) {

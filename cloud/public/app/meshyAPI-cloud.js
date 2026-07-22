@@ -1782,7 +1782,7 @@
                 clearPending();
                 return {
                   success: false, ok: false,
-                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls (~${Math.round(MAX_CONSECUTIVE_SERVER_ERRORS * POLL_INTERVAL_MS / 1000)}s) — backend unreachable. Your rig may still complete on Modal; check Projects.`,
+                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls (~${Math.round(MAX_CONSECUTIVE_SERVER_ERRORS * POLL_INTERVAL_MS / 1000)}s) — backend unreachable. Your rig may still complete on the cloud backend; check Projects.`,
                 };
               }
             }
@@ -1953,7 +1953,7 @@
                 clearPending();
                 return {
                   success: false, ok: false,
-                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls — backend unreachable. The segmentation may still complete on Modal; check Projects.`,
+                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls — backend unreachable. The segmentation may still complete on the cloud backend; check Projects.`,
                 };
               }
             }

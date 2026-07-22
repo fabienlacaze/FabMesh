@@ -490,12 +490,12 @@
           const SERVICES = [
             { key: 'text2image', label: 'Image generation',  desc: 'Generate image from prompt' },
             { key: 'image_op',   label: 'Image edit',        desc: 'Modify, Inpaint, Upscale, Face Fix, Remove BG' },
-            { key: 'mvadapter',  label: 'Multi-view',        desc: 'MV-Adapter 6 orthographic views (creature, animal)' },
+            { key: 'mvadapter',  label: 'Multi-view',        desc: '6 orthographic views (creature, animal)' },
             { key: 'back_view',  label: 'Back view',         desc: '2-view back photo generation' },
             { key: 'tpose',      label: 'T-pose rectify',    desc: 'Strict T-pose front rectifier' },
-            { key: 'mesh',       label: '3D mesh',           desc: 'Generate 3D from image (TRELLIS-2)' },
-            { key: 'rig',        label: 'Rig',               desc: 'Auto-rig via Puppeteer skeleton' },
-            { key: 'anim',       label: 'Animation',         desc: 'AnyTop motion + retargeting' },
+            { key: 'mesh',       label: '3D mesh',           desc: 'Generate 3D from image' },
+            { key: 'rig',        label: 'Rig',               desc: 'Automatic skeleton rigging' },
+            { key: 'anim',       label: 'Animation',         desc: 'Generative motion + retargeting' },
           ];
           let coldCount = 0;
           let allUnknown = true;

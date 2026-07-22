@@ -16111,7 +16111,7 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   const prompt = (document.getElementById('ws-anim-prompt')?.value || '').trim();
   if (engine !== 'anytop') {
     customError(
-      `Only the AnyTop engine is wired in this build. Procedural / Seed3D Puppeteer engines come later.`,
+      `Only the generative motion engine is available in this build. Other engines come later.`,
       'Engine not yet wired',
     );
     return;
@@ -16141,7 +16141,7 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   // type is always regenerated.
   gatedRun('anim', `Animate ${toRun.join('+')}: ${p.name}`, async () => {
     const batchJob = pushJob(`Animate ${toRun.join('+')}: ${p.name}`, null, {
-      Engine: 'AnyTop (cloud GPU)',
+      Engine: 'Generative motion AI (cloud GPU)',
       Types: toRun.join(', '),
       Prompt: prompt || '—',
       'Source rig': (rig.filename || rig.url).split(/[/\\]/).pop(),

@@ -164,7 +164,7 @@
       'Parental control': 'Contrôle parental',
       'About MyFabmesh.AI': 'À propos de MyFabmesh.AI',
       'Server warming up': 'Serveur en préchauffage',
-      'Modal containers': 'Conteneurs Modal',
+      'Cloud GPU services': 'Services GPU cloud',
       'Each container has its own warm-up. Cold = first call takes ~2 min, then warm for ~9 min idle.':
         'Chaque conteneur a son propre préchauffage. À froid = le premier appel prend ~2 min, puis reste chaud ~9 min en veille.',
       // ---- Projects home ----
@@ -374,7 +374,7 @@
       'Test animation': "Tester l'animation",
       // ---- Animation step ----
       'Generate animation clips for your rig via AI': "Générer des clips d'animation pour votre squelette via IA",
-      'AnyTop (skeleton-adaptive, BVH)': 'AnyTop (adaptatif au squelette, BVH)',
+      'Generative motion (skeleton-adaptive)': 'Mouvement génératif (adaptatif au squelette)',
       'Animations': 'Animations',
       '(check 1+ types — each becomes a new version)': '(cochez 1+ types — chacun devient une nouvelle version)',
       'Prompt': 'Prompt',
