@@ -407,7 +407,7 @@ export default function AccountPage() {
                     'Your projects, images, meshes and payment history were deleted, ' +
                     'but the Supabase login record could not be removed (transient ' +
                     'error). Please try again in a minute or contact support — ' +
-                    'fabien65400@hotmail.fr.',
+                    'myfabmesh.contact@gmail.com.',
                   );
                 } else {
                   alert('Account deleted. You will now be logged out.');

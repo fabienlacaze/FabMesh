@@ -10088,7 +10088,7 @@ function _csvEsc(s: unknown): string {
 // /api/admin/*. Putting the check here keeps the secret out of the
 // frontend bundle. Add new admins here as the team grows.
 const ADMIN_EMAILS = new Set<string>([
-  'fabien65400@hotmail.fr',
+  'myfabmesh.contact@gmail.com',   // pro/business account (NOT the owner's personal address)
 ]);
 
 // Admin session — short-lived signed token stored in an httpOnly cookie.
