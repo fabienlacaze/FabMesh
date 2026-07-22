@@ -1,0 +1,10 @@
+{
+  "_README": "Copy this file to build/smtp-config.json (gitignored) and fill it in, then run: node cloud/scripts/supabase-apply-smtp.mjs",
+  "_gmail_setup": "Free relay, no domain needed: enable 2-Step Verification on the Google account, then Google Account > Security > App passwords > generate a 16-char password. host/user/sender = that gmail, pass = the app password.",
+  "host": "smtp.gmail.com",
+  "port": 465,
+  "user": "your.address@gmail.com",
+  "pass": "xxxx xxxx xxxx xxxx",
+  "sender": "your.address@gmail.com",
+  "sender_name": "MyFabmesh.AI"
+}
