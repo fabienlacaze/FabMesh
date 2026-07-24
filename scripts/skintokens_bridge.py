@@ -67,8 +67,12 @@ def main():
         sys.exit(1)
 
     os.makedirs(os.path.dirname(output_glb), exist_ok=True)
-    # --use_transfer keeps the original texture on the rigged mesh.
-    cmd = [venv_py, demo, "--input", mesh_path, "--output", output_glb, "--use_transfer"]
+    # NOTE: --use_transfer (keep original texture) is intentionally OFF. It
+    # re-targets the skin onto the *source* mesh but leaves the skeleton in
+    # SkinTokens' normalised space → the bones float offset above the mesh.
+    # Exporting the asset's own mesh keeps skeleton + mesh in the same space
+    # (matches the aligned rigs validated in the comparison viewer).
+    cmd = [venv_py, demo, "--input", mesh_path, "--output", output_glb]
     log(f"python={venv_py}")
     log(f"exec: {' '.join(cmd)}")
 
