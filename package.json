@@ -54,6 +54,8 @@
       "!**/_dbg_*.*",
       "!**/test_*.py",
       "!**/*.backup",
+      "!**/*.backup_*.js",
+      "!**/*.backup_*.*",
       "!**/*.bak"
     ],
     "extraResources": [
