@@ -13363,6 +13363,7 @@ function _meRestore(snapshot) {
     geom._posGroups = null;
     geom._posKeyByIndex = null;
     geom.computeVertexNormals();
+    _meDisposeBVH(geom);
   }
   if (typeof _meUpdateSelButtons === 'function') _meUpdateSelButtons();
 }
@@ -13521,6 +13522,7 @@ function _meApplyGrab(e) {
   }
   pos.needsUpdate = true;
   geom._normsDirty = true;
+  _meRefitBVH(geom);
 }
 
 // Apply brush body at a (possibly mirrored) local-space point.
@@ -13611,6 +13613,20 @@ function _meVertsNearPoint(geom, px, py, pz, r) {
   return set;
 }
 
+// BVH lifecycle: keep the cached boundsTree in sync with geometry mutations,
+// else raycasts (where you click) and the brush's vertsNearPoint drift.
+// Position-only edits (sculpt/grab) -> refit (O(n), keeps the acceleration);
+// topology edits (delete/undo/view) -> dispose (lazy rebuild on next use).
+function _meRefitBVH(geom) {
+  const t = geom && geom.boundsTree;
+  if (t && typeof t.refit === 'function') { try { t.refit(); } catch (_) {} }
+}
+function _meDisposeBVH(geom) {
+  if (geom && geom.boundsTree && typeof geom.disposeBoundsTree === 'function') {
+    try { geom.disposeBoundsTree(); } catch (_) {}
+  }
+}
+
 function _meApplyBrush(hit) {
   const point = hit.point.clone();
   hit.object.worldToLocal(point);
@@ -13635,6 +13651,7 @@ function _meApplyBrush(hit) {
         _applyBrushAt(hit, mp);
       }
     }
+    _meRefitBVH(hit.object.geometry);
   } else if (meState.mode === 'paint') {
     const geom = hit.object.geometry;
     const pos = geom.attributes.position;
@@ -13792,6 +13809,7 @@ document.getElementById('me-sel-delete')?.addEventListener('click', () => {
       geom.setIndex(keep);
     }
     geom.attributes.position.needsUpdate = true;
+    _meDisposeBVH(geom);
   });
   showToast('Selected faces deleted', 'success', 1500);
 });
@@ -13857,6 +13875,7 @@ function _meRestoreView() {
       c.geometry.setIndex(c.geometry._viewBackup);
       c.geometry._viewBackup = null;
       c.geometry.attributes.position.needsUpdate = true;
+      _meDisposeBVH(c.geometry);
     }
   });
   meState.viewMode = 'none';
@@ -13880,6 +13899,7 @@ function _meApplyView(mode) {
     }
     geom.setIndex(keep);
     geom.attributes.position.needsUpdate = true;
+    _meDisposeBVH(geom);
   });
   meState.viewMode = mode;
   document.getElementById('me-sel-' + mode)?.classList.add('tool-active');
