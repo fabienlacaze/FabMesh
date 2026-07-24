@@ -3304,6 +3304,18 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
       step1Script = unirigScript;
       step1Label = 'UniRig';
       engineSuffix = 'unirig';
+    } else if (rigEngine === 'skintokens') {
+      // SkinTokens (VAST-AI, MIT) — native skeleton. The bridge orchestrates
+      // SkinTokens' own venv internally; run it with whatever python resolves.
+      const skintokensScript = path.join(scriptsDir, 'skintokens_bridge.py');
+      if (!fs.existsSync(skintokensScript)) {
+        return { success: false, error: 'skintokens_bridge.py not found' };
+      }
+      step1Script = skintokensScript;
+      step1Python = [process.env.FABMESH_SKINTOKENS_PY, 'C:\\tmp\\skv\\Scripts\\python.exe']
+        .find(p => p && fs.existsSync(p)) || 'python';
+      step1Label = 'SkinTokens';
+      engineSuffix = 'skintokens';
     } else {
       // Default: Puppeteer
       if (!fs.existsSync(puppeteerScript)) {
@@ -3436,6 +3448,13 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
       // Cleanup temps
       try { if (fs.existsSync(tempUnirigGlb)) fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
       try { if (fs.existsSync(tempSwapGlb)) fs.unlinkSync(tempSwapGlb); } catch (_e) {}
+    } else if (rigEngine === 'skintokens') {
+      // SkinTokens native skeleton — orc_m1 retarget deferred (it's lossy for
+      // now). Ship the rigged GLB from step 1 as-is: no swap_skeleton, no anim
+      // bake yet. (Anims/UE5 retarget are a follow-up.)
+      console.log('[auto-rig-ai] engine=skintokens: shipping native rig (orc_m1 swap deferred)');
+      try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
+      try { if (fs.existsSync(tempUnirigGlb)) fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
     } else {
       // Step 2: Swap skeleton to orc_m1 (117 bones) → temp swap GLB
       step2 = await runStep('SwapSkeleton', [swapScript, tempUnirigGlb, orcBones, tempSwapGlb]);

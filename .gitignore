@@ -63,6 +63,7 @@ external/MV-Adapter/
 external/Hi3DGen/
 external/StableFast3D/
 external/UniRig/
+external/SkinTokens/
 
 # Isolated venv for MV-Adapter (diffusers 0.30 + torch cu128, ~5 GB)
 .venv-mvadapter/

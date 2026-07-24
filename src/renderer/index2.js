@@ -153,6 +153,8 @@ const ENGINE_LABELS = {
   'trellis':        'MyFabmesh.AI 3D Engine',
   // Rigging engine labels (user-visible in job details)
   'puppeteer':      'MyFabmesh.AI Rig',
+  'skintokens':     'MyFabmesh.AI Rig',
+  'unirig':         'MyFabmesh.AI Rig',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
@@ -8929,7 +8931,7 @@ const _OP_RE = /_(cntile|retexture|trellis2_retex|retex|decimate|subdivide|smoot
 // (trellis2, PartSAM, Puppeteer, RealVis…) ne doivent JAMAIS apparaître dans
 // l'UI. Les fichiers sur disque GARDENT leurs noms (les renommer casserait
 // toute la lignée) — on nettoie uniquement à l'AFFICHAGE.
-const _AI_NAME_RE = /(trellis2_native|trellis2|trellis|sf3d|hunyuan|triposg|hi3dgen|sampart3d|partsam|puppeteer|unirig|rokoko|anytop|realvisxl|realvis|hidream|dreamshaper|sdxl|esrgan|meshy)/gi;
+const _AI_NAME_RE = /(trellis2_native|trellis2|trellis|sf3d|hunyuan|triposg|hi3dgen|sampart3d|partsam|skintokens|tokenrig|puppeteer|unirig|rokoko|anytop|realvisxl|realvis|hidream|dreamshaper|sdxl|esrgan|meshy)/gi;
 function _maskAiNames(s) {
   if (!s) return s;
   return String(s)
