@@ -8083,10 +8083,18 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   // définitive et silencieuse.
   const refundOnFailure = async () => {
     if (!record) return;
+    // Atomic + idempotent credit refund via the shared jobs-row primitive
+    // (conditional UPDATE out of processing/pending) — two racing failure
+    // polls, or a poll racing the reaper, refund EXACTLY once. A plain
+    // addCredits here double-refunds on concurrent ticks.
     try {
-      await addCredits(env, user.id, record.credits);
+      await _failAndRefundJob(
+        env,
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        'rig failed',
+      );
     } catch (e) {
-      console.error(`[auto-rig-status] REFUND FAILED job=${jobId} user=${user.id} `
+      console.error(`[auto-rig-status] REFUND FAILED job=${jobId} user=${record.user_id} `
         + `credits=${record.credits} — record kept for retry:`,
         e instanceof Error ? e.message : String(e));
       return;
@@ -8386,10 +8394,18 @@ async function handleMeshSegmentStatus(req: Request, env: Env): Promise<Response
 
   const refundOnFailure = async () => {
     if (!record) return;
+    // Atomic + idempotent credit refund: route through the shared jobs-row
+    // primitive (conditional UPDATE out of processing/pending) so two racing
+    // failure polls — or a poll racing the reaper — refund the credits EXACTLY
+    // once. A plain addCredits here double-refunds on concurrent ticks.
     try {
-      await addCredits(env, user.id, record.credits);
+      await _failAndRefundJob(
+        env,
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        'segment failed',
+      );
     } catch (e) {
-      console.error(`[mesh-segment-status] REFUND FAILED job=${jobId} user=${user.id} `
+      console.error(`[mesh-segment-status] REFUND FAILED job=${jobId} user=${record.user_id} `
         + `credits=${record.credits} — record kept for retry:`,
         e instanceof Error ? e.message : String(e));
       return;
@@ -9696,10 +9712,18 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
   // (le delete inconditionnel rendait la perte de crédits définitive).
   const refundOnFailure = async () => {
     if (!record) return;
+    // Atomic + idempotent credit refund via the shared jobs-row primitive
+    // (conditional UPDATE out of processing/pending) — two racing failure
+    // polls, or a poll racing the reaper, refund EXACTLY once. A plain
+    // addCredits here double-refunds on concurrent ticks.
     try {
-      await addCredits(env, user.id, record.credits);
+      await _failAndRefundJob(
+        env,
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        'fbx-retarget failed',
+      );
     } catch (e) {
-      console.error(`[fbx-retarget-status] REFUND FAILED job=${jobId} user=${user.id} `
+      console.error(`[fbx-retarget-status] REFUND FAILED job=${jobId} user=${record.user_id} `
         + `credits=${record.credits} — record kept for retry:`,
         e instanceof Error ? e.message : String(e));
       return;
