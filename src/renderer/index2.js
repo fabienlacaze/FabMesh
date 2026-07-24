@@ -4210,6 +4210,14 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     viewer.model.traverse(o => { if (o.name === 'SkeletonHelper') existing = o; });
     if (state.bones && !existing) {
       const helper = new THREE.SkeletonHelper(viewer.model);
+      // FIX décalage squelette: SkeletonHelper fait `this.matrix = model.matrixWorld`
+      // (il est prévu pour être ajouté à la SCÈNE). On l'attache SOUS le modèle
+      // (pour qu'il soit détruit avec le modèle), ce qui appliquerait DEUX FOIS la
+      // transform du modèle (le recentrage applyPivot) → le squelette flotte
+      // au-dessus du mesh (rigs SkinTokens). On lui donne sa propre matrice
+      // identité pour que la transform ne s'applique qu'une seule fois.
+      helper.matrix = new THREE.Matrix4();
+      helper.matrixAutoUpdate = false;
       // WebGL on Windows/ANGLE ignores linewidth, so we boost visibility via
       // a bright color + always-on-top rendering. The helper auto-updates each
       // frame from the bones it watches, so animations play correctly.
