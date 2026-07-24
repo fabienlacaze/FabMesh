@@ -5399,12 +5399,27 @@ function extractPythonCode(raw) {
   return code.trim();
 }
 
+// Security: the model name is forwarded to the child process argv (and, with
+// shell:true below, to a shell). It originates from the renderer, so restrict
+// it to a strict allowlist — a compromised renderer must not be able to inject
+// extra CLI arguments or shell commands through the `model` field.
+const ALLOWED_AI_MODELS = new Set(['opus', 'sonnet', 'haiku']);
+
 // --- Helper: call Claude CLI ---
 function callClaude(claudePath, aiModel, prompt) {
   return new Promise((resolve, reject) => {
+    // Hard gate: reject anything outside the allowlist (defence in depth on top
+    // of the caller-side normalisation). Closes the shell-injection vector.
+    if (!ALLOWED_AI_MODELS.has(aiModel)) {
+      reject(new Error(`Invalid AI model: ${String(aiModel).slice(0, 40)}`));
+      return;
+    }
     const cleanEnv = { ...process.env };
     delete cleanEnv.ELECTRON_RUN_AS_NODE;
     let stdout = '', stderr = '';
+    // shell:true is retained for Windows .cmd launcher compatibility; the only
+    // renderer-controlled arg (aiModel) is allowlisted above, and claudePath is
+    // server-side config — so there is no injectable value left in the argv.
     const proc = spawn(claudePath, ['--print', '--model', aiModel], {
       env: cleanEnv, shell: true, stdio: ['pipe', 'pipe', 'pipe'], timeout: 300000
     });
@@ -5472,7 +5487,8 @@ ipcMain.handle('generate-from-prompt', async (event, { prompt, outputName, forma
     }
 
     const ext = format || 'glb';
-    const aiModel = model || 'opus';
+    // Normalise the renderer-supplied model to the allowlist (unknown → opus).
+    const aiModel = ALLOWED_AI_MODELS.has(model) ? model : 'opus';
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
     const meshFilename = `${safeName}_${timestamp}.${ext}`;
