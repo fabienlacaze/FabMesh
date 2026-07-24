@@ -9445,7 +9445,7 @@ const MESH_TOOL_SCHEMAS = {
   },
   fix_normals: {
     title: 'Fix normals (weld UV seams)',
-    subtitle: 'Recompute vertex normals + weld them across UV seams — kills the criss-cross / cracked-plate shading on a fresh Trellis2 mesh. (Black patches that look like voids are usually triangles with reversed winding — a flip pass is on the todo list; for now regenerate the mesh if you see large dark voids.)',
+    subtitle: 'Recompute vertex normals + weld them across UV seams — kills the criss-cross / cracked-plate shading on a freshly generated mesh. (Black patches that look like voids are usually triangles with reversed winding — a flip pass is on the todo list; for now regenerate the mesh if you see large dark voids.)',
     needsImage: false,
     supportsClientApply: true,
     params: [],
@@ -10346,7 +10346,7 @@ function openSegmentModal() {
     box.innerHTML =
       '<div style="font-size:16px;font-weight:600;margin-bottom:6px;">✂ ' + FabI18n.t('Segment parts (AI)') + '</div>' +
       '<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:16px;">' +
-        FabI18n.t('Split the mesh into semantic parts (head / torso / arms / legs — wheel / chassis / cabin). Runs on cloud GPU (SAMPart3D), ~8 min. The result is added as a new colored mesh version.') +
+        FabI18n.t('Split the mesh into semantic parts (head / torso / arms / legs — wheel / chassis / cabin). Runs on cloud GPU, ~8 min. The result is added as a new colored mesh version.') +
       '</div>' +
       '<label style="font-size:13px;font-weight:500;">' + FabI18n.t('Granularity') + ': <span id="seg-gran-label"></span></label>' +
       '<input id="seg-gran" type="range" min="0" max="2" step="0.5" value="1" style="width:100%;margin:8px 0 4px;">' +

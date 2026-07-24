@@ -6444,8 +6444,8 @@ function _offerMultiviewRegenerate() {
         <button id="mv-regen-do" class="primary-btn">Regenerate back from front</button>
       </div>
       <p style="color:#777; font-size:11px; margin:10px 0 0;">
-        Regenerates the back view via RealVis + IPAdapter + ControlNet
-        OpenPose using the current front image. Takes ~25 s.
+        Regenerates the back view from the current front image, keeping
+        identity and pose consistent. Takes ~25 s.
       </p>
     </div>`;
   document.body.appendChild(modal);
@@ -9997,7 +9997,7 @@ function _openSegmentGranularityModal() {
       '<div style="font-size:16px;font-weight:600;margin-bottom:6px;">&#9986; Segment parts (AI)</div>' +
       '<div style="font-size:13px;opacity:.8;line-height:1.4;margin-bottom:16px;">' +
         'Split the mesh into semantic parts (head / torso / arms / legs — wheel / chassis / turret / barrel). ' +
-        'Runs locally on your GPU (PartSAM), ~1&nbsp;min. Adds a new colored, separable mesh version.</div>' +
+        'Runs locally on your GPU, ~1&nbsp;min. Adds a new colored, separable mesh version.</div>' +
       '<label style="font-size:13px;font-weight:500;">Granularity: <span id="seg-gran-label"></span></label>' +
       '<input id="seg-gran" type="range" min="0" max="1" step="0.1" value="0.2" style="width:100%;margin:8px 0 4px;">' +
       '<div style="display:flex;justify-content:space-between;font-size:11px;opacity:.65;margin-bottom:18px;">' +
@@ -10098,7 +10098,7 @@ async function _runSegmentJob(granularity, allowInstall) {
     if (allowInstall && /not installed|not found/i.test(err)) {
       if (job && typeof completeJob === 'function') completeJob(job.id, false, 'engine not installed');
       const ok = await customConfirm(
-        'The part-segmentation engine (PartSAM) is not installed yet.\n\n'
+        'The part-segmentation engine is not installed yet.\n\n'
         + 'Install it now? One-time download of the model + runtime.',
         'Install part segmentation', 'Install');
       if (ok && await _installSegmentEngine()) return _runSegmentJob(granularity, false);
@@ -10711,7 +10711,7 @@ const MESH_TOOL_SCHEMAS = {
   },
   fix_normals: {
     title: 'Fix normals (weld UV seams)',
-    subtitle: 'Recompute normals + fix winding, and WELD normals across UV seams — kills the criss-cross "cracked-plate" shading on fresh TRELLIS meshes.',
+    subtitle: 'Recompute normals + fix winding, and WELD normals across UV seams — kills the criss-cross "cracked-plate" shading on freshly generated meshes.',
     needsImage: false,
     params: [],
     build: () => [],
@@ -10768,7 +10768,7 @@ const MESH_TOOL_SCHEMAS = {
   },
   texture_var: {
     title: 'Texture variations',
-    subtitle: 'Regenerate ONLY the texture — geometry & UVs stay exactly the same. Change the Variation seed for a different look; raise Strength for a bigger change. Add a Style word (rusty, golden, camo…) to steer it. ~1–3 min (SDXL).',
+    subtitle: 'Regenerate ONLY the texture — geometry & UVs stay exactly the same. Change the Variation seed for a different look; raise Strength for a bigger change. Add a Style word (rusty, golden, camo…) to steer it. ~1–3 min.',
     needsImage: false,
     params: [
       { id: 'strength', label: 'Change strength', type: 'range', min: 15, max: 80, step: 5, default: 40 },

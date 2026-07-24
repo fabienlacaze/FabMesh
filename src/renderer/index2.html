@@ -695,10 +695,10 @@
                         <button id="ws-mesh-retexture-btn" class="ghost-btn tool-btn" title="Re-bake the WHOLE texture from the source photo at a chosen resolution (reprojects the photo onto the UVs)">&#128300; Re-bake from photo (HD)</button>
                         <button id="ws-mesh-texvar-btn" class="ghost-btn tool-btn" title="Generate DIFFERENT texture looks (geometry untouched) — change the seed for a new variant">&#127912; Texture variants</button>
                         <button id="ws-mesh-enhance-tex-btn" class="ghost-btn tool-btn" title="Sharpen / upscale the EXISTING baked texture (Real-ESRGAN x2, no hallucination) — no re-generation">&#10024; Sharpen texture (x2)</button>
-                        <button id="ws-mesh-detail-synth-btn" class="ghost-btn tool-btn" title="Ajoute du vrai détail (rendu → SDXL → re-bake, ~2 min)">&#10024; Détail++ (IA)</button>
+                        <button id="ws-mesh-detail-synth-btn" class="ghost-btn tool-btn" title="Ajoute du vrai détail (rendu → IA → re-bake, ~2 min)">&#10024; Détail++ (IA)</button>
                         <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint the WHOLE texture with the 3D Native PBR engine (best quality, ~90s)">&#11088; Re-texture all (AI)</button>
                         <button id="ws-mesh-region-retex-btn" class="ghost-btn tool-btn" title="Re-texture only ONE part (AI detects it) with a prompt — geometry stays intact">&#127912; Re-texture a region (AI)</button>
-                        <button id="ws-mesh-segment-btn" class="ghost-btn tool-btn" title="Split the mesh into semantic parts (head/torso/arms/legs — wheel/chassis/cabin). Runs locally on your GPU (SAMPart3D), ~6-10 min. Adds a colored, separable parts version.">&#9986; Segment parts (AI)</button>
+                        <button id="ws-mesh-segment-btn" class="ghost-btn tool-btn" title="Split the mesh into semantic parts (head/torso/arms/legs — wheel/chassis/cabin). Runs locally on your GPU, ~6-10 min. Adds a colored, separable parts version.">&#9986; Segment parts (AI)</button>
                         <button id="ws-mesh-name-btn" class="ghost-btn tool-btn" title="Name the parts (wheel / turret / cannon — arm / leg / head) with AI. Requires a segmented mesh.">&#127991; Name the zones (AI)</button>
                         <button id="ws-mesh-explode-btn" class="ghost-btn tool-btn" title="Fracture the mesh into shards and blast them outward over navigable stages (explosion / destruction). Texture preserved, exportable.">&#128165; Explode / destroy</button>
                       </div>
@@ -1443,7 +1443,7 @@
             </div>
             <label style="margin-top:14px;">Optional guide</label>
             <input type="text" id="age-guide" placeholder="e.g. grey beard, smooth skin... (optional)" />
-            <small class="modal-subtitle" style="display:block; margin-top:8px; font-size:11px; line-height:1.3;">Keeps the silhouette/pose (ControlNet) and re-renders the surface toward the chosen age (skin, wrinkles, hair). Works best on characters; for objects it reads as wear/patina.</small>
+            <small class="modal-subtitle" style="display:block; margin-top:8px; font-size:11px; line-height:1.3;">Keeps the silhouette/pose and re-renders the surface toward the chosen age (skin, wrinkles, hair). Works best on characters; for objects it reads as wear/patina.</small>
           </div>
         </div>
         <div class="modal-actions">
