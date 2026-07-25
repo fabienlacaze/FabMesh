@@ -2031,6 +2031,7 @@ function refreshButtonLabelsAndHiding(p) {
     btnMesh.disabled = !p.selectedImagePath;
     btnMesh.textContent = p.meshes.length > 0 ? 'Generate new 3D version' : 'Generate 3D';
   }
+  if (typeof window._applyMeshCostPill === 'function') window._applyMeshCostPill(btnMesh);
   // 2026-06-14: append the option-aware time estimate to every Generate
   // button (image/mesh/rig/anim), like cloud credits.
   try { _updateGenButtonsEstimate?.(); } catch (_) {}
@@ -3269,6 +3270,7 @@ function _updateGenButtonsEstimate() {
   if (bm) {
     const base = (p && p.meshes && p.meshes.length > 0) ? 'Generate new 3D version' : 'Generate 3D';
     bm.textContent = bm.disabled ? base : `${base} : ${_fmtEta(_estimateMeshMs())}`;
+    if (typeof window._applyMeshCostPill === 'function') window._applyMeshCostPill(bm);
   }
   const bi = document.getElementById('ws-generate-image');
   if (bi) {
@@ -22145,6 +22147,8 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
       try { window._applyCloudCostPill?.(); } catch (_) {}
       try { window._refreshTopbarCredits?.(); } catch (_) {}
       try { window._applyToolPills?.(); } catch (_) {}
+      try { window._applyMeshCostPill?.(); } catch (_) {}
+      try { window._applyCloudFeatureMask?.(); } catch (_) {}
     };
     btnL.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'local'); syncRow(); });
     btnC.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'cloud'); syncRow(); });
@@ -22220,6 +22224,8 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     try { window._applyCloudCostPill?.(); } catch (_) {}
     try { window._refreshTopbarCredits?.(); } catch (_) {}
     try { window._applyToolPills?.(); } catch (_) {}
+    try { window._applyMeshCostPill?.(); } catch (_) {}
+    try { window._applyCloudFeatureMask?.(); } catch (_) {}
   };
 
   bl.addEventListener('click', () => {
@@ -22455,6 +22461,51 @@ window._applyCloudCostPill = function (btn) {
 document.getElementById('ws-count')?.addEventListener('change', () => window._applyCloudCostPill());
 window._applyCloudCostPill();
 
+// ============================================================
+// PASTILLE COÛT CLOUD ⚡ SUR « GÉNÉRER 3D » (mode Cloud) — prix
+// réels du worker (PRICING_DEFAULTS) : preset + add-ons cochés.
+// Idempotent : rappelé après chaque réécriture du label du bouton.
+// ============================================================
+window._applyMeshCostPill = function (btn) {
+  try {
+    if (!btn) btn = document.getElementById('ws-generate-mesh');
+    if (!btn) return;
+    const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+    let pill = btn.querySelector('.generate-cost-pill');
+    if (!cloud) { if (pill) pill.remove(); return; }
+    const BASE = { fast: 1, balanced: 2, quality: 4, ultra_8k: 8 };
+    const preset = document.getElementById('ws-trellis2-preset')?.value || 'fast';
+    const on = (id) => !!document.getElementById(id)?.checked;
+    let cost = BASE[preset] ?? 1;
+    if (on('ws-trellis2-multiref')) cost += 1;
+    if (on('ws-trellis2-refine')) cost += 2;
+    if (on('ws-trellis2-rectify')) cost += 1;
+    if (on('ws-trellis2-quality-plus')) cost += 1;
+    if (on('ws-trellis2-ultra-q')) cost += 2;
+    // ultra_hd est ignoré par le worker quand le preset est déjà ultra_8k.
+    if (on('ws-trellis2-ultra-hd') && preset !== 'ultra_8k') cost += 3;
+    if (on('ws-trellis2-face-fix')) cost += 2;
+    // NB : ws-trellis2-smooth est gratuit côté worker — pas compté.
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'generate-cost-pill';
+      pill.innerHTML = '<span class="generate-cost-bolt">&#9889;</span><span class="gcp-val"></span>';
+      btn.appendChild(pill);
+    }
+    const v = pill.querySelector('.gcp-val');
+    if (v) v.textContent = String(cost);
+  } catch (_) {}
+};
+// Nos listeners s'enregistrent APRÈS ceux de l'ETA (_updateGenButtonsEstimate),
+// donc ils re-posent la pastille après la réécriture du textContent (qui
+// détruit les enfants du bouton).
+[
+  'ws-trellis2-preset', 'ws-trellis2-multiref', 'ws-trellis2-refine',
+  'ws-trellis2-rectify', 'ws-trellis2-quality-plus', 'ws-trellis2-ultra-q',
+  'ws-trellis2-ultra-hd', 'ws-trellis2-face-fix',
+].forEach(id => document.getElementById(id)?.addEventListener('change', () => window._applyMeshCostPill()));
+window._applyMeshCostPill();
+
 
 // ============================================================
 // SOLDE DE CRÉDITS DANS LA TOPBAR (mode Cloud uniquement)
@@ -22535,3 +22586,41 @@ window._applyToolPills = function () {
   } catch (_) {}
 };
 window._applyToolPills();
+
+// ============================================================
+// MASQUAGE DES OUTILS DESKTOP-ONLY EN MODE CLOUD — ces outils
+// IA 3D/rig n'ont AUCUN équivalent côté worker (pas d'endpoint) :
+// les laisser visibles en mode Cloud = échec garanti au clic.
+// En mode Local, tout est ré-affiché.
+// ============================================================
+const _CLOUD_HIDDEN_MESH_TOOLS = [
+  'ws-mesh-enhance-tex-btn',   // Real-ESRGAN local, pas d'endpoint worker
+  'ws-mesh-detail-synth-btn',  // detail_synth.py SDXL local
+  'ws-mesh-region-retex-btn',  // SDXL inpaint atlas local
+  'ws-mesh-texvar-btn',        // texture_var absent de la whitelist /api/mesh-op
+  'ws-mesh-trellis2-btn',      // trellis2_retex absent de la whitelist /api/mesh-op
+  'ws-mesh-name-btn',          // part namer local (Modal _partnamer non déployé)
+  'ws-rig-reskin-btn',         // re-skin SkinTokens local (seul /api/auto-rig existe)
+];
+// Entrées lightbox 3D correspondantes : la lightbox route vers les boutons
+// workspace par clic simulé, masquer le bouton workspace ne suffit donc pas.
+const _CLOUD_HIDDEN_LB3D_TOOLS = ['texvar', 'regionretex', 'enhancetex', 'detailsynth'];
+
+window._applyCloudFeatureMask = function () {
+  try {
+    const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+    for (const id of _CLOUD_HIDDEN_MESH_TOOLS) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = cloud ? 'none' : '';
+    }
+    for (const t of _CLOUD_HIDDEN_LB3D_TOOLS) {
+      const el = document.querySelector(`[data-lb3d-tool="${t}"]`);
+      if (el) el.style.display = cloud ? 'none' : '';
+    }
+    // Ligne « Mode » du panneau Animation : le select Local / « Cloud
+    // coming soon » est trompeur quand le switch global est déjà Cloud.
+    const animRow = document.getElementById('ws-anim-mode')?.closest('.form-row');
+    if (animRow) animRow.style.display = cloud ? 'none' : '';
+  } catch (_) {}
+};
+window._applyCloudFeatureMask();

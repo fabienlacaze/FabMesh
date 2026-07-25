@@ -344,6 +344,83 @@ async function imageOp({ endpoint, srcPath, extraBody = {}, outPath }) {
   return { success: true, newPath: outPath, creditsRemaining: oj.creditsRemaining };
 }
 
+// Génération 3D (image -> mesh TRELLIS-2) via /api/generate : multipart
+// (image en File), job async, polling GET /api/jobs/{id}, download du GLB.
+function _findGlbUrl(o) {
+  let found = null;
+  (function walk(v) {
+    if (found) return;
+    if (typeof v === 'string') {
+      if (/\.glb(\?|#|$)/i.test(v) || (/\/r2\//.test(v) && /mesh/i.test(v))) found = v;
+    } else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  })(o);
+  return found;
+}
+
+async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags = {}, outPath, onProgress }) {
+  const tok = await getAccessToken();
+  if (!tok) return { success: false, needsCloudLogin: true };
+
+  const fd = new FormData();
+  const buf = fs.readFileSync(imagePath);
+  fd.append('image', new Blob([buf], { type: 'image/png' }), path.basename(imagePath));
+  if (imagePathBack && fs.existsSync(imagePathBack)) {
+    try {
+      const bb = fs.readFileSync(imagePathBack);
+      const up = await _authedFetch('/api/upload-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl: `data:image/png;base64,${bb.toString('base64')}`, suffix: 'back' }),
+      });
+      const uj = up.resp ? await up.resp.json().catch(() => ({})) : {};
+      if (uj.path) fd.append('image_back_url', uj.path);
+    } catch (_) {}
+  }
+  fd.append('asset_type', assetType || 'character');
+  fd.append('preset', preset || 'fast');
+  for (const [k, v] of Object.entries(flags)) fd.append(k, v ? 'true' : 'false');
+
+  const r = await fetch(`${WORKER_URL}/api/generate`, {
+    method: 'POST',
+    headers: { Cookie: `mfm-session=${tok}` },
+    body: fd,
+  });
+  if (r.status === 401) { logout(); return { success: false, needsCloudLogin: true }; }
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 402) return { success: false, error: 'Not enough MyFabmesh credits. Top up on the website.' };
+  const jobId = j.jobId || j.job_id || j.id;
+  if (!r.ok || !jobId) return { success: false, error: j.error || `HTTP ${r.status}` };
+
+  const t0 = Date.now();
+  let polls = 0;
+  while (Date.now() - t0 < 15 * 60 * 1000) {
+    await new Promise((res) => setTimeout(res, 4000));
+    polls++;
+    const a = await _authedFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    const js = await a.resp.json().catch(() => ({}));
+    const st = String(js.status || js.state || '');
+    try { onProgress?.(st, polls); } catch (_) {}
+    if (/succeeded|completed/i.test(st)) {
+      const url = _findGlbUrl(js);
+      if (!url) return { success: false, error: 'job succeeded but no GLB url in response' };
+      const dl = await fetch(/^https?:/i.test(url) ? url : `${WORKER_URL}${url}`,
+        { headers: { Cookie: `mfm-session=${tok}` } });
+      if (!dl.ok) return { success: false, error: `GLB download HTTP ${dl.status}` };
+      const out = Buffer.from(await dl.arrayBuffer());
+      if (out.length < 1000) return { success: false, error: 'GLB too small' };
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, out);
+      return { success: true, meshPath: outPath, size: out.length };
+    }
+    if (/failed|error|canceled|cancelled/i.test(st)) {
+      return { success: false, error: js.error || js.detail || `job ${st}` };
+    }
+  }
+  return { success: false, error: 'cloud 3D generation timeout (15 min)' };
+}
+
 async function listLibrary() {
   const a = await _authedFetch('/api/cloud-projects');
   if (a.needsCloudLogin) return { needsCloudLogin: true };
@@ -429,4 +506,4 @@ function register(deps) {
   });
 }
 
-module.exports = { register, generateImages, imageOp, getAccessToken, status, login, logout };
+module.exports = { register, generateImages, imageOp, generateMesh, getAccessToken, status, login, logout };

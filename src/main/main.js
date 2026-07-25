@@ -4172,6 +4172,19 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
     if (!imagePath || !maskDataUrl) {
       return { success: false, error: 'imagePath and maskDataUrl required' };
     }
+    // Mode Cloud : /api/mask-inpaint (3 crédits) — le worker upload lui-même
+    // le masque (dataURL) sur R2, rien à convertir côté desktop.
+    if (isCloudMode()) {
+      const dirC = path.dirname(imagePath);
+      const extC = path.extname(imagePath) || '.png';
+      const outC = path.join(dirC, `${safeBase(path.basename(imagePath, extC))}_inpaint_${Date.now()}${extC}`);
+      const r = await cloudFallback.imageOp({
+        endpoint: '/api/mask-inpaint', srcPath: imagePath, outPath: outC,
+        extraBody: { maskDataUrl, prompt: prompt || '' },
+      });
+      if (r.creditsRemaining != null) safeSend('ai3d-progress', `[cloud] Crédits restants: ${r.creditsRemaining}\n`);
+      return r.success ? { success: true, newPath: r.newPath } : r;
+    }
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
     const base = safeBase(path.basename(imagePath, ext));
@@ -4368,6 +4381,17 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
     const base = safeBase(path.basename(imagePath, ext));
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_inpaint_${ts}${ext}`);
+
+    // Mode Cloud : /api/auto-inpaint (3 crédits), même contrat de sortie.
+    // Note : `rel` (précision CLIPSeg) n'existe pas côté worker — seul dilate passe.
+    if (isCloudMode()) {
+      const r = await cloudFallback.imageOp({
+        endpoint: '/api/auto-inpaint', srcPath: imagePath, outPath: newImagePath,
+        extraBody: { targetText, prompt: prompt || '', dilate: dilate || 15 },
+      });
+      if (r.creditsRemaining != null) safeSend('ai3d-progress', `[cloud] Crédits restants: ${r.creditsRemaining}\n`);
+      return r.success ? { success: true, newPath: r.newPath } : r;
+    }
 
     // Lazy-start the persistent SDXL server (no model reload between calls)
     await ensureSdxlServer();
@@ -4936,6 +4960,20 @@ ipcMain.handle('image-quick-edit', async (event, { imagePath, operation, params 
     const ts = Date.now();
     const outPath = path.join(dir, `${base}_${operation}_${ts}${ext}`);
     const p = params || {};
+
+    // Mode Cloud : upscale et facefix passent par le worker (les autres ops
+    // PIL — crop, brightness, symmetrize… — restent locales, pas d'IA).
+    if (isCloudMode() && (operation === 'upscale' || operation === 'facefix')) {
+      const r = await cloudFallback.imageOp({
+        endpoint: operation === 'upscale' ? '/api/upscale-image' : '/api/face-fix-image',
+        srcPath: imagePath, outPath,
+        extraBody: operation === 'upscale'
+          ? { scale: (p.scale === 4 ? 4 : 2) }
+          : (typeof p.strength === 'number' ? { strength: p.strength } : {}),
+      });
+      if (r.creditsRemaining != null) safeSend('ai3d-progress', `[cloud] Crédits restants: ${r.creditsRemaining}\n`);
+      return r.success ? { success: true, newPath: r.newPath } : r;
+    }
 
     const scripts = {
       symmetrize: `
@@ -6285,6 +6323,58 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     log.warn('main', 'engine=local (TripoSR) requested but disabled (Stability NC license); rerouting to trellis2_native');
     engine = 'trellis2_native';
   }
+  // Mode Cloud : /api/generate (TRELLIS-2 sur Modal) — upload multipart,
+  // polling /api/jobs/{id}, download du GLB. La rectification/refine/etc.
+  // sont faites côté worker via les flags ; rien ne tourne en local.
+  if (isCloudMode()) {
+    try {
+      const safeName = String(outputName || 'mesh').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const ts = Date.now();
+      const meshFilename = `${safeName}_trellis2_native_${ts}.glb`;
+      const meshPath = path.join(MESHES_DIR, meshFilename);
+      safeSend('ai3d-progress', 'LOCAL_TRELLIS2_PROGRESS: 10 cloud upload\n');
+      const r = await cloudFallback.generateMesh({
+        imagePath, imagePathBack, assetType,
+        preset: trellis2Preset || 'fast',
+        flags: {
+          rectify: !!trellis2RectifySource,
+          smooth: !!trellis2Smooth,
+          refine: !!trellis2Refine,
+          quality_plus: !!trellis2QualityPlus,
+          ultra_q: !!trellis2UltraQ,
+          ultra_hd: !!trellis2UltraHD,
+          face_fix: !!trellis2FaceFix,
+          multiref: !!trellis2MultiRef,
+          back_view: false,
+        },
+        outPath: meshPath,
+        onProgress: (st, polls) => {
+          // Progression croissante 30→90 pendant le polling (4 s/poll).
+          const pct = Math.min(90, 30 + polls * 2);
+          safeSend('ai3d-progress', `LOCAL_TRELLIS2_PROGRESS: ${pct} cloud ${st || 'processing'}\n`);
+        },
+      });
+      if (!r.success) {
+        return { success: false, error: r.error || 'cloud 3D generation failed',
+                 ...(r.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      safeSend('ai3d-progress', 'LOCAL_TRELLIS2_PROGRESS: 100 done\n');
+      // Sidecars comme le chemin local (viewer « jump to source » + Generation History).
+      try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch (_) {}
+      writeMeta(meshPath, {
+        kind: 'mesh', engine: 'trellis2_native', source: imagePath,
+        params: { cloud: true, preset: trellis2Preset || 'fast', assetType,
+                  multiRef: trellis2MultiRef, refine: trellis2Refine,
+                  rectifySource: trellis2RectifySource, smooth: trellis2Smooth,
+                  qualityPlus: trellis2QualityPlus, ultraQ: trellis2UltraQ,
+                  faceFix: trellis2FaceFix, ultraHD: trellis2UltraHD },
+      });
+      return { success: true, meshPath, meshFilename, format: 'glb', size: r.size, sourceImage: imagePath };
+    } catch (e) {
+      return { success: false, error: e.message || String(e) };
+    }
+  }
+
   const useTwoView = false;
 
   // SEQUENTIAL RESIDENCY — free the persistent SDXL server's RAM (~4-6 GB:
