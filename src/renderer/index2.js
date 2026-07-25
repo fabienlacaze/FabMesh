@@ -21854,3 +21854,128 @@ if (API.onAppCloseRequested) {
 // INIT
 // ============================================================
 showPage('projects');
+
+// ============================================================
+// MENU ⋮ DES VIGNETTES (test UX 2026-07-25)
+// Remplace les boutons d'action qui apparaissaient PAR-DESSUS la
+// vignette au survol par un menu déroulant ouvert au survol du ⋮.
+// Proxy pattern : les boutons originaux restent dans le DOM (masqués
+// par CSS) ; chaque item du menu relaie son .click() vers l'original,
+// donc les handlers existants marchent sans aucune modification.
+// ============================================================
+(() => {
+  const ACTION_SEL = ['.version-delete-btn', '.version-source-btn',
+    '.version-mesh-btn', '.version-rig-btn', '.version-history-btn'].join(',');
+
+  let menu = null;          // singleton #v-kebab-menu
+  let anchorThumb = null;   // vignette dont le menu est ouvert
+  let anchorKebab = null;
+  let closeTimer = 0;
+
+  function ensureMenu() {
+    if (menu) return menu;
+    menu = document.createElement('div');
+    menu.id = 'v-kebab-menu';
+    menu.addEventListener('mouseenter', () => clearTimeout(closeTimer));
+    menu.addEventListener('mouseleave', scheduleClose);
+    document.body.appendChild(menu);
+    // Fermer si on scrolle/redimensionne (le menu est en position fixed).
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('resize', closeMenu);
+    return menu;
+  }
+
+  function scheduleClose() {
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(closeMenu, 280);
+  }
+
+  function closeMenu() {
+    clearTimeout(closeTimer);
+    if (menu) { menu.classList.remove('open'); menu.innerHTML = ''; }
+    if (anchorKebab) anchorKebab.classList.remove('menu-open');
+    anchorThumb = null; anchorKebab = null;
+  }
+
+  function openMenu(thumb, kebab) {
+    const m = ensureMenu();
+    closeMenu();
+    const actions = Array.from(thumb.querySelectorAll(ACTION_SEL));
+    if (!actions.length) return;
+    anchorThumb = thumb; anchorKebab = kebab;
+    kebab.classList.add('menu-open');
+    for (const orig of actions) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'vkm-item'
+        + (orig.classList.contains('version-delete-btn') ? ' vkm-delete' : '');
+      const ico = document.createElement('span');
+      ico.className = 'vkm-ico';
+      ico.innerHTML = orig.innerHTML;
+      const label = document.createElement('span');
+      label.className = 'vkm-label';
+      label.textContent = orig.getAttribute('title') || '';
+      item.append(ico, label);
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeMenu();
+        orig.click();   // relaie vers le handler d'origine
+      });
+      m.appendChild(item);
+    }
+    // Position : sous le ⋮, aligné à droite ; remonte si déborde en bas.
+    m.classList.add('open');
+    const kr = kebab.getBoundingClientRect();
+    const mw = m.offsetWidth, mh = m.offsetHeight;
+    let left = Math.min(Math.max(8, kr.right - mw), window.innerWidth - mw - 8);
+    let top = kr.bottom + 4;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, kr.top - mh - 4);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+  }
+
+  function enhanceThumb(thumb) {
+    if (thumb.dataset.vkm) return;
+    if (!thumb.querySelector(ACTION_SEL)) return;   // rien à proposer
+    thumb.dataset.vkm = '1';
+    const kebab = document.createElement('button');
+    kebab.type = 'button';
+    kebab.className = 'v-kebab';
+    kebab.title = (typeof _i18nT === 'function') ? _i18nT('Actions') : 'Actions';
+    kebab.textContent = '\u22EE';   // ⋮
+    kebab.addEventListener('mouseenter', () => openMenu(thumb, kebab));
+    kebab.addEventListener('mouseleave', scheduleClose);
+    kebab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (anchorThumb === thumb) closeMenu();
+      else openMenu(thumb, kebab);
+    });
+    thumb.appendChild(kebab);
+  }
+
+  function enhanceAll() {
+    document.querySelectorAll('.version-thumb:not([data-vkm])').forEach(enhanceThumb);
+    // Le strip a pu être re-rendu pendant que le menu était ouvert.
+    if (anchorThumb && !anchorThumb.isConnected) closeMenu();
+  }
+
+  // Les strips se re-rendent par innerHTML → observer léger (childList).
+  const mo = new MutationObserver((muts) => {
+    for (const mu of muts) {
+      for (const n of mu.addedNodes) {
+        if (n.nodeType === 1 && (n.matches?.('.version-thumb')
+            || n.querySelector?.('.version-thumb'))) {
+          enhanceAll();
+          return;
+        }
+      }
+      for (const n of mu.removedNodes) {
+        if (anchorThumb && n.nodeType === 1 && n.contains?.(anchorThumb)) {
+          closeMenu();
+        }
+      }
+    }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+  enhanceAll();
+})();

@@ -4062,3 +4062,76 @@ details.stage-generating > summary .stage-gear .gear-glyph {
   overflow: hidden;
   box-shadow: 0 4px 16px rgba(0,0,0,0.6);
 }
+
+/* ═══ Menu ⋮ des vignettes (test UX 2026-07-25) ═══
+   Les boutons d'action (supprimer / lignée / historique) n'apparaissent PLUS
+   par-dessus la vignette au survol — ils sont regroupés dans un menu déroulant
+   ouvert au survol du bouton ⋮. Les boutons originaux restent dans le DOM
+   (masqués) : le menu affiche des proxys qui déclenchent leur .click(), donc
+   tous les handlers existants (directs ou délégués) marchent sans changement.
+   Les badges de STATUT (✂ segmenté, 💡 émissif, coche, vN) restent visibles
+   sur la vignette. */
+.version-thumb .version-delete-btn,
+.version-thumb .version-source-btn,
+.version-thumb .version-mesh-btn,
+.version-thumb .version-rig-btn,
+.version-thumb .version-history-btn,
+.version-thumb .v-rail-mid > .version-source-btn,
+.version-thumb .v-rail-mid > .version-mesh-btn,
+.version-thumb .v-rail-mid > .version-rig-btn,
+.version-thumb .v-rail-bot > .version-history-btn {
+  display: none !important;
+}
+.version-thumb .v-kebab {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(255,255,255,0.35);
+  color: #fff;
+  font-size: 14px; font-weight: 700;
+  cursor: pointer;
+  display: none;
+  align-items: center; justify-content: center;
+  padding: 0; line-height: 1;
+  z-index: 5;
+}
+.version-thumb:hover .v-kebab { display: inline-flex; }
+.version-thumb .v-kebab:hover,
+.version-thumb .v-kebab.menu-open {
+  background: #3b6fd4;
+  border-color: #8ab4ff;
+}
+#v-kebab-menu {
+  position: fixed;
+  z-index: 99999;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  background: #15151f;
+  border: 1px solid #3a3a4a;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.55);
+}
+#v-kebab-menu.open { display: flex; }
+#v-kebab-menu .vkm-item {
+  display: flex; align-items: center; gap: 8px;
+  height: 28px;
+  background: transparent;
+  border: none; border-radius: 6px;
+  color: #ddd;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+#v-kebab-menu .vkm-item:hover { background: #2a2a3a; }
+#v-kebab-menu .vkm-item.vkm-delete:hover { background: var(--error); color: #fff; }
+#v-kebab-menu .vkm-item .vkm-ico { width: 18px; text-align: center; flex: none; }
+#v-kebab-menu .vkm-item .vkm-label { font-size: 12px; color: #ccc; }
+#v-kebab-menu .vkm-item.vkm-delete:hover .vkm-label { color: #fff; }
