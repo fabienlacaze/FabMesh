@@ -4135,3 +4135,27 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 #v-kebab-menu .vkm-item .vkm-ico { width: 18px; text-align: center; flex: none; }
 #v-kebab-menu .vkm-item .vkm-label { font-size: 12px; color: #ccc; }
 #v-kebab-menu .vkm-item.vkm-delete:hover .vkm-label { color: #fff; }
+
+/* Renfort de spécificité (2026-07-25) : la règle historique
+   `.versions-strip .version-thumb:hover .v-rail-* > *` est en !important
+   avec une spécificité (0,4,0) qui battait notre masquage (0,3,0) — les
+   boutons d'action des rails réapparaissaient au survol sur certaines
+   vignettes. Ces sélecteurs (0,5,0) + !important, déclarés en dernier,
+   gagnent dans tous les cas. Les badges de statut (✂ 💡) restent visibles. */
+.versions-strip .version-thumb:hover .v-rail-mid > .version-source-btn,
+.versions-strip .version-thumb:hover .v-rail-mid > .version-mesh-btn,
+.versions-strip .version-thumb:hover .v-rail-mid > .version-rig-btn,
+.versions-strip .version-thumb:hover .v-rail-mid > .version-delete-btn,
+.versions-strip .version-thumb:hover .v-rail-mid > .version-history-btn,
+.versions-strip .version-thumb:hover .v-rail-bot > .version-source-btn,
+.versions-strip .version-thumb:hover .v-rail-bot > .version-mesh-btn,
+.versions-strip .version-thumb:hover .v-rail-bot > .version-rig-btn,
+.versions-strip .version-thumb:hover .v-rail-bot > .version-delete-btn,
+.versions-strip .version-thumb:hover .v-rail-bot > .version-history-btn,
+.versions-strip .version-thumb:hover .version-delete-btn,
+.versions-strip .version-thumb:hover .version-source-btn,
+.versions-strip .version-thumb:hover .version-mesh-btn,
+.versions-strip .version-thumb:hover .version-rig-btn,
+.versions-strip .version-thumb:hover .version-history-btn {
+  display: none !important;
+}

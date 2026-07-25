@@ -5,6 +5,11 @@
 (function () {
   if (!window.FabI18n || !window.FabI18n.register) return;
   window.FabI18n.register('fr', {
+  "View source image": "Voir l'image source",
+  "View source mesh": "Voir le maillage source",
+  "View source rig": "Voir le rig source",
+  "Delete this animation": "Supprimer cette animation",
+  "Actions": "Actions",
   "MyFabmesh.AI Image Engine (local)": "Moteur d'images MyFabmesh.AI (local)",
   "MyFabmesh.AI Image Engine HD (local)": "Moteur d'images MyFabmesh.AI HD (local)",
   "MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)": "Image MyFabmesh.AI ⚡ Turbo (~4 étapes, local)",
@@ -29,6 +34,11 @@
   "Clone Stamp save": "Sauvegarde du tampon de clonage"
 });
   window.FabI18n.register('es', {
+  "View source image": "Ver la imagen de origen",
+  "View source mesh": "Ver la malla de origen",
+  "View source rig": "Ver el rig de origen",
+  "Delete this animation": "Eliminar esta animación",
+  "Actions": "Acciones",
   "MyFabmesh.AI Image Engine (local)": "Motor de imágenes MyFabmesh.AI (local)",
   "MyFabmesh.AI Image Engine HD (local)": "Motor de imágenes MyFabmesh.AI HD (local)",
   "MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)": "Imagen MyFabmesh.AI ⚡ Turbo (~4 pasos, local)",
@@ -53,6 +63,11 @@
   "Clone Stamp save": "Guardar tampón de clonar"
 });
   window.FabI18n.register('zh', {
+  "View source image": "查看源图像",
+  "View source mesh": "查看源网格",
+  "View source rig": "查看源骨骼绑定",
+  "Delete this animation": "删除此动画",
+  "Actions": "操作",
   "MyFabmesh.AI Image Engine (local)": "MyFabmesh.AI 图像引擎（本地）",
   "MyFabmesh.AI Image Engine HD (local)": "MyFabmesh.AI 图像引擎 HD（本地）",
   "MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)": "MyFabmesh.AI 图像 ⚡ Turbo（约 4 步，本地）",
@@ -78,6 +93,11 @@
   "Clone Stamp save": "克隆图章保存"
 });
   window.FabI18n.register('hi', {
+  "View source image": "स्रोत इमेज देखें",
+  "View source mesh": "स्रोत मेश देखें",
+  "View source rig": "स्रोत रिग देखें",
+  "Delete this animation": "यह एनिमेशन हटाएँ",
+  "Actions": "क्रियाएँ",
   "MyFabmesh.AI Image Engine (local)": "MyFabmesh.AI इमेज इंजन (लोकल)",
   "MyFabmesh.AI Image Engine HD (local)": "MyFabmesh.AI इमेज इंजन HD (लोकल)",
   "MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)": "MyFabmesh.AI इमेज ⚡ Turbo (~4 स्टेप, लोकल)",
@@ -103,6 +123,11 @@
   "Clone Stamp save": "क्लोन स्टैम्प सेव"
 });
   window.FabI18n.register('ar', {
+  "View source image": "عرض الصورة المصدر",
+  "View source mesh": "عرض الشبكة المصدر",
+  "View source rig": "عرض الـ rig المصدر",
+  "Delete this animation": "حذف هذه الحركة",
+  "Actions": "إجراءات",
   "MyFabmesh.AI Image Engine (local)": "محرك صور MyFabmesh.AI (محلي)",
   "MyFabmesh.AI Image Engine HD (local)": "محرك صور MyFabmesh.AI HD (محلي)",
   "MyFabmesh.AI Image ⚡ Turbo (~4 steps, local)": "صورة MyFabmesh.AI ⚡ Turbo (~4 خطوات، محلي)",
