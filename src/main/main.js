@@ -386,6 +386,15 @@ function detectNvidiaGpu() {
 }
 ipcMain.handle('gpu-status', async () => detectNvidiaGpu());
 
+// Mode de calcul courant (annoncé par le renderer à chaque bascule) —
+// consulté par les handlers d'outils pour router local vs cloud.
+let _computeModeMain = 'local';
+ipcMain.on('compute-mode', (_e, m) => {
+  _computeModeMain = (m === 'cloud') ? 'cloud' : 'local';
+  log.info('compute-mode', _computeModeMain);
+});
+function isCloudMode() { return _computeModeMain === 'cloud'; }
+
 function checkPromptSafety(prompt) {
   const floor = checkHardFloor(prompt);
   if (!floor.safe) return floor;            // illegal floor — never bypassable
@@ -4409,6 +4418,20 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine, s
     if (!safety.safe) return { success: false, error: safety.reason };
     const aiSafety = await checkPromptSafetyAI(prompt);
     if (!aiSafety.safe) return { success: false, error: aiSafety.reason };
+
+    // Mode Cloud : /api/modify-image (2 crédits), même contrat de sortie.
+    if (isCloudMode()) {
+      const dirC = path.dirname(imagePath);
+      const extC = path.extname(imagePath) || '.png';
+      const uniqC = (seed != null && seed !== '') ? seed : Math.floor(Math.random() * 1e9);
+      const outC = path.join(dirC, `${safeBase(path.basename(imagePath, extC))}_edit_${Date.now()}_${uniqC}${extC}`);
+      const r = await cloudFallback.imageOp({
+        endpoint: '/api/modify-image', srcPath: imagePath, outPath: outC,
+        extraBody: { prompt, strength: (typeof strength === 'number' ? strength : 0.55) },
+      });
+      if (r.creditsRemaining != null) safeSend('ai3d-progress', `[cloud] Crédits restants: ${r.creditsRemaining}\n`);
+      return r.success ? { success: true, newPath: r.newPath } : r;
+    }
     // Create new version path in same folder
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
@@ -5024,6 +5047,18 @@ print("OK")`,
 });
 
 ipcMain.handle('remove-background', async (event, imagePath) => {
+  // Mode Cloud : même op via le worker (/api/remove-background, 1 crédit),
+  // même contrat de sortie (<base>_nobg_<ts> à côté de la source).
+  if (isCloudMode()) {
+    const dirC = path.dirname(imagePath);
+    const extC = path.extname(imagePath) || '.png';
+    const outC = path.join(dirC, `${safeBase(path.basename(imagePath, extC))}_nobg_${Date.now()}${extC}`);
+    const r = await cloudFallback.imageOp({
+      endpoint: '/api/remove-background', srcPath: imagePath, outPath: outC,
+    });
+    if (r.creditsRemaining != null) safeSend('ai3d-progress', `[cloud] Crédits restants: ${r.creditsRemaining}\n`);
+    return r.success ? { success: true, newPath: r.newPath } : r;
+  }
   return new Promise((resolve) => {
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);

@@ -22129,6 +22129,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
   // par le matériel — GPU NVIDIA → Local, sinon → Cloud. Le choix reste
   // modifiable pendant la session mais n'est pas persistant entre lancements.
   localStorage.setItem('fab-compute-mode', gpu.hasNvidia ? 'local' : 'cloud');
+  try { API.setComputeMode?.(gpu.hasNvidia ? 'local' : 'cloud'); } catch (_) {}
 
   if (gpu.hasNvidia) {
     // Machine équipée : local par défaut, cloud OPT-IN via les Réglages
@@ -22138,6 +22139,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     const row = btnL.closest('.form-row');
     const syncRow = async () => {
       const m = _computeMode();
+      try { API.setComputeMode?.(m); } catch (_) {}
       if (row) row.style.display = (m === 'cloud') ? '' : 'none';
       await apply(m, gpu);
       try { window._applyCloudCostPill?.(); } catch (_) {}
@@ -22197,6 +22199,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
 
   const refresh = async () => {
     const mode = _computeMode();
+    try { API.setComputeMode?.(mode); } catch (_) {}
     bl.classList.toggle('active', mode === 'local');
     bc.classList.toggle('active', mode === 'cloud');
     // Pas de rappel du prix ici : déjà indiqué dans la description au-dessus.

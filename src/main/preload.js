@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   generateFromImage: (opts) => ipcRenderer.invoke('generate-from-image', opts),
   generateImages: (opts) => ipcRenderer.invoke('generate-images', opts),
   gpuStatus: () => ipcRenderer.invoke('gpu-status'),
+  setComputeMode: (m) => ipcRenderer.send('compute-mode', m),
   cloudLogin: (opts) => ipcRenderer.invoke('cloud-login', opts),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
   cloudRecover: (opts) => ipcRenderer.invoke('cloud-recover', opts),

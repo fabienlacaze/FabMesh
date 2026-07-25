@@ -294,6 +294,56 @@ async function shareAsset({ filePath, projectName }) {
   return { success: true, r2Path: uploadedPath };
 }
 
+// Opération image générique via le worker : upload de l'image locale
+// (≤5 Mo) → endpoint d'op (modify/removebg/upscale/inpaint…) → télécharge
+// le résultat au chemin de sortie fourni (même contrat que les outils
+// locaux : nouveau fichier à côté de la source).
+async function imageOp({ endpoint, srcPath, extraBody = {}, outPath }) {
+  if (!fs.existsSync(srcPath)) return { success: false, error: 'source not found' };
+  const buf = fs.readFileSync(srcPath);
+  if (buf.length > 5 * 1024 * 1024) {
+    return { success: false, error: 'Image > 5 MB — cloud tool limit. Downscale it first.' };
+  }
+  const ext = path.extname(srcPath).toLowerCase();
+  const mime = ext === '.webp' ? 'image/webp' : (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' : 'image/png';
+
+  const up = await _authedFetch('/api/upload-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      dataUrl: `data:${mime};base64,${buf.toString('base64')}`,
+      suffix: 'desktop_op',
+    }),
+  });
+  if (up.needsCloudLogin) return { success: false, needsCloudLogin: true };
+  const uj = await up.resp.json().catch(() => ({}));
+  if (!up.resp.ok || !(uj.ok || uj.success)) {
+    return { success: false, error: uj.error || `upload HTTP ${up.resp.status}` };
+  }
+  const imageUrl = uj.path;   // URL signée renvoyée par le worker
+
+  const op = await _authedFetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageUrl, ...extraBody }),
+  });
+  if (op.needsCloudLogin) return { success: false, needsCloudLogin: true };
+  const oj = await op.resp.json().catch(() => ({}));
+  if (op.resp.status === 402) return { success: false, error: 'Not enough MyFabmesh credits. Top up on the website.' };
+  if (!op.resp.ok || oj.ok === false || oj.success === false) {
+    return { success: false, error: oj.error || `HTTP ${op.resp.status}` };
+  }
+  const resUrl = oj.path || oj.url || (Array.isArray(oj.paths) && oj.paths[0]);
+  if (!resUrl) return { success: false, error: 'no result url in worker response' };
+  const dl = await fetch(/^https?:/i.test(resUrl) ? resUrl : `${WORKER_URL}${resUrl}`);
+  if (!dl.ok) return { success: false, error: `result download HTTP ${dl.status}` };
+  const out = Buffer.from(await dl.arrayBuffer());
+  if (out.length < 500) return { success: false, error: 'result too small' };
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, out);
+  return { success: true, newPath: outPath, creditsRemaining: oj.creditsRemaining };
+}
+
 async function listLibrary() {
   const a = await _authedFetch('/api/cloud-projects');
   if (a.needsCloudLogin) return { needsCloudLogin: true };
@@ -379,4 +429,4 @@ function register(deps) {
   });
 }
 
-module.exports = { register, generateImages, getAccessToken, status, login, logout };
+module.exports = { register, generateImages, imageOp, getAccessToken, status, login, logout };
