@@ -22142,6 +22142,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
       await apply(m, gpu);
       try { window._applyCloudCostPill?.(); } catch (_) {}
       try { window._refreshTopbarCredits?.(); } catch (_) {}
+      try { window._applyToolPills?.(); } catch (_) {}
     };
     btnL.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'local'); syncRow(); });
     btnC.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'cloud'); syncRow(); });
@@ -22215,6 +22216,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     try { await window._syncComputeRow?.(); } catch (_) {}
     try { window._applyCloudCostPill?.(); } catch (_) {}
     try { window._refreshTopbarCredits?.(); } catch (_) {}
+    try { window._applyToolPills?.(); } catch (_) {}
   };
 
   bl.addEventListener('click', () => {
@@ -22471,3 +22473,51 @@ window._refreshTopbarCredits = async function (creditsKnown) {
 };
 document.getElementById('topbar-credits')?.addEventListener('click', () => _openCloudSite('/buy'));
 window._refreshTopbarCredits();
+
+// ============================================================
+// PASTILLES ⚡ SUR LES OUTILS IA (mode Cloud) — prix réels du
+// worker (PRICING_DEFAULTS). En mode Local : aucune pastille.
+// Couvre le panneau ÉDITER (ws-*-btn) et la lightbox (data-lb-tool).
+// ============================================================
+const _CLOUD_TOOL_PRICES = {
+  // panneau ÉDITER
+  'ws-modify-btn': 2,            // modify
+  'ws-autoinpaint-btn': 3,       // auto_inpaint
+  'ws-removebg-btn': 1,          // remove_background
+  'ws-resolution-btn': 2,        // upscale x2
+  'ws-facefix-btn': 2,           // face_fix_image
+  'ws-variant-btn': 2,           // modify (re-roll)
+  'ws-buildstages-btn': 6,       // text2image x3
+  'ws-mask-btn': 3,              // mask_inpaint
+};
+const _CLOUD_LB_PRICES = {
+  modify: 2, autoinpaint: 3, removebg: 1, resolution: 2,
+  facefix: 2, variant: 2, mask: 3,
+};
+
+window._applyToolPills = function () {
+  try {
+    const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+    const setPill = (btn, price) => {
+      if (!btn) return;
+      let pill = btn.querySelector('.generate-cost-pill');
+      if (!cloud) { if (pill) pill.remove(); return; }
+      if (!pill) {
+        pill = document.createElement('span');
+        pill.className = 'generate-cost-pill';
+        pill.style.cssText = 'font-size:10px;padding:1px 7px;margin-left:6px;';
+        pill.innerHTML = '<span class="generate-cost-bolt">&#9889;</span><span class="gcp-val"></span>';
+        btn.appendChild(pill);
+      }
+      const v = pill.querySelector('.gcp-val');
+      if (v) v.textContent = String(price);
+    };
+    for (const [id, price] of Object.entries(_CLOUD_TOOL_PRICES)) {
+      setPill(document.getElementById(id), price);
+    }
+    for (const [tool, price] of Object.entries(_CLOUD_LB_PRICES)) {
+      setPill(document.querySelector(`.lb-tool-btn[data-lb-tool="${tool}"]`), price);
+    }
+  } catch (_) {}
+};
+window._applyToolPills();
