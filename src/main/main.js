@@ -8780,7 +8780,7 @@ try {
 let cloudFallback = { generateImages: async () => ({ success: false, error: 'cloud fallback unavailable' }) };
 try {
   cloudFallback = require('./cloud_fallback');
-  cloudFallback.register({ ipcMain, app, log });
+  cloudFallback.register({ ipcMain, app, log, isPathAllowed, MESHES_DIR, IMAGES_DIR });
 } catch (e) {
   console.error('[cloud-fallback] register failed:', e.message);
 }

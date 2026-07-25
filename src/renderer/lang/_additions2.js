@@ -5,6 +5,11 @@
 (function () {
   if (!window.FabI18n || !window.FabI18n.register) return;
   window.FabI18n.register('fr', {
+  "Cloud library": "Bibliothèque cloud",
+  "My assets": "Mes assets",
+  "Marketplace": "Marketplace",
+  "Send to cloud": "Envoyer vers le cloud",
+  "Send this image to your MyFabmesh web library": "Envoyer cette image dans votre bibliothèque web MyFabmesh",
   "Cloud generation": "Génération cloud",
   "Image generation compute": "Calcul de la génération d'images",
   "Local: free and unlimited, requires an NVIDIA GPU. Cloud: works on any PC, uses MyFabmesh credits (2 per image), results also appear in your web library.": "Local : gratuit et illimité, nécessite un GPU NVIDIA. Cloud : fonctionne sur tout PC, utilise des crédits MyFabmesh (2 par image), les résultats apparaissent aussi dans votre bibliothèque web.",

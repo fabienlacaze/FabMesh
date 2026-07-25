@@ -22198,3 +22198,164 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
 
   refresh();
 })();
+
+// ============================================================
+// PASSERELLE CLOUD (2026-07-26) — partage vers la bibliothèque
+// web + navigateur Bibliothèque cloud / Marketplace.
+// ============================================================
+async function _cloudShare(filePath, kindLabel) {
+  const p = state.currentProject;
+  showToast(`Sending ${kindLabel} to your cloud library…`, 'info', 8000);
+  let r = await API.cloudShareAsset({ filePath, projectName: p?.name || 'desktop' });
+  if (r?.needsCloudLogin) {
+    const ok = await showCloudLoginModal();
+    if (ok) r = await API.cloudShareAsset({ filePath, projectName: p?.name || 'desktop' });
+    else return;
+  }
+  if (r?.success) showToast(`${kindLabel} sent — visible in your web library.`, 'success');
+  else showToast(`Cloud share failed: ${r?.error || 'unknown'}`, 'error');
+}
+
+document.getElementById('ws-cloud-share-img-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  await _cloudShare(target, 'Image');
+});
+
+document.getElementById('ws-cloud-share-mesh-btn')?.addEventListener('click', async () => {
+  const m = getCurrentMeshObj();
+  if (!m?.path) { showToast('Pick a mesh first.', 'error'); return; }
+  await _cloudShare(m.path, 'Mesh');
+});
+
+// ---- Navigateur Bibliothèque cloud / Marketplace ----
+async function showCloudLibraryModal() {
+  const old = document.getElementById('cloud-lib-overlay');
+  if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'cloud-lib-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100000;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML = `
+    <div style="background:#15151f;border:1px solid #3a3a4a;border-radius:12px;padding:18px;width:min(860px,92vw);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+        <h3 style="margin:0;font-size:16px;color:#eee;flex:1;" data-i18n>Cloud library</h3>
+        <div class="compute-toggle">
+          <button type="button" class="ct-btn active" id="clb-tab-mine" data-i18n>My assets</button>
+          <button type="button" class="ct-btn" id="clb-tab-market" data-i18n>Marketplace</button>
+        </div>
+        <button id="clb-close" style="background:#2a2a3a;color:#ddd;border:1px solid #3a3a4a;border-radius:8px;padding:6px 12px;cursor:pointer;">&#10005;</button>
+      </div>
+      <div id="clb-body" style="overflow:auto;flex:1;min-height:220px;color:#9aa;font-size:12px;">Loading…</div>
+    </div>`;
+  document.body.appendChild(ov);
+  try { window.FabI18n?.apply?.(ov); } catch (_) {}
+  ov.querySelector('#clb-close').onclick = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+
+  const body = ov.querySelector('#clb-body');
+  const grid = (inner) => `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;">${inner}</div>`;
+  const card = ({ img, title, sub, btnLabel, btnData }) => `
+    <div style="background:#1a1a24;border:1px solid #2a2a36;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;">
+      <div style="height:100px;display:flex;align-items:center;justify-content:center;background:#0f0f16;border-radius:6px;overflow:hidden;">
+        ${img ? `<img src="${img}" loading="lazy" style="max-width:100%;max-height:100%;object-fit:contain;">` : '<span style="font-size:34px;">&#129482;</span>'}
+      </div>
+      <div style="font-size:11px;color:#ccd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${title}">${title}</div>
+      ${sub ? `<div style="font-size:10px;color:#778;">${sub}</div>` : ''}
+      <button class="clb-dl primary-btn" style="padding:5px 8px;font-size:11px;" ${btnData}>${btnLabel}</button>
+    </div>`;
+
+  const destProject = () => (state.currentProject?.name || 'cloud_import').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  function wireDownloads() {
+    body.querySelectorAll('.clb-dl').forEach((b) => {
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        const url = b.dataset.url || null;
+        const marketId = b.dataset.market || null;
+        const buy = b.dataset.buy;
+        if (buy) { try { API.openExternal?.(buy); } catch (_) {} b.disabled = false; return; }
+        const fname = b.dataset.fname || `cloud_${Date.now()}.png`;
+        const isMesh = /\.(glb|fbx)$/i.test(fname);
+        // Le main construit le chemin absolu (MESHES_DIR / IMAGES_DIR).
+        const r = await API.cloudDownloadItem({
+          url, marketId, fname,
+          kind: isMesh ? 'mesh' : 'image',
+          project: destProject(),
+        });
+        if (r?.needsCloudLogin) {
+          const ok = await showCloudLoginModal();
+          if (ok) { b.disabled = false; b.click(); return; }
+        }
+        if (r?.success) {
+          showToast(`Downloaded: ${fname}`, 'success');
+          try { await reloadCurrentProject(); } catch (_) {}
+          try { refreshProjectsPage(); } catch (_) {}
+        } else {
+          showToast(`Download failed: ${r?.error || 'unknown'}`, 'error');
+        }
+        b.disabled = false;
+      });
+    });
+  }
+
+  async function loadMine() {
+    body.textContent = 'Loading…';
+    const r = await API.cloudListLibrary();
+    if (r?.needsCloudLogin) {
+      body.innerHTML = '<div style="padding:30px;text-align:center;">Sign in to see your cloud library.<br><br><button id="clb-login" class="primary-btn" style="padding:6px 14px;">Sign in</button></div>';
+      body.querySelector('#clb-login').onclick = async () => { if (await showCloudLoginModal()) loadMine(); };
+      return;
+    }
+    if (!r?.success) { body.textContent = `Error: ${r?.error || 'unknown'}`; return; }
+    const cards = [];
+    for (const proj of (r.projects || [])) {
+      for (const imgUrl of (proj.images || []).slice(0, 60)) {
+        let fname = `${proj.name}_${(imgUrl.split('/').pop() || 'img').split('?')[0]}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        if (!fname.toLowerCase().endsWith('.png')) fname += '.png';
+        cards.push(card({ img: imgUrl, title: proj.name, sub: 'image',
+          btnLabel: '&#11015; Import', btnData: `data-url="${imgUrl.replace(/"/g, '&quot;')}" data-fname="${fname}"` }));
+      }
+    }
+    for (const m of (r.meshes || []).slice(0, 120)) {
+      const fname = (m.filename || `mesh_${Date.now()}.glb`).replace(/[^a-zA-Z0-9_.-]/g, '_');
+      cards.push(card({ img: m.thumb || null, title: m.filename || 'mesh', sub: m.projectName || 'mesh',
+        btnLabel: '&#11015; Import', btnData: `data-url="${(m.url || '').replace(/"/g, '&quot;')}" data-fname="${fname}"` }));
+    }
+    body.innerHTML = cards.length ? grid(cards.join('')) : '<div style="padding:30px;text-align:center;">Your cloud library is empty.</div>';
+    wireDownloads();
+  }
+
+  async function loadMarket() {
+    body.textContent = 'Loading…';
+    const r = await API.cloudListMarket();
+    if (!r?.success) { body.textContent = `Error: ${r?.error || 'unknown'}`; return; }
+    const ownedIds = new Set((r.owned || []).map(o => o.id || o.listing_id || o));
+    const cards = (r.listings || []).map((l) => {
+      const free = !l.price_cents;
+      const owned = ownedIds.has(l.id);
+      let fname = `market_${(l.title || l.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      fname += (l.asset_kind === 'mesh') ? '.glb' : '.png';
+      const canGet = free || owned;
+      const ownedLbl = owned ? 'Download (owned)' : 'Download (free)';
+      const priceLbl = `&#128722; ${(l.price_cents / 100).toFixed(2)} ${l.currency || 'EUR'}`;
+      const btnLabel = canGet ? ('&#11015; ' + ownedLbl) : priceLbl;
+      const btnData = canGet
+        ? `data-market="${l.id}" data-fname="${fname}"`
+        : 'data-buy="https://myfabmesh-cloud.fabien65400.workers.dev/marketplace"';
+      return card({ img: l.asset_url || l.mesh_url || null, title: l.title || l.id,
+        sub: `${l.asset_kind || ''} · ${l.author_display || ''} · ${l.downloads || 0}&#11015;`,
+        btnLabel, btnData });
+    });
+    body.innerHTML = cards.length ? grid(cards.join('')) : '<div style="padding:30px;text-align:center;">No marketplace listings yet.</div>';
+    wireDownloads();
+  }
+
+  const tMine = ov.querySelector('#clb-tab-mine');
+  const tMarket = ov.querySelector('#clb-tab-market');
+  tMine.onclick = () => { tMine.classList.add('active'); tMarket.classList.remove('active'); loadMine(); };
+  tMarket.onclick = () => { tMarket.classList.add('active'); tMine.classList.remove('active'); loadMarket(); };
+  loadMine();
+}
+
+document.getElementById('btn-cloud-library')?.addEventListener('click', showCloudLibraryModal);

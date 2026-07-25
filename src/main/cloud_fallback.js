@@ -199,6 +199,135 @@ async function generateImages({ prompt, numImages, imagesDir, assetType, steps, 
   return { success: true, images: saved, creditsRemaining: data.creditsRemaining };
 }
 
+// -----------------------------------------------------------------------------
+// Passerelle bibliothèque/marketplace (2026-07-26)
+// Upload d'assets locaux vers la bibliothèque web du compte, listing de la
+// bibliothèque, marketplace publique + téléchargement. Tout passe par le
+// worker (mêmes sessions/quotas que le site) : upload-image (≤5 Mo, 200/j),
+// upload-mesh (GLB ≤50 Mo, 500/j), user-assets/record, cloud-projects,
+// meshes, market/list, market/download.
+// -----------------------------------------------------------------------------
+async function _authedFetch(pathname, init = {}) {
+  const tok = await getAccessToken();
+  if (!tok) return { needsCloudLogin: true };
+  const r = await fetch(`${WORKER_URL}${pathname}`, {
+    ...init,
+    headers: { ...(init.headers || {}), Cookie: `mfm-session=${tok}` },
+  });
+  if (r.status === 401) { logout(); return { needsCloudLogin: true }; }
+  return { resp: r };
+}
+
+async function shareAsset({ filePath, projectName }) {
+  if (!fs.existsSync(filePath)) return { success: false, error: 'file not found' };
+  const ext = path.extname(filePath).toLowerCase();
+  const buf = fs.readFileSync(filePath);
+  const isMesh = (ext === '.glb');
+
+  if (isMesh && buf.length > 50 * 1024 * 1024) {
+    return { success: false, error: 'Mesh > 50 MB — cloud sharing limit. Decimate it first.' };
+  }
+  if (!isMesh && buf.length > 5 * 1024 * 1024) {
+    return { success: false, error: 'Image > 5 MB — cloud sharing limit.' };
+  }
+
+  let uploadedPath = null;
+  if (isMesh) {
+    const a = await _authedFetch('/api/upload-mesh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64: buf.toString('base64'), filename: path.basename(filePath) }),
+    });
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    const j = await a.resp.json().catch(() => ({}));
+    if (!a.resp.ok || !j.success) return { success: false, error: j.error || `HTTP ${a.resp.status}` };
+    uploadedPath = j.path;                       // clé R2
+  } else {
+    const mime = ext === '.webp' ? 'image/webp' : (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' : 'image/png';
+    const a = await _authedFetch('/api/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dataUrl: `data:${mime};base64,${buf.toString('base64')}`,
+        suffix: path.basename(filePath, ext).slice(0, 40),
+      }),
+    });
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    const j = await a.resp.json().catch(() => ({}));
+    if (!a.resp.ok || !(j.ok || j.success)) return { success: false, error: j.error || `HTTP ${a.resp.status}` };
+    // upload-image renvoie une URL signée /r2/<clé>?exp&sig -> extraire la clé
+    try {
+      const u = new URL(j.path, WORKER_URL);
+      uploadedPath = decodeURIComponent(u.pathname.replace(/^\/r2\//, ''));
+    } catch (_) { uploadedPath = j.path; }
+  }
+
+  // Enregistre dans user_assets pour que l'asset apparaisse dans la
+  // bibliothèque web (idempotent côté worker).
+  const rec = await _authedFetch('/api/user-assets/record', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      projectName: projectName || 'desktop',
+      kind: isMesh ? 'mesh-desktop' : 'image-front',
+      paths: [uploadedPath],
+      meta: { source: 'desktop' },
+    }),
+  });
+  if (!rec.needsCloudLogin) { try { await rec.resp.json(); } catch (_) {} }
+  return { success: true, r2Path: uploadedPath };
+}
+
+async function listLibrary() {
+  const a = await _authedFetch('/api/cloud-projects');
+  if (a.needsCloudLogin) return { needsCloudLogin: true };
+  const projects = (await a.resp.json().catch(() => ({}))).projects || [];
+  const b = await _authedFetch('/api/meshes');
+  const meshes = b.needsCloudLogin ? [] : ((await b.resp.json().catch(() => ({}))).meshes || (await Promise.resolve([])));
+  return { success: true, projects, meshes: Array.isArray(meshes) ? meshes : [] };
+}
+
+async function listMarket() {
+  const r = await fetch(`${WORKER_URL}/api/market/list`);      // public
+  const j = await r.json().catch(() => ({}));
+  let owned = [];
+  const a = await _authedFetch('/api/market/owned');
+  if (!a.needsCloudLogin && a.resp.ok) {
+    const oj = await a.resp.json().catch(() => ({}));
+    owned = oj.owned || oj.listings || [];
+  }
+  return { success: r.ok, listings: j.listings || j.items || [], owned };
+}
+
+async function downloadItem({ url, marketId, destPath, fname, kind, project }) {
+  // Le renderer envoie (kind, fname, project) — on construit ici le chemin
+  // absolu dans les dossiers de données de l'app (jamais de chemin libre).
+  if (!destPath && fname) {
+    const safe = String(fname).replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const safeProj = String(project || 'cloud_import').replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (kind === 'mesh' && _deps.MESHES_DIR) {
+      destPath = path.join(_deps.MESHES_DIR, safe);
+    } else if (_deps.IMAGES_DIR) {
+      destPath = path.join(_deps.IMAGES_DIR, safeProj, safe);
+    }
+  }
+  if (!destPath) return { success: false, error: 'no destination' };
+  let resp;
+  if (marketId) {
+    const a = await _authedFetch(`/api/market/download/${encodeURIComponent(marketId)}`);
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    resp = a.resp;
+  } else {
+    resp = await fetch(url.startsWith('http') ? url : `${WORKER_URL}${url}`);
+  }
+  if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+  const buf = Buffer.from(await resp.arrayBuffer());
+  if (buf.length < 100) return { success: false, error: 'empty download' };
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  fs.writeFileSync(destPath, buf);
+  return { success: true, path: destPath, size: buf.length };
+}
+
 function register(deps) {
   _deps = deps;
   const { ipcMain } = deps;
@@ -208,6 +337,26 @@ function register(deps) {
   });
   ipcMain.handle('cloud-logout', async () => logout());
   ipcMain.handle('cloud-status', async () => status());
+  ipcMain.handle('cloud-share-asset', async (_e, opts = {}) => {
+    try { return await shareAsset(opts); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
+  ipcMain.handle('cloud-list-library', async () => {
+    try { return await listLibrary(); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
+  ipcMain.handle('cloud-list-market', async () => {
+    try { return await listMarket(); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
+  ipcMain.handle('cloud-download-item', async (_e, opts = {}) => {
+    try {
+      // destPath libre interdit depuis le renderer : seul le couple
+      // (kind, fname, project) est accepté — le chemin est construit ici.
+      delete opts.destPath;
+      return await downloadItem(opts);
+    } catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
 }
 
 module.exports = { register, generateImages, getAccessToken, status, login, logout };
