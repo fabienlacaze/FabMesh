@@ -22489,7 +22489,10 @@ const _CLOUD_TOOL_PRICES = {
   'ws-variant-btn': 2,           // modify (re-roll)
   'ws-buildstages-btn': 6,       // text2image x3
   'ws-mask-btn': 3,              // mask_inpaint
+  'ws-style-btn': 2,             // style = modify
 };
+// Outils SANS équivalent cloud (gaps de parité) : masqués en mode Cloud.
+const _CLOUD_HIDDEN_TOOLS = ['ws-recolor-btn', 'ws-age-btn'];
 const _CLOUD_LB_PRICES = {
   modify: 2, autoinpaint: 3, removebg: 1, resolution: 2,
   facefix: 2, variant: 2, mask: 3,
@@ -22517,6 +22520,14 @@ window._applyToolPills = function () {
     }
     for (const [tool, price] of Object.entries(_CLOUD_LB_PRICES)) {
       setPill(document.querySelector(`.lb-tool-btn[data-lb-tool="${tool}"]`), price);
+    }
+    for (const id of _CLOUD_HIDDEN_TOOLS) {
+      const b = document.getElementById(id);
+      if (b) b.style.display = cloud ? 'none' : '';
+    }
+    for (const tool of ['recolor', 'age']) {
+      const b = document.querySelector(`.lb-tool-btn[data-lb-tool="${tool}"]`);
+      if (b) b.style.display = cloud ? 'none' : '';
     }
   } catch (_) {}
 };
