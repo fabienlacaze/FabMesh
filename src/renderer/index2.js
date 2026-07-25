@@ -21998,8 +21998,10 @@ showPage('projects');
 async function _openCloudSite(pathOrUrl) {
   const base = 'https://myfabmesh-cloud.fabien65400.workers.dev';
   const url = /^https?:/i.test(pathOrUrl) ? pathOrUrl : (base + pathOrUrl);
+  // openExternal est exposé sous wizardAPI (pas meshyAPI) — bug initial.
+  const _open = window.wizardAPI?.openExternal || window.meshyAPI?.openExternal;
   let r = null;
-  try { r = await API.openExternal?.(url); } catch (_) {}
+  try { r = _open ? await _open(url) : null; } catch (_) {}
   if (!r || r.ok === false) {
     try { await navigator.clipboard.writeText(url); } catch (_) {}
     showToast('Lien copié dans le presse-papier : ' + url, 'info', 6000);
@@ -22151,7 +22153,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     buy.href = '#';
     buy.textContent = (typeof _i18nT === 'function') ? _i18nT('Buy credits') : 'Buy credits';
     buy.style.cssText = 'margin-left:8px;color:#8ab4ff;';
-    buy.onclick = (e) => { e.preventDefault(); try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/pricing'); } catch (_) {} };
+    buy.onclick = (e) => { e.preventDefault(); _openCloudSite('/pricing'); };
     note.appendChild(buy);
   }
   // Pas d'autre listener : sans GPU le mode est Cloud et ne peut pas changer.
@@ -22315,7 +22317,7 @@ async function showCloudLibraryModal() {
         const url = b.dataset.url || null;
         const marketId = b.dataset.market || null;
         const buy = b.dataset.buy;
-        if (buy) { try { API.openExternal?.(buy); } catch (_) {} b.disabled = false; return; }
+        if (buy) { _openCloudSite(buy); b.disabled = false; return; }
         const fname = b.dataset.fname || `cloud_${Date.now()}.png`;
         const isMesh = /\.(glb|fbx)$/i.test(fname);
         // Le main construit le chemin absolu (MESHES_DIR / IMAGES_DIR).
