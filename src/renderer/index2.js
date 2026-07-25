@@ -22081,12 +22081,20 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
   try { gpu = await API.gpuStatus?.() || gpu; } catch (_) {}
 
   if (gpu.hasNvidia) {
-    // Machine équipée : AUCUNE UI cloud — le desktop reste 100 % local
-    // (décision produit 2026-07-25 : pas de crédits/Stripe côté desktop ;
-    // le cloud n'existe que là où le local est physiquement impossible).
-    localStorage.setItem('fab-compute-mode', 'local');
+    // Machine équipée : local par défaut, cloud OPT-IN via les Réglages
+    // (switch « Cloud generation »). La ligne Compute du panneau image ne
+    // s'affiche que quand le mode Cloud est actif — indicateur + retour
+    // rapide au Local, sans polluer l'UI des utilisateurs 100 % locaux.
     const row = btnL.closest('.form-row');
-    if (row) row.style.display = 'none';
+    const syncRow = async () => {
+      const m = _computeMode();
+      if (row) row.style.display = (m === 'cloud') ? '' : 'none';
+      await apply(m, gpu);
+    };
+    btnL.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'local'); syncRow(); });
+    btnC.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'cloud'); syncRow(); });
+    window._syncComputeRow = syncRow;   // appelé par le switch des Réglages
+    await syncRow();
     return;
   }
 
@@ -22107,4 +22115,74 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     note.appendChild(buy);
   }
   // Pas d'autre listener : sans GPU le mode est Cloud et ne peut pas changer.
+})();
+
+// ============================================================
+// RÉGLAGES > CLOUD GENERATION — switch Local/Cloud + compte
+// Écrit la même clé localStorage 'fab-compute-mode' que le
+// toggle du panneau image (window._syncComputeRow les relie).
+// Sans GPU NVIDIA : Local grisé, Cloud forcé.
+// ============================================================
+(async () => {
+  const bl = document.getElementById('set-compute-local');
+  const bc = document.getElementById('set-compute-cloud');
+  const note = document.getElementById('set-compute-note');
+  const acct = document.getElementById('set-cloud-account');
+  const bLogin = document.getElementById('set-cloud-login');
+  const bLogout = document.getElementById('set-cloud-logout');
+  if (!bl || !bc) return;
+
+  let gpu = { hasNvidia: true, name: '' };
+  try { gpu = await API.gpuStatus?.() || gpu; } catch (_) {}
+  if (!gpu.hasNvidia) {
+    localStorage.setItem('fab-compute-mode', 'cloud');
+    bl.disabled = true;
+    bl.title = (typeof _i18nT === 'function')
+      ? _i18nT('No NVIDIA GPU detected — local generation unavailable on this device')
+      : 'No NVIDIA GPU detected — local generation unavailable on this device';
+  }
+
+  const refresh = async () => {
+    const mode = _computeMode();
+    bl.classList.toggle('active', mode === 'local');
+    bc.classList.toggle('active', mode === 'cloud');
+    if (note) {
+      note.textContent = (mode === 'cloud')
+        ? ((typeof _i18nT === 'function') ? _i18nT('2 credits per image') : '2 credits per image')
+        : (gpu.name || '');
+    }
+    try {
+      const s = await API.cloudStatus?.();
+      if (s?.loggedIn) {
+        if (acct) acct.textContent = s.email + (s.credits != null ? ` · ${s.credits} crédits` : '');
+        if (bLogin) bLogin.style.display = 'none';
+        if (bLogout) bLogout.style.display = '';
+      } else {
+        if (acct) acct.textContent = (typeof _i18nT === 'function') ? _i18nT('Not signed in') : 'Not signed in';
+        if (bLogin) bLogin.style.display = '';
+        if (bLogout) bLogout.style.display = 'none';
+      }
+    } catch (_) {}
+    try { await window._syncComputeRow?.(); } catch (_) {}
+  };
+
+  bl.addEventListener('click', () => {
+    if (bl.disabled) return;
+    localStorage.setItem('fab-compute-mode', 'local');
+    refresh();
+  });
+  bc.addEventListener('click', () => {
+    localStorage.setItem('fab-compute-mode', 'cloud');
+    refresh();
+  });
+  bLogin?.addEventListener('click', async () => {
+    const ok = await showCloudLoginModal();
+    if (ok) refresh();
+  });
+  bLogout?.addEventListener('click', async () => {
+    try { await API.cloudLogout?.(); } catch (_) {}
+    refresh();
+  });
+
+  refresh();
 })();

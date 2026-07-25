@@ -115,7 +115,19 @@ async function getAccessToken() {
 
 async function status() {
   const tok = await getAccessToken();
-  return { loggedIn: !!tok, email: _mem?.email || '' };
+  if (!tok) return { loggedIn: false, email: '' };
+  // Solde de crédits via GET /api/me (même session cookie que la génération).
+  let credits = null;
+  try {
+    const r = await fetch(`${WORKER_URL}/api/me`, {
+      headers: { Cookie: `mfm-session=${tok}` },
+    });
+    if (r.ok) {
+      const j = await r.json().catch(() => ({}));
+      credits = j.credits ?? j.user?.credits ?? j.profile?.credits ?? null;
+    }
+  } catch (_) {}
+  return { loggedIn: true, email: _mem?.email || '', credits };
 }
 
 // -----------------------------------------------------------------------------

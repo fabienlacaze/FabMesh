@@ -1998,6 +1998,24 @@
         </div>
 
         <!-- ═══ CLOUD SERVICES ═══ -->
+        <div class="settings-section-header">Cloud generation</div>
+        <div class="settings-box" id="set-compute-box">
+          <div class="settings-box-title">Image generation compute</div>
+          <div class="settings-box-desc">Local: free and unlimited, requires an NVIDIA GPU. Cloud: works on any PC, uses MyFabmesh credits (2 per image), results also appear in your web library.</div>
+          <div style="display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+            <div class="compute-toggle">
+              <button type="button" id="set-compute-local" class="ct-btn" data-mode="local">Local (free)</button>
+              <button type="button" id="set-compute-cloud" class="ct-btn" data-mode="cloud">Cloud (credits)</button>
+            </div>
+            <span id="set-compute-note" style="font-size:11px; color:var(--text-2);"></span>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+            <span id="set-cloud-account" style="font-size:11px; color:var(--text-2); flex:1;">Not signed in</span>
+            <button id="set-cloud-login" class="ghost-btn" style="padding:4px 10px; font-size:11px;">Sign in</button>
+            <button id="set-cloud-logout" class="ghost-btn danger" style="padding:4px 10px; font-size:11px; display:none;">Sign out</button>
+          </div>
+        </div>
+
         <!-- ═══ AI ASSISTANT ═══ -->
         <div class="settings-section-header">AI Assistant</div>
         <div class="settings-box">

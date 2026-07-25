@@ -5,6 +5,11 @@
 (function () {
   if (!window.FabI18n || !window.FabI18n.register) return;
   window.FabI18n.register('fr', {
+  "Cloud generation": "Génération cloud",
+  "Image generation compute": "Calcul de la génération d'images",
+  "Local: free and unlimited, requires an NVIDIA GPU. Cloud: works on any PC, uses MyFabmesh credits (2 per image), results also appear in your web library.": "Local : gratuit et illimité, nécessite un GPU NVIDIA. Cloud : fonctionne sur tout PC, utilise des crédits MyFabmesh (2 par image), les résultats apparaissent aussi dans votre bibliothèque web.",
+  "Not signed in": "Non connecté",
+  "Sign out": "Se déconnecter",
   "Buy credits": "Acheter des crédits",
   "Local (free)": "Local (gratuit)",
   "Cloud (credits)": "Cloud (crédits)",
