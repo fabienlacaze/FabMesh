@@ -6245,7 +6245,14 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
       Prompt: userPrompt,
     }, expectedMs, { projectName: p.name, assetKind: assetType });
     try {
-      const r = await API.generateImages({ prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100, assetType });
+      const _genArgs = { prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100, assetType };
+      let r = await API.generateImages(_genArgs);
+      // Machine sans GPU NVIDIA : le main a besoin d'une session cloud
+      // MyFabmesh (cert Store 10.1.2.10). On ouvre la connexion puis retry.
+      if (r?.needsCloudLogin) {
+        const ok = await showCloudLoginModal();
+        if (ok) r = await API.generateImages(_genArgs);
+      }
       if (r?.success) {
         // Save the creation style for each generated image so the Style
         // dropdown shows the correct style when selecting any of them.
@@ -21979,3 +21986,61 @@ showPage('projects');
   mo.observe(document.body, { childList: true, subtree: true });
   enhanceAll();
 })();
+
+// ============================================================
+// MODALE CONNEXION CLOUD MyFabmesh (cert Store 10.1.2.10)
+// Sur machine sans GPU NVIDIA, la génération d'images passe par
+// le cloud → il faut une session (email + mot de passe du compte
+// MyFabmesh, 50 crédits offerts à l'inscription). Retourne une
+// Promise<boolean> : true = connecté.
+// ============================================================
+async function showCloudLoginModal() {
+  return new Promise((resolve) => {
+    const old = document.getElementById('cloud-login-overlay');
+    if (old) old.remove();
+    const ov = document.createElement('div');
+    ov.id = 'cloud-login-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100000;display:flex;align-items:center;justify-content:center;';
+    ov.innerHTML = `
+      <div style="background:#15151f;border:1px solid #3a3a4a;border-radius:12px;padding:22px;width:360px;box-shadow:0 12px 40px rgba(0,0,0,.6);">
+        <h3 style="margin:0 0 6px;font-size:16px;color:#eee;" data-i18n>Sign in to MyFabmesh Cloud</h3>
+        <p style="margin:0 0 14px;font-size:12px;color:#9aa;line-height:1.5;" data-i18n>No NVIDIA GPU was detected on this device, so images are generated on the MyFabmesh cloud. Sign in with your MyFabmesh account (new accounts get free credits).</p>
+        <input id="cl-email" type="email" placeholder="Email" autocomplete="username"
+               style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:9px 10px;border-radius:8px;border:1px solid #3a3a4a;background:#0f0f16;color:#eee;font-size:13px;">
+        <input id="cl-pass" type="password" placeholder="Password" autocomplete="current-password"
+               style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px 10px;border-radius:8px;border:1px solid #3a3a4a;background:#0f0f16;color:#eee;font-size:13px;">
+        <div id="cl-err" style="min-height:16px;font-size:11px;color:#f66;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">
+          <a href="#" id="cl-signup" style="font-size:11px;color:#8ab4ff;" data-i18n>Create an account</a>
+          <div style="display:flex;gap:8px;">
+            <button id="cl-cancel" style="background:#2a2a3a;color:#ddd;border:1px solid #3a3a4a;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;" data-i18n>Cancel</button>
+            <button id="cl-ok" style="background:linear-gradient(90deg,#e0447c,#8a5cf6);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;" data-i18n>Sign in</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    try { window.FabI18n?.apply?.(ov); } catch (_) {}
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.querySelector('#cl-cancel').onclick = () => done(false);
+    ov.addEventListener('click', (e) => { if (e.target === ov) done(false); });
+    ov.querySelector('#cl-signup').onclick = (e) => {
+      e.preventDefault();
+      try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/login'); } catch (_) {}
+    };
+    const submit = async () => {
+      const email = ov.querySelector('#cl-email').value.trim();
+      const pass = ov.querySelector('#cl-pass').value;
+      const err = ov.querySelector('#cl-err');
+      if (!email || !pass) { err.textContent = 'Email et mot de passe requis.'; return; }
+      err.textContent = '';
+      ov.querySelector('#cl-ok').disabled = true;
+      const r = await API.cloudLogin({ email, password: pass });
+      ov.querySelector('#cl-ok').disabled = false;
+      if (r?.success) done(true);
+      else err.textContent = r?.error || 'Connexion impossible.';
+    };
+    ov.querySelector('#cl-ok').onclick = submit;
+    ov.querySelector('#cl-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    setTimeout(() => ov.querySelector('#cl-email')?.focus(), 50);
+  });
+}

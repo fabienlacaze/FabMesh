@@ -359,6 +359,33 @@ function checkHardFloor(prompt) {
   return { safe: true };
 }
 
+// =============================================================================
+// Détection GPU NVIDIA (certification Store 10.1.2.10) — les machines sans
+// GPU NVIDIA (Surface, iGPU Intel/AMD) ne peuvent pas exécuter les moteurs
+// locaux CUDA : la génération d'images bascule alors sur le cloud MyFabmesh.
+// Résultat mis en cache (le matériel ne change pas en cours de session).
+// =============================================================================
+let _nvidiaGpuCache = null;   // { hasNvidia: bool, name: string }
+function detectNvidiaGpu() {
+  // FABMESH_FORCE_NO_GPU=1 : simule une machine sans GPU NVIDIA (test du
+  // fallback cloud sur la machine de dev, voir docs/STORE_RESUBMISSION.md).
+  if (process.env.FABMESH_FORCE_NO_GPU === '1') {
+    _nvidiaGpuCache = { hasNvidia: false, name: '' };
+  }
+  if (_nvidiaGpuCache) return Promise.resolve(_nvidiaGpuCache);
+  return new Promise((resolve) => {
+    execFile('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'],
+      { timeout: 8000 }, (err, stdout) => {
+        const name = (!err && stdout) ? String(stdout).trim().split(/\r?\n/)[0] : '';
+        _nvidiaGpuCache = { hasNvidia: !!name, name };
+        log.info('gpu-detect', _nvidiaGpuCache.hasNvidia
+          ? `NVIDIA GPU: ${name}` : 'no NVIDIA GPU (nvidia-smi absent/vide) — moteurs locaux indisponibles, fallback cloud');
+        resolve(_nvidiaGpuCache);
+      });
+  });
+}
+ipcMain.handle('gpu-status', async () => detectNvidiaGpu());
+
 function checkPromptSafety(prompt) {
   const floor = checkHardFloor(prompt);
   if (!floor.safe) return floor;            // illegal floor — never bypassable
@@ -5984,6 +6011,31 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
       ..._tempLimit  ? { FABMESH_TEMP_LIMIT:  _tempLimit  } : {},
     };
 
+    // =========================================================================
+    // CERT STORE 10.1.2.10 : sans GPU NVIDIA (Surface/iGPU — machines des
+    // testeurs Microsoft ET de la majorité des clients Store), les moteurs
+    // locaux CUDA ne peuvent pas tourner → bascule automatique sur le cloud
+    // MyFabmesh. Même contrat de sortie (PNG dans le dossier projet), l'UI
+    // ne change pas. Si pas de session cloud → needsCloudLogin:true et le
+    // renderer ouvre la modale de connexion.
+    // =========================================================================
+    if (['local-flux', 'local-lightning', 'hidream', 'local-sd'].includes(engine)) {
+      const gpu = await detectNvidiaGpu();
+      if (!gpu.hasNvidia) {
+        safeSend('ai3d-progress', '[cloud-fallback] No NVIDIA GPU — generating via MyFabmesh cloud…\n');
+        const r = await cloudFallback.generateImages({
+          prompt,
+          numImages: numImages || 4,
+          imagesDir,
+          assetType: _assetType,
+          steps,
+          turbo: engine === 'local-lightning',
+        });
+        if (r.success) safeSend('ai3d-progress', `[cloud-fallback] ${r.images.length} image(s) générées (cloud). Crédits restants: ${r.creditsRemaining ?? '?'}\n`);
+        return r;
+      }
+    }
+
     // LOCAL GPU: Juggernaut XL v9 (recommended, photorealistic SDXL fine-tune)
     if (engine === 'local-flux' || engine === 'local-lightning') {
       const turbo = engine === 'local-lightning';
@@ -8715,6 +8767,16 @@ try {
   });
 } catch (e) {
   console.error('[animation] register failed:', e.message);
+}
+
+// Fallback cloud génération d'images (machines sans GPU NVIDIA — cert Store
+// 10.1.2.10). Sessions Supabase + POST /api/generate-image du worker.
+let cloudFallback = { generateImages: async () => ({ success: false, error: 'cloud fallback unavailable' }) };
+try {
+  cloudFallback = require('./cloud_fallback');
+  cloudFallback.register({ ipcMain, app, log });
+} catch (e) {
+  console.error('[cloud-fallback] register failed:', e.message);
 }
 
 // Delete an entire project: image folders matching the name, all meshes
