@@ -22008,8 +22008,12 @@ async function showCloudLoginModal() {
         <p style="margin:0 0 14px;font-size:12px;color:#9aa;line-height:1.5;" data-i18n>No NVIDIA GPU was detected on this device, so images are generated on the MyFabmesh cloud. Sign in with your MyFabmesh account (new accounts get free credits).</p>
         <input id="cl-email" type="email" placeholder="Email" autocomplete="username"
                style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:9px 10px;border-radius:8px;border:1px solid #3a3a4a;background:#0f0f16;color:#eee;font-size:13px;">
-        <input id="cl-pass" type="password" placeholder="Password" autocomplete="current-password"
-               style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px 10px;border-radius:8px;border:1px solid #3a3a4a;background:#0f0f16;color:#eee;font-size:13px;">
+        <div style="position:relative;margin-bottom:6px;">
+          <input id="cl-pass" type="password" placeholder="Password" autocomplete="current-password"
+                 style="width:100%;box-sizing:border-box;padding:9px 34px 9px 10px;border-radius:8px;border:1px solid #3a3a4a;background:#0f0f16;color:#eee;font-size:13px;">
+          <button type="button" id="cl-eye" title="Show password" tabindex="-1"
+                  style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#889;cursor:pointer;font-size:14px;padding:4px;line-height:1;">&#128065;</button>
+        </div>
         <div id="cl-err" style="min-height:16px;font-size:11px;color:#f66;margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">
           <a href="#" id="cl-signup" style="font-size:11px;color:#8ab4ff;" data-i18n>Create an account</a>
@@ -22024,6 +22028,14 @@ async function showCloudLoginModal() {
     const done = (v) => { ov.remove(); resolve(v); };
     ov.querySelector('#cl-cancel').onclick = () => done(false);
     ov.addEventListener('click', (e) => { if (e.target === ov) done(false); });
+    const eye = ov.querySelector('#cl-eye');
+    eye.onclick = () => {
+      const inp = ov.querySelector('#cl-pass');
+      const show = inp.type === 'password';
+      inp.type = show ? 'text' : 'password';
+      eye.style.color = show ? '#8ab4ff' : '#889';
+      inp.focus();
+    };
     ov.querySelector('#cl-signup').onclick = (e) => {
       e.preventDefault();
       try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/login'); } catch (_) {}
