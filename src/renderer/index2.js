@@ -22283,7 +22283,7 @@ async function showCloudLibraryModal() {
   try { window.FabI18n?.apply?.(ov); } catch (_) {}
   ov.querySelector('#clb-close').onclick = () => ov.remove();
   ov.querySelector('#clb-site').onclick = () => {
-    _openCloudSite('/');
+    _openCloudSite(_clbTab === 'market' ? '/marketplace' : '/');
   };
   ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
 
@@ -22398,8 +22398,17 @@ async function showCloudLibraryModal() {
 
   const tMine = ov.querySelector('#clb-tab-mine');
   const tMarket = ov.querySelector('#clb-tab-market');
-  tMine.onclick = () => { tMine.classList.add('active'); tMarket.classList.remove('active'); loadMine(); };
-  tMarket.onclick = () => { tMarket.classList.add('active'); tMine.classList.remove('active'); loadMarket(); };
+  let _clbTab = 'mine';
+  const _siteLbl = ov.querySelector('#clb-site span');
+  const _updSite = () => {
+    if (_siteLbl) {
+      const key = (_clbTab === 'market') ? 'Open the marketplace' : 'Open the website';
+      _siteLbl.textContent = (typeof _i18nT === 'function') ? _i18nT(key) : key;
+    }
+  };
+  tMine.onclick = () => { _clbTab = 'mine'; tMine.classList.add('active'); tMarket.classList.remove('active'); _updSite(); loadMine(); };
+  tMarket.onclick = () => { _clbTab = 'market'; tMarket.classList.add('active'); tMine.classList.remove('active'); _updSite(); loadMarket(); };
+  _updSite();
   loadMine();
 }
 
