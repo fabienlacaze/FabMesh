@@ -5,6 +5,7 @@
 (function () {
   if (!window.FabI18n || !window.FabI18n.register) return;
   window.FabI18n.register('fr', {
+  "Buy credits": "Acheter des crédits",
   "Local (free)": "Local (gratuit)",
   "Cloud (credits)": "Cloud (crédits)",
   "Compute": "Calcul",

@@ -22080,16 +22080,31 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
   let gpu = { hasNvidia: true, name: '' };
   try { gpu = await API.gpuStatus?.() || gpu; } catch (_) {}
 
-  if (!gpu.hasNvidia) {
-    btnL.disabled = true;
-    btnL.title = (typeof _i18nT === 'function')
-      ? _i18nT('No NVIDIA GPU detected — local generation unavailable on this device')
-      : 'No NVIDIA GPU detected — local generation unavailable on this device';
-    await apply('cloud', gpu);
-  } else {
-    await apply(_computeMode(), gpu);
+  if (gpu.hasNvidia) {
+    // Machine équipée : AUCUNE UI cloud — le desktop reste 100 % local
+    // (décision produit 2026-07-25 : pas de crédits/Stripe côté desktop ;
+    // le cloud n'existe que là où le local est physiquement impossible).
+    localStorage.setItem('fab-compute-mode', 'local');
+    const row = btnL.closest('.form-row');
+    if (row) row.style.display = 'none';
+    return;
   }
 
-  btnL.addEventListener('click', () => { if (!btnL.disabled) apply('local', gpu); });
-  btnC.addEventListener('click', () => apply('cloud', gpu));
+  // Machine SANS GPU NVIDIA (testeurs Store, laptops) : Cloud forcé,
+  // Local grisé, solde + lien de recharge vers le SITE (pas d'achat in-app
+  // → couvert par la déclaration 10.8.2 de Partner Center).
+  btnL.disabled = true;
+  btnL.title = (typeof _i18nT === 'function')
+    ? _i18nT('No NVIDIA GPU detected — local generation unavailable on this device')
+    : 'No NVIDIA GPU detected — local generation unavailable on this device';
+  await apply('cloud', gpu);
+  if (note) {
+    const buy = document.createElement('a');
+    buy.href = '#';
+    buy.textContent = (typeof _i18nT === 'function') ? _i18nT('Buy credits') : 'Buy credits';
+    buy.style.cssText = 'margin-left:8px;color:#8ab4ff;';
+    buy.onclick = (e) => { e.preventDefault(); try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/pricing'); } catch (_) {} };
+    note.appendChild(buy);
+  }
+  // Pas d'autre listener : sans GPU le mode est Cloud et ne peut pas changer.
 })();

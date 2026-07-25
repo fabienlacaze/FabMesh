@@ -23,6 +23,17 @@ NVIDIA)**. Les moteurs d'images de l'app étaient 100 % locaux CUDA → la
 fonctionnalité principale était physiquement intestable chez eux (et chez
 la majorité des clients du Store).
 
+Modèle final (décision produit du 25/07) :
+- **GPU NVIDIA présent** → app 100 % locale, AUCUNE UI cloud (le toggle
+  Compute est masqué). L'expérience desktop ne change pas.
+- **Pas de GPU NVIDIA** (cas des testeurs MS) → mode Cloud affiché et forcé,
+  génération via le worker MyFabmesh (compte + crédits), lien « Acheter des
+  crédits » vers le SITE WEB (aucun achat in-app → cohérent avec la
+  déclaration 10.8.2).
+- PAS de désactivation post-certification : le comportement est identique
+  avant/après (exigence policy 10.1) — le cloud reste disponible pour tout
+  client sans GPU.
+
 Correctif implémenté (voir `src/main/main.js`) :
 - **Détection GPU au démarrage** (`detectNvidiaGpu()`, cache session,
   IPC `gpu-status`).
