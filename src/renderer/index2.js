@@ -22124,6 +22124,11 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
   let gpu = { hasNvidia: true, name: '' };
   try { gpu = await API.gpuStatus?.() || gpu; } catch (_) {}
 
+  // Règle produit (2026-07-26) : à CHAQUE lancement, le mode est déterminé
+  // par le matériel — GPU NVIDIA → Local, sinon → Cloud. Le choix reste
+  // modifiable pendant la session mais n'est pas persistant entre lancements.
+  localStorage.setItem('fab-compute-mode', gpu.hasNvidia ? 'local' : 'cloud');
+
   if (gpu.hasNvidia) {
     // Machine équipée : local par défaut, cloud OPT-IN via les Réglages
     // (switch « Cloud generation »). La ligne Compute du panneau image ne
