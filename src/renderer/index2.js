@@ -6256,6 +6256,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         const ok = await showCloudLoginModal();
         if (ok) r = await API.generateImages(_genArgs);
       }
+      if (r?.creditsRemaining != null) { try { window._refreshTopbarCredits?.(r.creditsRemaining); } catch (_) {} }
       if (r?.success) {
         // Save the creation style for each generated image so the Style
         // dropdown shows the correct style when selecting any of them.
@@ -22140,6 +22141,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
       if (row) row.style.display = (m === 'cloud') ? '' : 'none';
       await apply(m, gpu);
       try { window._applyCloudCostPill?.(); } catch (_) {}
+      try { window._refreshTopbarCredits?.(); } catch (_) {}
     };
     btnL.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'local'); syncRow(); });
     btnC.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'cloud'); syncRow(); });
@@ -22161,7 +22163,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     buy.href = '#';
     buy.textContent = (typeof _i18nT === 'function') ? _i18nT('Buy credits') : 'Buy credits';
     buy.style.cssText = 'margin-left:8px;color:#8ab4ff;';
-    buy.onclick = (e) => { e.preventDefault(); _openCloudSite('/pricing'); };
+    buy.onclick = (e) => { e.preventDefault(); _openCloudSite('/buy'); };
     note.appendChild(buy);
   }
   // Pas d'autre listener : sans GPU le mode est Cloud et ne peut pas changer.
@@ -22212,6 +22214,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     } catch (_) {}
     try { await window._syncComputeRow?.(); } catch (_) {}
     try { window._applyCloudCostPill?.(); } catch (_) {}
+    try { window._refreshTopbarCredits?.(); } catch (_) {}
   };
 
   bl.addEventListener('click', () => {
@@ -22446,3 +22449,25 @@ window._applyCloudCostPill = function (btn) {
 };
 document.getElementById('ws-count')?.addEventListener('change', () => window._applyCloudCostPill());
 window._applyCloudCostPill();
+
+
+// ============================================================
+// SOLDE DE CRÉDITS DANS LA TOPBAR (mode Cloud uniquement)
+// ============================================================
+window._refreshTopbarCredits = async function (creditsKnown) {
+  try {
+    const el = document.getElementById('topbar-credits');
+    const val = document.getElementById('topbar-credits-val');
+    if (!el || !val) return;
+    const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+    if (!cloud) { el.style.display = 'none'; return; }
+    el.style.display = 'inline-flex';
+    if (creditsKnown != null) { val.textContent = String(creditsKnown); return; }
+    const s = await API.cloudStatus?.();
+    if (s?.loggedIn && s.credits != null) val.textContent = String(s.credits);
+    else if (s?.loggedIn) val.textContent = '…';
+    else val.textContent = '—';
+  } catch (_) {}
+};
+document.getElementById('topbar-credits')?.addEventListener('click', () => _openCloudSite('/buy'));
+window._refreshTopbarCredits();
