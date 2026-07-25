@@ -5,6 +5,9 @@
 (function () {
   if (!window.FabI18n || !window.FabI18n.register) return;
   window.FabI18n.register('fr', {
+  "Forgot password?": "Mot de passe oublié ?",
+  "Open the website": "Ouvrir le site",
+  "Open your MyFabmesh account in the browser": "Ouvrir votre compte MyFabmesh dans le navigateur",
   "Cloud library": "Bibliothèque cloud",
   "My assets": "Mes assets",
   "Marketplace": "Marketplace",

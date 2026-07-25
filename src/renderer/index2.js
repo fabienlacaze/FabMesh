@@ -22016,7 +22016,10 @@ async function showCloudLoginModal() {
         </div>
         <div id="cl-err" style="min-height:16px;font-size:11px;color:#f66;margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">
-          <a href="#" id="cl-signup" style="font-size:11px;color:#8ab4ff;" data-i18n>Create an account</a>
+          <span style="display:flex;flex-direction:column;gap:3px;">
+            <a href="#" id="cl-signup" style="font-size:11px;color:#8ab4ff;" data-i18n>Create an account</a>
+            <a href="#" id="cl-forgot" style="font-size:11px;color:#8ab4ff;" data-i18n>Forgot password?</a>
+          </span>
           <div style="display:flex;gap:8px;">
             <button id="cl-cancel" style="background:#2a2a3a;color:#ddd;border:1px solid #3a3a4a;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;" data-i18n>Cancel</button>
             <button id="cl-ok" style="background:linear-gradient(90deg,#e0447c,#8a5cf6);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;" data-i18n>Sign in</button>
@@ -22039,6 +22042,20 @@ async function showCloudLoginModal() {
     ov.querySelector('#cl-signup').onclick = (e) => {
       e.preventDefault();
       try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/login'); } catch (_) {}
+    };
+    ov.querySelector('#cl-forgot').onclick = async (e) => {
+      e.preventDefault();
+      const email = ov.querySelector('#cl-email').value.trim();
+      const err = ov.querySelector('#cl-err');
+      if (!email) { err.textContent = 'Entrez votre e-mail d\'abord.'; return; }
+      err.style.color = '#f66';
+      const r = await API.cloudRecover?.({ email });
+      if (r?.success) {
+        err.style.color = '#7ee787';
+        err.textContent = 'E-mail de réinitialisation envoyé — suivez le lien, puis reconnectez-vous ici.';
+      } else {
+        err.textContent = r?.error || 'Envoi impossible.';
+      }
     };
     const submit = async () => {
       const email = ov.querySelector('#cl-email').value.trim();
@@ -22244,6 +22261,7 @@ async function showCloudLibraryModal() {
           <button type="button" class="ct-btn active" id="clb-tab-mine" data-i18n>My assets</button>
           <button type="button" class="ct-btn" id="clb-tab-market" data-i18n>Marketplace</button>
         </div>
+        <button id="clb-site" style="background:#2a2a3a;color:#8ab4ff;border:1px solid #3a3a4a;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;" title="Open your MyFabmesh account in the browser">&#127760; <span data-i18n>Open the website</span></button>
         <button id="clb-close" style="background:#2a2a3a;color:#ddd;border:1px solid #3a3a4a;border-radius:8px;padding:6px 12px;cursor:pointer;">&#10005;</button>
       </div>
       <div id="clb-body" style="overflow:auto;flex:1;min-height:220px;color:#9aa;font-size:12px;">Loading…</div>
@@ -22251,6 +22269,9 @@ async function showCloudLibraryModal() {
   document.body.appendChild(ov);
   try { window.FabI18n?.apply?.(ov); } catch (_) {}
   ov.querySelector('#clb-close').onclick = () => ov.remove();
+  ov.querySelector('#clb-site').onclick = () => {
+    try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/app'); } catch (_) {}
+  };
   ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
 
   const body = ov.querySelector('#clb-body');

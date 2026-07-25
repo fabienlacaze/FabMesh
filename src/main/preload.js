@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   gpuStatus: () => ipcRenderer.invoke('gpu-status'),
   cloudLogin: (opts) => ipcRenderer.invoke('cloud-login', opts),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
+  cloudRecover: (opts) => ipcRenderer.invoke('cloud-recover', opts),
   cloudStatus: () => ipcRenderer.invoke('cloud-status'),
   cloudShareAsset: (opts) => ipcRenderer.invoke('cloud-share-asset', opts),
   cloudListLibrary: () => ipcRenderer.invoke('cloud-list-library'),

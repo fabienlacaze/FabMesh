@@ -91,6 +91,22 @@ async function login(email, password) {
   return { success: true, email: _mem.email };
 }
 
+async function recoverPassword(email) {
+  // Même flux que le « Mot de passe oublié » du site (LoginForm.tsx:187) :
+  // Supabase envoie l'email de réinitialisation, le lien atterrit sur
+  // <site>/auth/reset-password.
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON },
+    body: JSON.stringify({ email, redirect_to: `${WORKER_URL}/auth/reset-password` }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error_description || j.msg || `HTTP ${r.status}`);
+  }
+  return { success: true };
+}
+
 function logout() {
   _mem = null;
   _saveSession();
@@ -333,6 +349,10 @@ function register(deps) {
   const { ipcMain } = deps;
   ipcMain.handle('cloud-login', async (_e, { email, password } = {}) => {
     try { return await login(String(email || ''), String(password || '')); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
+  ipcMain.handle('cloud-recover', async (_e, { email } = {}) => {
+    try { return await recoverPassword(String(email || '')); }
     catch (e) { return { success: false, error: String(e.message || e) }; }
   });
   ipcMain.handle('cloud-logout', async () => logout());
