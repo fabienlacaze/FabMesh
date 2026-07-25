@@ -15872,6 +15872,22 @@ function renderAnimVersions(p) {
   if (!anims.length) {
     strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick an engine and click Generate Animation.</div>';
     _selectedAnim = null;  // sinon la sélection pointe sur un clip supprimé
+    // Vide aussi l'aperçu ÉDITER LA SÉLECTION : sans ça le viewer garde le
+    // dernier clip (canvas + nom de fichier) après suppression du dernier.
+    if (_animViewer) {
+      try { _animViewer.cleanup(); } catch (_) {}
+      _animViewer = null;
+    }
+    const cv = document.getElementById('ws-anim-result-canvas');
+    if (cv && cv.parentNode) {
+      // canvas neuf = détache l'ancien contexte WebGL (même pattern que
+      // _selectAnim) et efface le dernier rendu à l'écran.
+      cv.parentNode.replaceChild(cv.cloneNode(false), cv);
+    }
+    const ph = document.getElementById('ws-anim-preview-placeholder');
+    if (ph) ph.style.display = '';
+    const fn = document.getElementById('ws-anim-filename');
+    if (fn) fn.textContent = '';
     return;
   }
   const iconFor = (t) => t === 'idle' ? '😴' : t === 'walk' ? '🚶'
