@@ -21995,6 +21995,17 @@ showPage('projects');
 // MyFabmesh, 50 crédits offerts à l'inscription). Retourne une
 // Promise<boolean> : true = connecté.
 // ============================================================
+async function _openCloudSite(pathOrUrl) {
+  const base = 'https://myfabmesh-cloud.fabien65400.workers.dev';
+  const url = /^https?:/i.test(pathOrUrl) ? pathOrUrl : (base + pathOrUrl);
+  let r = null;
+  try { r = await API.openExternal?.(url); } catch (_) {}
+  if (!r || r.ok === false) {
+    try { await navigator.clipboard.writeText(url); } catch (_) {}
+    showToast('Lien copié dans le presse-papier : ' + url, 'info', 6000);
+  }
+}
+
 async function showCloudLoginModal() {
   return new Promise((resolve) => {
     const old = document.getElementById('cloud-login-overlay');
@@ -22041,7 +22052,7 @@ async function showCloudLoginModal() {
     };
     ov.querySelector('#cl-signup').onclick = (e) => {
       e.preventDefault();
-      try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/login'); } catch (_) {}
+      _openCloudSite('/login');
     };
     ov.querySelector('#cl-forgot').onclick = async (e) => {
       e.preventDefault();
@@ -22270,7 +22281,7 @@ async function showCloudLibraryModal() {
   try { window.FabI18n?.apply?.(ov); } catch (_) {}
   ov.querySelector('#clb-close').onclick = () => ov.remove();
   ov.querySelector('#clb-site').onclick = () => {
-    try { API.openExternal?.('https://myfabmesh-cloud.fabien65400.workers.dev/app'); } catch (_) {}
+    _openCloudSite('/');
   };
   ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
 
@@ -22321,6 +22332,8 @@ async function showCloudLibraryModal() {
           showToast(`Downloaded: ${fname}`, 'success');
           try { await reloadCurrentProject(); } catch (_) {}
           try { refreshProjectsPage(); } catch (_) {}
+        } else if (/404/.test(r?.error || '')) {
+          showToast('Cet asset n\'est plus disponible (fichier expiré côté cloud).', 'error', 6000);
         } else {
           showToast(`Download failed: ${r?.error || 'unknown'}`, 'error');
         }

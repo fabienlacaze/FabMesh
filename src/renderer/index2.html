@@ -2004,7 +2004,10 @@
         <div class="settings-section-header">Cloud generation</div>
         <div class="settings-box" id="set-compute-box">
           <div class="settings-box-title">Image generation compute</div>
-          <div class="settings-box-desc">Local: free and unlimited, requires an NVIDIA GPU. Cloud: works on any PC, uses MyFabmesh credits (2 per image), results also appear in your web library.</div>
+          <div class="settings-box-desc" style="display:flex; flex-direction:column; gap:4px; line-height:1.5;">
+            <div>&#128421;&#65039; <b style="color:var(--text-0);">Local</b> &nbsp;·&nbsp; <span data-i18n>Free and unlimited</span> &nbsp;·&nbsp; <span data-i18n>Requires an NVIDIA GPU</span></div>
+            <div>&#9729;&#65039; <b style="color:var(--text-0);">Cloud</b> &nbsp;·&nbsp; <span data-i18n>Works on any PC</span> &nbsp;·&nbsp; <span data-i18n>2 credits per image</span> &nbsp;·&nbsp; <span data-i18n>Results also appear in your web library</span></div>
+          </div>
           <div style="display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap;">
             <div class="compute-toggle">
               <button type="button" id="set-compute-local" class="ct-btn" data-mode="local">Local (free)</button>
