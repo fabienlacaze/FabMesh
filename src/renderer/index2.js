@@ -22284,7 +22284,7 @@ async function showCloudLibraryModal() {
   try { window.FabI18n?.apply?.(ov); } catch (_) {}
   ov.querySelector('#clb-close').onclick = () => ov.remove();
   ov.querySelector('#clb-site').onclick = () => {
-    _openCloudSite(_clbTab === 'market' ? '/marketplace' : '/');
+    _openCloudSite(_clbTab === 'market' ? '/market' : '/');
   };
   ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
 
@@ -22293,7 +22293,7 @@ async function showCloudLibraryModal() {
   const card = ({ img, title, sub, btnLabel, btnData }) => `
     <div style="background:#1a1a24;border:1px solid #2a2a36;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;">
       <div style="height:100px;display:flex;align-items:center;justify-content:center;background:#0f0f16;border-radius:6px;overflow:hidden;">
-        ${img ? `<img src="${img}" loading="lazy" style="max-width:100%;max-height:100%;object-fit:contain;">` : '<span style="font-size:34px;">&#129482;</span>'}
+        ${img ? `<img src="${img}" loading="lazy" style="max-width:100%;max-height:100%;object-fit:contain;" onerror="this.outerHTML='<span style=&quot;font-size:34px;opacity:.5;&quot;>&#128444;&#65039;</span>'">` : '<span style="font-size:34px;opacity:.5;">&#129482;</span>'}
       </div>
       <div style="font-size:11px;color:#ccd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${title}">${title}</div>
       ${sub ? `<div style="font-size:10px;color:#778;">${sub}</div>` : ''}
@@ -22388,7 +22388,7 @@ async function showCloudLibraryModal() {
       const btnLabel = canGet ? ('&#11015; ' + ownedLbl) : priceLbl;
       const btnData = canGet
         ? `data-market="${l.id}" data-fname="${fname}"`
-        : 'data-buy="https://myfabmesh-cloud.fabien65400.workers.dev/marketplace"';
+        : 'data-buy="https://myfabmesh-cloud.fabien65400.workers.dev/market"';
       return card({ img: abs(l.asset_url || l.mesh_url), title: l.title || l.id,
         sub: `${l.asset_kind || ''} · ${l.author_display || ''} · ${l.downloads || 0}&#11015;`,
         btnLabel, btnData });
