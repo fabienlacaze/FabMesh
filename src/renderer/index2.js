@@ -22188,11 +22188,8 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     const mode = _computeMode();
     bl.classList.toggle('active', mode === 'local');
     bc.classList.toggle('active', mode === 'cloud');
-    if (note) {
-      note.textContent = (mode === 'cloud')
-        ? ((typeof _i18nT === 'function') ? _i18nT('2 credits per image') : '2 credits per image')
-        : (gpu.name || '');
-    }
+    // Pas de rappel du prix ici : déjà indiqué dans la description au-dessus.
+    if (note) note.textContent = (mode === 'cloud') ? '' : (gpu.name || '');
     try {
       const s = await API.cloudStatus?.();
       if (s?.loggedIn) {
