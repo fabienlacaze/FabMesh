@@ -145,6 +145,14 @@
               </summary>
               <div class="stage-body">
                 <div class="form-row">
+                  <label>Compute</label>
+                  <div id="ws-compute-toggle" class="compute-toggle">
+                    <button type="button" id="ws-compute-local" class="ct-btn active" data-mode="local" title="Generate on this PC (NVIDIA GPU required) — free and unlimited">Local (free)</button>
+                    <button type="button" id="ws-compute-cloud" class="ct-btn" data-mode="cloud" title="Generate on MyFabmesh cloud — works on any PC, uses credits">Cloud (credits)</button>
+                  </div>
+                  <div id="ws-compute-note" style="font-size:10px;color:var(--text-2);margin-top:3px;min-height:12px;"></div>
+                </div>
+                <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
                     <option value="local-flux" selected>Balanced (quality/speed)</option>

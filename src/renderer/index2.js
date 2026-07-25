@@ -6245,7 +6245,8 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
       Prompt: userPrompt,
     }, expectedMs, { projectName: p.name, assetKind: assetType });
     try {
-      const _genArgs = { prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100, assetType };
+      const _computeM = (typeof window._computeMode === 'function') ? window._computeMode() : 'local';
+      const _genArgs = { prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView: multiView && _computeM !== 'cloud', buildStages: buildStages && _computeM !== 'cloud', jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100, assetType, computeMode: _computeM };
       let r = await API.generateImages(_genArgs);
       // Machine sans GPU NVIDIA : le main a besoin d'une session cloud
       // MyFabmesh (cert Store 10.1.2.10). On ouvre la connexion puis retry.
@@ -6265,7 +6266,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         // 2-view mode: generate a PHOTOREALISTIC back photo via RealVis XL
         // + IPAdapter (replaces Zero123++ which was hallucinated). Conditioned
         // on the front photo, prompted with the user's original asset prompt.
-        if (multiView && r.images?.length > 0) {
+        if (multiView && _computeM !== 'cloud' && r.images?.length > 0) {
           // Phase 2 — front image is done, now generating back views.
           // Without this bump, the progress bar would stay frozen at ~40%
           // while back-view runs silently for ~30s (no progress markers),
@@ -22044,3 +22045,51 @@ async function showCloudLoginModal() {
     setTimeout(() => ov.querySelector('#cl-email')?.focus(), 50);
   });
 }
+
+// ============================================================
+// SÉLECTEUR DE CALCUL LOCAL / CLOUD (passerelle desktop-cloud)
+// Local = GPU NVIDIA de la machine (gratuit, illimité).
+// Cloud = worker MyFabmesh (crédits du compte, marche partout).
+// Sans GPU NVIDIA : Local désactivé, Cloud forcé (cert 10.1.2.10).
+// ============================================================
+window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
+(async () => {
+  const btnL = document.getElementById('ws-compute-local');
+  const btnC = document.getElementById('ws-compute-cloud');
+  const note = document.getElementById('ws-compute-note');
+  if (!btnL || !btnC) return;
+
+  const setNote = async (mode, gpu) => {
+    if (!note) return;
+    if (mode === 'cloud') {
+      let who = '';
+      try { const s = await API.cloudStatus?.(); if (s?.loggedIn) who = ` — ${s.email}`; } catch (_) {}
+      note.textContent = (typeof _i18nT === 'function' ? _i18nT('2 credits per image') : '2 credits per image') + who;
+    } else {
+      note.textContent = gpu?.name ? `GPU: ${gpu.name}` : '';
+    }
+  };
+
+  const apply = async (mode, gpu) => {
+    localStorage.setItem('fab-compute-mode', mode);
+    btnL.classList.toggle('active', mode === 'local');
+    btnC.classList.toggle('active', mode === 'cloud');
+    await setNote(mode, gpu);
+  };
+
+  let gpu = { hasNvidia: true, name: '' };
+  try { gpu = await API.gpuStatus?.() || gpu; } catch (_) {}
+
+  if (!gpu.hasNvidia) {
+    btnL.disabled = true;
+    btnL.title = (typeof _i18nT === 'function')
+      ? _i18nT('No NVIDIA GPU detected — local generation unavailable on this device')
+      : 'No NVIDIA GPU detected — local generation unavailable on this device';
+    await apply('cloud', gpu);
+  } else {
+    await apply(_computeMode(), gpu);
+  }
+
+  btnL.addEventListener('click', () => { if (!btnL.disabled) apply('local', gpu); });
+  btnC.addEventListener('click', () => apply('cloud', gpu));
+})();

@@ -123,7 +123,7 @@ async function status() {
 // Retourne { success, images:[chemins locaux], creditsRemaining } ou
 // { success:false, needsCloudLogin:true } si aucune session valide.
 // -----------------------------------------------------------------------------
-async function generateImages({ prompt, numImages, imagesDir, assetType, steps, turbo }) {
+async function generateImages({ prompt, numImages, imagesDir, assetType, steps, turbo, projectName }) {
   const tok = await getAccessToken();
   if (!tok) {
     return { success: false, needsCloudLogin: true,
@@ -145,6 +145,10 @@ async function generateImages({ prompt, numImages, imagesDir, assetType, steps, 
         asset_type: assetType || 'character',
         steps: Number(steps) || 30,
         turbo: !!turbo,
+        // Passerelle desktop->web : le worker insère l'asset dans
+        // user_assets => la génération apparaît aussi dans la
+        // bibliothèque du compte sur le site.
+        ...(projectName ? { projectName } : {}),
       }),
       signal: ctrl.signal,
     });

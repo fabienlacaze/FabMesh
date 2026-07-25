@@ -5,6 +5,17 @@
 (function () {
   if (!window.FabI18n || !window.FabI18n.register) return;
   window.FabI18n.register('fr', {
+  "Local (free)": "Local (gratuit)",
+  "Cloud (credits)": "Cloud (crédits)",
+  "Compute": "Calcul",
+  "2 credits per image": "2 crédits par image",
+  "No NVIDIA GPU detected — local generation unavailable on this device": "Aucun GPU NVIDIA détecté — génération locale indisponible sur cette machine",
+  "Generate on this PC (NVIDIA GPU required) — free and unlimited": "Générer sur ce PC (GPU NVIDIA requis) — gratuit et illimité",
+  "Generate on MyFabmesh cloud — works on any PC, uses credits": "Générer sur le cloud MyFabmesh — marche sur tout PC, utilise des crédits",
+  "Sign in to MyFabmesh Cloud": "Connexion au cloud MyFabmesh",
+  "No NVIDIA GPU was detected on this device, so images are generated on the MyFabmesh cloud. Sign in with your MyFabmesh account (new accounts get free credits).": "Aucun GPU NVIDIA détecté sur cette machine : les images sont générées sur le cloud MyFabmesh. Connectez-vous avec votre compte MyFabmesh (crédits offerts à l'inscription).",
+  "Create an account": "Créer un compte",
+  "Sign in": "Se connecter",
   "View source image": "Voir l'image source",
   "View source mesh": "Voir le maillage source",
   "View source rig": "Voir le rig source",

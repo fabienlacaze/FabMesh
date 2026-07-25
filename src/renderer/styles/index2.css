@@ -4159,3 +4159,33 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 .versions-strip .version-thumb:hover .version-history-btn {
   display: none !important;
 }
+
+/* ═══ Sélecteur de calcul Local / Cloud (passerelle desktop-cloud) ═══ */
+.compute-toggle {
+  display: inline-flex;
+  background: #0f0f16;
+  border: 1px solid #3a3a4a;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.compute-toggle .ct-btn {
+  border: none;
+  background: transparent;
+  color: #aab;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background .12s, color .12s;
+}
+.compute-toggle .ct-btn.active {
+  background: linear-gradient(90deg, #e0447c, #8a5cf6);
+  color: #fff;
+  font-weight: 600;
+}
+.compute-toggle .ct-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}

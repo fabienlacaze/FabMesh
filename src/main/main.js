@@ -5956,7 +5956,7 @@ const _BUILD_STAGE_MODIFIERS = [
   'fully finished and complete, every detail present, clean polished final version',
 ];
 
-ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction, assetType, buildStages }) => {
+ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction, assetType, buildStages, computeMode }) => {
   try {
     // Parental control: check prompt for blocked content
     const safety = checkPromptSafety(prompt);
@@ -6020,9 +6020,14 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     // renderer ouvre la modale de connexion.
     // =========================================================================
     if (['local-flux', 'local-lightning', 'hidream', 'local-sd'].includes(engine)) {
+      // Mode CLOUD choisi par l'utilisateur (toggle Compute), OU machine sans
+      // GPU NVIDIA (les moteurs locaux CUDA ne peuvent pas tourner).
       const gpu = await detectNvidiaGpu();
-      if (!gpu.hasNvidia) {
-        safeSend('ai3d-progress', '[cloud-fallback] No NVIDIA GPU — generating via MyFabmesh cloud…\n');
+      const wantCloud = (computeMode === 'cloud');
+      if (wantCloud || !gpu.hasNvidia) {
+        safeSend('ai3d-progress', wantCloud
+          ? '[cloud] Generating via MyFabmesh cloud (user choice)…\n'
+          : '[cloud] No NVIDIA GPU — generating via MyFabmesh cloud…\n');
         const r = await cloudFallback.generateImages({
           prompt,
           numImages: numImages || 4,
@@ -6030,8 +6035,9 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
           assetType: _assetType,
           steps,
           turbo: engine === 'local-lightning',
+          projectName: safeName,   // -> user_assets: visible aussi sur le site web
         });
-        if (r.success) safeSend('ai3d-progress', `[cloud-fallback] ${r.images.length} image(s) générées (cloud). Crédits restants: ${r.creditsRemaining ?? '?'}\n`);
+        if (r.success) safeSend('ai3d-progress', `[cloud] ${r.images.length} image(s) générées (cloud). Crédits restants: ${r.creditsRemaining ?? '?'}\n`);
         return r;
       }
     }
