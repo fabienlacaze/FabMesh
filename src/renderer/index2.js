@@ -22266,6 +22266,15 @@ async function showCloudLibraryModal() {
     </div>`;
 
   const destProject = () => (state.currentProject?.name || 'cloud_import').replace(/[^a-zA-Z0-9_-]/g, '_');
+  // Les URLs du worker peuvent etre relatives (/r2/<cle>?exp&sig) : dans
+  // Electron elles se resoudraient contre l'app -> prefixer par le site.
+  const CLB_ORIGIN = 'https://myfabmesh-cloud.fabien65400.workers.dev';
+  const abs = (u) => {
+    if (!u || typeof u !== 'string') return null;
+    if (/^https?:/i.test(u)) return u;
+    if (u.startsWith('/')) return CLB_ORIGIN + u;
+    return CLB_ORIGIN + '/r2/' + u;   // cle R2 nue (non signee: peut echouer)
+  };
 
   function wireDownloads() {
     body.querySelectorAll('.clb-dl').forEach((b) => {
@@ -22313,14 +22322,14 @@ async function showCloudLibraryModal() {
       for (const imgUrl of (proj.images || []).slice(0, 60)) {
         let fname = `${proj.name}_${(imgUrl.split('/').pop() || 'img').split('?')[0]}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
         if (!fname.toLowerCase().endsWith('.png')) fname += '.png';
-        cards.push(card({ img: imgUrl, title: proj.name, sub: 'image',
-          btnLabel: '&#11015; Import', btnData: `data-url="${imgUrl.replace(/"/g, '&quot;')}" data-fname="${fname}"` }));
+        cards.push(card({ img: abs(imgUrl), title: proj.name, sub: 'image',
+          btnLabel: '&#11015; Import', btnData: `data-url="${(abs(imgUrl) || '').replace(/"/g, '&quot;')}" data-fname="${fname}"` }));
       }
     }
     for (const m of (r.meshes || []).slice(0, 120)) {
       const fname = (m.filename || `mesh_${Date.now()}.glb`).replace(/[^a-zA-Z0-9_.-]/g, '_');
-      cards.push(card({ img: m.thumb || null, title: m.filename || 'mesh', sub: m.projectName || 'mesh',
-        btnLabel: '&#11015; Import', btnData: `data-url="${(m.url || '').replace(/"/g, '&quot;')}" data-fname="${fname}"` }));
+      cards.push(card({ img: abs(m.thumb), title: m.filename || 'mesh', sub: m.projectName || 'mesh',
+        btnLabel: '&#11015; Import', btnData: `data-url="${(abs(m.url) || '').replace(/"/g, '&quot;')}" data-fname="${fname}"` }));
     }
     body.innerHTML = cards.length ? grid(cards.join('')) : '<div style="padding:30px;text-align:center;">Your cloud library is empty.</div>';
     wireDownloads();
@@ -22343,7 +22352,7 @@ async function showCloudLibraryModal() {
       const btnData = canGet
         ? `data-market="${l.id}" data-fname="${fname}"`
         : 'data-buy="https://myfabmesh-cloud.fabien65400.workers.dev/marketplace"';
-      return card({ img: l.asset_url || l.mesh_url || null, title: l.title || l.id,
+      return card({ img: abs(l.asset_url || l.mesh_url), title: l.title || l.id,
         sub: `${l.asset_kind || ''} · ${l.author_display || ''} · ${l.downloads || 0}&#11015;`,
         btnLabel, btnData });
     });
