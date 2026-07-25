@@ -274,6 +274,78 @@ function _spawnLocalRetarget({
 }
 
 // -----------------------------------------------------------------------------
+// Generative motion AI (Kimodo) — text -> motion diffusion, local RTX GPU.
+// scripts/kimodo_bridge.py: prompt -> BVH SOMA -> retarget onto the rig GLB.
+// Needs the Kimodo venv (FABMESH_KIMODO_PY or c:\tmp\kmv312).
+// -----------------------------------------------------------------------------
+function _resolveKimodoPython() {
+  const cands = [
+    process.env.FABMESH_KIMODO_PY,
+    'c:\\tmp\\kmv312\\Scripts\\python.exe',
+  ];
+  for (const c of cands) { if (c && fs.existsSync(c)) return c; }
+  return null;
+}
+
+// animType -> English prompt (Kimodo is text-conditioned; the dropdown
+// values map to fixed prompts so the UX stays one-click).
+const KIMODO_PROMPTS = {
+  idle:   'a person stands idle, shifting weight and looking around.',
+  walk:   'a person walks forward.',
+  run:    'a person runs fast forward.',
+  attack: 'a person throws a powerful punch attack.',
+  death:  'a person collapses to the ground and lies still.',
+  fly:    'a person leaps high into the air.',
+};
+
+function _spawnKimodo({ jobId, meshPath, prompt, animType, outGlb, BrowserWindow, trackProc }) {
+  return new Promise((resolve, reject) => {
+    const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
+    const scriptPath = path.join(scriptsDir, 'kimodo_bridge.py');
+    const py = _resolveKimodoPython();
+    if (!py) {
+      return reject(new Error(
+        "Le moteur IA de mouvement n'est pas installé sur cette machine " +
+        '(venv Kimodo introuvable — FABMESH_KIMODO_PY ou c:\\tmp\\kmv312).'));
+    }
+    if (!fs.existsSync(scriptPath)) {
+      return reject(new Error('kimodo_bridge.py missing'));
+    }
+    const args = [scriptPath,
+      '--rig', meshPath, '--out', outGlb,
+      '--prompt', prompt, '--clip-name', animType];
+    const proc = spawn(py, args, {
+      cwd: scriptsDir,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+    });
+    if (typeof trackProc === 'function') trackProc(proc);
+    _jobs.set(jobId, { proc, startedAt: Date.now() });
+
+    let stderr = '';
+    const onLine = (chunk) => {
+      const line = chunk.toString();
+      _sendToAllWindows(BrowserWindow, 'anim:log', { jobId, line });
+      const m = line.match(/LOCAL_KIMODO_PROGRESS:\s*(\d+)/);
+      if (m) {
+        _sendToAllWindows(BrowserWindow, 'anim:progress',
+          { jobId, phase: 'kimodo', pct: Number(m[1]) });
+      }
+    };
+    proc.stdout.on('data', onLine);
+    proc.stderr.on('data', (c) => { stderr += c.toString(); onLine(c); });
+    proc.on('error', (err) => { _jobs.delete(jobId); reject(err); });
+    proc.on('close', (code) => {
+      _jobs.delete(jobId);
+      if (code === 0 && fs.existsSync(outGlb)) {
+        resolve({ glbPath: outGlb });
+      } else {
+        reject(new Error(`kimodo_bridge exited code=${code}\n${stderr.slice(-2000)}`));
+      }
+    });
+  });
+}
+
+// -----------------------------------------------------------------------------
 // Cloud retarget â€” POST to Modal endpoint, stream multipart, save GLB
 // -----------------------------------------------------------------------------
 async function _runCloudRetarget({ jobId, meshPath, motion, outGlb, BrowserWindow }) {
@@ -433,6 +505,48 @@ function register(deps) {
       writeMeta(glbPath, {
         kind: 'anim', engine: 'rokoko_retarget', parent: meshPath,
         params: { motionId, motionLabel: motion.label || motion.id, mode: mode || 'local' },
+      });
+      _sendToAllWindows(BrowserWindow, 'anim:progress',
+        { jobId, phase: 'done', pct: 100 });
+      return { success: true, jobId, glbPath };
+    } catch (err) {
+      _sendToAllWindows(BrowserWindow, 'anim:progress',
+        { jobId, phase: 'error', pct: 0, msg: String(err.message || err) });
+      return { success: false, jobId, error: String(err.message || err) };
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // anim:kimodo — generative motion AI (text -> motion), humanoid rigs only
+  // ---------------------------------------------------------------------------
+  ipcMain.handle('anim:kimodo', async (_e, opts = {}) => {
+    const { meshPath, animType, prompt } = opts;
+    if (!meshPath || !fs.existsSync(meshPath)) {
+      return { success: false, error: 'Mesh not found' };
+    }
+    if (typeof isPathAllowed === 'function' && !isPathAllowed(meshPath)) {
+      return { success: false, error: 'Mesh path not allowed' };
+    }
+    const type = String(animType || 'walk').toLowerCase();
+    const effPrompt = (prompt && String(prompt).trim())
+      || KIMODO_PROMPTS[type] || KIMODO_PROMPTS.walk;
+
+    const jobId = _safeId();
+    const outDir = path.join(MESHES_DIR || os.tmpdir(), 'animated');
+    _ensureDir(outDir);
+    const rigStem = path.basename(meshPath, path.extname(meshPath));
+    const outGlb = path.join(outDir, `kimodo_${type}__${rigStem}.glb`);
+
+    _sendToAllWindows(BrowserWindow, 'anim:progress',
+      { jobId, phase: 'start', pct: 0, msg: `Generating "${type}" (AI, local)` });
+    try {
+      const { glbPath } = await _spawnKimodo({
+        jobId, meshPath, prompt: effPrompt, animType: type, outGlb,
+        BrowserWindow, trackProc,
+      });
+      writeMeta(glbPath, {
+        kind: 'anim', engine: 'kimodo', parent: meshPath,
+        params: { animType: type, prompt: effPrompt, mode: 'local' },
       });
       _sendToAllWindows(BrowserWindow, 'anim:progress',
         { jobId, phase: 'done', pct: 100 });

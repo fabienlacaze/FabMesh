@@ -16128,8 +16128,8 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     }
   };
 
-  if (engine !== 'rokoko_library') {
-    customError(`${engine} not wired yet — only Motion Library is available in v1.`, 'Engine not ready');
+  if (engine !== 'rokoko_library' && engine !== 'kimodo_ai') {
+    customError(`${engine} not wired yet.`, 'Engine not ready');
     return;
   }
   // Resolve the current rigged GLB from the active project state
@@ -16159,6 +16159,60 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
       }, 20000, { sourceImageUrl: rigPath, projectName: proj?.name })
     : null;
   try {
+    // ---- Generative motion AI (text->motion diffusion, local GPU) ----
+    if (engine === 'kimodo_ai') {
+      if (detectedClass !== 'humanoid') {
+        setStatus('Generative motion AI is humanoid-only for now — use Motion Library for creatures.', true);
+        if (_activeAnimJob && typeof completeJob === 'function') {
+          try { completeJob(_activeAnimJob.id, false, 'humanoid-only'); } catch (_) {}
+          _activeAnimJob = null;
+        }
+        btn.disabled = false;
+        return;
+      }
+      setStatus(`Generating "${animType}" with generative AI (local GPU)…`);
+      const result = await window.meshyAPI.animKimodo({ meshPath: rigPath, animType });
+      if (!result?.success) {
+        setStatus(`Generation failed: ${result?.error || 'unknown'}`, true);
+        if (_activeAnimJob && typeof completeJob === 'function') {
+          try { completeJob(_activeAnimJob.id, false, result?.error || 'unknown'); } catch (_) {}
+          _activeAnimJob = null;
+        }
+        btn.disabled = false;
+        return;
+      }
+      let verdictAI = 'n/a';
+      try {
+        const judged = await window.meshyAPI.animJudge({ glbPath: result.glbPath });
+        verdictAI = judged?.verdict || 'n/a';
+      } catch (_) {}
+      setStatus(`Done — ${result.glbPath?.split(/[\\/]/).pop()} (judge: ${verdictAI})`);
+      const projAI = state.currentProject;
+      if (projAI) {
+        projAI.animations = projAI.animations || [];
+        projAI.animations.unshift({
+          id: result.jobId || `${Date.now()}`,
+          batchId: `local_${Date.now()}`,
+          type: animType,
+          filename: result.glbPath.split(/[\\/]/).pop(),
+          path: result.glbPath,
+          url: 'file:///' + result.glbPath.replace(/\\/g, '/'),
+          engine: 'kimodo_ai',
+          mode: 'local',
+          verdict: verdictAI,
+          created: new Date().toISOString(),
+        });
+        try { renderAnimVersions(projAI); } catch (_) {}
+        try { _selectAnim?.(projAI.animations[0]); } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent('anim:new', { detail: projAI.animations[0] })); } catch (_) {}
+      }
+      if (_activeAnimJob && typeof completeJob === 'function') {
+        try { completeJob(_activeAnimJob.id, true); } catch (_) {}
+        _activeAnimJob = null;
+      }
+      return;
+    }
+
     setStatus(`Listing ${animType} motions for ${detectedClass}…`);
     const list = await window.meshyAPI.animListMotions({ class: detectedClass });
     const target = animType.toLowerCase();

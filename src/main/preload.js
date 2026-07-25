@@ -247,6 +247,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   animListMotions: (opts) => ipcRenderer.invoke('anim:list-motions', opts || {}),
   animMotionThumb: (opts) => ipcRenderer.invoke('anim:motion-thumb', opts),
   animRetarget: (opts) => ipcRenderer.invoke('anim:retarget', opts),
+  animKimodo: (opts) => ipcRenderer.invoke('anim:kimodo', opts),
   animJudge: (opts) => ipcRenderer.invoke('anim:judge', opts),
   animExport: (opts) => ipcRenderer.invoke('anim:export', opts),
   animCancel: (opts) => ipcRenderer.invoke('anim:cancel', opts),
