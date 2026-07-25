@@ -4189,3 +4189,20 @@ details.stage-generating > summary .stage-gear .gear-glyph {
   opacity: .45;
   cursor: not-allowed;
 }
+
+/* Pastille coût cloud (mode Cloud) — même style que le site web */
+.generate-cost-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 2px 9px;
+  background: linear-gradient(135deg, #ffd84a, #f5a623);
+  color: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  vertical-align: middle;
+}

@@ -2025,6 +2025,7 @@ function refreshButtonLabelsAndHiding(p) {
   if (!p) return;
   const btnImg = document.getElementById('ws-generate-image');
   if (btnImg) btnImg.textContent = p.images.length > 0 ? 'Generate new version' : 'Generate';
+  if (typeof window._applyCloudCostPill === 'function') window._applyCloudCostPill(btnImg);
   const btnMesh = document.getElementById('ws-generate-mesh');
   if (btnMesh) {
     btnMesh.disabled = !p.selectedImagePath;
@@ -3273,6 +3274,7 @@ function _updateGenButtonsEstimate() {
   if (bi) {
     const base = (p && p.images && p.images.length > 0) ? 'Generate new version' : 'Generate';
     bi.textContent = bi.disabled ? base : `${base} : ${_fmtEta(_estimateImageMs())}`;
+    if (typeof window._applyCloudCostPill === 'function') window._applyCloudCostPill(bi);
   }
   const br = document.getElementById('ws-generate-rig-ai');
   if (br) br.textContent = br.disabled ? 'Generate Rig' : `Generate Rig : ${_fmtEta(90000)}`;
@@ -22132,6 +22134,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
       const m = _computeMode();
       if (row) row.style.display = (m === 'cloud') ? '' : 'none';
       await apply(m, gpu);
+      try { window._applyCloudCostPill?.(); } catch (_) {}
     };
     btnL.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'local'); syncRow(); });
     btnC.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'cloud'); syncRow(); });
@@ -22203,6 +22206,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
       }
     } catch (_) {}
     try { await window._syncComputeRow?.(); } catch (_) {}
+    try { window._applyCloudCostPill?.(); } catch (_) {}
   };
 
   bl.addEventListener('click', () => {
@@ -22410,3 +22414,30 @@ async function showCloudLibraryModal() {
 }
 
 document.getElementById('btn-cloud-library')?.addEventListener('click', showCloudLibraryModal);
+
+
+// ============================================================
+// PASTILLE COÛT CLOUD ⚡ (mode Cloud uniquement) — même pastille
+// jaune que le site web sur le bouton Générer (2 crédits × N).
+// Idempotent : rappelé après chaque réécriture du label du bouton.
+// ============================================================
+window._applyCloudCostPill = function (btn) {
+  try {
+    if (!btn) btn = document.getElementById('ws-generate-image');
+    if (!btn) return;
+    const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+    let pill = btn.querySelector('.generate-cost-pill');
+    if (!cloud) { if (pill) pill.remove(); return; }
+    const count = parseInt(document.getElementById('ws-count')?.value, 10) || 4;
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'generate-cost-pill';
+      pill.innerHTML = '<span class="generate-cost-bolt">&#9889;</span><span class="gcp-val"></span>';
+      btn.appendChild(pill);
+    }
+    const v = pill.querySelector('.gcp-val');
+    if (v) v.textContent = String(2 * count);
+  } catch (_) {}
+};
+document.getElementById('ws-count')?.addEventListener('change', () => window._applyCloudCostPill());
+window._applyCloudCostPill();
