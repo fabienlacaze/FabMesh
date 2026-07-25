@@ -8769,6 +8769,12 @@ ipcMain.handle('delete-file', (event, filePath) => {
   if (fs.existsSync(sidecar)) {
     try { fs.unlinkSync(sidecar); sidecarDeleted = true; } catch (_) {}
   }
+  // Idem pour le sidecar de lignée .meta.json (writeMeta) — sans ça les
+  // suppressions d'animations laissent des orphelins dans meshes/animated/.
+  const metaSidecar = filePath + '.meta.json';
+  if (fs.existsSync(metaSidecar)) {
+    try { fs.unlinkSync(metaSidecar); } catch (_) {}
+  }
   if (!fs.existsSync(filePath)) {
     // The PNG itself doesn't exist (typical case: NSFW filter blocked
     // the generation and only the .nsfw sidecar was written). If we

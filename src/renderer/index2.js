@@ -2343,7 +2343,11 @@ function populateWorkspace(p) {
   // on-disk animations (from listAnimations -> p.animations in
   // refreshProjectsPage). Without this, the version-thumb strip was
   // empty after a refresh even though the GLBs existed on disk.
-  try { if (p && Array.isArray(p.animations) && p.animations.length) renderAnimVersions(p); } catch (e) { console.warn('[populate] renderAnimVersions failed:', e); }
+  // 2026-07-25: appel INCONDITIONNEL — renderAnimVersions gère lui-même le
+  // cas vide (placeholder). Avec la garde `.length`, supprimer la DERNIÈRE
+  // animation laissait la puce fantôme dans le strip (vieux listeners →
+  // deleteFile sur un chemin déjà effacé → « impossible de supprimer »).
+  try { if (p) renderAnimVersions(p); } catch (e) { console.warn('[populate] renderAnimVersions failed:', e); }
   // 2026-06-02 (mirror cloud c5866be): dispose any 3D viewer state held
   // over from a PREVIOUS project before we re-render the DOM for the
   // new project. NOTE: by the time we get here, openProject has ALREADY
@@ -15867,6 +15871,7 @@ function renderAnimVersions(p) {
   const anims = (p?.animations || []).slice().sort((a, b) => _ts(b) - _ts(a));
   if (!anims.length) {
     strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick an engine and click Generate Animation.</div>';
+    _selectedAnim = null;  // sinon la sélection pointe sur un clip supprimé
     return;
   }
   const iconFor = (t) => t === 'idle' ? '😴' : t === 'walk' ? '🚶'
