@@ -2044,6 +2044,9 @@ function refreshButtonLabelsAndHiding(p) {
     btnRigAI.disabled = !p.selectedMeshPath && !rigSrcModel;
     btnRigAI.textContent = p.rigs.length > 0 ? 'Generate new rig version' : 'Generate Rig';
   }
+  // Cette réécriture arrive APRÈS le _updateGenButtonsEstimate de plus haut
+  // et écrase la pastille ⚡ qu'il venait de poser sur le bouton Rig — re-poser.
+  if (typeof window._applyRigAnimPills === 'function') window._applyRigAnimPills();
   // Hide each "Edit selected" stage when there is nothing to edit yet
   toggleEditStage('step-card-image', p.images.length > 0);
   toggleEditStage('step-card-mesh',  p.meshes.length > 0);
@@ -3282,6 +3285,8 @@ function _updateGenButtonsEstimate() {
   if (br) br.textContent = br.disabled ? 'Generate Rig' : `Generate Rig : ${_fmtEta(90000)}`;
   const ba = document.getElementById('ws-generate-anim');
   if (ba) ba.textContent = ba.disabled ? 'Generate Animation' : `Generate Animation : ${_fmtEta(20000)}`;
+  // Les réécritures textContent ci-dessus détruisent les pastilles ⚡ — re-poser.
+  if (typeof window._applyRigAnimPills === 'function') window._applyRigAnimPills();
 }
 [
   'ws-3d-engine', 'ws-3d-quality', 'ws-3d-triangles',
@@ -16195,7 +16200,11 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   try {
     // ---- Generative motion AI (text->motion diffusion, local GPU) ----
     if (engine === 'kimodo_ai') {
-      if (detectedClass !== 'humanoid') {
+      // Garde humanoid-only : moteur LOCAL uniquement. En mode Cloud le
+      // backend est AnyTop (skeleton-agnostic) et la Motion Library est
+      // masquée — bloquer ici laisserait les créatures sans aucun moteur.
+      const _animCloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+      if (!_animCloud && detectedClass !== 'humanoid') {
         setStatus('Generative motion AI is humanoid-only for now — use Motion Library for creatures.', true);
         if (_activeAnimJob && typeof completeJob === 'function') {
           try { completeJob(_activeAnimJob.id, false, 'humanoid-only'); } catch (_) {}
@@ -18394,6 +18403,13 @@ function isHeavyJobRunning() {
 // Enqueue a job (or run it immediately if there's headroom).
 // `runFn` is an async function that performs the actual API call + cleanup.
 async function enqueueJob(kind, displayName, runFn) {
+  // Mode Cloud : le job tourne sur le worker, pas sur le GPU local — les
+  // gates VRAM/température/concurrence n'ont aucun sens (et une machine
+  // sans GPU NVIDIA est TOUJOURS en Cloud : le rig/anim doit passer).
+  if ((typeof window._computeMode === 'function') && window._computeMode() === 'cloud') {
+    runFn();
+    return;
+  }
   const r = await hasVramHeadroomFor(kind);
   if (r && r.ok) {
     runFn();
@@ -22149,6 +22165,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
       try { window._applyToolPills?.(); } catch (_) {}
       try { window._applyMeshCostPill?.(); } catch (_) {}
       try { window._applyCloudFeatureMask?.(); } catch (_) {}
+      try { window._applyRigAnimPills?.(); } catch (_) {}
     };
     btnL.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'local'); syncRow(); });
     btnC.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'cloud'); syncRow(); });
@@ -22226,6 +22243,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     try { window._applyToolPills?.(); } catch (_) {}
     try { window._applyMeshCostPill?.(); } catch (_) {}
     try { window._applyCloudFeatureMask?.(); } catch (_) {}
+    try { window._applyRigAnimPills?.(); } catch (_) {}
   };
 
   bl.addEventListener('click', () => {
@@ -22544,12 +22562,39 @@ const _CLOUD_TOOL_PRICES = {
   'ws-buildstages-btn': 6,       // text2image x3
   'ws-mask-btn': 3,              // mask_inpaint
   'ws-style-btn': 2,             // style = modify
+  // panneau ÉDITER step 2 (outils mesh → /api/mesh-op & co)
+  // NOTE: ws-mesh-subdivide-btn est masqué en dur au boot (fusionné dans
+  // « Triangle count ») → pas de pastille.
+  'ws-mesh-smooth-btn': 1,       // mesh-op smooth
+  'ws-mesh-decimate-btn': 1,     // mesh-op decimate/subdivide (Triangle count)
+  'ws-mesh-fixnormals-btn': 1,   // mesh-op fix_normals
+  'ws-mesh-fillholes-btn': 1,    // mesh-op fill_holes
+  'ws-mesh-watertight-btn': 1,   // mesh-op watertight
+  // ws-mesh-center-btn (Set Pivot) : PAS de pastille — l'op set_pivot n'est
+  // pas dans la whitelist /api/mesh-op et reste LOCALE (CPU pur, gratuite)
+  // même en mode Cloud (voir mesh-tool dans main.js).
+  'ws-mesh-retexture-btn': 1,    // mesh-op retex_swap (Re-bake from photo HD)
+  'ws-mesh-explode-btn': 1,      // mesh-op explode
+  'ws-mesh-resize-btn': 1,       // mesh-op resize
+  'ws-mesh-material-btn': 1,     // mesh-op material_adjust
+  'ws-mesh-stages3d-btn': 2,     // /api/construction-stages-3d
+  'ws-mesh-segment-btn': 15,     // /api/mesh-segment (PartSAM async)
 };
 // Outils SANS équivalent cloud (gaps de parité) : masqués en mode Cloud.
 const _CLOUD_HIDDEN_TOOLS = ['ws-recolor-btn', 'ws-age-btn'];
 const _CLOUD_LB_PRICES = {
   modify: 2, autoinpaint: 3, removebg: 1, resolution: 2,
   facefix: 2, variant: 2, mask: 3,
+};
+// Lightbox 3D : elle route par clic simulé vers les boutons workspace
+// (LB3D_TOOL_MAP), les pastilles workspace n'y sont donc pas visibles —
+// on pose les mêmes prix sur les entrées [data-lb3d-tool]. sculpt/paintvert/
+// selectface/export/blender/folder restent sans pastille (gratuits/locaux) ;
+// texvar/regionretex/enhancetex/detailsynth sont masquées en Cloud.
+// « center » (→ Set Pivot) volontairement ABSENT : op locale gratuite.
+const _CLOUD_LB3D_PRICES = {
+  smooth: 1, decimate: 1, fixnormals: 1, fillholes: 1,
+  watertight: 1, retexture: 1, material: 1,
 };
 
 window._applyToolPills = function () {
@@ -22574,6 +22619,9 @@ window._applyToolPills = function () {
     }
     for (const [tool, price] of Object.entries(_CLOUD_LB_PRICES)) {
       setPill(document.querySelector(`.lb-tool-btn[data-lb-tool="${tool}"]`), price);
+    }
+    for (const [tool, price] of Object.entries(_CLOUD_LB3D_PRICES)) {
+      setPill(document.querySelector(`[data-lb3d-tool="${tool}"]`), price);
     }
     for (const id of _CLOUD_HIDDEN_TOOLS) {
       const b = document.getElementById(id);
@@ -22601,10 +22649,12 @@ const _CLOUD_HIDDEN_MESH_TOOLS = [
   'ws-mesh-trellis2-btn',      // trellis2_retex absent de la whitelist /api/mesh-op
   'ws-mesh-name-btn',          // part namer local (Modal _partnamer non déployé)
   'ws-rig-reskin-btn',         // re-skin SkinTokens local (seul /api/auto-rig existe)
+  'ws-mesh-aligntex-btn',      // align_texture retiré de la whitelist /api/mesh-op
+                               // (paid no-op côté worker, pas de vraie reprojection)
 ];
 // Entrées lightbox 3D correspondantes : la lightbox route vers les boutons
 // workspace par clic simulé, masquer le bouton workspace ne suffit donc pas.
-const _CLOUD_HIDDEN_LB3D_TOOLS = ['texvar', 'regionretex', 'enhancetex', 'detailsynth'];
+const _CLOUD_HIDDEN_LB3D_TOOLS = ['texvar', 'regionretex', 'enhancetex', 'detailsynth', 'aligntex'];
 
 window._applyCloudFeatureMask = function () {
   try {
@@ -22624,3 +22674,48 @@ window._applyCloudFeatureMask = function () {
   } catch (_) {}
 };
 window._applyCloudFeatureMask();
+
+// ============================================================
+// PASTILLES ⚡ RIG + ANIMATION (mode Cloud) + masquage Motion Library.
+// Les deux boutons Generate voient leur textContent réécrit par
+// _updateGenButtonsEstimate ET refreshButtonLabelsAndHiding (ce qui
+// détruit la pastille enfant) → cette fonction est ré-appelée après
+// chaque réécriture, en plus des 2 sites de bascule Local/Cloud.
+// En mode Cloud : rig = /api/auto-rig (puppeteer) 5 crédits, anim =
+// /api/animate (anytop) 5 crédits ; la Motion Library (Blender/Rokoko
+// locale) n'a pas d'équivalent worker → option masquée + défaut
+// basculé sur le moteur génératif (kimodo_ai).
+// ============================================================
+window._applyRigAnimPills = function () {
+  try {
+    const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+    const setPill = (btn, price) => {
+      if (!btn) return;
+      let pill = btn.querySelector('.generate-cost-pill');
+      if (!cloud) { if (pill) pill.remove(); return; }
+      if (!pill) {
+        pill = document.createElement('span');
+        pill.className = 'generate-cost-pill';
+        pill.style.cssText = 'font-size:10px;padding:1px 7px;margin-left:6px;';
+        pill.innerHTML = '<span class="generate-cost-bolt">&#9889;</span><span class="gcp-val"></span>';
+        btn.appendChild(pill);
+      }
+      const v = pill.querySelector('.gcp-val');
+      if (v) v.textContent = String(price);
+    };
+    setPill(document.getElementById('ws-generate-rig-ai'), 5);
+    setPill(document.getElementById('ws-generate-anim'), 5);
+    const sel = document.getElementById('ws-anim-engine');
+    const opt = sel?.querySelector('option[value="rokoko_library"]');
+    if (opt) {
+      opt.disabled = cloud;
+      opt.hidden = cloud;
+      opt.style.display = cloud ? 'none' : '';
+    }
+    if (cloud && sel && sel.value === 'rokoko_library') {
+      sel.value = 'kimodo_ai';
+      sel.dispatchEvent(new Event('change'));
+    }
+  } catch (_) {}
+};
+window._applyRigAnimPills();

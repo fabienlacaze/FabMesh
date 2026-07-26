@@ -427,7 +427,8 @@ function _runExport({ glbPath, format, dest }) {
 // register({ ipcMain, app, BrowserWindow, MESHES_DIR, isPathAllowed, trackProc })
 // =============================================================================
 function register(deps) {
-  const { ipcMain, app, BrowserWindow, MESHES_DIR, isPathAllowed, trackProc } = deps;
+  const { ipcMain, app, BrowserWindow, MESHES_DIR, isPathAllowed, trackProc, isCloudMode } = deps;
+  const _cloud = () => { try { return typeof isCloudMode === 'function' && isCloudMode(); } catch (_) { return false; } };
   _ensureDir(MOTION_THUMBS_DIR);
 
   // ---------------------------------------------------------------------------
@@ -471,6 +472,13 @@ function register(deps) {
     }
     if (typeof isPathAllowed === 'function' && !isPathAllowed(meshPath)) {
       return { success: false, error: 'Mesh path not allowed' };
+    }
+    // Mode Cloud : pipeline Rokoko/Blender local sans équivalent worker —
+    // ceinture+bretelles (l'option rokoko_library est aussi masquée côté
+    // renderer par _applyCloudFeatureMask).
+    if (_cloud()) {
+      return { success: false,
+        error: 'Bibliothèque de mouvements indisponible en mode Cloud — utilisez le moteur génératif.' };
     }
     const idx = _readOrBuildIndex();
     const motion = idx.motions.find((m) => m.id === motionId);
@@ -536,6 +544,52 @@ function register(deps) {
     _ensureDir(outDir);
     const rigStem = path.basename(meshPath, path.extname(meshPath));
     const outGlb = path.join(outDir, `kimodo_${type}__${rigStem}.glb`);
+
+    // ── Mode Cloud : POST /api/animate (AnyTop, 5 crédits) + polling
+    // GET /api/animate-status (5 s, cap 15 min). Même nommage local
+    // (kimodo_<type>__<rigStem>.glb) → list-animations/strip inchangés.
+    // require paresseux : cloudFallback.register(...) est appelé par main.js
+    // APRÈS ce register — au moment de l'appel IPC ses deps sont posées.
+    if (_cloud()) {
+      _sendToAllWindows(BrowserWindow, 'anim:progress',
+        { jobId, phase: 'start', pct: 5, msg: `[cloud] Génération "${type}" (moteur cloud)…` });
+      try {
+        const cloudFallback = require('./cloud_fallback');
+        const start = await cloudFallback.startMeshJob({
+          meshPath, startPath: '/api/animate',
+          bodyFor: (u) => ({
+            rig_url: u, anim_type: type, prompt: effPrompt,
+            engine: 'anytop', batch_id: `d${Date.now().toString(36)}`,
+          }),
+        });
+        if (!start.success) {
+          throw new Error(start.error
+            || (start.needsCloudLogin ? 'Session cloud expirée — reconnectez-vous.' : 'cloud animate start failed'));
+        }
+        const done = await cloudFallback.pollJob({
+          statusPath: '/api/animate-status', jobId: start.jobId, outPath: outGlb,
+          urlKeys: ['anim_url', 'url'], intervalMs: 5000, capMs: 15 * 60 * 1000, minBytes: 1000,
+          onTick: (st, polls, js) => {
+            const pct = Math.min(90, 10 + polls * 2);
+            _sendToAllWindows(BrowserWindow, 'anim:progress',
+              { jobId, phase: 'progress', pct,
+                msg: `[cloud] ${(js && js.stage) || st || 'en cours'}…` });
+          },
+        });
+        if (!done.success) throw new Error(done.error || 'cloud animation failed');
+        writeMeta(outGlb, {
+          kind: 'anim', engine: 'anytop_cloud', parent: meshPath,
+          params: { animType: type, prompt: effPrompt, mode: 'cloud', r2_url: done.resultUrl },
+        });
+        _sendToAllWindows(BrowserWindow, 'anim:progress',
+          { jobId, phase: 'done', pct: 100 });
+        return { success: true, jobId, glbPath: outGlb };
+      } catch (err) {
+        _sendToAllWindows(BrowserWindow, 'anim:progress',
+          { jobId, phase: 'error', pct: 0, msg: String(err.message || err) });
+        return { success: false, jobId, error: String(err.message || err) };
+      }
+    }
 
     _sendToAllWindows(BrowserWindow, 'anim:progress',
       { jobId, phase: 'start', pct: 0, msg: `Generating "${type}" (AI, local)` });

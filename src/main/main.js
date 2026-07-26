@@ -3299,6 +3299,51 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
   const rigSkeleton = (skeleton || 'orc_m1').replace(/[^a-z0-9_-]/gi, '');
   console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} skeleton=${rigSkeleton} @${new Date(_t0).toISOString()}`);
   try {
+    // ── Mode Cloud : POST /api/auto-rig (ASYNC, 5 crédits) + polling
+    // GET /api/auto-rig-status (5 s, cap 15 min). Le worker n'a QUE le
+    // moteur Puppeteer — on IGNORE le moteur desktop demandé (skintokens…)
+    // et on force engine=puppeteer + skeleton=orc_m1. Nommage identique au
+    // local (_rigged_puppeteer_) pour le routage renderer.
+    if (isCloudMode()) {
+      if (!meshPath || !fs.existsSync(meshPath)) {
+        return { success: false, error: 'Mesh not found' };
+      }
+      if (!isPathAllowed(meshPath)) {
+        return { success: false, error: 'Mesh path not allowed' };
+      }
+      const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_puppeteer_${Date.now()}.glb`);
+      safeSend('ai3d-progress', '[cloud] Rig (moteur cloud)…');
+      const start = await cloudFallback.startMeshJob({
+        meshPath, startPath: '/api/auto-rig',
+        bodyFor: (u) => ({ mesh_url: u, skeleton: 'orc_m1', engine: 'puppeteer' }),
+      });
+      if (!start.success) {
+        return { success: false, error: start.error || 'cloud rig start failed',
+                 ...(start.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      const done = await cloudFallback.pollJob({
+        statusPath: '/api/auto-rig-status', jobId: start.jobId, outPath: outputGlb,
+        urlKeys: ['mesh_url', 'url'], intervalMs: 5000, capMs: 15 * 60 * 1000, minBytes: 1000,
+        onTick: (st, polls, js) => {
+          const pct = Math.min(90, 20 + polls * 2);   // progression 20→90
+          safeSend('ai3d-progress',
+            `[cloud] Rig (moteur cloud)… ${pct}% ${(js && js.stage) || st || ''}`);
+        },
+      });
+      if (!done.success) {
+        return { success: false, error: done.error || 'cloud rig failed',
+                 ...(done.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      const stats = fs.statSync(outputGlb);
+      console.log(`[auto-rig-ai] CLOUD END duration=${((Date.now() - _t0) / 1000).toFixed(2)}s → ${outputGlb}`);
+      writeMeta(outputGlb, {
+        kind: 'rig', engine: 'puppeteer', parent: meshPath,
+        params: { skeleton: 'orc_m1', cloud: true, r2_url: done.resultUrl },
+      });
+      return { success: true, path: outputGlb, filename: path.basename(outputGlb), size: stats.size };
+    }
+
     if (rigEngine !== 'puppeteer') await _freeSdxlForHeavyOp('rigging IA');
     if (!meshPath || !fs.existsSync(meshPath)) {
       return { success: false, error: 'Mesh not found' };
@@ -4831,6 +4876,37 @@ ipcMain.handle('generate-construction-stages-3d', async (event, opts) => {
     const outDir = path.join(MESHES_DIR, `${newStem}_stages3d`);
     try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
     fs.mkdirSync(outDir, { recursive: true });
+    // ── Mode Cloud : POST /api/construction-stages-3d (SYNC mais LONG —
+    // budget ≥10 min côté cloud_fallback, le worker enchaîne Modal 290 s
+    // + fetch 120 s/stage). Le worker clampe stageCount à 2..12.
+    // Nommage/contrat identiques au local : versionMesh = copie du GLB
+    // source (déjà faite ci-dessus), stages dans <newStem>_stages3d/.
+    if (isCloudMode()) {
+      const nc = Math.min(n, 12);
+      const mats = materials
+        ? { scaffold: scafMat, frame: frameMat, planks: planksMat, formwork: formworkMat }
+        : scafMat;
+      const r = await cloudFallback.constructionStages3D({
+        meshPath, stageCount: nc, materials: mats, projectName: stem, stagesDir: outDir,
+      });
+      if (!r.success) {
+        // Nettoie la version + le dossier créés optimistement.
+        try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
+        try { fs.unlinkSync(versionMeshPath); } catch (_) {}
+        return { success: false, error: r.error || 'cloud construction stages failed',
+                 ...(r.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      try {
+        writeMeta(versionMeshPath, { kind: 'op', op: 'chantier3d', parent: meshPath,
+          params: { stageCount: nc, materials: mats, cloud: true,
+                    ...(r.versionUrl ? { r2_url: r.versionUrl } : {}) } });
+      } catch (_) {}
+      const cnt = r.count;
+      const stages = r.stages.map(s => ({
+        index: s.index, path: s.path, progress: cnt <= 1 ? 1 : s.index / (cnt - 1),
+      }));
+      return { success: true, versionMeshPath, dir: outDir, stages, count: cnt };
+    }
     const script = path.join(SCRIPTS_DIR, 'construction_stages_3d.py');
     const ok = await new Promise((resolve) => {
       execFile(_aiPython(), [script, meshPath, outDir, String(n), scafMat, frameMat, planksMat, formworkMat],
@@ -4881,6 +4957,20 @@ ipcMain.handle('mesh-resize', async (_event, { meshPath, sx, sy, sz } = {}) => {
     const [ax, ay, az] = [cl(sx), cl(sy), cl(sz)];
     const stem = path.basename(meshPath, path.extname(meshPath)).replace(/_resize_\d+$/i, '');
     const outPath = path.join(MESHES_DIR, `${stem}_resize_${Date.now()}.glb`);
+    // ── Mode Cloud : /api/mesh-op opType='resize' {sx,sy,sz} (1 crédit) —
+    // même clamp local 0.001..1000 qu'en local.
+    if (isCloudMode()) {
+      const r = await cloudFallback.meshOp({ meshPath, opType: 'resize', params: { sx: ax, sy: ay, sz: az }, outPath, projectName: stem });
+      if (!r.success) {
+        return { success: false, error: r.error || 'cloud resize failed',
+                 ...(r.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      try {
+        writeMeta(outPath, { kind: 'op', op: 'resize', parent: meshPath,
+          params: { sx: ax, sy: ay, sz: az, cloud: true, r2_url: r.resultUrl } });
+      } catch (_) {}
+      return { success: true, newPath: outPath, filename: path.basename(outPath) };
+    }
     const script = path.join(SCRIPTS_DIR, 'scale_mesh.py');
     if (!fs.existsSync(script)) return { success: false, error: 'scale_mesh.py not found' };
     const ok = await new Promise((resolve) => {
@@ -4909,6 +4999,21 @@ ipcMain.handle('generate-explode-3d', async (event, opts) => {
     // (same as segmented meshes) blasts them apart. New version, original intact.
     const stem = path.basename(meshPath, path.extname(meshPath)).replace(/_explode_\d+$/i, '');
     const outPath = path.join(MESHES_DIR, `${stem}_explode_${Date.now()}.glb`);
+    // ── Mode Cloud : /api/mesh-op opType='explode' {fragments} (1 crédit).
+    // `fill` accepté pour parité mais ignoré côté cloud (comme le shim web).
+    if (isCloudMode()) {
+      safeSend('ai3d-progress', '[Explode] Fracture Voronoi (cloud)…');
+      const r = await cloudFallback.meshOp({ meshPath, opType: 'explode', params: { fragments: frags }, outPath, projectName: stem });
+      if (!r.success) {
+        return { success: false, error: r.error || 'cloud explode failed',
+                 ...(r.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      try {
+        writeMeta(outPath, { kind: 'op', op: 'explode', parent: meshPath,
+          params: { fragments: frags, cloud: true, r2_url: r.resultUrl } });
+      } catch (_) {}
+      return { success: true, newPath: outPath, filename: path.basename(outPath), operation: 'explode' };
+    }
     const script = path.join(SCRIPTS_DIR, 'explode_mesh_3d.py');
     if (!fs.existsSync(script)) return { success: false, error: 'explode_mesh_3d.py not found' };
     safeSend('ai3d-progress', '[Explode] Fracturing mesh into shards…');
@@ -6363,7 +6468,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch (_) {}
       writeMeta(meshPath, {
         kind: 'mesh', engine: 'trellis2_native', source: imagePath,
-        params: { cloud: true, preset: trellis2Preset || 'fast', assetType,
+        // r2_url : URL R2 signée du GLB généré — réutilisée par
+        // cloudFallback.resolveMeshUrl pour chaîner les ops mesh cloud
+        // (mesh-op / segment / rig / animate) sans re-upload.
+        params: { cloud: true, r2_url: r.glbUrl, preset: trellis2Preset || 'fast', assetType,
                   multiRef: trellis2MultiRef, refine: trellis2Refine,
                   rectifySource: trellis2RectifySource, smooth: trellis2Smooth,
                   qualityPlus: trellis2QualityPlus, ultraQ: trellis2UltraQ,
@@ -7266,6 +7374,62 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params, namedP
   do { _prev = base; base = base.replace(OP_SUFFIX, ''); } while (base !== _prev);
   if (base.length > 90) base = base.slice(0, 90);  // hard cap, belt-and-braces
   const outPath = path.join(path.dirname(meshPath), `${base}_${operation}_${timestamp}${ext}`);
+
+  // ── Mode Cloud : route les ops simples vers POST /api/mesh-op (worker,
+  // 1 crédit). Mapping positionnel→nommé identique au shim web
+  // (meshyAPI-cloud.js). set_pivot reste LOCAL (pas dans la whitelist worker,
+  // CPU pur, gratuit) ; texture_var / trellis2_retex sont masqués côté
+  // renderer en mode Cloud (_applyCloudFeatureMask) — toute op non mappée
+  // retombe sur l'exécution locale.
+  if (isCloudMode()) {
+    try {
+      const p = (params || []).map(String);
+      let opType = operation;
+      let opParams = null;
+      switch (operation) {
+        case 'smooth':      opParams = { iterations: Number(p[0]) || 10, lamb: Number(p[1]) || 0.5 }; break;
+        case 'decimate':    opParams = { target_faces: Number(p[0]) || 10000 }; break;
+        case 'subdivide':   opParams = { iterations: Number(p[0]) || 1 }; break;
+        // Mode 'seal' (p[1], keepDetail) desktop-only — Modal ne lit que resolution.
+        case 'watertight':  opParams = { resolution: Number(p[0]) || 512 }; break;
+        case 'fill_holes':  // sliders min/max ignorés par Modal (défauts cloud)
+        case 'center':
+        case 'fix_normals': opParams = {}; break;
+        case 'retexture': {
+          // → retex_swap : upload de l'image locale (≤5 Mo) → image_url,
+          // tex_res clampé à 2048 (le worker renvoie 400 au-delà).
+          opType = 'retex_swap';
+          const up = await cloudFallback.uploadImage(p[0], 'retex_swap');
+          if (!up.success) {
+            return { success: false, error: up.error || 'image upload failed',
+                     ...(up.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+          }
+          opParams = { image_url: up.url, tex_res: Math.min(Number(p[1]) || 2048, 2048) };
+          break;
+        }
+        default: opParams = null; // set_pivot & co → local
+      }
+      if (opParams !== null) {
+        const r = await cloudFallback.meshOp({ meshPath, opType, params: opParams, outPath, projectName: base });
+        if (!r.success) {
+          return { success: false, error: r.error || 'cloud mesh op failed',
+                   ...(r.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+        }
+        const stats = fs.statSync(outPath);
+        writeMeta(outPath, {
+          kind: 'op', op: operation, parent: meshPath,
+          params: { ...(namedParams || { args: params || [] }), cloud: true, r2_url: r.resultUrl },
+        });
+        return {
+          success: true, newPath: outPath, filename: path.basename(outPath),
+          size: stats.size, operation, ...(r.stats ? { stats: r.stats } : {}),
+        };
+      }
+    } catch (e) {
+      return { success: false, error: e.message || String(e) };
+    }
+  }
+
   const args = [script, operation, meshPath, outPath, ...(params || [])];
 
   return new Promise((resolve) => {
@@ -7312,6 +7476,50 @@ ipcMain.handle('mesh-segment', async (_event, { meshPath, granularity, scale }) 
   try {
     if (!meshPath || !fs.existsSync(meshPath)) return { success: false, error: 'Mesh not found' };
     if (!isPathAllowed(meshPath)) return { success: false, error: 'Mesh path not allowed' };
+
+    // ── Mode Cloud : POST /api/mesh-segment (ASYNC, 15 crédits) + polling
+    // GET /api/mesh-segment-status (5 s, cap 15 min). PartSAM local n'est
+    // PAS requis — la branche vit AVANT la résolution segPython/PartSAM.
+    if (isCloudMode()) {
+      const ts = Date.now();
+      const ext = path.extname(meshPath);
+      let base = path.basename(meshPath, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const OP_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|edited|upscale|refine|augment|vc|segment)(?:_\d{6,})?$/i;
+      let _p; do { _p = base; base = base.replace(OP_SUFFIX, ''); } while (base !== _p);
+      if (base.length > 90) base = base.slice(0, 90);
+      // GLB scène à sous-meshes nommés — SURTOUT pas de _rigged_/_anim_ dans
+      // le nom (routage buckets renderer).
+      const outPath = path.join(path.dirname(meshPath), `${base}_segment_${ts}.glb`);
+      const g = Number.isFinite(+granularity)
+        ? Math.max(0, Math.min(1, +granularity))
+        : (Number.isFinite(+scale) ? Math.max(0, Math.min(1, +scale / 2)) : 0.2);
+      safeSend('ai3d-progress', '[Segment] Segmentation cloud (PartSAM, 15 crédits)…');
+      const start = await cloudFallback.startMeshJob({
+        meshPath, startPath: '/api/mesh-segment',
+        bodyFor: (u) => ({ mesh_url: u, granularity: g, projectName: base }),
+      });
+      if (!start.success) {
+        return { success: false, error: start.error || 'cloud segmentation start failed',
+                 ...(start.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      const done = await cloudFallback.pollJob({
+        statusPath: '/api/mesh-segment-status', jobId: start.jobId, outPath,
+        urlKeys: ['mesh_url', 'url'], intervalMs: 5000, capMs: 15 * 60 * 1000, minBytes: 1000,
+        onTick: (st, polls, js) => safeSend('ai3d-progress',
+          `[Segment] Cloud: ${(js && js.stage) || st || 'en cours'}… (${polls * 5}s)`),
+      });
+      if (!done.success) {
+        return { success: false, error: done.error || 'cloud segmentation failed',
+                 ...(done.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      const stats = fs.statSync(outPath);
+      console.log(`[mesh-segment] CLOUD DONE in ${((Date.now() - _t0) / 1000).toFixed(0)}s → ${outPath}`);
+      writeMeta(outPath, {
+        kind: 'op', op: 'segment', engine: 'partsam_cloud', parent: meshPath,
+        params: { granularity: g, cloud: true, r2_url: done.resultUrl },
+      });
+      return { success: true, newPath: outPath, filename: path.basename(outPath), size: stats.size, operation: 'segment' };
+    }
 
     // PartSAM (feedforward, ~40-90 s) — remplace SAMPart3D (optim ~4 min).
     // Pas de Blender, pas de rendu multi-vues : natif 3D.
@@ -7458,6 +7666,34 @@ ipcMain.handle('material-adjust', async (_event, {
   const ext = path.extname(meshPath);
   const base = path.basename(meshPath, ext);
   const outPath = path.join(path.dirname(meshPath), `${base}_mat_${timestamp}${ext}`);
+
+  // ── Mode Cloud : /api/mesh-op opType='material_adjust' (1 crédit) — les 7
+  // noms de params correspondent exactement à ceux du côté Modal.
+  if (isCloudMode()) {
+    try {
+      const opParams = {
+        brightness: Number(brightness), saturation: Number(saturation),
+        contrast: Number(contrast), emissive: Number(emissive),
+        metallic: Number(metallic), roughness: Number(roughness),
+        hue_shift: Number(hue_shift ?? 0),
+      };
+      const r = await cloudFallback.meshOp({ meshPath, opType: 'material_adjust', params: opParams, outPath, projectName: base });
+      if (!r.success) {
+        return { success: false, error: r.error || 'cloud material adjust failed',
+                 ...(r.needsCloudLogin ? { needsCloudLogin: true } : {}) };
+      }
+      const stats = fs.statSync(outPath);
+      writeMeta(outPath, {
+        kind: 'op', op: 'mat', parent: meshPath,
+        params: { brightness, saturation, contrast, emissive, metallic, roughness, hue_shift,
+                  cloud: true, r2_url: r.resultUrl },
+      });
+      return { success: true, newPath: outPath, filename: path.basename(outPath), size: stats.size };
+    } catch (e) {
+      return { success: false, error: e.message || String(e) };
+    }
+  }
+
   const args = [
     script, meshPath, outPath,
     '--brightness', String(brightness),
@@ -8895,6 +9131,9 @@ try {
   require('./animation').register({
     ipcMain, app, BrowserWindow,
     MESHES_DIR, isPathAllowed, trackProc,
+    // Mode Cloud global : anim:kimodo route vers /api/animate (AnyTop) et
+    // anim:retarget (Bibliothèque de mouvements) est désactivé.
+    isCloudMode,
   });
 } catch (e) {
   console.error('[animation] register failed:', e.message);
