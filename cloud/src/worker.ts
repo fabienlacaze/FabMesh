@@ -10299,6 +10299,13 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   }
   if (!ok) {
     await _recordFail();
+    // Journal des tentatives : une rafale d'échecs sur le dashboard admin
+    // doit être visible (onglet Audit log), pas seulement comptée.
+    await _auditLog(env, {
+      req, actorEmail: user.email,
+      action: 'admin_login_failed',
+      details: { reason: 'invalid_password', fails: fails.count },
+    });
     return err(401, 'invalid password');
   }
   // Successful password check — wipe the IP's failure counter so the
@@ -10312,8 +10319,22 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   if (totpSecret) {
     const code = String(body.totp ?? '').trim();
     if (!code) return err(401, 'totp_required');
-    if (!(await _totpVerify(totpSecret, code))) return err(401, 'invalid totp');
+    if (!(await _totpVerify(totpSecret, code))) {
+      await _recordFail();
+      await _auditLog(env, {
+        req, actorEmail: user.email,
+        action: 'admin_login_failed',
+        details: { reason: 'invalid_totp' },
+      });
+      return err(401, 'invalid totp');
+    }
   }
+  // Connexion admin réussie — tracée avec l'IP par _auditLog.
+  await _auditLog(env, {
+    req, actorEmail: user.email,
+    action: 'admin_login_ok',
+    details: { totp: totpSecret ? 'yes' : 'not_enrolled' },
+  });
 
   const exp = Math.floor(Date.now() / 1000) + ADMIN_TTL_SEC;
   const payload = `${user.email.toLowerCase()}:${exp}`;
@@ -10348,7 +10369,24 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
     return err(403, 'forbidden — your Supabase email is not in the admin allow-list');
   }
   if (!env.MESHES) return err(500, 'R2 binding required');
-  const body = await req.json().catch(() => ({})) as { newPassword?: string };
+  const body = await req.json().catch(() => ({})) as { newPassword?: string; totp?: string };
+  // 2FA OBLIGATOIRE sur la rotation dès que le TOTP est enrôlé. Sans ce
+  // contrôle, le compte Supabase admin seul suffisait à réinitialiser le
+  // mot de passe du dashboard — le second facteur ne servait à rien
+  // puisqu'il était contournable par « Forgot password ».
+  const _resetTotpSecret = await _getAdminTotpSecret(env);
+  if (_resetTotpSecret) {
+    const code = String(body?.totp ?? '').trim();
+    if (!code) return err(401, 'totp_required');
+    if (!(await _totpVerify(_resetTotpSecret, code))) {
+      await _auditLog(env, {
+        req, actorEmail: user.email,
+        action: 'admin_password_reset_denied',
+        details: { reason: 'invalid_totp' },
+      });
+      return err(401, 'invalid totp');
+    }
+  }
   const newPassword = String(body?.newPassword ?? '');
   if (newPassword.length < 20) {
     return err(400, 'newPassword must be at least 20 characters');
