@@ -499,6 +499,17 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   await window.wizardAPI.completeSetup({ mode: chosenMode, hw: hwReport });
 });
 
+// Page « no-gpu » : lancer l'app EN MODE CLOUD (et non le site web). Sans ce
+// bouton, une machine sans GPU NVIDIA (Surface des testeurs Store, laptops)
+// n'avait AUCUN moyen d'ouvrir l'application — le wizard renvoyait vers le
+// navigateur. Le mode Cloud route désormais tout le pipeline vers le worker.
+document.getElementById('btn-launch-cloud')?.addEventListener('click', async () => {
+  const b = document.getElementById('btn-launch-cloud');
+  if (b) { b.disabled = true; b.textContent = 'Starting…'; }
+  try { localStorage.setItem('fab-compute-mode', 'cloud'); } catch (_) {}
+  await window.wizardAPI.completeSetup({ mode: 'cloud', hw: hwReport });
+});
+
 // Export logs button — one click → diagnostics .txt on the Desktop,
 // so a user (or a friend testing the app) can send it to support
 // instead of hunting through %APPDATA%.
