@@ -14664,6 +14664,7 @@ document.getElementById('me-sel-delete')?.addEventListener('click', () => {
   showToast(any ? 'Selected faces deleted' : 'Nothing selected', any ? 'success' : 'info', 1500);
 });
 document.getElementById('me-sel-invert')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
     const color = c.geometry.attributes.color;
@@ -14676,6 +14677,7 @@ document.getElementById('me-sel-invert')?.addEventListener('click', () => {
   });
 });
 document.getElementById('me-sel-clear')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
     const color = c.geometry.attributes.color;
@@ -14698,6 +14700,7 @@ function _meEnsureColor(c) {
   return geom.attributes.color;
 }
 document.getElementById('me-sel-all')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.position) return;
     const color = _meEnsureColor(c), sel = _meSelMap(c.geometry);
@@ -14709,6 +14712,7 @@ document.getElementById('me-sel-all')?.addEventListener('click', () => {
   });
 });
 document.getElementById('me-sel-grow')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
     const geom = c.geometry, color = geom.attributes.color, sel = _meSelMap(geom), idx = geom.index.array;
@@ -14731,6 +14735,7 @@ document.getElementById('me-sel-grow')?.addEventListener('click', () => {
   });
 });
 document.getElementById('me-sel-shrink')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
     const geom = c.geometry, color = geom.attributes.color, sel = _meSelMap(geom), idx = geom.index.array;
