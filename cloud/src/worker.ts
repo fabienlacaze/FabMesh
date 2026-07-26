@@ -5824,7 +5824,7 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
   if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
 
   const t0 = Date.now();
-  const r = await fetch(url, {
+  const doFetch = () => fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -5845,7 +5845,36 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
     // endpoint doesn't hang the user UI forever.
     signal: AbortSignal.timeout(600_000),
   });
+  // Multi-shot 524 retry — same schedule as callModalImageOp (6141+).
+  // The 600 s AbortSignal above is a red herring: Cloudflare fronts
+  // *.modal.run and cuts every subrequest at 100 s, handing us a 524.
+  // Without this loop the very first click of a Store tester surfaced
+  // "image generation failed (credits refunded): Cloud GPU HTTP 524".
+  //
+  // The delays MUST stay >= 60 s. A 524 does NOT cancel the Modal
+  // request — FastAPI keeps running it to completion (~30-60 s boot +
+  // 25-45 s diffusion) and @app.cls serves one input per container, so
+  // a retry fired too early makes Modal autoscale a SECOND cold
+  // container: double the GPU bill and a second 524.
+  //   t=0    1st request → cut at 100 s (524)
+  //   wait 60 s  → the first (discarded) generation finishes meanwhile
+  //   t=160  2nd request → should land on the now-idle warm container
+  //   wait 90 s
+  //   t=350  3rd request → last chance
+  let r = await doFetch();
+  for (const delay of [60_000, 90_000]) {
+    if (r.status !== 524) break;
+    console.log(`[modal] text2image 524 — cold start retry after ${delay / 1000}s`);
+    await new Promise((res) => setTimeout(res, delay));
+    r = await doFetch();
+  }
   if (!r.ok) {
+    if (r.status === 524) {
+      throw new Error(
+        'the cloud GPU took too long to start (cold start). '
+        + 'Please try again in a minute — your credits were refunded.'
+      );
+    }
     throw new Error(`Cloud GPU HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
@@ -6058,7 +6087,7 @@ async function callModalTpose(env: Env, userId: string, input: {
   if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
 
   const t0 = Date.now();
-  const r = await fetch(url, {
+  const doFetch = () => fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -6075,7 +6104,24 @@ async function callModalTpose(env: Env, userId: string, input: {
     // headroom for retries on cold L40S).
     signal: AbortSignal.timeout(300_000),
   });
+  // Same 524 cold-start retry as callModalText2Image / callModalImageOp —
+  // the tpose branch of /api/generate-image shares the failure mode.
+  // Delays >= 60 s for the same reason (a 524 does not cancel the Modal
+  // request; retrying too early autoscales a second cold container).
+  let r = await doFetch();
+  for (const delay of [60_000, 90_000]) {
+    if (r.status !== 524) break;
+    console.log(`[modal] tpose 524 — cold start retry after ${delay / 1000}s`);
+    await new Promise((res) => setTimeout(res, delay));
+    r = await doFetch();
+  }
   if (!r.ok) {
+    if (r.status === 524) {
+      throw new Error(
+        'the cloud GPU took too long to start (cold start). '
+        + 'Please try again in a minute — your credits were refunded.'
+      );
+    }
     throw new Error(`Cloud GPU tpose HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
@@ -12422,11 +12468,15 @@ async function isUserOnline(env: Env): Promise<boolean> {
   return Date.now() - ts < HEARTBEAT_WINDOW_MS;
 }
 
+/** Replicate keepalive — LEGACY FALLBACK ONLY.
+ *  Production runs on Modal (handleGenerateImage picks callModalText2Image
+ *  as soon as MODAL_TEXT2IMAGE_URL is set), so warming the Cog warms a
+ *  backend nobody hits and costs ~$0.005 per fire for nothing. Kept —
+ *  guarded — because deleting it would silently remove the pre-warm on a
+ *  rollback that unsets MODAL_TEXT2IMAGE_URL.
+ *  The heartbeat gate now lives in preWarmTick() (shared with preWarmModal). */
 async function preWarmCog(env: Env): Promise<void> {
-  if (!(await isUserOnline(env))) {
-    console.log('[pre-warm] skipped — no recent heartbeat (nobody online)');
-    return;
-  }
+  if (env.MODAL_TEXT2IMAGE_URL) return;   // Modal is the live backend → see preWarmModal
   const token = env.REPLICATE_API_TOKEN ?? '';
   if (!token) return;
   try {
@@ -12447,6 +12497,98 @@ async function preWarmCog(env: Env): Promise<void> {
   }
 }
 
+/* ───────────────────────── Modal pre-warm ─────────────────────────────
+ * The 524 blocker: /api/generate-image is synchronous, a cold Modal
+ * container takes 2-3 min to boot, and Cloudflare cuts every subrequest
+ * at 100 s → the very first click of a Store tester returned
+ * "image generation failed (credits refunded): Cloud GPU HTTP 524".
+ *
+ * Pre-warming reduces how OFTEN that happens; it can never remove the
+ * case entirely (see the cron math below). The actual fix is the 524
+ * retry in callModalText2Image + the desktop-side retry in
+ * src/main/cloud_fallback.js — pre-warm is the cheap first line.
+ *
+ * WHAT CAN BE WARMED, AND WHAT CANNOT
+ *   ✅ text2image  — MyFabmeshPredictor router (modal_app/app.py:513),
+ *                    the GPU class hit by the first click.
+ *   ✅ image_op / back_view — MyFabmeshBackview router (app.py:764),
+ *                    same GPU class; only on explicit request.
+ *   ❌ mesh / rig / segment / anim — their routers are CPU dispatchers
+ *                    (`@app.function(image=image)` with NO gpu=, see
+ *                    app.py:1597) that .spawn() the real GPU class.
+ *                    Pinging their /healthz warms a CPU container and
+ *                    the GPU class not at all. The only way to warm
+ *                    those is to run a real (paid, minutes-long) job —
+ *                    deliberately NOT attempted here.
+ *
+ * Every Modal router exposes GET /healthz with no auth (app.py:725,
+ * app.py:1319, app.py:1818, _puppeteer_rig.py:972, …), so the ping needs
+ * no MODAL_SHARED_SECRET. The MODAL_*_URL secrets hold the FULL url
+ * including the route path (documented at the top of the Modal section),
+ * so the healthz url = last path segment replaced.
+ * ──────────────────────────────────────────────────────────────────── */
+
+/** Consider a container still warm (→ ping is pointless) below this age.
+ *  Kept under MyFabmeshPredictor's scaledown_window=300 s (app.py:525)
+ *  with a margin, so we never pay for a boot we do not need. */
+const PREWARM_FRESH_MS = 4 * 60 * 1000;
+
+function _healthzUrl(fullUrl: string): string {
+  // …/myfabmeshpredictor-router.modal.run/text2image → …/healthz
+  return fullUrl.replace(/\/[^/]*$/, '/healthz');
+}
+
+/** Boot the Modal containers the next user click will hit.
+ *  A 524 / timeout on the ping is EXPECTED and counts as success: the
+ *  container boots regardless of whether Cloudflare kept the connection.
+ *  Never throws. */
+async function preWarmModal(env: Env, opts: { imageOp?: boolean } = {}): Promise<void> {
+  const targets: Array<{ label: string; url?: string; warmKey: string }> = [
+    { label: 'text2image', url: env.MODAL_TEXT2IMAGE_URL, warmKey: '_meta/last_warm_text2image.txt' },
+  ];
+  if (opts.imageOp) {
+    targets.push({ label: 'image_op', url: env.MODAL_IMAGE_OP_URL ?? env.MODAL_BACKVIEW_URL,
+                   warmKey: '_meta/last_warm_image_op.txt' });
+  }
+  for (const t of targets) {
+    if (!t.url) continue;
+    try {
+      const last = await _readLastWarmMs(env, t.warmKey).catch(() => null);
+      if (last != null && Date.now() - last < PREWARM_FRESH_MS) {
+        console.log(`[pre-warm] ${t.label} already warm — skipped`);
+        continue;
+      }
+      // Do NOT log the url: /healthz is unauthenticated and publicly pingable.
+      await fetch(_healthzUrl(t.url), {
+        method: 'GET',
+        signal: AbortSignal.timeout(120_000),
+      }).catch(() => null);
+      console.log(`[pre-warm] ${t.label} healthz pinged`);
+    } catch (e) {
+      console.warn(`[pre-warm] ${t.label} failed:`,
+                   e instanceof Error ? e.message : String(e));
+    }
+  }
+}
+
+/** Cron entry point. Heartbeat-gated so an idle deployment never boots a
+ *  GPU: without a /api/heartbeat in the last 5 min we assume nobody is
+ *  online. NOTE (documented for the record): a 15-minute cron CANNOT keep
+ *  the text2image container alive — scaledown_window is 300 s, so it is
+ *  dead for 10 of every 15 minutes. Closing that gap with a 4-minute cron
+ *  would cost ~$1400/month of idle L40S and was already tried + disabled (see
+ *  the commented-out block in wrangler.toml). The cron is therefore a
+ *  best-effort top-up only; the real coverage comes from the
+ *  desktop-triggered POST /api/prewarm and from the 524 retries. */
+async function preWarmTick(env: Env): Promise<void> {
+  if (!(await isUserOnline(env))) {
+    console.log('[pre-warm] skipped — no recent heartbeat (nobody online)');
+    return;
+  }
+  if (env.MODAL_TEXT2IMAGE_URL) await preWarmModal(env);
+  else await preWarmCog(env);
+}
+
 async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
   // No auth — heartbeat is cheap and unauthenticated.
   // (We don't want to fail the heartbeat if the user's cookie has
@@ -12454,6 +12596,30 @@ async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
   void req;
   await markHeartbeat(env);
   return json({ ok: true });
+}
+
+/** POST /api/prewarm — a signed-in client (desktop app entering Cloud
+ *  mode, or the web app opening the image panel) asks us to start booting
+ *  the text2image container NOW, so its first real click lands warm.
+ *  Returns immediately; the ping runs in waitUntil.
+ *  Auth is REQUIRED (unlike /api/heartbeat): this route can start a GPU,
+ *  so it must not be anonymous. The PREWARM_FRESH_MS check inside
+ *  preWarmModal is the natural rate limit — a repeated caller costs
+ *  nothing while the container is warm. */
+async function handlePrewarm(req: Request, env: Env,
+                             ctx?: { waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  let imageOp = false;
+  try { imageOp = !!(await req.json().catch(() => ({})) as { imageOp?: boolean }).imageOp; } catch { /* body optional */ }
+  const last = await _readLastWarmMs(env, '_meta/last_warm_text2image.txt').catch(() => null);
+  if (last != null && Date.now() - last < PREWARM_FRESH_MS && !imageOp) {
+    return json({ ok: true, warming: false, warm: true });
+  }
+  const p = preWarmModal(env, { imageOp });
+  if (ctx?.waitUntil) ctx.waitUntil(p);
+  else p.catch(() => {});          // never block the caller on a GPU boot
+  return json({ ok: true, warming: true });
 }
 
 /* ────────────────────────── main fetch handler ─────────────────────── */
@@ -12753,7 +12919,7 @@ export default {
           skipped: 0,
           errors: [] as string[],
         };
-        try { await preWarmCog(env); } catch (e) { rec.errors.push('preWarm: ' + emsg(e)); }
+        try { await preWarmTick(env); } catch (e) { rec.errors.push('preWarm: ' + emsg(e)); }
         try { await purgeTransientUploads(env); } catch (e) { rec.errors.push('purge: ' + emsg(e)); }
         try {
           const r = await reapStuckJobs(env);
@@ -12811,6 +12977,10 @@ export default {
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
         '/api/auto-rig', '/api/auto-rig-status',
         '/api/mesh-segment', '/api/mesh-segment-status',
+        // /api/prewarm can BOOT a Modal GPU — it must obey the same kill
+        // switch. (/api/heartbeat stays reachable: it is a free R2 write and
+        // the pre-warm it gates is itself blocked here.)
+        '/api/prewarm',
       ]);
       // /api/stripe-webhook MUST stay reachable even when Site is OFF.
       // Stripe has already charged the card by the time it calls us; a
@@ -12979,6 +13149,14 @@ export default {
         if (pathname === '/api/animations/copy'       && method === 'POST') return await handleAnimCopy(req, env);
         if (pathname === '/api/landmarks'             && method === 'POST') return await handleLandmarks(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
+        // Cold-start mitigation (see the "Modal pre-warm" section):
+        //   /api/heartbeat — free, unauthenticated, 1 R2 PUT. It was DEFINED
+        //     but never routed, so isUserOnline() always returned false and
+        //     the pre-warm cron had been inert since it was written.
+        //   /api/prewarm   — session-gated, boots the text2image container
+        //     on demand (desktop entering Cloud mode / image panel opened).
+        if (pathname === '/api/heartbeat'             && (method === 'POST' || method === 'GET')) return await handleHeartbeat(req, env);
+        if (pathname === '/api/prewarm'               && method === 'POST') return await handlePrewarm(req, env, _ctx as { waitUntil?: (p: Promise<unknown>) => void });
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/construction-stages-3d' && method === 'POST') return await handleConstructionStages3d(req, env);
         if (pathname === '/api/stages3d-list'         && method === 'GET')  return await handleStages3dList(req, env);

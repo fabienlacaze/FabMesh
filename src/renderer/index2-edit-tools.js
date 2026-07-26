@@ -604,7 +604,17 @@
           alert('maskInpaint API not available.');
           return;
         }
-        window.meshyAPI.maskInpaint({ imagePath: imgPath, maskDataUrl: maskDataUrl, prompt: promptText })
+        // Ce fichier est un script CLASSIQUE : il ne voit ni la copie `API`
+        // d'index2.js ni showCloudLoginModal (portée module). En mode Cloud,
+        // maskInpaint peut renvoyer { needsCloudLogin:true } → on passe par le
+        // helper global exposé par index2.js (modale de connexion + 1 retry).
+        // Repli sur l'appel direct si index2.js n'a pas encore booté.
+        var _mi = function (o) { return window.meshyAPI.maskInpaint(o); };
+        var _args = { imagePath: imgPath, maskDataUrl: maskDataUrl, prompt: promptText };
+        var _call = (typeof window._withCloudLogin === 'function')
+          ? window._withCloudLogin(_mi, _args)
+          : _mi(_args);
+        _call
         .then(function (r) {
           if (r && r.success) {
             try { completeJob(job.id, true); } catch (_) {}

@@ -80,10 +80,23 @@ bucket_name = "myfabmesh-meshes"
 
 # ACTIVE crons:
 #   "*/15 * * * *"  → maintenance: reapStuckJobs (refund abandoned jobs) +
-#                     purgeTransientUploads (R2 retention). preWarmCog is gated
+#                     purgeTransientUploads (R2 retention). preWarmTick is gated
 #                     on isUserOnline() so it NO-OPS (no credit burn) when no tab
 #                     is open — that was the reason the old */4min cron was
 #                     disabled; */15 + the gate is safe.
+#
+# COLD-START NOTE (2026-07-26) — do NOT "fix" the 524 by shortening this cron.
+# The Modal text2image container has scaledown_window=300s (modal_app/app.py:525),
+# so a 15-min cron leaves it dead for 10 of every 15 minutes. Making the cron
+# beat that window (*/4) is exactly the setup that was tried and disabled above,
+# and keeping an L40S alive 24/7 costs ~$1400/month. Same verdict for
+# min_containers=1 on the Modal side. The supported coverage is instead:
+#   1. POST /api/prewarm (session-gated, fired by the desktop when it enters
+#      Cloud mode) — boots the container while the user reads the UI;
+#   2. the 524 retry inside callModalText2Image / callModalTpose (60s + 90s);
+#   3. the one-shot desktop retry in src/main/cloud_fallback.js.
+# Until this commit /api/heartbeat was DEFINED but never routed, so the gate
+# never opened and the pre-warm had never actually run in production.
 #   "0 6 * * 1"     → weekly Supabase keep-alive ONLY (cheap ping, no pre-warm),
 #                     anti free-tier auto-pause.
 # scheduled() routes by event.cron: the weekly tick runs only keepAliveSupabase;

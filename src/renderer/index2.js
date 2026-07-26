@@ -28,6 +28,32 @@ if (!THREE.Mesh.prototype.__bvhPatched) {
 }
 
 // ============================================================
+// GARDE WEBGL (cert Store 10.1.2.10)
+// ============================================================
+// Un contexte WebGL peut échouer (iGPU sur blocklist Chromium, RDP, VM,
+// accélération désactivée). `new THREE.WebGLRenderer` LÈVE dans ce cas et
+// l'exception remonte au panneau d'erreur global → app inutilisable alors que
+// la génération, elle, marche. On centralise la création : en cas d'échec on
+// renvoie null et on affiche un encart explicatif dans le conteneur.
+function _webglNote(hostEl) {
+  if (!hostEl || !hostEl.querySelector) return;
+  if (hostEl.querySelector('.webgl-unavailable')) return;
+  const n = document.createElement('div');
+  n.className = 'webgl-unavailable';
+  n.textContent = _i18nT('3D preview unavailable on this device (no WebGL / graphics acceleration). '
+    + 'Generation still works and the file is saved to disk.');
+  hostEl.appendChild(n);
+}
+function _mkRenderer(opts, hostEl) {
+  try { return new THREE.WebGLRenderer(opts); }
+  catch (e) {
+    console.warn('[webgl] renderer creation failed:', (e && e.message) || e);
+    _webglNote(hostEl);
+    return null;
+  }
+}
+
+// ============================================================
 // PASSERELLE IPC + INTERCEPTION « session cloud requise »
 // ============================================================
 // Cert Store 10.1.2.10 : en mode Cloud, TOUT appel d'outil peut revenir avec
@@ -70,6 +96,20 @@ const API = (() => {
     return copy;
   } catch (_) { return raw; }
 })();
+
+// Helper exposé pour les scripts NON-module (index2-edit-tools.js) qui ne
+// voient ni la copie `API` ni showCloudLoginModal (portée module). Même
+// contrat que le wrapper ci-dessus : appel → needsCloudLogin → modale → un
+// seul retry. Transparent hors cloud (sans needsCloudLogin, retour tel quel).
+window.showCloudLoginModal = showCloudLoginModal;   // déclaration hoistée
+window._withCloudLogin = async function (fn, ...args) {
+  let r = await fn(...args);
+  if (r && r.needsCloudLogin) {
+    const ok = await showCloudLoginModal();
+    if (ok) r = await fn(...args);
+  }
+  return r;
+};
 
 // Statut GPU mis en cache au boot (le main le cache aussi). Sert à masquer les
 // éléments d'UI purement NVIDIA (moniteur VRAM/température) sur une machine
@@ -230,19 +270,22 @@ function humanizeErrorMessage(raw) {
   const gpuOom = /cuda out of memory|outofmemoryerror|cublas_status_alloc_failed|cudaerrormemoryallocation|cuda error: out of memory|hip out of memory|torch\.cuda\.outofmemory/i.test(s);
   // Saturation RAM système (CPU) — allocateur PyTorch / bad_alloc / MemoryError.
   const ramOom = /defaultcpuallocator: not enough memory|std::bad_alloc|bad_alloc|\bmemoryerror\b|cannot allocate memory|paging file is too small/i.test(s);
+  // Clés ANGLAISES (langue par défaut de l'UI, cert Store) + traduction fr
+  // dans lang/_additions2.js. _i18nT est une déclaration hoistée du module :
+  // l'appel à l'exécution est sûr même si elle est définie plus bas.
   if (gpuOom) {
-    return 'GPU insuffisant — la mémoire de votre carte graphique (VRAM) est saturée.\n\n'
-      + 'Solutions :\n'
-      + '• Fermez les autres applications qui utilisent le GPU (jeux, navigateurs, IA).\n'
-      + '• Réessayez avec une qualité/résolution plus faible.\n'
-      + '• Ou passez au mode Cloud (bouton « Cloud ») pour lancer ce calcul sur nos serveurs.';
+    return _i18nT('Not enough GPU memory — your graphics card (VRAM) is full.\n\n'
+      + 'What you can do:\n'
+      + '• Close other apps using the GPU (games, browsers, AI tools).\n'
+      + '• Retry with a lower quality/resolution.\n'
+      + '• Or switch to Cloud mode to run this on our servers.');
   }
   if (ramOom) {
-    return 'RAM insuffisante — la mémoire de votre système est saturée.\n\n'
-      + 'Solutions :\n'
-      + '• Fermez les autres applications ouvertes pour libérer de la mémoire.\n'
-      + '• Réessayez avec une qualité/résolution plus faible.\n'
-      + '• Ou passez au mode Cloud (bouton « Cloud ») pour lancer ce calcul sur nos serveurs.';
+    return _i18nT('Not enough system memory (RAM).\n\n'
+      + 'What you can do:\n'
+      + '• Close other open apps to free memory.\n'
+      + '• Retry with a lower quality/resolution.\n'
+      + '• Or switch to Cloud mode to run this on our servers.');
   }
   return s;
 }
@@ -253,7 +296,7 @@ function customError(message, title = 'Error') {
   // Traduit les erreurs OOM (VRAM/RAM) en message FR actionnable avant affichage.
   const mapped = humanizeErrorMessage(message);
   const isOom = mapped !== String(message || '');
-  if (isOom && (title === 'Error' || title === 'Erreur')) title = 'Mémoire insuffisante';
+  if (isOom && (title === 'Error' || title === 'Erreur')) title = _i18nT('Out of memory');
   // Truncate insanely long messages but keep them scrollable
   const safe = String(mapped || 'Unknown error');
   const modal = document.getElementById('modal-confirm');
@@ -460,9 +503,9 @@ function showGoToToast(targetEl, message, label, onGo) {
   const toast = document.createElement('div');
   toast.style.cssText = 'background:rgba(22,163,74,0.95); color:white; padding:10px 16px; border-radius:8px; font-size:13px; font-weight:600; pointer-events:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3); transition:opacity 0.3s; max-width:520px; display:flex; align-items:center; gap:12px;';
   const span = document.createElement('span');
-  span.textContent = message || 'Élément généré ✅';
+  span.textContent = message || (_i18nT('Item generated') + ' ✅');
   const btn = document.createElement('button');
-  btn.textContent = label || 'Aller à l\'élément généré';
+  btn.textContent = label || _i18nT('Go to the generated item');
   btn.style.cssText = 'background:rgba(255,255,255,0.2); color:#fff; border:1px solid rgba(255,255,255,0.55); border-radius:6px; padding:5px 12px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; flex:none;';
   let hideTimer = null, removeTimer = null;
   const dismiss = () => {
@@ -1120,7 +1163,8 @@ function _mountMeshThumb(card, url) {
   if (!slot) return;
   const w = slot.clientWidth || 240;
   const h = slot.clientHeight || 200;
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
+  const renderer = _mkRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false }, slot);
+  if (!renderer) return;   // pas de WebGL : encart posé dans le slot, carte utilisable
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(w, h, false);
   renderer.setClearColor(0x0a0a0e, 1);
@@ -1866,12 +1910,10 @@ async function gateUltraQualityByRAM() {
     const bTxt = `${budgetGB.toFixed(0)} GB`;
     // Ultra (1536_cascade) — needs the largest budget.
     _gateCascadeRow(ultra, budgetGB >= ULTRA_Q_MIN_RAM_GB,
-      `Ultra Quality (1536) nécessite un budget RAM ≥ ${ULTRA_Q_MIN_RAM_GB} GB. ` +
-      `Budget actuel : ${bTxt}. Monte le curseur RAM (Réglages) ou ajoute de la RAM.`);
+      _i18nTf('Ultra Quality (1536) needs a RAM budget of at least {x} GB. Current budget: {y}. Raise the RAM slider in Settings, or add RAM.', ULTRA_Q_MIN_RAM_GB, bTxt));
     // Quality+ (1024_cascade) — below this we fall back to the base mode.
     _gateCascadeRow(qplus, budgetGB >= QUALITY_PLUS_MIN_RAM,
-      `Quality+ (1024) nécessite un budget RAM ≥ ${QUALITY_PLUS_MIN_RAM} GB. ` +
-      `Budget actuel : ${bTxt} → mode de base (le plus léger).`);
+      _i18nTf('Quality+ (1024) needs a RAM budget of at least {x} GB. Current budget: {y} → base mode (the lightest).', QUALITY_PLUS_MIN_RAM, bTxt));
     // If Ultra is locked out but Quality+ is still available, fall back to it.
     if (ultra && ultra.disabled && qplus && !qplus.disabled && !qplus.checked) {
       qplus.checked = true;
@@ -3680,9 +3722,9 @@ document.getElementById('bs-start')?.addEventListener('click', async () => {
   const count = Math.max(2, Math.min(20, parseInt(document.getElementById('bs-count')?.value, 10) || 4));
   document.getElementById('modal-buildstages-options')?.classList.add('hidden');
   const prompt = (p && (p.prompt || p.initialPrompt)) || '';
-  gatedRun('img2img', `Étapes de construction: ${p.name}`, async () => {
-    const job = pushJob(`Étapes de construction: ${p.name}`, null,
-      { 'Étapes': count, Source: String(target).split(/[\\/]/).pop() },
+  gatedRun('img2img', `${_i18nT('Construction stages')}: ${p.name}`, async () => {
+    const job = pushJob(`${_i18nT('Construction stages')}: ${p.name}`, null,
+      { [_i18nT('Stages')]: count, Source: String(target).split(/[\\/]/).pop() },
       count * 9000, { sourceImageUrl: target, projectName: p.name });
     try {
       const r = await API.generateConstructionStages({ imagePath: target, prompt, stageCount: count, jobId: job.id });
@@ -3708,17 +3750,17 @@ document.getElementById('bs-start')?.addEventListener('click', async () => {
         }
         const goEl = document.getElementById('step-card-image') || document.getElementById('step1-preview');
         if (goEl && typeof showGoToToast === 'function') {
-          showGoToToast(goEl, `Nouvelle version « chantier » créée — ${r.stages.length} étapes ✅`, 'Aller à l\'élément généré');
+          showGoToToast(goEl, _i18nTf('New "stages" version created — {x} steps', r.stages.length) + ' ✅', _i18nT('Go to the generated item'));
         } else {
-          showToast(`Nouvelle version « chantier » créée — ${r.stages.length} étapes`, 'success', 2600);
+          showToast(_i18nTf('New "stages" version created — {x} steps', r.stages.length), 'success', 2600);
         }
       } else {
         completeJob(job.id, false);
-        if (!job.cancelled) customError(r?.error || 'unknown', 'Étapes de construction — échec');
+        if (!job.cancelled) customError(r?.error || 'unknown', _i18nT('Construction stages failed'));
       }
     } catch (e) {
       completeJob(job.id, false);
-      if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Étapes de construction — erreur');
+      if (!job.cancelled) customError(e?.error || e?.message || String(e), _i18nT('Construction stages error'));
     }
   });
 });
@@ -3793,7 +3835,7 @@ document.getElementById('ws-stages-bar')?.addEventListener('click', (e) => {
 document.getElementById('ws-mesh-stages3d-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   const mp = p && (p.previewMeshPath || p.selectedMeshPath);
-  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  if (!mp) { showToast(_i18nT('Pick or generate a mesh first.'), 'error'); return; }
   document.getElementById('modal-stages3d-options')?.classList.remove('hidden');
 });
 
@@ -3803,7 +3845,7 @@ document.getElementById('ws-mesh-stages3d-btn')?.addEventListener('click', () =>
 document.getElementById('ws-mesh-explode-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   const mp = p && (p.previewMeshPath || p.selectedMeshPath);
-  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  if (!mp) { showToast(_i18nT('Pick or generate a mesh first.'), 'error'); return; }
   document.getElementById('modal-explode-options')?.classList.remove('hidden');
 });
 document.getElementById('ex3d-frags')?.addEventListener('input', (e) => { const el = document.getElementById('ex3d-frags-val'); if (el) el.textContent = e.target.value; });
@@ -3812,7 +3854,7 @@ document.getElementById('ex3d-start')?.addEventListener('click', () => {
   document.getElementById('modal-explode-options')?.classList.add('hidden');
   const p = state.currentProject;
   const mp = p && (p.previewMeshPath || p.selectedMeshPath);
-  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  if (!mp) { showToast(_i18nT('Pick or generate a mesh first.'), 'error'); return; }
   const fragments = Math.max(6, Math.min(80, parseInt(document.getElementById('ex3d-frags')?.value, 10) || 24));
   const fill = document.getElementById('ex3d-fill')?.checked !== false;
   const job = pushJob(`Explosion 3D: ${p.name}`, null,
@@ -3825,10 +3867,10 @@ document.getElementById('ex3d-start')?.addEventListener('click', () => {
         await reloadCurrentProject();
         const np = state.currentProject;
         if (np) { np.previewMeshPath = r.newPath; try { showStep2Preview({ path: r.newPath, filename: r.filename }); } catch (_) {} }
-        showToast('Version « explosion » créée — utilise le slider d\'explosion du viewer.', 'success', 3200);
+        showToast(_i18nT('"Exploded" version created — use the explode slider in the viewer.'), 'success', 3200);
       } else {
         completeJob(job.id, false);
-        customError((r && r.error) || 'unknown', 'Explosion 3D — échec');
+        customError((r && r.error) || 'unknown', _i18nT('3D explode failed'));
       }
     } catch (e) {
       completeJob(job.id, false);
@@ -3990,7 +4032,7 @@ function _rzCleanup() {
 function openResizeTool() {
   const p = state.currentProject;
   const mp = p && (p.previewMeshPath || p.selectedMeshPath);
-  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  if (!mp) { showToast(_i18nT('Pick or generate a mesh first.'), 'error'); return; }
   rzState.meshPath = String(mp);
   const modal = document.getElementById('modal-resize');
   const canvas = document.getElementById('rz-canvas');
@@ -3998,7 +4040,8 @@ function openResizeTool() {
   if (!modal || !canvas || !vp) return;
   modal.classList.remove('hidden');
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const renderer = _mkRenderer({ canvas, antialias: true }, vp);
+  if (!renderer) return;   // modale ouverte + encart : pas de crash au clic
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0b14);
   const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 5000);
@@ -4051,7 +4094,7 @@ function openResizeTool() {
     _rzSetUniform(document.getElementById('rz-uniform')?.checked);
     _rzBuildRulers(); _rzUpdateReadout();
   }, undefined, (err) => {
-    showToast('Chargement du mesh échoué: ' + (err?.message || err), 'error');
+    showToast(_i18nT('Could not load the mesh:') + ' ' + (err?.message || err), 'error');
   });
 
   const loop = () => {
@@ -4087,7 +4130,7 @@ document.getElementById('rz-apply')?.addEventListener('click', () => {
   const mp = rzState.meshPath;
   _rzCloseModal();
   const p = state.currentProject;
-  const job = pushJob(`Redimensionnement: ${p?.name || ''}`, null, { Échelle: `${sx.toFixed(2)}×${sy.toFixed(2)}×${sz.toFixed(2)}` }, 4000, { projectName: p?.name });
+  const job = pushJob(`${_i18nT('Resize')}: ${p?.name || ''}`, null, { [_i18nT('Scale')]: `${sx.toFixed(2)}×${sy.toFixed(2)}×${sz.toFixed(2)}` }, 4000, { projectName: p?.name });
   (async () => {
     try {
       const r = await API.resizeMesh({ meshPath: mp, sx, sy, sz });
@@ -4096,10 +4139,10 @@ document.getElementById('rz-apply')?.addEventListener('click', () => {
         await reloadCurrentProject();
         const np = state.currentProject;
         if (np) { np.previewMeshPath = r.newPath; try { showStep2Preview({ path: r.newPath, filename: r.filename }); } catch (_) {} }
-        showToast('Nouvelle version redimensionnée créée.', 'success', 2500);
+        showToast(_i18nT('New resized version created.'), 'success', 2500);
       } else {
         completeJob(job.id, false);
-        customError((r && r.error) || 'unknown', 'Redimensionnement — échec');
+        customError((r && r.error) || 'unknown', _i18nT('Resize failed'));
       }
     } catch (e) {
       completeJob(job.id, false);
@@ -4126,13 +4169,13 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
   document.getElementById('modal-stages3d-options')?.classList.add('hidden');
   const p = state.currentProject;
   let mp = p && (p.previewMeshPath || p.selectedMeshPath);
-  if (!mp) { showToast('Génère ou choisis un mesh d\'abord.', 'error'); return; }
+  if (!mp) { showToast(_i18nT('Pick or generate a mesh first.'), 'error'); return; }
   // If a construction STAGE is displayed, study from its COVER mesh instead —
   // otherwise the new version's cover would be the scaffolded half-building.
   mp = String(mp).replace(/_stages3d[\\\/]stage_\d+\.glb$/i, '.glb');
   const count = Math.max(2, Math.min(20, parseInt(document.getElementById('bs3d-count')?.value, 10) || 5));
-  const job = pushJob(`Étapes de construction 3D: ${p.name}`, null,
-    { 'Étapes': count, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
+  const job = pushJob(`${_i18nT('Construction stages 3D')}: ${p.name}`, null,
+    { [_i18nT('Stages')]: count, Source: String(mp).split(/[\\/]/).pop() }, count * 2500, { projectName: p.name });
   (async () => {
     try {
       const manual = document.getElementById('bs3d-mat-mode')?.value === 'manual';
@@ -4158,14 +4201,14 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
           }
           _showMeshStagesBar(r.stages);
         }
-        showToast(`Nouvelle version « chantier 3D » — ${r.stages.length} étapes, clique les vignettes`, 'success', 3000);
+        showToast(_i18nTf('New "3D stages" version — {x} steps, click the thumbnails', r.stages.length), 'success', 3000);
       } else {
         completeJob(job.id, false);
-        customError((r && r.error) || 'unknown', 'Étapes de construction 3D — échec');
+        customError((r && r.error) || 'unknown', _i18nT('3D construction stages failed'));
       }
     } catch (e) {
       completeJob(job.id, false);
-      customError(e?.message || String(e), 'Étapes de construction 3D — erreur');
+      customError(e?.message || String(e), _i18nT('Construction stages 3D — error'));
     }
   })();
 });
@@ -4173,7 +4216,7 @@ document.getElementById('bs3d-start')?.addEventListener('click', () => {
 // construction stages read CHANTIER→FINAL (detected from the stage folder name).
 function _stageKindLabels(stages) {
   const explode = /_explode_stages/i.test(String((stages && stages[0] && stages[0].path) || ''));
-  return explode ? { first: 'INTACT', last: 'EXPLOSÉ' } : { first: 'CHANTIER', last: 'FINAL' };
+  return explode ? { first: _i18nT('INTACT'), last: _i18nT('EXPLODED') } : { first: _i18nT('SCAFFOLD'), last: _i18nT('FINAL') };
 }
 function _showMeshStagesBar(stages) {
   const bar = document.getElementById('ws-mesh-stages-bar');
@@ -5320,12 +5363,12 @@ async function jumpToSourceImage(imgPath) {
     try {
       const info = await API.getFileInfo(imgPath);
       if (info && info.ok) {
-        showToast("Source absente des versions actuelles — affichée en grand.", 'info');
+        showToast(_i18nT('Source is not among the current versions — shown full size.'), 'info');
         openLightbox(imgPath);
         return;
       }
     } catch (_) {}
-    showToast("Image source introuvable (déplacée ou supprimée).", 'error');
+    showToast(_i18nT('Source image not found (moved or deleted).'), 'error');
     return;
   }
   const matchedPath = matched.path || matched;
@@ -5852,20 +5895,23 @@ const ASSET_STYLE_PROMPTS = {
 // remapper (scripts/puppeteer_to_orc_m1.py) only handles orc_m1 today;
 // other entries map to bones_json templates listed in
 // scripts/rig_templates/skm/registry.json + companions on disk.
+// Libellés en ANGLAIS (langue par défaut de l'UI, cert Store 10.1.2.10) —
+// la traduction fr vit dans lang/_additions2.js, appliquée via _i18nT au
+// moment où l'option est construite.
 const SKELETON_TARGETS = [
-  { value: "orc_m1",         emoji: "🤖",  label: "Humanoide bipède",        variete: "Humanoide" },
-  { value: "ue5_mannequin",  emoji: "🤖",  label: "UE5 Mannequin std",       variete: "Humanoide" },
-  { value: "zebra",          emoji: "🐎",  label: "Quadrupède équidé",       variete: "Quadrupède équidé" },
-  { value: "lion",           emoji: "🦁",  label: "Quadrupède félidé",       variete: "Quadrupède félidé" },
-  { value: "wolf",           emoji: "🐺",  label: "Quadrupède canidé",       variete: "Quadrupède canidé" },
-  { value: "crocodile",      emoji: "🐊",  label: "Reptile quadrupède",      variete: "Reptile" },
-  { value: "elephant",       emoji: "🐘",  label: "Pachyderme",              variete: "Pachyderme" },
-  { value: "deer",           emoji: "🦌",  label: "Cervidé",                 variete: "Cervidé" },
-  { value: "crow",           emoji: "🐦",  label: "Oiseau",                  variete: "Oiseau" },
-  { value: "turtle",         emoji: "🐢",  label: "Tortue",                  variete: "Tortue" },
-  { value: "spider",         emoji: "🕷️", label: "Arachnide 8-pattes",      variete: "Arachnide" },
-  { value: "bat",            emoji: "🦇",  label: "Chiroptère",              variete: "Chiroptère" },
-  { value: "dragon",         emoji: "🐉",  label: "Dragon fantastique",      variete: "Dragon" },
+  { value: "orc_m1",         emoji: "🤖",  label: "Biped humanoid",          variete: "Humanoid" },
+  { value: "ue5_mannequin",  emoji: "🤖",  label: "UE5 Mannequin std",       variete: "Humanoid" },
+  { value: "zebra",          emoji: "🐎",  label: "Equine quadruped",        variete: "Equine quadruped" },
+  { value: "lion",           emoji: "🦁",  label: "Feline quadruped",        variete: "Feline quadruped" },
+  { value: "wolf",           emoji: "🐺",  label: "Canine quadruped",        variete: "Canine quadruped" },
+  { value: "crocodile",      emoji: "🐊",  label: "Quadruped reptile",       variete: "Reptile" },
+  { value: "elephant",       emoji: "🐘",  label: "Pachyderm",               variete: "Pachyderm" },
+  { value: "deer",           emoji: "🦌",  label: "Cervid",                  variete: "Cervid" },
+  { value: "crow",           emoji: "🐦",  label: "Bird",                    variete: "Bird" },
+  { value: "turtle",         emoji: "🐢",  label: "Turtle",                  variete: "Turtle" },
+  { value: "spider",         emoji: "🕷️", label: "8-legged arachnid",       variete: "Arachnid" },
+  { value: "bat",            emoji: "🦇",  label: "Chiropteran",             variete: "Chiropteran" },
+  { value: "dragon",         emoji: "🐉",  label: "Fantasy dragon",          variete: "Dragon" },
   { value: "puppeteer_raw",  emoji: "⚪",  label: "Puppeteer raw (no remap)", variete: "Raw" },
 ];
 
@@ -5898,7 +5944,7 @@ async function populateRigSkeletonDropdown() {
   for (const t of SKELETON_TARGETS) {
     const opt = document.createElement('option');
     opt.value = t.value;
-    opt.textContent = `${t.emoji} ${t.label} (loading...)`;
+    opt.textContent = `${t.emoji} ${_i18nT(t.label)} (${_i18nT('loading')}...)`;
     opt.dataset.variete = t.variete;
     sel.appendChild(opt);
   }
@@ -5929,7 +5975,7 @@ async function populateRigSkeletonDropdown() {
       } catch (_) { /* fallback */ }
     }
     const opt = sel.options[i];
-    if (opt) opt.textContent = `${t.emoji} ${t.label} (${count} bones)`;
+    if (opt) opt.textContent = `${t.emoji} ${_i18nT(t.label)} (${count} ${_i18nT('bones')})`;
   }));
 }
 
@@ -6483,7 +6529,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
           if (createStage) createStage.open = false;
           if (editStage) editStage.open = true;
           // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément généré".
-          showGoToToast(imgCard, 'Image générée ✅', 'Aller à l\'élément généré');
+          showGoToToast(imgCard, _i18nT('Image generated') + ' ✅', _i18nT('Go to the generated item'));
         }
       } else {
         completeJob(job.id, false, r?.error || 'unknown');
@@ -8744,8 +8790,12 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
 
 // ----- Mesh step -----
 let wsRenderer, wsScene, wsCamera, wsControls, wsModel, wsRafId;
+// Sans WebGL, wsRenderer reste null : ce drapeau évite de reconstruire un
+// Viewer3D à chaque appel (la scène/caméra, elles, restent valides).
+let _wsThreeInit = false;
 function initWsThree() {
-  if (wsRenderer) return;
+  if (wsRenderer || _wsThreeInit) return;
+  _wsThreeInit = true;
   const canvas = document.getElementById('ws-mesh-canvas');
   // Unified Viewer3D (see src/renderer/lib/Viewer3D.js).
   // preserveDrawingBuffer is required so canvas.toDataURL() can capture
@@ -8757,14 +8807,20 @@ function initWsThree() {
   // Renderer needs preserveDrawingBuffer → patch after construction.
   // (Viewer3D's renderer was created without it; recreate using the
   // same canvas with the flag on.)
-  _wsV.renderer.dispose();
-  _wsV.renderer = new THREE.WebGLRenderer({
+  // Viewer3D garde déjà sa propre création (renderer null si WebGL absent) :
+  // on ne détruit l'ancien renderer QU'APRÈS avoir réussi à en créer un neuf,
+  // sinon un échec laisserait le viewer principal sans aucun renderer.
+  const _r2 = _mkRenderer({
     canvas, antialias: true, alpha: true, preserveDrawingBuffer: true,
-  });
-  _wsV.renderer.setSize(canvas.clientWidth || 320, canvas.clientHeight || 260, false);
-  _wsV.renderer.setPixelRatio(window.devicePixelRatio);
-  _wsV.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  _wsV.renderer.toneMappingExposure = 1.0;
+  }, canvas?.parentElement);
+  if (_r2) {
+    try { _wsV.renderer?.dispose(); } catch (_) {}
+    _wsV.renderer = _r2;
+    _wsV.renderer.setSize(canvas.clientWidth || 320, canvas.clientHeight || 260, false);
+    _wsV.renderer.setPixelRatio(window.devicePixelRatio);
+    _wsV.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    _wsV.renderer.toneMappingExposure = 1.0;
+  }
   wsRenderer = _wsV.renderer;
   wsScene = _wsV.scene;
   wsCamera = _wsV.camera;
@@ -9522,7 +9578,8 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
           const canvas = document.getElementById('ws-anim-rig-canvas');
           if (!canvas) { clearLoading(); return; }
           const w = canvas.clientWidth || 300, h = canvas.clientHeight || 200;
-          const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+          const renderer = _mkRenderer({ canvas, antialias: true }, canvas.parentElement);
+          if (!renderer) { clearLoading(); return; }
           renderer.setPixelRatio(devicePixelRatio);
           renderer.setSize(w, h, false);
           const scene = new THREE.Scene();
@@ -9929,8 +9986,8 @@ document.getElementById('ws-mesh-detail-synth-btn')?.addEventListener('click', (
   const m = getCurrentMeshObj();
   if (!p || !m) { showToast('Pick a mesh first.', 'error'); return; }
   const assetType = document.getElementById('ws-asset-type')?.value || p.assetType || 'character';
-  gatedRun('rig', `Détail++: ${p.name}`, async () => {
-    const job = pushJob(`Détail++: ${p.name}`, null, {
+  gatedRun('rig', `${_i18nT('Detail++')}: ${p.name}`, async () => {
+    const job = pushJob(`${_i18nT('Detail++')}: ${p.name}`, null, {
       Method: 'render → SDXL tile → re-bake',
       'Asset type': assetType,
       'Source mesh': m.filename,
@@ -9942,11 +9999,11 @@ document.getElementById('ws-mesh-detail-synth-btn')?.addEventListener('click', (
         await reloadCurrentProject();
       } else {
         completeJob(job.id, false);
-        if (!job.cancelled) customError(r?.error || 'unknown', 'Détail++ failed');
+        if (!job.cancelled) customError(r?.error || 'unknown', _i18nT('Detail++ failed'));
       }
     } catch (e) {
       completeJob(job.id, false);
-      if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Détail++ error');
+      if (!job.cancelled) customError(e?.error || e?.message || String(e), _i18nT('Detail++ error'));
     }
   });
 });
@@ -11041,19 +11098,19 @@ function _mtRunPreview() {
     }
     if (mtState.schema.overlayPreview === 'pivot') {
       _mtBuildPivotGizmo(vals);
-      if (status) status.textContent = `Pivot: ${vals.pivot || 'bottom'} — le gizmo jaune montre où sera l'origine. Apply déplace le mesh.`;
+      if (status) status.textContent = `Pivot: ${vals.pivot || 'bottom'} — ` + _i18nT('the yellow gizmo shows where the origin will be. Apply moves the mesh.');
     } else if (mtState.schema.overlayPreview) {
       const st = _mtBuildFillOverlays(vals);
       if (status) {
         if (st.loops) {
-          status.textContent = `Trous : ${st.filled} à remplir (vert) · ${st.tooSmall} trop petits (gris) · ${st.tooBig} trop grands (rouge)`;
+          status.textContent = _i18nTf('Holes: {x} to fill (green)', st.filled) + ` · ` + _i18nTf('{x} too small (grey)', st.tooSmall) + ` · ` + _i18nTf('{x} too large (red)', st.tooBig);
         } else if ((st.boundaryEdges || 0) < 3) {
           // No open boundary edges at all → the black speckles are NOT holes
           // but reversed-normal / double-sided faces. Fill Holes can't help;
           // Fix normals (or Watertight remesh) is the tool.
-          status.textContent = 'Aucun bord ouvert : les taches noires sont des faces à normale inversée (pas des trous). → Utilise « Fix normals » ou « Watertight ».';
+          status.textContent = _i18nT('No open boundary: the black speckles are reversed-normal faces, not holes. Use "Fix normals" or "Watertight" instead.');
         } else {
-          status.textContent = `Bords ouverts détectés (${st.boundaryEdges} arêtes) mais 0 boucle fermée traçable — géométrie non-manifold. Essaie « Watertight ».`;
+          status.textContent = _i18nTf('Open edges detected ({x}) but no traceable closed loop — non-manifold geometry. Try "Watertight".', st.boundaryEdges);
         }
       }
     } else if (status) {
@@ -11081,7 +11138,10 @@ async function _mtInitViewport() {
   const canvas = document.getElementById('mt-canvas');
   const w = container.clientWidth || 800;
   const h = container.clientHeight || 600;
-  mtState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  mtState.renderer = _mkRenderer({ canvas, antialias: true, alpha: true }, container);
+  // Sans WebGL : l'aperçu est indisponible (encart posé dans le conteneur) mais
+  // la modale et son bouton Apply restent utilisables — l'op tourne côté main.
+  if (!mtState.renderer) { mtState.webglUnavailable = true; return; }
   mtState.renderer.setSize(w, h, false);
   mtState.renderer.setPixelRatio(window.devicePixelRatio);
   mtState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -11123,6 +11183,7 @@ async function _mtInitViewport() {
 }
 
 function _mtLoadMesh(meshPath) {
+  if (!mtState.renderer || !mtState.scene) return;   // WebGL indisponible
   if (mtState.origModel && mtState.scene) {
     mtState.scene.remove(mtState.origModel);
   }
@@ -11277,10 +11338,10 @@ function openMeshToolModal(toolName) {
         rb.id = 'mt-reset-current';
         rb.className = 'secondary-btn';
         rb.style.cssText = 'margin-top:4px; padding:4px 8px; font-size:11px; width:100%;';
-        rb.textContent = '↺ Actuel';
+        rb.textContent = '↺ ' + _i18nT('Current');
         rb.onclick = () => {
           const n = _mtCurrentTriCount();
-          if (!n) { showToast('Mesh pas encore chargé', 'info', 1200); return; }
+          if (!n) { showToast(_i18nT('Mesh not loaded yet'), 'info', 1200); return; }
           if (n > Number(input.max)) input.max = String(n);  // let the slider reach it
           input.value = String(n);
           labVal.textContent = String(n);
@@ -11347,7 +11408,7 @@ function openMeshToolModal(toolName) {
     // decides decimate vs subdivide from the target vs the current count).
     if (typeof schema.resolveOp === 'function') {
       const r = schema.resolveOp(vals, ctx);
-      if (!r || !r.operation) { showToast('Cible ≈ compte actuel — rien à faire', 'info', 1800); return; }
+      if (!r || !r.operation) { showToast(_i18nT('Target is already the current count — nothing to do'), 'info', 1800); return; }
       close();
       runMeshTool(r.operation, r.params || [], vals);
       return;
@@ -11421,7 +11482,8 @@ async function _atInitViewport() {
   }
   console.log('[align-tex] viewport size', w, h);
   if (!atState.renderer) {
-    atState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    atState.renderer = _mkRenderer({ canvas, antialias: true, alpha: false }, wrap);
+    if (!atState.renderer) { atState.webglUnavailable = true; return; }
     atState.renderer.setSize(w, h, false);
     atState.renderer.setPixelRatio(window.devicePixelRatio);
     atState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -11994,7 +12056,8 @@ async function _peInitViewport() {
   const h = wrap.clientHeight || 560;
   // preserveDrawingBuffer:true so the magnifier loupe can drawImage() the
   // rendered canvas (needed by _peUpdateLoupe).
-  peState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+  peState.renderer = _mkRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true }, wrap);
+  if (!peState.renderer) { peState.webglUnavailable = true; return; }
   peState.renderer.setSize(w, h, false);
   peState.renderer.setPixelRatio(window.devicePixelRatio);
   peState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -12146,7 +12209,7 @@ function _pcSetupCloneCanvas() {
 // moves between strokes) plus its current screen position as a fallback.
 function _pcSetSource(clientX, clientY) {
   const hit = _peRaycast(clientX, clientY);
-  if (!hit) { showToast('Vise le mesh pour définir la source.', 'error', 2000); return; }
+  if (!hit) { showToast(_i18nT('Aim at the mesh to set the clone source.'), 'error', 2000); return; }
   peState.cloneSource = { mesh: hit.object, u: _peClamp01(hit.uv.x), v: _peClamp01(hit.uv.y) };
   peState.cloneSource3D = hit.point.clone();
   peState.cloneSourceScreen = { x: clientX, y: clientY };
@@ -12172,7 +12235,7 @@ function _pcSetSource(clientX, clientY) {
       peState.cloneSrcMarker.scale.setScalar(Math.max(peState.brushSize * 0.5 * unitsPerPx, 1e-4));
     }
   } catch (_) {}
-  showToast('Source définie — clic gauche + glisser pour cloner.', 'success', 1800);
+  showToast(_i18nT('Source set — left-click and drag to clone.'), 'success', 1800);
 }
 
 // Fast raycast for a client-space point, reusing a cached canvas rect and the
@@ -12196,7 +12259,7 @@ function _pcRaycastAt(clientX, clientY, rect, meshes) {
 // BVH raycasting (three-mesh-bvh) keeps the many casts/stamp real-time.
 function _pcStampClone(clientX, clientY, isStart) {
   if (!peState.cloneSource3D && !peState.cloneSourceScreen) {
-    showToast('Ctrl+clic pour définir la source à cloner d\'abord.', 'error', 2500);
+    showToast(_i18nT('Ctrl+click to set the clone source first.'), 'error', 2500);
     return;
   }
   if (!peState.canvases || !peState.raycaster || !peState.camera) return;
@@ -12313,6 +12376,7 @@ function _pcStampClone(clientX, clientY, isStart) {
 }
 
 async function _peLoadMesh(meshPath) {
+  if (!peState.renderer || !peState.scene) return;   // WebGL indisponible
   if (peState.origModel) {
     peState.scene.remove(peState.origModel);
     peState.origModel = null;
@@ -12632,15 +12696,15 @@ function _peConfigureModeUI() {
   const apply = $('pe-apply-device');
   const status = $('pe-status');
   if (cloneMode) {
-    if (h2) h2.textContent = '🩹 Tampon de clonage 3D';
-    if (sub) sub.textContent = "Clone une zone de la texture vers une autre. Ctrl+clic = définir la source, puis clic gauche + glisser = cloner. Tourne (clic droit), zoome, loupe, undo/redo.";
-    if (apply) apply.textContent = '💾 Enregistrer (nouvelle version)';
-    if (status) status.textContent = 'Ctrl+clic = source · clic gauche + glisser = cloner · clic droit = tourner · molette = zoom';
+    if (h2) h2.textContent = '🩹 ' + _i18nT('3D Clone Stamp');
+    if (sub) sub.textContent = _i18nT('Clone one area of the texture onto another. Ctrl+click = set the source, then left-click and drag = clone. Orbit (right-click), zoom, magnifier, undo/redo.');
+    if (apply) apply.textContent = '💾 ' + _i18nT('Save new version');
+    if (status) status.textContent = _i18nT('Ctrl+click = source · left-click + drag = clone · right-click = orbit · wheel = zoom');
   } else if (maskMode) {
-    if (h2) h2.textContent = '🎨 Re-texturer une zone (IA)';
-    if (sub) sub.textContent = "Peins la zone à re-texturer directement sur le mesh 3D (tourne, zoome, loupe, undo/redo), puis décris le nouveau rendu et applique.";
-    if (apply) apply.textContent = '✨ Appliquer la re-texture';
-    if (status) status.textContent = 'Clic gauche + glisser = peindre la zone (blanc). Clic droit = tourner. Molette = zoom.';
+    if (h2) h2.textContent = '🎨 ' + _i18nT('Re-texture an area (AI)');
+    if (sub) sub.textContent = _i18nT('Paint the area to re-texture straight on the 3D mesh (orbit, zoom, magnifier, undo/redo), then describe the new look and apply.');
+    if (apply) apply.textContent = '✨ ' + _i18nT('Apply re-texture');
+    if (status) status.textContent = _i18nT('Left-click + drag = paint the area (white). Right-click = orbit. Wheel = zoom.');
   } else {
     if (h2) h2.textContent = '💡 Paint Emissive';
     if (sub) sub.innerHTML = 'Paint glow areas (lamps, windows, runes). The painted areas become a separate <code>T_emissive</code> texture wired to <code>emissiveMap</code> on the material.';
@@ -12867,7 +12931,7 @@ async function _peApplyMaskRetex() {
   const meshPath = peState.retexMeshPath;
   if (!meshPath) throw new Error('no mesh');
   const rawPrompt = (document.getElementById('pe-mask-prompt')?.value || '').trim();
-  if (!rawPrompt) { showToast('Décris à quoi doit ressembler la zone.', 'error'); throw new Error('no prompt'); }
+  if (!rawPrompt) { showToast(_i18nT('Describe what the painted area should look like.'), 'error'); throw new Error('no prompt'); }
   // Pick the painted mask canvas. Region-retex targets a single atlas; use the
   // mesh with the most painted texels (handles single-mesh GLBs = the common case).
   let best = null, bestScore = -1;
@@ -12877,7 +12941,7 @@ async function _peApplyMaskRetex() {
     for (let i = 0; i < d.length; i += 4) { if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 40) s++; }
     if (s > bestScore) { bestScore = s; best = entry; }
   });
-  if (!best || bestScore <= 0) { showToast('Peins d\'abord la zone à re-texturer (en blanc).', 'error'); throw new Error('empty mask'); }
+  if (!best || bestScore <= 0) { showToast(_i18nT('Paint the area to re-texture first (in white).'), 'error'); throw new Error('empty mask'); }
   // Binarize to pure white-on-black (the atlas may carry faint falloff edges).
   const mc = document.createElement('canvas'); mc.width = PE_TEX_SIZE; mc.height = PE_TEX_SIZE;
   const mctx = mc.getContext('2d');
@@ -12896,7 +12960,7 @@ async function _peApplyMaskRetex() {
   const r = await window.meshyAPI.regionRetex?.({ meshPath, maskDataUrl, prompt, strength, uvMask: true });
   if (r && r.ok && r.path) {
     if (job) completeJob(job.id, true);
-    showToast('Zone re-texturée ✅', 'success');
+    showToast(_i18nT('Region re-textured') + ' ✅', 'success');
     try { await reloadCurrentProject(); } catch (_) {}
   } else {
     if (job) completeJob(job.id, false);
@@ -13419,7 +13483,8 @@ async function _meInitViewport() {
   // preserveDrawingBuffer: true so the magnifier loupe can drawImage() a
   // magnified crop of the rendered WebGL canvas (otherwise the buffer is
   // cleared after compositing and the loupe reads black).
-  meState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+  meState.renderer = _mkRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true }, container);
+  if (!meState.renderer) { meState.webglUnavailable = true; return; }
   meState.renderer.setSize(w, h, false);
   meState.renderer.setPixelRatio(window.devicePixelRatio);
   meState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -13503,6 +13568,7 @@ async function _meInitViewport() {
 }
 
 function _meLoadMesh(meshPath) {
+  if (!meState.renderer || !meState.scene) return;   // WebGL indisponible
   // Remove old mesh
   if (meState.mesh && meState.scene) {
     meState.scene.remove(meState.mesh);
@@ -15837,7 +15903,7 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
           if (createStage) createStage.open = false;
           if (editStage) editStage.open = true;
           // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément généré".
-          showGoToToast(rigCard, 'Rig généré ✅', 'Aller à l\'élément généré');
+          showGoToToast(rigCard, _i18nT('Rig generated') + ' ✅', _i18nT('Go to the generated item'));
         }
       } else {
         completeJob(job.id, false);
@@ -15917,7 +15983,7 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
           if (createStage) createStage.open = false;
           if (editStage) editStage.open = true;
           // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément généré".
-          showGoToToast(rigCard, 'Rig généré ✅', 'Aller à l\'élément généré');
+          showGoToToast(rigCard, _i18nT('Rig generated') + ' ✅', _i18nT('Go to the generated item'));
         }
       } else {
         completeJob(job.id, false, r?.error || 'unknown');
@@ -16105,7 +16171,8 @@ function _initAnimResultViewer(anim) {
 
 function _bootAnimResultViewer(canvas, anim, w, h) {
   console.log('[anim-result] canvas size', w, 'x', h);
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    const renderer = _mkRenderer({ canvas, antialias: true }, canvas.parentElement);
+    if (!renderer) return;   // encart affiché, l'anim reste téléchargeable
     renderer.setPixelRatio(devicePixelRatio);
     renderer.setSize(w, h, false);
     const scene = new THREE.Scene();
@@ -16245,6 +16312,13 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     customError(`${engine} not wired yet.`, 'Engine not ready');
     return;
   }
+  // Garde Cloud : anim:retarget (Motion Library Blender/Rokoko) n'a AUCUN
+  // équivalent worker — le main renverrait une erreur brute. L'option est déjà
+  // masquée par _applyRigAnimPills ; ceinture-bretelles si le select est forcé.
+  if (engine === 'rokoko_library' && _isCloudMode()) {
+    _cloudToolUnavailable(_i18nT('Motion Library'));
+    return;
+  }
   // Resolve the current rigged GLB from the active project state
   const proj = state.currentProject;
   const rigPath = proj?.activeRigPath || proj?.rigs?.[proj.rigs.length - 1]?.path;
@@ -16288,7 +16362,9 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
         return;
       }
       setStatus(`Generating "${animType}" with generative AI (local GPU)…`);
-      const result = await window.meshyAPI.animKimodo({ meshPath: rigPath, animType });
+      // Passe par la copie `API` (et non window.meshyAPI brut) pour bénéficier
+      // de l'interception needsCloudLogin → modale de connexion + retry.
+      const result = await API.animKimodo({ meshPath: rigPath, animType });
       if (!result?.success) {
         setStatus(`Generation failed: ${result?.error || 'unknown'}`, true);
         if (_activeAnimJob && typeof completeJob === 'function') {
@@ -18196,8 +18272,15 @@ function refreshGpuLimitLockState() {
   });
 }
 
+// Sonde nvidia-smi autorisée ? Sur une machine sans carte NVIDIA (testeurs
+// Store, laptops) ou en mode Cloud, chaque appel checkGPU spawn un exécutable
+// inexistant — jusqu'à 2 fois par seconde tant que les Réglages sont ouverts.
+// Un seul point de vérité pour tous les appels checkGPU du renderer.
+function _gpuProbeAllowed() { return _hasNvidia() && !_isCloudMode(); }
+
 // Returns true if the GPU is currently over any user-defined limit
 async function checkGpuLimits() {
+  if (!_gpuProbeAllowed()) return { ok: true };   // pas de GPU local à surveiller
   if (!API.checkGPU) return { ok: true };
   try {
     const gpu = await API.checkGPU();
@@ -18405,6 +18488,7 @@ const queuedJobs = []; // [{ kind, run: () => Promise }]
 let _queueProcessing = false;
 
 async function getCurrentVramUsedGB() {
+  if (!_gpuProbeAllowed()) return null;
   try {
     const gpu = await API.checkGPU();
     if (gpu && gpu.available) return { used: gpu.usedGB, total: gpu.totalGB };
@@ -18416,6 +18500,9 @@ async function getCurrentVramUsedGB() {
 // launch a job of this kind. Heavy jobs are blocked when any user-defined
 // limit is exceeded; light jobs (bg, rig) are never blocked.
 async function hasVramHeadroomFor(kind) {
+  // Mode Cloud / machine sans NVIDIA : le calcul part sur nos serveurs, aucune
+  // VRAM locale à arbitrer → jamais de mise en file (et aucun spawn nvidia-smi).
+  if (!_gpuProbeAllowed()) return { ok: true };
   // Returns { ok: true } or { ok: false, reason: "..." } so callers can show
   // a meaningful popup explaining WHY a job was queued.
   //
@@ -18441,7 +18528,7 @@ async function hasVramHeadroomFor(kind) {
         }
       } catch (_) {}
       if (runningHeavy >= maxConcurrent) {
-        return { ok: false, reason: `${runningHeavy} génération(s) lourde(s) en cours — ta carte en supporte ${maxConcurrent} en parallèle. La suivante attend qu'une se libère.` };
+        return { ok: false, reason: _i18nTf('{x} heavy generation(s) running — your card supports {y} at a time. The next one waits for a slot.', runningHeavy, maxConcurrent) };
       }
     }
   }
@@ -18458,7 +18545,7 @@ async function hasVramHeadroomFor(kind) {
       return { ok: false, reason: `GPU trop chaud (${gpu.tempC}°C > limite ${gpuLimits.temp}°C). Le job attendra.` };
     }
     if ((gpu.gpuUtil || 0) > gpuLimits.util) {
-      return { ok: false, reason: `GPU utilisé à ${gpu.gpuUtil}% (> limite ${gpuLimits.util}%). Le job attendra.` };
+      return { ok: false, reason: _i18nTf('GPU is {x}% busy (over the {y}% limit). The job will wait.', gpu.gpuUtil, gpuLimits.util) };
     }
 
     // SDXL-reusing op (image/img2img/inpaint): if the image engine is ALREADY
@@ -18486,7 +18573,7 @@ async function hasVramHeadroomFor(kind) {
     if (projectedPct > gpuLimits.vram) {
       return {
         ok: false,
-        reason: `VRAM insuffisante: ${gpu.usedGB.toFixed(1)}/${gpu.totalGB.toFixed(1)} GB utilisés, ce job a besoin de ~${cost} GB supplémentaires → ${projectedPct.toFixed(0)}% > limite ${gpuLimits.vram}%. Le job attendra que la VRAM se libère.`
+        reason: _i18nTf('Not enough VRAM: {x} GB used, this job needs about {y} GB more than the limit allows. It will wait until VRAM frees up.', `${gpu.usedGB.toFixed(1)}/${gpu.totalGB.toFixed(1)}`, cost)
       };
     }
     // Also check absolute free headroom: even below the slider, refuse to start
@@ -18507,7 +18594,7 @@ async function hasVramHeadroomFor(kind) {
       const ram = await API.checkRAM();
       const ramPct = (ram.usedGB / ram.totalGB) * 100;
       if (ramPct > gpuLimits.ram) {
-        return { ok: false, reason: `RAM système saturée (${ram.usedGB.toFixed(1)}/${ram.totalGB.toFixed(1)} GB, ${ramPct.toFixed(0)}% > limite ${gpuLimits.ram}%). Le job attendra.` };
+        return { ok: false, reason: _i18nTf('System RAM is full ({x} GB, {y}% over the limit). The job will wait.', `${ram.usedGB.toFixed(1)}/${ram.totalGB.toFixed(1)}`, ramPct.toFixed(0)) };
       }
     }
   } catch (e) {}
@@ -18539,7 +18626,7 @@ async function enqueueJob(kind, displayName, runFn) {
     runFn();
     return;
   }
-  const reason = (r && r.reason) || 'Limites GPU/RAM dépassées';
+  const reason = (r && r.reason) || _i18nT('GPU/RAM limits exceeded');
   // No room — push to queue and surface a visible notice
   queuedJobs.push({ kind, displayName, run: runFn, queuedAt: Date.now() });
   renderQueueIndicator();
@@ -18626,6 +18713,9 @@ function renderQueueIndicator() {
 let _draggingGpuLimit = false;
 async function refreshGpuStats() {
   if (_draggingGpuLimit) return;
+  // Sans carte NVIDIA (ou en mode Cloud) : aucune sonde matérielle, la carte
+  // Hardware est remplacée par la note cloud (voir _applyHardwareCardMask).
+  if (!_gpuProbeAllowed()) { try { refreshPythonStats(); } catch (_) {} return; }
   try {
     refreshPythonStats();
     // Throttle the per-process list to ~2s while reusing the 500ms tick.
@@ -18677,6 +18767,7 @@ async function openSettings() {
     const blenderEl = document.getElementById('set-blender-path');
     if (blenderEl) blenderEl.value = cfg?.blenderPath || '';
   } catch (e) {}
+  _applyHardwareCardMask();
   applyGpuLimitMarkers();
   setupGpuLimitDragging();
   refreshGpuStats();
@@ -18688,8 +18779,37 @@ async function openSettings() {
   if (_gpuPollTimer) clearInterval(_gpuPollTimer);
   // 500ms tick while Settings is open so the user sees real-time VRAM/GPU/RAM.
   // The timer is cleared as soon as the panel closes (set-close handler).
-  _gpuPollTimer = setInterval(refreshGpuStats, 500);
+  // Sans GPU NVIDIA / en mode Cloud, le tick spawnerait nvidia-smi 2×/s pour
+  // rien : on ne l'arme pas du tout (cert Store 10.1.2.10).
+  if (_gpuProbeAllowed()) _gpuPollTimer = setInterval(refreshGpuStats, 500);
 }
+
+// Carte « Hardware » des Réglages : sans carte NVIDIA (ou en mode Cloud) les
+// jauges VRAM/Temp/GPU resteraient figées sur « -- » et le titre afficherait
+// « GPU info unavailable » — lu comme une panne. On masque la carte et on
+// affiche à la place l'explication produit.
+function _applyHardwareCardMask() {
+  try {
+    const card = document.getElementById('set-gpu-card');
+    if (!card) return;
+    const off = !_gpuProbeAllowed();
+    card.style.display = off ? 'none' : '';
+    let note = document.getElementById('set-gpu-cloud-note');
+    if (off && !note) {
+      note = document.createElement('div');
+      note.id = 'set-gpu-cloud-note';
+      note.className = 'settings-box';
+      note.innerHTML = '<div class="settings-box-hint"></div>';
+      card.parentNode.insertBefore(note, card.nextSibling);
+    }
+    if (note) {
+      note.style.display = off ? '' : 'none';
+      const h = note.querySelector('.settings-box-hint');
+      if (h) h.textContent = _i18nT('Generated on the MyFabmesh cloud — your GPU is not used.');
+    }
+  } catch (_) {}
+}
+window._applyHardwareCardMask = _applyHardwareCardMask;
 document.getElementById('btn-settings')?.addEventListener('click', openSettings);
 
 // About / Help modal — show version, links, update check.
@@ -20361,7 +20481,7 @@ window.addEventListener('drop', async (e) => {
         if (createStage) createStage.open = false;
         if (editStage) editStage.open = true;
         // FEATURE B — plus de saut auto : toast + bouton "Aller à l'élément importé".
-        showGoToToast(card, `Nouvelle version ${r.kind} ajoutée ✅`, 'Aller à l\'élément importé');
+        showGoToToast(card, _i18nTf('New {x} version added', r.kind) + ' ✅', _i18nT('Go to the imported item'));
       }
       // Fallback si la carte cible est absente (aucun toast go-to affiché).
       if (!card) showToast?.(`Added a new ${r.kind} version`, 'success', 1800);
@@ -20814,7 +20934,7 @@ function _lmPlaceAllBoneMarkers() {
   });
   try { refreshLmFsSilhouetteDots && refreshLmFsSilhouetteDots(); } catch (e) {}
   if (typeof showToast === 'function') {
-    showToast(`${bones.length} os affichés — glisse un marqueur pour déplacer l'articulation (Freeze mesh gardé), puis « Save rig ».`, 'success', 6000);
+    showToast(_i18nTf('{x} bones shown — drag a marker to move the joint (Freeze mesh kept), then "Save rig".', bones.length), 'success', 6000);
   }
 }
 // Export the ADJUSTED rig (corrected skeleton) as a NEW rig version. The drag
@@ -20851,7 +20971,7 @@ async function _lmSaveAdjustedRig() {
             p.selectedRigPath = actualPath;
           }
           completeJob(job.id, true);
-          showToast('Rig ajusté sauvegardé ✓', 'success', 2500);
+          showToast(_i18nT('Adjusted rig saved') + ' ✓', 'success', 2500);
           try { populateWorkspace(state.currentProject); } catch (e) {}
         } else {
           completeJob(job.id, false, (r && r.error) || 'unknown');
@@ -21333,7 +21453,8 @@ function initLmFullscreen() {
   lmFsScene.add(back);
   lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.6));
   // Pane A (Front by default)
-  lmFsRenderer = new THREE.WebGLRenderer({ canvas: canvasA, antialias: true, alpha: true });
+  lmFsRenderer = _mkRenderer({ canvas: canvasA, antialias: true, alpha: true }, canvasA.parentElement);
+  if (!lmFsRenderer) { lmFsScene = null; return; }
   lmFsRenderer.setPixelRatio(window.devicePixelRatio);
   lmFsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
   lmFsRenderer.toneMappingExposure = 1.4;
@@ -21350,7 +21471,9 @@ function initLmFullscreen() {
   });
   // Pane B (Side by default) — only created if the second canvas exists
   if (canvasB) {
-    lmFsRendererB = new THREE.WebGLRenderer({ canvas: canvasB, antialias: true, alpha: true });
+    lmFsRendererB = _mkRenderer({ canvas: canvasB, antialias: true, alpha: true }, canvasB.parentElement);
+  }
+  if (lmFsRendererB) {
     lmFsRendererB.setPixelRatio(window.devicePixelRatio);
     lmFsRendererB.toneMapping = THREE.ACESFilmicToneMapping;
     lmFsRendererB.toneMappingExposure = 1.0;
@@ -21424,6 +21547,7 @@ async function openLandmarksFullscreen() {
   }
   initLmFullscreen();
   document.getElementById('lm-fullscreen').classList.remove('hidden');
+  if (!lmFsRenderer || !lmFsScene) return;   // WebGL indisponible (encart posé)
   setTimeout(resizeLmFullscreen, 50);
   _updateLmUndoRedoButtons();
   // Show file info in the top-left overlay
@@ -22149,7 +22273,7 @@ async function _openCloudSite(pathOrUrl) {
   try { r = _open ? await _open(url) : null; } catch (_) {}
   if (!r || r.ok === false) {
     try { await navigator.clipboard.writeText(url); } catch (_) {}
-    showToast('Lien copié dans le presse-papier : ' + url, 'info', 6000);
+    showToast(_i18nT('Link copied to clipboard:') + ' ' + url, 'info', 6000);
   }
 }
 
@@ -22205,27 +22329,27 @@ async function showCloudLoginModal() {
       e.preventDefault();
       const email = ov.querySelector('#cl-email').value.trim();
       const err = ov.querySelector('#cl-err');
-      if (!email) { err.textContent = 'Entrez votre e-mail d\'abord.'; return; }
+      if (!email) { err.textContent = _i18nT('Enter your email first.'); return; }
       err.style.color = '#f66';
       const r = await API.cloudRecover?.({ email });
       if (r?.success) {
         err.style.color = '#7ee787';
-        err.textContent = 'E-mail de réinitialisation envoyé — suivez le lien, puis reconnectez-vous ici.';
+        err.textContent = _i18nT('Reset email sent — follow the link, then sign in here.');
       } else {
-        err.textContent = r?.error || 'Envoi impossible.';
+        err.textContent = r?.error || _i18nT('Could not send the email.');
       }
     };
     const submit = async () => {
       const email = ov.querySelector('#cl-email').value.trim();
       const pass = ov.querySelector('#cl-pass').value;
       const err = ov.querySelector('#cl-err');
-      if (!email || !pass) { err.textContent = 'Email et mot de passe requis.'; return; }
+      if (!email || !pass) { err.textContent = _i18nT('Email and password are required.'); return; }
       err.textContent = '';
       ov.querySelector('#cl-ok').disabled = true;
       const r = await API.cloudLogin({ email, password: pass });
       ov.querySelector('#cl-ok').disabled = false;
       if (r?.success) done(true);
-      else err.textContent = r?.error || 'Connexion impossible.';
+      else err.textContent = r?.error || _i18nT('Sign-in failed.');
     };
     ov.querySelector('#cl-ok').onclick = submit;
     ov.querySelector('#cl-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
@@ -22290,6 +22414,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
       try { window._applyMeshCostPill?.(); } catch (_) {}
       try { window._applyCloudFeatureMask?.(); } catch (_) {}
       try { window._applyRigAnimPills?.(); } catch (_) {}
+      try { window._applyHardwareCardMask?.(); } catch (_) {}
     };
     btnL.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'local'); syncRow(); });
     btnC.addEventListener('click', () => { localStorage.setItem('fab-compute-mode', 'cloud'); syncRow(); });
@@ -22352,7 +22477,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     try {
       const s = await API.cloudStatus?.();
       if (s?.loggedIn) {
-        if (acct) acct.textContent = s.email + (s.credits != null ? ` · ${s.credits} crédits` : '');
+        if (acct) acct.textContent = s.email + (s.credits != null ? ' · ' + _i18nTf('{x} credits', s.credits) : '');
         if (bLogin) bLogin.style.display = 'none';
         if (bLogout) bLogout.style.display = '';
       } else {
@@ -22368,6 +22493,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     try { window._applyMeshCostPill?.(); } catch (_) {}
     try { window._applyCloudFeatureMask?.(); } catch (_) {}
     try { window._applyRigAnimPills?.(); } catch (_) {}
+    try { window._applyHardwareCardMask?.(); } catch (_) {}
   };
 
   bl.addEventListener('click', () => {
@@ -22497,7 +22623,7 @@ async function showCloudLibraryModal() {
           try { await reloadCurrentProject(); } catch (_) {}
           try { refreshProjectsPage(); } catch (_) {}
         } else if (/404/.test(r?.error || '')) {
-          showToast('Cet asset n\'est plus disponible (fichier expiré côté cloud).', 'error', 6000);
+          showToast(_i18nT('This asset is no longer available (the cloud file has expired).'), 'error', 6000);
         } else {
           showToast(`Download failed: ${r?.error || 'unknown'}`, 'error');
         }
@@ -22536,6 +22662,13 @@ async function showCloudLibraryModal() {
   async function loadMarket() {
     body.textContent = 'Loading…';
     const r = await API.cloudListMarket();
+    // Même UX inline que loadMine() : panneau + bouton « Sign in », plutôt
+    // qu'un « Error: Cloud session expired » sans issue (cert 10.1.2.10).
+    if (r?.needsCloudLogin) {
+      body.innerHTML = '<div style="padding:30px;text-align:center;">Sign in to browse the marketplace.<br><br><button id="clb-login" class="primary-btn" style="padding:6px 14px;">Sign in</button></div>';
+      body.querySelector('#clb-login').onclick = async () => { if (await showCloudLoginModal()) loadMarket(); };
+      return;
+    }
     if (!r?.success) { body.textContent = `Error: ${r?.error || 'unknown'}`; return; }
     const ownedIds = new Set((r.owned || []).map(o => o.id || o.listing_id || o));
     const cards = (r.listings || []).map((l) => {
@@ -22758,7 +22891,9 @@ window._applyToolPills = function () {
       const b = document.getElementById(id);
       if (b) b.style.display = cloud ? 'none' : '';
     }
-    for (const tool of ['recolor', 'age']) {
+    // Pendants lightbox des boutons masqués : la lightbox route par clic
+    // simulé vers le bouton workspace, masquer ce dernier ne suffit donc pas.
+    for (const tool of ['recolor', 'age', 'multiview']) {
       const b = document.querySelector(`.lb-tool-btn[data-lb-tool="${tool}"]`);
       if (b) b.style.display = cloud ? 'none' : '';
     }
@@ -22787,11 +22922,15 @@ const _CLOUD_HIDDEN_MESH_TOOLS = [
 ];
 // Entrées lightbox 3D correspondantes : la lightbox route vers les boutons
 // workspace par clic simulé, masquer le bouton workspace ne suffit donc pas.
-const _CLOUD_HIDDEN_LB3D_TOOLS = ['texvar', 'regionretex', 'enhancetex', 'detailsynth', 'aligntex', 'center'];
+const _CLOUD_HIDDEN_LB3D_TOOLS = ['texvar', 'regionretex', 'enhancetex', 'detailsynth', 'aligntex', 'center',
+  'blender'];  // Open in Blender : binaire local, jamais disponible en Cloud
 // Outils qui exigent Blender installé (aucun rapport avec le cloud) : sur une
 // machine de test Store, Blender est absent → clic = « Blender path not
 // configured ». On les grise avec une explication au lieu d'une erreur.
-const _BLENDER_TOOLS = ['ws-mesh-blender-btn', 'ws-rig-blender-btn', 'ws-rig-unreal-btn'];
+// En mode Cloud ils sont en plus MASQUÉS (voir _applyCloudFeatureMask) : le
+// pipeline Blender/Unreal/FBX est 100 % local, sans équivalent worker.
+const _BLENDER_TOOLS = ['ws-mesh-blender-btn', 'ws-rig-blender-btn', 'ws-rig-unreal-btn',
+  'ws-anim-export-btn'];   // Export FBX = anim:export → Blender
 
 window._applyCloudFeatureMask = function () {
   try {
@@ -22802,6 +22941,12 @@ window._applyCloudFeatureMask = function () {
     }
     for (const t of _CLOUD_HIDDEN_LB3D_TOOLS) {
       const el = document.querySelector(`[data-lb3d-tool="${t}"]`);
+      if (el) el.style.display = cloud ? 'none' : '';
+    }
+    // Blender / Unreal / Export FBX : chaîne 100 % locale (binaire externe).
+    // _applyBlenderToolState ne touche QUE disabled/title → pas de conflit ici.
+    for (const id of _BLENDER_TOOLS) {
+      const el = document.getElementById(id);
       if (el) el.style.display = cloud ? 'none' : '';
     }
     // Ligne « Mode » du panneau Animation : le select Local / « Cloud

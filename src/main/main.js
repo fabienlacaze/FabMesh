@@ -5533,6 +5533,12 @@ ipcMain.handle('show-in-explorer', (event, filePath) => {
 
 // Check GPU status
 ipcMain.handle('check-gpu', async () => {
+  // Aucun GPU NVIDIA (ou mode Cloud forcé) : ne pas lancer nvidia-smi du tout.
+  // Le renderer a déjà sa garde (_gpuProbeAllowed) — ceinture-bretelles côté main.
+  await detectNvidiaGpu();
+  if (isCloudMode() || (_nvidiaGpuCache && !_nvidiaGpuCache.hasNvidia)) {
+    return { available: false, error: 'no NVIDIA GPU on this device' };
+  }
   // Use nvidia-smi for instant GPU stats (no PyTorch load, ~50 ms)
   return new Promise((resolve) => {
     execFile('nvidia-smi',
@@ -5577,6 +5583,13 @@ ipcMain.handle('hidream-available', async () => {
   const MIN_VRAM_MB = 12000;
   let hasRuntime = false;
   try { hasRuntime = fs.existsSync(HIDREAM_PY); } catch (_) {}
+  // Mode Cloud / machine sans GPU NVIDIA : HiDream est un moteur LOCAL CUDA,
+  // il ne doit jamais rester dans le sélecteur (clic = échec = « unusable
+  // feature » pour le testeur Store). Réponse immédiate, sans nvidia-smi.
+  await detectNvidiaGpu();
+  if (isCloudMode() || (_nvidiaGpuCache && !_nvidiaGpuCache.hasNvidia)) {
+    return { available: false, reason: 'cloud mode (no local CUDA engine)', hasRuntime };
+  }
   return new Promise((resolve) => {
     execFile('nvidia-smi', ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
       { timeout: 3000 }, (error, stdout) => {
@@ -9611,7 +9624,16 @@ try {
 let cloudFallback = { generateImages: async () => ({ success: false, error: 'cloud fallback unavailable' }) };
 try {
   cloudFallback = require('./cloud_fallback');
-  cloudFallback.register({ ipcMain, app, log, isPathAllowed, MESHES_DIR, IMAGES_DIR });
+  // safeSend : canal de progression partagé (« ai3d-progress ») — permet au
+  // retry cold start d'annoncer « Cloud GPU is starting up… » sans toucher aux
+  // 14 call sites cloud. isCloudMode : garde du heartbeat/préchauffage.
+  cloudFallback.register({ ipcMain, app, log, isPathAllowed, MESHES_DIR, IMAGES_DIR, safeSend, isCloudMode });
+  // Préchauffage au démarrage en mode Cloud : le conteneur GPU Modal commence
+  // à booter pendant que l'utilisateur découvre l'UI, pour que son premier clic
+  // ne paie pas les 2-3 min de cold start (cause du HTTP 524).
+  setTimeout(() => {
+    try { if (isCloudMode()) cloudFallback.prewarm?.({}).catch?.(() => {}); } catch (_) {}
+  }, 8000);
 } catch (e) {
   console.error('[cloud-fallback] register failed:', e.message);
 }

@@ -106,6 +106,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
   cloudRecover: (opts) => ipcRenderer.invoke('cloud-recover', opts),
   cloudStatus: () => ipcRenderer.invoke('cloud-status'),
+  // Préchauffage du GPU cloud (anti cold start 524) — fire-and-forget.
+  cloudPrewarm: (opts) => ipcRenderer.invoke('cloud-prewarm', opts),
   cloudShareAsset: (opts) => ipcRenderer.invoke('cloud-share-asset', opts),
   cloudListLibrary: () => ipcRenderer.invoke('cloud-list-library'),
   cloudListMarket: () => ipcRenderer.invoke('cloud-list-market'),

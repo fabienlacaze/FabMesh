@@ -4206,3 +4206,21 @@ details.stage-generating > summary .stage-gear .gear-glyph {
   line-height: 1.2;
   vertical-align: middle;
 }
+
+/* ------------------------------------------------------------
+   Encart « WebGL indisponible » (cert Store 10.1.2.10)
+   Posé par _mkRenderer/_webglNote (index2.js) dans le conteneur
+   d'un viewer quand la création du contexte WebGL échoue (iGPU sur
+   blocklist Chromium, RDP, VM, accélération désactivée). L'app doit
+   rester utilisable : la génération marche, seul l'aperçu manque.
+   ------------------------------------------------------------ */
+.webgl-unavailable {
+  padding: 18px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted, #9aa);
+  text-align: center;
+  max-width: 340px;
+  margin: 0 auto;
+  pointer-events: none;
+}

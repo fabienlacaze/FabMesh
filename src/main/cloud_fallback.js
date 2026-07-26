@@ -35,8 +35,81 @@ const SUPABASE_ANON = process.env.FABMESH_SUPABASE_ANON
 // connecter (cert Store 10.1.2.10).
 const CLOUD_LOGIN_ERR = 'Sign in to your MyFabmesh account to use cloud generation on this device.';
 
-let _deps = null;              // { app, log }
+// Message final honnête quand le second essai échoue lui aussi (cert Store
+// 10.1.2.10 : le testeur doit comprendre que rien n'est cassé et que rien
+// n'est facturé). Vérifié endpoint par endpoint : le worker rembourse
+// TOUJOURS avant de répondre sur ces chemins — addCredits + refundModalSpend
+// dans les catch de handleGenerateImage, handleModifyImage, handleMaskInpaint,
+// handleUpscaleImage, handleRemoveBackground, handleMeshOp et
+// handleConstructionStages3d.
+const COLD_START_ERR = 'The cloud GPU took too long to start (cold start). '
+  + 'Please try again in a minute — your credits were refunded.';
+
+let _deps = null;              // { app, log, safeSend }
 let _mem = null;               // { access_token, expires_at, refresh_token, email }
+
+// -----------------------------------------------------------------------------
+// Cold start Modal — retry unique partagé par tous les points d'entrée cloud.
+//
+// Un conteneur GPU Modal froid met 2-3 min à démarrer et Cloudflare coupe toute
+// sous-requête à 100 s en renvoyant 524 : le tout premier clic d'un testeur
+// tombait sur « image generation failed (credits refunded): Cloud GPU HTTP
+// 524 ». Le worker a DÉJÀ remboursé les crédits ET le budget Modal dans son
+// bloc catch avant de répondre — le retry est donc un appel NEUF, entièrement
+// re-facturé s'il réussit, JAMAIS un double débit : on ne paie que la
+// tentative qui aboutit.
+//
+// Le délai par défaut est de 60 s et NE DOIT PAS être raccourci à ~20 s : un
+// 524 Cloudflare n'annule pas la requête Modal, FastAPI continue de la traiter
+// jusqu'au bout (~30-60 s de boot + 25-45 s de diffusion) et @app.cls ne sert
+// qu'une entrée par conteneur. Rejouer trop tôt fait donc démarrer un SECOND
+// conteneur froid par autoscale : facture GPU doublée et second 524. À 60 s la
+// première génération (jetée) est terminée et le conteneur est chaud et libre,
+// dans sa fenêtre scaledown de 300 s (modal_app/app.py:525).
+//
+// Un seul rejeu par action utilisateur : chaque tentative consomme un slot du
+// quota MAX_USER_DAILY_CALLS (40/j) qui, lui, n'est PAS remboursé par le
+// worker (seuls les crédits et le budget $ le sont).
+// -----------------------------------------------------------------------------
+const COLD_RETRY_DELAY_MS = 60 * 1000;
+
+function _progress(msg) {
+  try { _deps?.safeSend?.('ai3d-progress', `[cloud] ${msg}\n`); } catch (_) {}
+}
+
+function _isColdStart(status, msg) {
+  const st = Number(status);
+  if ([502, 503, 504, 524].includes(st)) return true;
+  return /\b(524|502|503|504)\b|cold start|timeout|timed out|aborted|ETIMEDOUT|ECONNRESET|ECONNREFUSED|fetch failed|UND_ERR_HEADERS_TIMEOUT|warm up/i
+    .test(String(msg || ''));
+}
+
+// Vrai si le résultat d'une tentative ressemble à un cold start rejouable.
+// Exclusions strictes : session expirée (il faut se reconnecter), crédits
+// insuffisants (402) et quota/budget atteint (429) ne doivent JAMAIS être
+// rejoués.
+function _resultIsColdStart(r) {
+  if (!r || r.success !== false) return false;
+  if (r.needsCloudLogin) return false;
+  const st = Number(r._httpStatus || 0);
+  if (st === 402 || st === 429) return false;
+  return _isColdStart(st, r.error);
+}
+
+// Joue fn() une fois ; si le résultat ressemble à un cold start, prévient
+// l'utilisateur, attend delayMs et rejoue UNE seule fois.
+async function _withColdRetry(fn, { label = 'cloud operation', delayMs = COLD_RETRY_DELAY_MS } = {}) {
+  const strip = (r) => { if (r && typeof r === 'object') delete r._httpStatus; return r; };
+  let r = await fn();
+  if (!_resultIsColdStart(r)) return strip(r);
+  _deps?.log?.info?.('cloud-fallback', `${label}: cold start detected — retry in ${delayMs / 1000}s`);
+  _progress(`Cloud GPU is starting up (cold start), retrying in ${Math.round(delayMs / 1000)}s…`);
+  await new Promise((res) => setTimeout(res, delayMs));
+  _progress('Retrying on the cloud GPU…');
+  r = await fn();
+  if (_resultIsColdStart(r)) return { success: false, error: COLD_START_ERR };
+  return strip(r);
+}
 
 function _sessionFile() {
   return path.join(_deps.app.getPath('userData'), 'cloud_session.json');
@@ -166,42 +239,60 @@ async function generateImages({ prompt, numImages, imagesDir, assetType, steps, 
     return { success: false, needsCloudLogin: true,
       error: 'Sign in to your MyFabmesh account to generate images on this device (no NVIDIA GPU detected).' };
   }
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
-  let resp, data;
-  try {
-    resp = await fetch(`${WORKER_URL}/api/generate-image`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Cookie: `mfm-session=${tok}`,   // le worker ne lit PAS Authorization
-      },
-      body: JSON.stringify({
-        prompt,                          // prompt déjà enrichi par le desktop
-        numImages: Math.max(1, Math.min(4, Number(numImages) || 1)),
-        asset_type: assetType || 'character',
-        steps: Number(steps) || 30,
-        turbo: !!turbo,
-        // Passerelle desktop->web : le worker insère l'asset dans
-        // user_assets => la génération apparaît aussi dans la
-        // bibliothèque du compte sur le site.
-        ...(projectName ? { projectName } : {}),
-      }),
-      signal: ctrl.signal,
-    });
-    data = await resp.json().catch(() => ({}));
-  } finally { clearTimeout(t); }
+  // Budget d'abandon porté de 5 à 10 min : le worker rejoue lui-même un 524
+  // deux fois (60 s + 90 s) avant de répondre, donc une tentative légitime
+  // peut durer ~350 s — l'ancien AbortController de 300 s tuait une requête
+  // que le worker était sur le point de satisfaire.
+  const attempt = async () => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10 * 60 * 1000);
+    let resp, data;
+    try {
+      resp = await fetch(`${WORKER_URL}/api/generate-image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `mfm-session=${tok}`,   // le worker ne lit PAS Authorization
+        },
+        body: JSON.stringify({
+          prompt,                          // prompt déjà enrichi par le desktop
+          numImages: Math.max(1, Math.min(4, Number(numImages) || 1)),
+          asset_type: assetType || 'character',
+          steps: Number(steps) || 30,
+          turbo: !!turbo,
+          // Passerelle desktop->web : le worker insère l'asset dans
+          // user_assets => la génération apparaît aussi dans la
+          // bibliothèque du compte sur le site.
+          ...(projectName ? { projectName } : {}),
+        }),
+        signal: ctrl.signal,
+      });
+      data = await resp.json().catch(() => ({}));
+    } catch (e) {
+      // Abort / socket coupé : traité comme un cold start rejouable.
+      return { success: false, error: String((e && e.message) || e), _httpStatus: 0 };
+    } finally { clearTimeout(t); }
 
-  if (resp.status === 401) {
-    logout();
-    return { success: false, needsCloudLogin: true, error: 'Cloud session expired — please sign in again.' };
-  }
-  if (resp.status === 402) {
-    return { success: false, error: 'Not enough MyFabmesh credits for cloud generation. Top up on the website.' };
-  }
-  if (!resp.ok || !(data.ok || data.success) || !Array.isArray(data.paths) || !data.paths.length) {
-    return { success: false, error: `Cloud generation failed: ${data.error || 'HTTP ' + resp.status}` };
-  }
+    if (resp.status === 401) {
+      logout();
+      return { success: false, needsCloudLogin: true, error: 'Cloud session expired — please sign in again.' };
+    }
+    if (resp.status === 402) {
+      return { success: false, _httpStatus: 402,
+        error: 'Not enough MyFabmesh credits for cloud generation. Top up on the website.' };
+    }
+    if (!resp.ok || !(data.ok || data.success) || !Array.isArray(data.paths) || !data.paths.length) {
+      // Le worker emballe le 524 amont dans SON propre 502 : le statut seul ne
+      // suffit pas, on donne aussi le texte à l'analyse cold start.
+      return { success: false, _httpStatus: resp.status,
+        error: `Cloud generation failed: ${data.error || 'HTTP ' + resp.status}` };
+    }
+    return { success: true, data };
+  };
+
+  const first = await _withColdRetry(attempt, { label: 'image generation' });
+  if (!first.success) return first;
+  const data = first.data;
 
   // Télécharge les URLs R2 signées dans le dossier projet (contrat local).
   fs.mkdirSync(imagesDir, { recursive: true });
@@ -331,17 +422,27 @@ async function imageOp({ endpoint, srcPath, extraBody = {}, outPath }) {
   }
   const imageUrl = uj.path;   // URL signée renvoyée par le worker
 
-  const op = await _authedFetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageUrl, ...extraBody }),
-  });
-  if (op.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
-  const oj = await op.resp.json().catch(() => ({}));
-  if (op.resp.status === 402) return { success: false, error: 'Not enough MyFabmesh credits. Top up on the website.' };
-  if (!op.resp.ok || oj.ok === false || oj.success === false) {
-    return { success: false, error: oj.error || `HTTP ${op.resp.status}` };
-  }
+  // L'appel d'op passe par _postJsonLong (et PAS par le fetch Node) : undici
+  // coupe à 300 s si les headers de réponse n'arrivent pas, or le worker
+  // rejoue lui-même un 524 deux fois (callModalImageOp) et peut donc mettre
+  // ~450 s à répondre — on voyait alors un « fetch failed » opaque côté
+  // desktop alors que le worker travaillait encore.
+  const attempt = async () => {
+    const op = await _authedPostLong(endpoint, { imageUrl, ...extraBody }, 12 * 60 * 1000);
+    if (op.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
+    if (op.error) return { success: false, error: op.error, _httpStatus: 0 };
+    const j = op.json || {};
+    if (op.status === 402) {
+      return { success: false, _httpStatus: 402, error: 'Not enough MyFabmesh credits. Top up on the website.' };
+    }
+    if (!(op.status >= 200 && op.status < 300) || j.ok === false || j.success === false) {
+      return { success: false, _httpStatus: op.status, error: _httpErr(op.status, j) };
+    }
+    return { success: true, json: j };
+  };
+  const opRes = await _withColdRetry(attempt, { label: `image op ${endpoint}` });
+  if (!opRes.success) return opRes;
+  const oj = opRes.json || {};
   const resUrl = oj.path || oj.url || (Array.isArray(oj.paths) && oj.paths[0]);
   if (!resUrl) return { success: false, error: 'no result url in worker response' };
   const dl = await fetch(/^https?:/i.test(resUrl) ? resUrl : `${WORKER_URL}${resUrl}`);
@@ -498,6 +599,19 @@ function _httpErr(status, j) {
   return (j && j.error) || `HTTP ${status}`;
 }
 
+// Cold start sur la forme de réponse d'_authedPostLong ({ status, json } ou
+// { error }). Sert aux ops SYNC (mesh-op, construction-stages-3d) qui ont déjà
+// leur propre rejeu « URL signée périmée » : les deux rejeux ne doivent JAMAIS
+// se cumuler (garde `attempts < 2` côté appelant).
+function _postLongIsCold(r) {
+  if (!r || r.needsCloudLogin) return false;
+  if (r.error) return _isColdStart(0, r.error);
+  const st = Number(r.status || 0);
+  if (st === 402 || st === 429) return false;
+  if (st >= 200 && st < 300) return false;
+  return _isColdStart(st, r.json && r.json.error);
+}
+
 // Op mesh SYNC via POST /api/mesh-op — whitelist worker : smooth, decimate,
 // center, fix_normals, fill_holes, subdivide, material, material_adjust,
 // retex_swap, watertight, resize, explode. Télécharge le GLB résultat à
@@ -506,15 +620,26 @@ function _httpErr(status, j) {
 async function meshOp({ meshPath, opType, params = {}, outPath, projectName }) {
   let src = await resolveMeshUrl(meshPath);
   if (!src.success) return src;
-  const call = (meshUrl) => _authedPostLong('/api/mesh-op',
-    { meshUrl, opType, params, ...(projectName ? { projectName } : {}) });
+  let attempts = 0;
+  const call = (meshUrl) => {
+    attempts++;
+    return _authedPostLong('/api/mesh-op',
+      { meshUrl, opType, params, ...(projectName ? { projectName } : {}) });
+  };
   let r = await call(src.meshUrl);
+  // Deux causes de rejeu possibles, jamais cumulées (2 appels réseau max) :
+  // (a) URL signée du sidecar périmée/refusée → re-upload frais ;
+  // (b) sinon cold start Modal (524/502/503/timeout) → attente puis rejeu.
   if (!r.needsCloudLogin && !r.error && !(r.status >= 200 && r.status < 300)
       && !src.uploaded && _staleUrlError(r.json && r.json.error, r.status)) {
-    // URL signée du sidecar périmée → re-upload frais + un seul retry.
     src = await resolveMeshUrl(meshPath, { forceUpload: true });
     if (!src.success) return src;
     r = await call(src.meshUrl);
+  } else if (attempts < 2 && _postLongIsCold(r)) {
+    _progress(`Cloud GPU is starting up (cold start), retrying in ${COLD_RETRY_DELAY_MS / 1000}s…`);
+    await new Promise((res) => setTimeout(res, COLD_RETRY_DELAY_MS));
+    r = await call(src.meshUrl);
+    if (_postLongIsCold(r)) return { success: false, error: COLD_START_ERR };
   }
   if (r.needsCloudLogin) return { success: false, needsCloudLogin: true, error: 'Cloud session expired — please sign in again.' };
   if (r.error) return { success: false, error: r.error };
@@ -568,6 +693,7 @@ async function pollJob({ statusPath, jobId, outPath, urlKeys = ['mesh_url', 'ani
                          onTick, intervalMs = 5000, capMs = 15 * 60 * 1000, minBytes = 500 }) {
   const t0 = Date.now();
   let polls = 0;
+  let coldNoted = false;
   while (Date.now() - t0 < capMs) {
     await new Promise((res) => setTimeout(res, intervalMs));
     polls++;
@@ -576,6 +702,12 @@ async function pollJob({ statusPath, jobId, outPath, urlKeys = ['mesh_url', 'ani
     const js = await a.resp.json().catch(() => ({}));
     const st = String(js.status || js.state || '');
     try { onTick?.(st, polls, js); } catch (_) {}
+    // Ops ASYNC : pas de retry (il démarrerait un second job payant), mais on
+    // nomme le cold start pour que l'attente ne passe pas pour un blocage.
+    if (!coldNoted && polls >= 8 && /queued|pending|starting/i.test(st)) {
+      coldNoted = true;
+      _progress('Cloud GPU is starting up (cold start) — this first run can take 2-3 minutes…');
+    }
     if (/^done$|succeeded|completed/i.test(st)) {
       if (js.success === false) return { success: false, error: js.error || 'cloud job failed' };
       let resultUrl = null;
@@ -603,15 +735,25 @@ async function pollJob({ statusPath, jobId, outPath, urlKeys = ['mesh_url', 'ani
 async function constructionStages3D({ meshPath, stageCount, materials, projectName, stagesDir }) {
   let src = await resolveMeshUrl(meshPath);
   if (!src.success) return src;
-  const call = (meshUrl) => _authedPostLong('/api/construction-stages-3d',
-    { meshUrl, stageCount, materials, ...(projectName ? { projectName } : {}) },
-    15 * 60 * 1000);
+  let attempts = 0;
+  const call = (meshUrl) => {
+    attempts++;
+    return _authedPostLong('/api/construction-stages-3d',
+      { meshUrl, stageCount, materials, ...(projectName ? { projectName } : {}) },
+      15 * 60 * 1000);
+  };
   let r = await call(src.meshUrl);
+  // Même garde qu'meshOp : URL périmée OU cold start, jamais les deux.
   if (!r.needsCloudLogin && !r.error && !(r.status >= 200 && r.status < 300)
       && !src.uploaded && _staleUrlError(r.json && r.json.error, r.status)) {
     src = await resolveMeshUrl(meshPath, { forceUpload: true });
     if (!src.success) return src;
     r = await call(src.meshUrl);
+  } else if (attempts < 2 && _postLongIsCold(r)) {
+    _progress(`Cloud GPU is starting up (cold start), retrying in ${COLD_RETRY_DELAY_MS / 1000}s…`);
+    await new Promise((res) => setTimeout(res, COLD_RETRY_DELAY_MS));
+    r = await call(src.meshUrl);
+    if (_postLongIsCold(r)) return { success: false, error: COLD_START_ERR };
   }
   if (r.needsCloudLogin) return { success: false, needsCloudLogin: true, error: 'Cloud session expired — please sign in again.' };
   if (r.error) return { success: false, error: r.error };
@@ -675,19 +817,38 @@ async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags
   fd.append('preset', preset || 'fast');
   for (const [k, v] of Object.entries(flags)) fd.append(k, v ? 'true' : 'false');
 
-  const r = await fetch(`${WORKER_URL}/api/generate`, {
-    method: 'POST',
-    headers: { Cookie: `mfm-session=${tok}` },
-    body: fd,
-  });
-  if (r.status === 401) { logout(); return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR }; }
-  const j = await r.json().catch(() => ({}));
-  if (r.status === 402) return { success: false, error: 'Not enough MyFabmesh credits. Top up on the website.' };
-  const jobId = j.jobId || j.job_id || j.id;
-  if (!r.ok || !jobId) return { success: false, error: j.error || `HTTP ${r.status}` };
+  // Seul le POST de DÉMARRAGE est protégé par le retry cold start : il ne
+  // fait qu'enfiler le job (le routeur mesh de Modal est un dispatcher CPU),
+  // donc un 502/503 ici signifie que rien n'a été dépensé. Le job lui-même
+  // est ASYNC : un GPU froid s'y traduit par un statut « queued » qui dure,
+  // pas par un 524 — le rejouer démarrerait un SECOND job payant.
+  const startAttempt = async () => {
+    let r;
+    try {
+      r = await fetch(`${WORKER_URL}/api/generate`, {
+        method: 'POST',
+        headers: { Cookie: `mfm-session=${tok}` },
+        body: fd,
+      });
+    } catch (e) {
+      return { success: false, error: String((e && e.message) || e), _httpStatus: 0 };
+    }
+    if (r.status === 401) { logout(); return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR }; }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 402) {
+      return { success: false, _httpStatus: 402, error: 'Not enough MyFabmesh credits. Top up on the website.' };
+    }
+    const id = j.jobId || j.job_id || j.id;
+    if (!r.ok || !id) return { success: false, _httpStatus: r.status, error: j.error || `HTTP ${r.status}` };
+    return { success: true, jobId: id };
+  };
+  const started = await _withColdRetry(startAttempt, { label: 'cloud 3D start' });
+  if (!started.success) return started;
+  const jobId = started.jobId;
 
   const t0 = Date.now();
   let polls = 0;
+  let coldNoted = false;
   while (Date.now() - t0 < 15 * 60 * 1000) {
     await new Promise((res) => setTimeout(res, 4000));
     polls++;
@@ -696,6 +857,12 @@ async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags
     const js = await a.resp.json().catch(() => ({}));
     const st = String(js.status || js.state || '');
     try { onProgress?.(st, polls); } catch (_) {}
+    // Un GPU froid se voit ici comme un « queued » qui s'éternise : on
+    // l'explique une fois plutôt que de laisser l'UI paraître figée.
+    if (!coldNoted && polls >= 10 && /queued|pending|starting/i.test(st)) {
+      coldNoted = true;
+      _progress('Cloud GPU is starting up (cold start) — this first run can take 2-3 minutes…');
+    }
     if (/succeeded|completed/i.test(st)) {
       const url = _findGlbUrl(js);
       if (!url) return { success: false, error: 'job succeeded but no GLB url in response' };
@@ -768,9 +935,67 @@ async function downloadItem({ url, marketId, destPath, fname, kind, project }) {
   return { success: true, path: destPath, size: buf.length };
 }
 
+// -----------------------------------------------------------------------------
+// Préchauffage — POST /api/prewarm (le worker ping le /healthz du conteneur
+// Modal text2image dans un waitUntil). Totalement « fire-and-forget » : jamais
+// bloquant, jamais d'erreur remontée à l'UI. Le seul but est que le premier
+// clic du testeur tombe sur un conteneur déjà démarré au lieu de payer les
+// 2-3 min de cold start.
+//
+// Débounce client de 4 min, aligné sur la fenêtre « déjà chaud » du worker :
+// sans lui, un utilisateur qui alt-tabbe en boucle facturerait des démarrages
+// de GPU.
+// -----------------------------------------------------------------------------
+const PREWARM_DEBOUNCE_MS = 4 * 60 * 1000;
+let _lastPrewarmMs = 0;
+let _hbTimer = null;
+
+async function prewarm({ imageOp = false, force = false } = {}) {
+  if (!force && Date.now() - _lastPrewarmMs < PREWARM_DEBOUNCE_MS) {
+    return { success: true, skipped: true };
+  }
+  _lastPrewarmMs = Date.now();
+  try {
+    const tok = await getAccessToken();
+    if (!tok) return { success: false, needsCloudLogin: true };
+    await fetch(`${WORKER_URL}/api/prewarm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `mfm-session=${tok}` },
+      body: JSON.stringify({ imageOp: !!imageOp }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {});
+  } catch (_) { /* jamais visible par l'utilisateur */ }
+  return { success: true };
+}
+
+// Battement de cœur : le cron du worker ne préchauffe QUE si un /api/heartbeat
+// a été reçu dans les 5 dernières minutes (sinon un déploiement inactif
+// démarrerait un GPU pour rien). Le desktop ne l'envoyait jamais — la porte
+// était donc fermée en permanence. Endpoint gratuit et non authentifié.
+function _startHeartbeat() {
+  if (_hbTimer) return;
+  const ping = async () => {
+    try {
+      if (_deps?.isCloudMode && !_deps.isCloudMode()) return;   // mode local : rien à chauffer
+      if (!(await getAccessToken())) return;                    // pas de session : rien à chauffer
+      await fetch(`${WORKER_URL}/api/heartbeat`, {
+        method: 'POST', signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+    } catch (_) {}
+  };
+  _hbTimer = setInterval(ping, 2 * 60 * 1000);
+  _hbTimer.unref?.();      // ne doit jamais retenir le process
+  ping();
+}
+
 function register(deps) {
   _deps = deps;
   const { ipcMain } = deps;
+  _startHeartbeat();
+  ipcMain.handle('cloud-prewarm', async (_e, opts = {}) => {
+    try { return await prewarm(opts || {}); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
   ipcMain.handle('cloud-login', async (_e, { email, password } = {}) => {
     try { return await login(String(email || ''), String(password || '')); }
     catch (e) { return { success: false, error: String(e.message || e) }; }
@@ -805,6 +1030,8 @@ function register(deps) {
 
 module.exports = {
   register, generateImages, imageOp, generateMesh, getAccessToken, status, login, logout,
+  // Cold start Modal : préchauffage à la demande + retry partagé
+  prewarm,
   // Outils mesh mode Cloud (R2-reuse)
   resolveMeshUrl, uploadImage, meshOp, startJob, startMeshJob, pollJob, constructionStages3D,
 };
