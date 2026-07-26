@@ -29,6 +29,12 @@ const SUPABASE_URL = process.env.FABMESH_SUPABASE_URL
 const SUPABASE_ANON = process.env.FABMESH_SUPABASE_ANON
   || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92b2Njb2lwZXFta2ZudWdrbXloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MTIzODgsImV4cCI6MjA5NTE4ODM4OH0.0vjGjN1VD_h_MefS4quDFnGXa-nTsbpM2KpNvQZKQlI';
 
+// Message par défaut de toute réponse needsCloudLogin : plusieurs call sites du
+// renderer affichent `r.error` tel quel — sans ce texte l'utilisateur voyait
+// « unknown » / « cloud 3D generation failed » au lieu d'une invitation à se
+// connecter (cert Store 10.1.2.10).
+const CLOUD_LOGIN_ERR = 'Sign in to your MyFabmesh account to use cloud generation on this device.';
+
 let _deps = null;              // { app, log }
 let _mem = null;               // { access_token, expires_at, refresh_token, email }
 
@@ -228,12 +234,12 @@ async function generateImages({ prompt, numImages, imagesDir, assetType, steps, 
 // -----------------------------------------------------------------------------
 async function _authedFetch(pathname, init = {}) {
   const tok = await getAccessToken();
-  if (!tok) return { needsCloudLogin: true };
+  if (!tok) return { needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
   const r = await fetch(`${WORKER_URL}${pathname}`, {
     ...init,
     headers: { ...(init.headers || {}), Cookie: `mfm-session=${tok}` },
   });
-  if (r.status === 401) { logout(); return { needsCloudLogin: true }; }
+  if (r.status === 401) { logout(); return { needsCloudLogin: true, error: CLOUD_LOGIN_ERR }; }
   return { resp: r };
 }
 
@@ -257,7 +263,7 @@ async function shareAsset({ filePath, projectName }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base64: buf.toString('base64'), filename: path.basename(filePath) }),
     });
-    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
     const j = await a.resp.json().catch(() => ({}));
     if (!a.resp.ok || !j.success) return { success: false, error: j.error || `HTTP ${a.resp.status}` };
     uploadedPath = j.path;                       // clé R2
@@ -271,7 +277,7 @@ async function shareAsset({ filePath, projectName }) {
         suffix: path.basename(filePath, ext).slice(0, 40),
       }),
     });
-    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
     const j = await a.resp.json().catch(() => ({}));
     if (!a.resp.ok || !(j.ok || j.success)) return { success: false, error: j.error || `HTTP ${a.resp.status}` };
     // upload-image renvoie une URL signée /r2/<clé>?exp&sig -> extraire la clé
@@ -318,7 +324,7 @@ async function imageOp({ endpoint, srcPath, extraBody = {}, outPath }) {
       suffix: 'desktop_op',
     }),
   });
-  if (up.needsCloudLogin) return { success: false, needsCloudLogin: true };
+  if (up.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
   const uj = await up.resp.json().catch(() => ({}));
   if (!up.resp.ok || !(uj.ok || uj.success)) {
     return { success: false, error: uj.error || `upload HTTP ${up.resp.status}` };
@@ -330,7 +336,7 @@ async function imageOp({ endpoint, srcPath, extraBody = {}, outPath }) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageUrl, ...extraBody }),
   });
-  if (op.needsCloudLogin) return { success: false, needsCloudLogin: true };
+  if (op.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
   const oj = await op.resp.json().catch(() => ({}));
   if (op.resp.status === 402) return { success: false, error: 'Not enough MyFabmesh credits. Top up on the website.' };
   if (!op.resp.ok || oj.ok === false || oj.success === false) {
@@ -421,7 +427,7 @@ async function uploadImage(srcPath, suffix = 'desktop_op') {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dataUrl: `data:${mime};base64,${buf.toString('base64')}`, suffix }),
   });
-  if (up.needsCloudLogin) return { success: false, needsCloudLogin: true };
+  if (up.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
   const uj = await up.resp.json().catch(() => ({}));
   if (!up.resp.ok || !(uj.ok || uj.success) || !uj.path) {
     return { success: false, error: uj.error || `upload HTTP ${up.resp.status}` };
@@ -477,10 +483,10 @@ function _postJsonLong(pathname, body, cookie, timeoutMs = 12 * 60 * 1000) {
 
 async function _authedPostLong(pathname, body, timeoutMs) {
   const tok = await getAccessToken();
-  if (!tok) return { needsCloudLogin: true };
+  if (!tok) return { needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
   const r = await _postJsonLong(pathname, body, `mfm-session=${tok}`, timeoutMs);
   if (r.error) return { error: String(r.error.message || r.error) };
-  if (r.status === 401) { logout(); return { needsCloudLogin: true }; }
+  if (r.status === 401) { logout(); return { needsCloudLogin: true, error: CLOUD_LOGIN_ERR }; }
   let j = {};
   try { j = JSON.parse(r.text); } catch (_) {}
   return { status: r.status, json: j };
@@ -648,7 +654,7 @@ function _findGlbUrl(o) {
 
 async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags = {}, outPath, onProgress }) {
   const tok = await getAccessToken();
-  if (!tok) return { success: false, needsCloudLogin: true };
+  if (!tok) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
 
   const fd = new FormData();
   const buf = fs.readFileSync(imagePath);
@@ -674,7 +680,7 @@ async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags
     headers: { Cookie: `mfm-session=${tok}` },
     body: fd,
   });
-  if (r.status === 401) { logout(); return { success: false, needsCloudLogin: true }; }
+  if (r.status === 401) { logout(); return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR }; }
   const j = await r.json().catch(() => ({}));
   if (r.status === 402) return { success: false, error: 'Not enough MyFabmesh credits. Top up on the website.' };
   const jobId = j.jobId || j.job_id || j.id;
@@ -686,7 +692,7 @@ async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags
     await new Promise((res) => setTimeout(res, 4000));
     polls++;
     const a = await _authedFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
-    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
     const js = await a.resp.json().catch(() => ({}));
     const st = String(js.status || js.state || '');
     try { onProgress?.(st, polls); } catch (_) {}
@@ -714,7 +720,7 @@ async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags
 
 async function listLibrary() {
   const a = await _authedFetch('/api/cloud-projects');
-  if (a.needsCloudLogin) return { needsCloudLogin: true };
+  if (a.needsCloudLogin) return { needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
   const projects = (await a.resp.json().catch(() => ({}))).projects || [];
   const b = await _authedFetch('/api/meshes');
   const meshes = b.needsCloudLogin ? [] : ((await b.resp.json().catch(() => ({}))).meshes || (await Promise.resolve([])));
@@ -749,7 +755,7 @@ async function downloadItem({ url, marketId, destPath, fname, kind, project }) {
   let resp;
   if (marketId) {
     const a = await _authedFetch(`/api/market/download/${encodeURIComponent(marketId)}`);
-    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true };
+    if (a.needsCloudLogin) return { success: false, needsCloudLogin: true, error: CLOUD_LOGIN_ERR };
     resp = a.resp;
   } else {
     resp = await fetch(url.startsWith('http') ? url : `${WORKER_URL}${url}`);

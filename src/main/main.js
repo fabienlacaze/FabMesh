@@ -72,7 +72,7 @@
 const _log = (lvl, ...args) => { try { if (global.__startupLog) global.__startupLog(lvl, ...args); } catch (_) {} };
 _log('boot', 'requiring electron…');
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -90,6 +90,15 @@ const { writeMeta, readMeta } = require('./meta');
 // is safe for the main process itself.
 process.env.PYTHONUTF8 = '1';
 process.env.PYTHONIOENCODING = 'utf-8';
+
+// Certification Store 10.1.2.10 — WebGL sur machine sans GPU utilisable.
+// Depuis Chromium 118, le rendu WebGL logiciel (SwiftShader) est REFUSÉ sans
+// ce switch : sur une Surface (iGPU blacklisté, pilote ancien, session
+// distante) `canvas.getContext('webgl')` renvoie null, three.js jette
+// « Error creating WebGL context » et l'aperçu 3D reste vide sans message.
+// Le switch garantit un rendu (lent mais fonctionnel) partout. Doit être posé
+// AVANT app.whenReady().
+try { app.commandLine.appendSwitch('enable-unsafe-swiftshader'); } catch (_) {}
 
 _log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion ? app.getVersion() : '?'));
 
@@ -384,7 +393,20 @@ function detectNvidiaGpu() {
       });
   });
 }
-ipcMain.handle('gpu-status', async () => detectNvidiaGpu());
+// Mode choisi dans le wizard (setup_state.json). Exposé au renderer pour qu'un
+// utilisateur AVEC GPU qui a choisi « Cloud » ne soit pas ramené en local à
+// chaque lancement — jusqu'ici ce champ n'était relu nulle part.
+function _wizardChosenMode() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETUP_STATE_FILE, 'utf-8'));
+    const m = String((s && s.mode) || '').toLowerCase();
+    return m === 'cloud' ? 'cloud' : (m || null);
+  } catch (_) { return null; }
+}
+ipcMain.handle('gpu-status', async () => {
+  const g = await detectNvidiaGpu();
+  return { ...g, wizardMode: _wizardChosenMode() };
+});
 
 // Mode de calcul courant (annoncé par le renderer à chaque bascule) —
 // consulté par les handlers d'outils pour router local vs cloud.
@@ -393,7 +415,46 @@ ipcMain.on('compute-mode', (_e, m) => {
   _computeModeMain = (m === 'cloud') ? 'cloud' : 'local';
   log.info('compute-mode', _computeModeMain);
 });
-function isCloudMode() { return _computeModeMain === 'cloud'; }
+// Le mode ne doit JAMAIS dépendre uniquement d'un IPC du renderer : si celui-ci
+// n'a pas encore annoncé son mode (ou si son IIFE de câblage sort avant), une
+// machine sans GPU NVIDIA partirait sur les moteurs locaux CUDA et échouerait
+// avec une erreur Python brute. Ceinture-bretelles matérielle : dès que la
+// détection a tourné et qu'aucun GPU NVIDIA n'est présent, on force le cloud.
+function isCloudMode() {
+  if (_computeModeMain === 'cloud') return true;
+  if (_nvidiaGpuCache && !_nvidiaGpuCache.hasNvidia) return true;
+  return false;
+}
+
+// Vrai quand un script Python « léger » (PIL / numpy / trimesh) peut réellement
+// tourner. En dev on suppose l'interpréteur système complet ; en packagé il faut
+// le venv IA provisionné — `build/python-embed` est NU (aucun site-packages),
+// donc tout script échouerait sur ModuleNotFoundError. Le parcours Cloud
+// (machine sans GPU) ne provisionne jamais ce venv.
+function _localPyLibsUsable() {
+  // Override de test : rejoue le comportement « aucun venv IA » (mode Cloud du
+  // testeur Store) depuis la machine de dev.
+  if (process.env.FABMESH_FORCE_NO_LOCAL_PY === '1') return false;
+  try { return !app.isPackaged || _aiPythonReady(); } catch (_) { return false; }
+}
+// Message produit (anglais — l'i18n FR vit côté renderer) pour un outil sans
+// équivalent cloud dont le moteur local n'est pas installé. Jamais de traceback
+// Python renvoyée à l'UI.
+function _localEngineMsg(tool) {
+  return `${tool} needs the local AI engine, which is not installed on this device. `
+       + 'It stays available in local mode on a PC with an NVIDIA GPU.';
+}
+
+// Dossier INSCRIPTIBLE pour les scripts/JSON temporaires générés à la volée.
+// En installation MSIX (Store), `resources/scripts` est en LECTURE SEULE : y
+// écrire lève EPERM. Ne jamais écrire dans SCRIPTS_DIR.
+function _tmpWorkDir() {
+  let base;
+  try { base = app.getPath('temp'); } catch (_) { base = os.tmpdir(); }
+  const d = path.join(base, 'myfabmesh');
+  try { fs.mkdirSync(d, { recursive: true }); } catch (_) {}
+  return d;
+}
 
 function checkPromptSafety(prompt) {
   const floor = checkHardFloor(prompt);
@@ -1720,6 +1781,18 @@ app.whenReady().then(() => {
   // crash the process or hide the window.
   // ----------------------------------------------------------
 
+  // Détection matérielle AU BOOT (cert Store 10.1.2.10) : remplit le cache GPU
+  // et bascule le mode par défaut sur 'cloud' quand aucun GPU NVIDIA n'est
+  // présent, SANS attendre l'IPC 'compute-mode' du renderer. Non bloquant.
+  try {
+    detectNvidiaGpu().then((g) => {
+      if (g && !g.hasNvidia && _computeModeMain !== 'cloud') {
+        _computeModeMain = 'cloud';
+        log.info('compute-mode', 'cloud (aucun GPU NVIDIA détecté au démarrage)');
+      }
+    }).catch(() => {});
+  } catch (e) { log.warn('main', `detectNvidiaGpu at boot failed: ${e.message}`); }
+
   // 2026-06-13: resume any jobs the user paused on the last quit.
   try { resumePausedJobs(); } catch (e) { log.warn('main', `resumePausedJobs failed: ${e.message}`); }
 
@@ -2356,6 +2429,10 @@ ipcMain.handle('get-nsfw-keywords', () => {
 // Returns { nsfw: true/false, score: 0.XX }
 ipcMain.handle('check-image-nsfw', async (_event, { imagePath }) => {
   if (isUnrestrictedMode()) return { nsfw: false, score: 0 };
+  // Venv IA absent (installation Cloud / machine sans GPU) : transformers+PIL
+  // ne sont pas installés, le spawn échouerait à chaque appel (bruit CPU +
+  // événements SAC/Defender). La modération des images cloud relève du worker.
+  if (!_localPyLibsUsable()) return { nsfw: false, score: 0, skipped: 'no-local-engine' };
   if (!imagePath || !fs.existsSync(imagePath)) return { nsfw: false, score: 0 };
   // Image path passed via sys.argv to avoid `r"${imagePath}"` injection.
   const pyCode = `
@@ -2415,6 +2492,13 @@ ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
   }
   if (toScan.length === 0) {
     log.info('main', `NSFW scan: all ${imgList.length} already decided (sidecars) — no AI run`);
+    return decided;
+  }
+  // Venv IA absent : nsfw_scan.py importe PIL+transformers et échouerait à
+  // CHAQUE rafraîchissement de projet (aucun sidecar écrit → scan relancé
+  // indéfiniment). On renvoie les verdicts déjà connus, sans spawn.
+  if (!_localPyLibsUsable()) {
+    log.info('main', `NSFW scan: skipped (no local AI engine) — ${toScan.length} image(s) non classées`);
     return decided;
   }
 
@@ -3735,7 +3819,7 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) 
     // Write landmarks to a temp file (avoids long argv on Windows)
     const args = [script, meshPath, templateName, outputFbx, config.blenderPath];
     if (landmarks && Object.keys(landmarks).length > 0) {
-      const lmTmp = path.join(SCRIPTS_DIR, `_landmarks_${Date.now()}.json`);
+      const lmTmp = path.join(_tmpWorkDir(), `_landmarks_${Date.now()}.json`);
       try {
         fs.writeFileSync(lmTmp, JSON.stringify(landmarks));
         args.push(lmTmp);
@@ -3859,7 +3943,7 @@ bpy.ops.export_scene.fbx(
     embed_textures=True
 )
 `;
-    const tmpScript = path.join(SCRIPTS_DIR, `unreal_export_${Date.now()}.py`);
+    const tmpScript = path.join(_tmpWorkDir(), `unreal_export_${Date.now()}.py`);
     fs.writeFileSync(tmpScript, exportScript);
 
     return await new Promise((resolve) => {
@@ -4265,6 +4349,13 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
 ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate, rel, binary }) => {
   try {
     if (!imagePath || !targetText || !String(targetText).trim()) return { success: false, error: 'missing target' };
+    // Aperçu du masque = CLIPSeg local, aucune route cloud. Sans venv IA on
+    // renvoie un message clair au lieu d'un spinner infini (l'op « Appliquer »
+    // d'Auto-inpaint, elle, est bien routée vers le worker en mode Cloud).
+    if (!_localPyLibsUsable()) {
+      return { success: false, cloudUnavailable: true,
+               error: 'Mask preview needs the local AI engine. Type what to replace and click Apply — the change itself is computed in the cloud.' };
+    }
     await ensureSdxlServer();
     if (!sdxlReady) return { success: false, error: 'engine not ready' };
     // binary mode (AI region re-texture) -> white/black mask in a distinct file so it
@@ -4378,6 +4469,9 @@ ipcMain.handle('tex-variant', async (event, { imagePath, prompt, strength, seed,
     const base = safeBase(path.basename(imagePath, ext));
     const _uniq = (seed != null && seed !== '') ? seed : Math.floor(Math.random() * 1e9);
     const newImagePath = path.join(dir, `${base}_texvar_${Date.now()}_${_uniq}${ext}`);
+    if (!_localPyLibsUsable()) {
+      return { success: false, cloudUnavailable: true, error: _localEngineMsg('Texture-only variant') };
+    }
     await ensureSdxlServer();
     if (!sdxlReady) return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
     const r = await sdxlServerCall('/tex_variant', {
@@ -4807,6 +4901,12 @@ ipcMain.handle('generate-construction-stages', async (event, opts) => {
   try {
     const { imagePath, prompt, stageCount } = (opts || {});
     if (!imagePath || !fs.existsSync(imagePath)) return { success: false, error: 'Image not found' };
+    // Pas de route cloud : le worker de chantier ET le repli « reveal » sont des
+    // scripts SDXL/PIL locaux. Sans venv on produisait n copies identiques de
+    // l'image (feature muette) — on renvoie un message explicite à la place.
+    if (!_localPyLibsUsable()) {
+      return { success: false, cloudUnavailable: true, error: _localEngineMsg('Construction stages (2D)') };
+    }
     const n = Math.max(2, Math.min(20, parseInt(stageCount, 10) || 4));
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath) || '.png';
@@ -5054,6 +5154,152 @@ ipcMain.handle('check-stages-dir', async (_event, imagePath) => {
   } catch (_) { return { exists: false }; }
 });
 
+// =============================================================================
+// Retouches images SANS Python (certification Store 10.1.2.10)
+// Les ops « PIL pures » (recadrer, luminosité, symétriser, marge, up/downscale)
+// n'ont AUCUN équivalent cloud et échouaient en ModuleNotFoundError sur une
+// machine sans venv IA (le parcours Cloud ne provisionne jamais le venv).
+// Réimplémentées ici avec le décodeur d'images d'Electron : 100 % hors-ligne,
+// gratuit, aucun spawn. Utilisées UNIQUEMENT quand Python n'est pas exploitable
+// — le chemin local avec GPU garde exactement le comportement PIL d'origine.
+// =============================================================================
+function _boxBlur3(px, w, h) {
+  // Flou 3x3 sur les canaux BGR (l'alpha est conservé) — base de l'ajustement
+  // « netteté » et de l'unsharp mask du face-fix.
+  const out = Buffer.from(px);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      for (let c = 0; c < 3; c++) {
+        let sum = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy; if (yy < 0 || yy >= h) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx; if (xx < 0 || xx >= w) continue;
+            sum += px[(yy * w + xx) * 4 + c]; n++;
+          }
+        }
+        out[(y * w + x) * 4 + c] = Math.round(sum / n);
+      }
+    }
+  }
+  return out;
+}
+
+function _quickEditNative(operation, imagePath, outPath, p) {
+  const img = nativeImage.createFromPath(imagePath);
+  if (img.isEmpty()) return { success: false, error: 'This image format cannot be read on this device.' };
+  const { width: w, height: h } = img.getSize();
+  if (!w || !h) return { success: false, error: 'This image format cannot be read on this device.' };
+  const isJpg = /\.jpe?g$/i.test(outPath);
+  const save = (native) => {
+    const buf = isJpg ? native.toJPEG(95) : native.toPNG();
+    if (!buf || !buf.length) throw new Error('image encode failed');
+    fs.writeFileSync(outPath, buf);
+  };
+  const fromBitmap = (buf, ww, hh) => nativeImage.createFromBitmap(buf, { width: ww, height: hh });
+  const clamp255 = (v) => (v < 0 ? 0 : (v > 255 ? 255 : v));
+
+  switch (operation) {
+    case 'crop': {
+      const l = Math.max(0, Math.min(w - 1, Math.round(w * (p.left != null ? p.left : 0))));
+      const t = Math.max(0, Math.min(h - 1, Math.round(h * (p.top != null ? p.top : 0))));
+      const r = Math.max(l + 1, Math.min(w, Math.round(w * (p.right != null ? p.right : 1))));
+      const b = Math.max(t + 1, Math.min(h, Math.round(h * (p.bottom != null ? p.bottom : 1))));
+      save(img.crop({ x: l, y: t, width: r - l, height: b - t }));
+      return { success: true };
+    }
+    case 'upscale':
+      save(img.resize({ width: w * 2, height: h * 2, quality: 'best' }));
+      return { success: true };
+    case 'downscale':
+      save(img.resize({ width: Math.max(1, Math.floor(w / 2)), height: Math.max(1, Math.floor(h / 2)), quality: 'best' }));
+      return { success: true };
+    case 'symmetrize':
+    case 'symmetrize_right': {
+      // Miroir de la moitié gauche (ou droite) sur l'autre moitié.
+      const px = Buffer.from(img.getBitmap());
+      const half = Math.floor(w / 2);
+      const keepLeft = (operation === 'symmetrize');
+      for (let y = 0; y < h; y++) {
+        const row = y * w * 4;
+        for (let x = 0; x < half; x++) {
+          const srcX = keepLeft ? x : (w - 1 - x);
+          const dstX = keepLeft ? (w - 1 - x) : x;
+          px.copy(px, row + dstX * 4, row + srcX * 4, row + srcX * 4 + 4);
+        }
+      }
+      save(fromBitmap(px, w, h));
+      return { success: true };
+    }
+    case 'extend': {
+      const pad = Math.max(1, Math.round(Math.max(w, h) * (p.padding != null ? p.padding : 0.2)));
+      const src = img.getBitmap();
+      // Fond transparent si l'image a de la transparence, blanc sinon (même
+      // règle que la version PIL).
+      let hasAlpha = false;
+      for (let i = 3; i < src.length; i += 4) { if (src[i] < 250) { hasAlpha = true; break; } }
+      const nw = w + pad * 2, nh = h + pad * 2;
+      const dst = Buffer.alloc(nw * nh * 4, 0);
+      if (!hasAlpha) dst.fill(255);
+      for (let y = 0; y < h; y++) {
+        src.copy(dst, ((y + pad) * nw + pad) * 4, y * w * 4, (y + 1) * w * 4);
+      }
+      save(fromBitmap(dst, nw, nh));
+      return { success: true };
+    }
+    case 'brightness': {
+      const px = Buffer.from(img.getBitmap());
+      const br = p.brightness != null ? Number(p.brightness) : 1.0;
+      const ct = p.contrast   != null ? Number(p.contrast)   : 1.0;
+      const sa = p.saturation != null ? Number(p.saturation) : 1.0;
+      const sh = p.sharpness  != null ? Number(p.sharpness)  : 1.0;
+      // Moyenne de luminance (référence du contraste, comme ImageEnhance).
+      let sum = 0;
+      for (let i = 0; i < px.length; i += 4) sum += 0.299 * px[i + 2] + 0.587 * px[i + 1] + 0.114 * px[i];
+      const mean = sum / (px.length / 4);
+      for (let i = 0; i < px.length; i += 4) {
+        let b = px[i], g = px[i + 1], r = px[i + 2];
+        if (br !== 1) { b *= br; g *= br; r *= br; }
+        if (ct !== 1) { b = mean + (b - mean) * ct; g = mean + (g - mean) * ct; r = mean + (r - mean) * ct; }
+        if (sa !== 1) {
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          b = lum + (b - lum) * sa; g = lum + (g - lum) * sa; r = lum + (r - lum) * sa;
+        }
+        px[i] = clamp255(Math.round(b)); px[i + 1] = clamp255(Math.round(g)); px[i + 2] = clamp255(Math.round(r));
+      }
+      if (sh !== 1) {
+        const blur = _boxBlur3(px, w, h);
+        for (let i = 0; i < px.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            px[i + c] = clamp255(Math.round(blur[i + c] + (px[i + c] - blur[i + c]) * sh));
+          }
+        }
+      }
+      save(fromBitmap(px, w, h));
+      return { success: true };
+    }
+    case 'facefix': {
+      // Unsharp mask sur la zone haute-centre (là où se trouve le visage) —
+      // même cadrage que la version PIL, sans IA.
+      const px = Buffer.from(img.getBitmap());
+      const blur = _boxBlur3(px, w, h);
+      const fl = Math.round(w * 0.2), fr = Math.round(w * 0.8), fb = Math.round(h * 0.4);
+      for (let y = 0; y < fb; y++) {
+        for (let x = fl; x < fr; x++) {
+          const i = (y * w + x) * 4;
+          for (let c = 0; c < 3; c++) {
+            px[i + c] = clamp255(Math.round(blur[i + c] + (px[i + c] - blur[i + c]) * 1.6));
+          }
+        }
+      }
+      save(fromBitmap(px, w, h));
+      return { success: true };
+    }
+    default:
+      return { success: false, error: `Unknown operation: ${operation}` };
+  }
+}
+
 // Quick image edits: symmetrize, upscale, brightness, crop, etc.
 // All done via a single Python one-liner using PIL — fast, no GPU needed.
 ipcMain.handle('image-quick-edit', async (event, { imagePath, operation, params }) => {
@@ -5078,6 +5324,22 @@ ipcMain.handle('image-quick-edit', async (event, { imagePath, operation, params 
       });
       if (r.creditsRemaining != null) safeSend('ai3d-progress', `[cloud] Crédits restants: ${r.creditsRemaining}\n`);
       return r.success ? { success: true, newPath: r.newPath } : r;
+    }
+
+    // Pas de venv IA exploitable (mode Cloud / machine sans GPU) : on fait la
+    // retouche en natif Electron au lieu d'échouer sur ModuleNotFoundError.
+    if (!_localPyLibsUsable()) {
+      try {
+        const rn = _quickEditNative(operation, imagePath, outPath, p);
+        if (rn.success && fs.existsSync(outPath)) {
+          _handleMultiviewInheritance(outPath).catch(() => {});
+          return { success: true, newPath: outPath };
+        }
+        return { success: false, error: rn.error || 'Image edit failed on this device.' };
+      } catch (e) {
+        log.warn('main', `image-quick-edit native (${operation}) failed: ${e.message}`);
+        return { success: false, error: 'Image edit failed on this device: ' + e.message };
+      }
     }
 
     const scripts = {
@@ -5338,6 +5600,8 @@ ipcMain.handle('hidream-available', async () => {
 // (fail open), so generation never breaks. SDXL/RealVisXL/HiDream need English.
 const _translateCache = new Map();  // `${from}|${text}` -> translated; avoids re-spawning Python on the Generate critical path
 let _translateWorkingPy = null;     // remember which interpreter has argostranslate (skip the failing embedded attempt next time)
+let _translateFailures = 0;         // échecs consécutifs du chemin de traduction
+let _translateBroken = false;       // argos définitivement indisponible pour cette session
 
 // Persistent translation server — loads Argos ONCE and keeps it warm, so each
 // translation is ~instant instead of re-importing argos (~5s) per spawn.
@@ -5358,6 +5622,10 @@ function _bumpTranslateIdle() {
 }
 function startTranslateServer() {
   if (translateProc) return;
+  // Sans venv IA (mode Cloud / machine sans GPU) argos n'existe pas : le spawn
+  // échoue instantanément mais ensureTranslateServer attendait quand même 12 s
+  // à CHAQUE appel (gel avant chaque génération si la langue UI n'est pas 'en').
+  if (!_localPyLibsUsable()) return;
   const scriptT = path.join(SCRIPTS_DIR, 'translate_server.py');
   if (!fs.existsSync(scriptT)) return;
   try {
@@ -5386,7 +5654,9 @@ function stopTranslateServer() {
 }
 async function ensureTranslateServer() {
   if (translateReady) return true;
+  if (!_localPyLibsUsable()) return false;   // pas d'attente inutile de 12 s
   if (!translateProc) startTranslateServer();
+  if (!translateProc) return false;          // spawn refusé/échoué → on sort
   for (let i = 0; i < 60 && !translateReady; i++) await new Promise(r => setTimeout(r, 200));
   return translateReady;
 }
@@ -5412,6 +5682,7 @@ let nsfwReady = false;
 const NSFW_PORT = 5558;
 function startNsfwServer() {
   if (nsfwProc) return;
+  if (!_localPyLibsUsable()) return;   // pas de classifieur local sans venv IA
   const scriptN = path.join(SCRIPTS_DIR, 'nsfw_server.py');
   if (!fs.existsSync(scriptN)) return;
   try {
@@ -5436,7 +5707,9 @@ function stopNsfwServer() {
 }
 async function ensureNsfwServer() {
   if (nsfwReady) return true;
+  if (!_localPyLibsUsable()) return false;   // évite 18 s d'attente à vide
   if (!nsfwProc) startNsfwServer();
+  if (!nsfwProc) return false;
   for (let i = 0; i < 90 && !nsfwReady; i++) await new Promise(r => setTimeout(r, 200));
   return nsfwReady;
 }
@@ -5457,6 +5730,7 @@ function nsfwServerCall(text) {
 ipcMain.handle('i18n-auto-translate', async (event, { texts, to } = {}) => {
   const out = {};
   if (!Array.isArray(texts) || !texts.length || !to || to === 'en') return out;
+  if (!_localPyLibsUsable() || _translateBroken) return out;   // pas d'argos sans venv IA
   try {
     await ensureTranslateServer();
     for (const tx of texts) {
@@ -5479,6 +5753,11 @@ ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   if (src === 'en' || !text || !text.trim()) return { text: text || '' };
   const _ck = src + '|' + text;
   if (_translateCache.has(_ck)) return { text: _translateCache.get(_ck) };
+  // Sans venv IA (mode Cloud), argostranslate est absent : le chemin complet
+  // coûtait jusqu'à ~50 s de gel AVANT chaque génération (12 s d'attente serveur
+  // + 2 spawns à 20 s de timeout), pour finir en fail-open. On sort tout de
+  // suite avec le texte d'origine — le prompt part tel quel vers le cloud.
+  if (!_localPyLibsUsable() || _translateBroken) return { text };
   // Fast path: the persistent translate server (argos kept warm).
   try {
     await ensureTranslateServer();
@@ -5518,10 +5797,17 @@ ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   for (const [py, strict] of attempts) {
     const out = await tryRun(py, strict);
     if (out) {
+      _translateFailures = 0;
       if (_translateCache.size > 500) _translateCache.clear();  // simple cap
       _translateCache.set(_ck, out);
       return { text: out };
     }
+  }
+  // Cache négatif borné : après 2 échecs complets (argos absent / cassé), on
+  // arrête de repayer les spawns à chaque génération pour la session.
+  if (++_translateFailures >= 2) {
+    _translateBroken = true;
+    log.warn('main', 'translate: désactivé pour cette session (2 échecs — argos indisponible)');
   }
   return { text };  // fail open → original (don't cache failures)
 });
@@ -7184,6 +7470,12 @@ function _mvScriptForEngine(engineOverride) {
 
 ipcMain.handle('generate-multiview', async (_event, opts) => {
   const { imagePath, harmonize, upscale, engine: engineOverride } = (opts || {});
+  // MV-Adapter est local uniquement (aucun endpoint worker). Le chemin
+  // automatique post-génération est déjà désactivé en Cloud côté renderer ;
+  // ce garde couvre l'entrée MANUELLE (bouton Multi-Views).
+  if (!_localPyLibsUsable()) {
+    return { success: false, cloudUnavailable: true, error: _localEngineMsg('Multi-view generation') };
+  }
   // Per-call engine override: defaults to MV-Adapter (true ortho
   // azim 0/90/180/270, same SDXL base as RealVis so colours match).
   const script = _mvScriptForEngine(engineOverride);
@@ -7428,6 +7720,13 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params, namedP
     } catch (e) {
       return { success: false, error: e.message || String(e) };
     }
+  }
+
+  // Toute op non routée vers le worker (set_pivot, texture_var…) exige
+  // trimesh/numpy : sans venv IA on renvoie un message produit plutôt qu'une
+  // traceback Python.
+  if (!_localPyLibsUsable()) {
+    return { success: false, cloudUnavailable: true, error: _localEngineMsg(`Mesh operation "${operation}"`) };
   }
 
   const args = [script, operation, meshPath, outPath, ...(params || [])];
@@ -7741,6 +8040,9 @@ ipcMain.handle('caption-image', async (_event, { imagePath }) => {
   if (!imagePath || !fs.existsSync(imagePath)) {
     return { success: false, error: `image not found: ${imagePath}` };
   }
+  // BLIP est local : sans venv IA on renvoie une légende vide (les appelants
+  // enrichissent juste un prompt) au lieu d'un échec de spawn.
+  if (!_localPyLibsUsable()) return { success: true, caption: '', skipped: 'no-local-engine' };
   const script = path.join(SCRIPTS_DIR, 'caption_image.py');
   return new Promise((resolve) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
@@ -7769,6 +8071,10 @@ ipcMain.handle('caption-image', async (_event, { imagePath }) => {
 ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages, mode, assetType, sheetViews }) => {
   if (!frontImage || !fs.existsSync(frontImage)) {
     return { success: false, error: `front image not found: ${frontImage}` };
+  }
+  // Vue arrière = RealVis/ControlNet/MV-Adapter locaux, pas d'endpoint worker.
+  if (!_localPyLibsUsable()) {
+    return { success: false, cloudUnavailable: true, error: _localEngineMsg('Back-view generation') };
   }
   // Save back photos in a subdir so the project image scan doesn't pick
   // them up as new versions. The back is data attached to the front, not
@@ -8052,15 +8358,166 @@ ipcMain.handle('create-project-from-mesh', (event, { projectName, meshPath, mesh
 // =====================================================================
 // All wizard:* IPC calls live here. Keep the surface minimal — every
 // extra channel is one more thing to validate.
-ipcMain.handle('wizard:detect-hardware', async () => {
-  const script = path.join(SCRIPTS_DIR, 'hw_detect.py');
-  return new Promise((resolve, reject) => {
-    execFile(_aiPython(), [script], { timeout: 30000 }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(stderr || err.message));
-      try { resolve(JSON.parse(stdout.trim().split(/\r?\n/).pop())); }
-      catch (e) { reject(new Error('cannot parse hw_detect output: ' + e.message)); }
-    });
+// =====================================================================
+// DÉTECTION MATÉRIELLE — 100 % NODE, ne peut JAMAIS échouer
+// =====================================================================
+// Cert Store 10.1.2.10 : la détection était entièrement déléguée à
+// scripts/hw_detect.py via le python embarqué. Tout blocage de ce spawn
+// (Smart App Control, antivirus, .pyd refusé, python-embed absent, timeout)
+// faisait rejeter le handler → le wizard affichait « Detection failed », le
+// bouton Continue restait grisé et l'app devenait INATTEIGNABLE. La détection
+// est désormais native (nvidia-smi + PowerShell CIM + os/fs) ; hw_detect.py
+// n'est plus qu'un enrichissement facultatif.
+function _nvidiaGpuInfo() {
+  // Même override que detectNvidiaGpu() : permet de rejouer le parcours de
+  // certification (machine sans GPU) depuis la machine de dev.
+  if (process.env.FABMESH_FORCE_NO_GPU === '1') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      execFile('nvidia-smi', ['--query-gpu=name,memory.total,driver_version', '--format=csv,noheader,nounits'],
+        { timeout: 8000 }, (err, stdout) => {
+          if (err || !stdout || !String(stdout).trim()) return resolve(null);
+          const line = String(stdout).trim().split(/\r?\n/)[0];
+          const parts = line.split(',').map((s) => s.trim());
+          if (!parts[0]) return resolve(null);
+          resolve({
+            vendor: 'NVIDIA', model: parts[0],
+            vram_mb: parseInt(parts[1], 10) || 0,
+            driver: parts[2] || null,
+          });
+        });
+    } catch (_) { resolve(null); }
   });
+}
+
+// GPU non-NVIDIA (Intel/AMD) via PowerShell CIM. `wmic` a été RETIRÉ de
+// Windows 11 24H2+ (les Surface récentes) : le repli wmic de hw_detect.py ne
+// voit donc plus l'iGPU et le wizard affichait « Not detected » en rouge.
+function _otherGpuInfo() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve(null);
+    try {
+      execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+        'Get-CimInstance Win32_VideoController | Select-Object -First 1 Name,AdapterRAM,DriverVersion | ConvertTo-Json -Compress'],
+        { timeout: 10000, windowsHide: true }, (err, stdout) => {
+          if (err || !stdout) return resolve(null);
+          try {
+            const j = JSON.parse(String(stdout).trim());
+            const o = Array.isArray(j) ? j[0] : j;
+            const name = (o && o.Name) ? String(o.Name) : '';
+            if (!name) return resolve(null);
+            const lower = name.toLowerCase();
+            const vendor = /nvidia|geforce|quadro|rtx|gtx/.test(lower) ? 'NVIDIA'
+                         : (/amd|radeon|\brx\b/.test(lower) ? 'AMD'
+                         : (/intel|iris|uhd|hd graphics|arc/.test(lower) ? 'Intel' : 'Other'));
+            const ram = Number(o.AdapterRAM) || 0;
+            resolve({ vendor, model: name, vram_mb: ram > 0 ? Math.round(ram / (1024 * 1024)) : 0,
+                      driver: o.DriverVersion || null });
+          } catch (_) { resolve(null); }
+        });
+    } catch (_) { resolve(null); }
+  });
+}
+
+function _diskFreeGb() {
+  for (const p of [HEAVY_DIR, path.parse(HEAVY_DIR || 'C:\\').root, app.getPath('userData')]) {
+    try {
+      if (!p) continue;
+      const s = fs.statfsSync(fs.existsSync(p) ? p : path.parse(p).root);
+      const gb = Math.floor((s.bavail * s.bsize) / (1024 ** 3));
+      if (gb >= 0) return gb;
+    } catch (_) {}
+  }
+  return 0;
+}
+
+// Même logique que hw_detect.recommend_mode() : TRELLIS-2 a besoin de ~15 Go de
+// VRAM et OOM sous 12 Go → aucun mode local viable en dessous, on route Cloud.
+function _recommendMode(gpu, ramMb, diskGb) {
+  if (!gpu || gpu.vendor !== 'NVIDIA') return 'cloud';
+  const vram = gpu.vram_mb || 0;
+  const FLOOR = 12 * 1024;
+  if (vram >= 16 * 1024 && ramMb >= 16 * 1024 && diskGb >= 30) return 'full';
+  if (vram >= FLOOR && ramMb >= 16 * 1024 && diskGb >= 25) return 'standard';
+  if (vram >= FLOOR && ramMb >= 8 * 1024 && diskGb >= 20) return 'lite';
+  return 'cloud';
+}
+
+async function _detectHardwareNative() {
+  const forceNoGpu = process.env.FABMESH_FORCE_NO_GPU === '1';
+  let gpu = null;
+  try { gpu = await _nvidiaGpuInfo(); } catch (_) {}
+  if (!gpu && !forceNoGpu) { try { gpu = await _otherGpuInfo(); } catch (_) {} }
+  const ram_mb = Math.round(os.totalmem() / (1024 * 1024));
+  const disk_free_gb = _diskFreeGb();
+  const driverMajor = gpu && gpu.driver ? parseInt(String(gpu.driver).split('.')[0], 10) || 0 : 0;
+  const driver_ok = !!(gpu && gpu.vendor === 'NVIDIA' && driverMajor >= 550);
+  const recommended_mode = _recommendMode(gpu, ram_mb, disk_free_gb);
+
+  const warnings = [];
+  if (!gpu) warnings.push('No GPU reported by Windows — Cloud mode will be used.');
+  else if (gpu.vendor !== 'NVIDIA') {
+    warnings.push(`${gpu.vendor} graphics detected (${gpu.model}) — the local AI engine needs an NVIDIA GPU. Cloud mode will be used instead.`);
+  } else if (!driver_ok && gpu.driver) {
+    warnings.push(`NVIDIA driver ${gpu.driver} is older than 550 — update it via GeForce Experience or nvidia.com/drivers.`);
+  }
+  if (gpu && gpu.vendor === 'NVIDIA' && (gpu.vram_mb || 0) < 12 * 1024) {
+    warnings.push(`Your GPU has ${Math.round((gpu.vram_mb || 0) / 1024)} GB VRAM — the local 3D engine needs at least 12 GB. Cloud mode will be used instead.`);
+  }
+  if (ram_mb && ram_mb < 8 * 1024) warnings.push(`Low system RAM (${Math.round(ram_mb / 1024)} GB). 16 GB is recommended.`);
+  if (recommended_mode !== 'cloud' && disk_free_gb < 15) warnings.push(`Low disk space (${disk_free_gb} GB free).`);
+
+  return {
+    os: `${os.type()} ${os.release()}`,
+    cpu_cores: os.cpus() ? os.cpus().length : 0,
+    ram_mb, disk_free_gb, gpu, recommended_mode, driver_ok, warnings,
+    source: 'native',
+  };
+}
+
+ipcMain.handle('wizard:detect-hardware', async () => {
+  // 1) Rapport NATIF — jamais d'exception remontée au wizard.
+  let report;
+  try {
+    report = await _detectHardwareNative();
+  } catch (e) {
+    log.warn('wizard', `native hw detect failed: ${e.message}`);
+    report = {
+      os: `${os.type()} ${os.release()}`, cpu_cores: 0,
+      ram_mb: Math.round(os.totalmem() / (1024 * 1024)), disk_free_gb: 0,
+      gpu: null, recommended_mode: 'cloud', driver_ok: false,
+      warnings: ['Hardware probe unavailable — Cloud mode will be used.'],
+      source: 'fallback',
+    };
+  }
+  // 2) Enrichissement OPTIONNEL par hw_detect.py (bande passante, GPU exotique).
+  //    Tout échec est ignoré : il ne doit JAMAIS bloquer le wizard.
+  try {
+    if (_localPyLibsUsable() || fs.existsSync(_embeddedPython())) {
+      const script = path.join(SCRIPTS_DIR, 'hw_detect.py');
+      const py = await new Promise((resolve) => {
+        execFile(_aiPython(), [script], { timeout: 20000 }, (err, stdout) => {
+          if (err || !stdout) return resolve(null);
+          try { resolve(JSON.parse(String(stdout).trim().split(/\r?\n/).pop())); }
+          catch (_) { resolve(null); }
+        });
+      });
+      if (py && typeof py === 'object') {
+        if (typeof py.bandwidth_mbps === 'number') report.bandwidth_mbps = py.bandwidth_mbps;
+        if (!report.gpu && py.gpu && process.env.FABMESH_FORCE_NO_GPU !== '1') {
+          // Python a vu un GPU que le natif a manqué → recalcul du mode.
+          report.gpu = py.gpu;
+          report.recommended_mode = _recommendMode(py.gpu, report.ram_mb, report.disk_free_gb);
+        }
+        if (py.bandwidth_mbps && py.bandwidth_mbps < 2 && report.recommended_mode !== 'cloud') {
+          report.warnings.push(`Slow connection (${py.bandwidth_mbps} MB/s). The model download may take a long time.`);
+        }
+      }
+    }
+  } catch (_) { /* enrichissement facultatif */ }
+  log.info('wizard', `detect-hardware: gpu=${report.gpu ? report.gpu.vendor + ' ' + report.gpu.model : 'none'} `
+    + `vram=${report.gpu ? report.gpu.vram_mb : 0}MB ram=${report.ram_mb}MB disk=${report.disk_free_gb}GB mode=${report.recommended_mode}`);
+  return report;
 });
 
 // Manifest of models per mode — keep in sync with what each script actually
@@ -8557,6 +9014,16 @@ function _findUninstaller() {
 // exe folder or the Windows registry). The uninstaller itself asks whether to
 // also delete models/generated content/settings.
 ipcMain.handle('app:uninstall', async (_e, opts = {}) => {
+  // Installation Microsoft Store (MSIX) : il n'y a AUCUN désinstalleur NSIS.
+  // On ouvre le panneau Windows au lieu d'affirmer « l'app n'est pas installée ».
+  if (process.windowsStore) {
+    try { shell.openExternal('ms-settings:appsfeatures'); } catch (_) {}
+    return {
+      ok: false, mode: 'store',
+      error: 'This copy was installed from the Microsoft Store. Uninstall it from '
+           + 'Windows Settings → Apps → Installed apps (just opened for you).',
+    };
+  }
   const uninstaller = _findUninstaller();
   if (uninstaller) {
     const { spawn } = require('child_process');
@@ -8880,7 +9347,7 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 ${importLine}
 `;
-    const tmpScript = path.join(SCRIPTS_DIR, `_open_blender_${Date.now()}.py`);
+    const tmpScript = path.join(_tmpWorkDir(), `_open_blender_${Date.now()}.py`);
     fs.writeFileSync(tmpScript, script, 'utf-8');
     // Spawn Blender in foreground (GUI mode), don't wait for it to close
     const proc = spawn(config.blenderPath, ['--python', tmpScript], {
@@ -9404,6 +9871,14 @@ function _exportViaTrimesh({ sourcePath, outputPath, targetFormat }) {
         return resolve({ path: outputPath, filename: path.basename(outputPath) });
       } catch (e) { return reject({ error: e.message }); }
     }
+    // Conversion via trimesh : impossible sans venv IA (mode Cloud / machine
+    // sans GPU). Le GLB reste exportable (copie directe ci-dessus) — on le dit
+    // clairement au lieu de renvoyer « ModuleNotFoundError: trimesh ».
+    if (!_localPyLibsUsable()) {
+      return reject({ error: `Exporting to ${String(targetFormat).toUpperCase()} needs the local AI engine, `
+        + 'which is not installed on this device. Export as GLB instead — it works everywhere '
+        + '(GLB opens in Blender, Unreal, Unity and Windows 3D Viewer).' });
+    }
     const pyCode = [
       'import sys, trimesh',
       'src, out, fmt = sys.argv[1], sys.argv[2], sys.argv[3]',
@@ -9759,7 +10234,7 @@ elif fmt == 'ply':
     bpy.ops.export_mesh.ply(filepath=out)
 `;
 
-  const tmpScript = path.join(SCRIPTS_DIR, `export_${Date.now()}.py`);
+  const tmpScript = path.join(_tmpWorkDir(), `export_${Date.now()}.py`);
   fs.writeFileSync(tmpScript, exportScript);
 
   return new Promise((resolve, reject) => {

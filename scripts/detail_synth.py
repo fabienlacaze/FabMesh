@@ -6,7 +6,7 @@ Adds GENUINE high-frequency surface detail to a mesh's baked texture, beyond
 the TRELLIS-2 generation ceiling, using a three-stage "render -> refine ->
 reproject" loop:
 
-  STAGE 1 — RENDER   (nvdiffrast, light GPU ~700 MB)
+  STAGE 1 — RENDER   (kaolin raster, Apache 2.0, light GPU ~700 MB)
       Rasterize the mesh WITH its current baked baseColorTexture from N camera
       views, at 1024x1024, into render_<i>.png (white background).
 
@@ -29,13 +29,33 @@ reproject" loop:
 
 VRAM SEQUENCING
 ---------------
-nvdiffrast render is light (~700 MB). SDXL tile is ~9.5 GB. texture_project is
-pure CPU. This script renders ALL views first (light GPU), then `del`s the
-nvdiffrast context + tensors and calls torch.cuda.empty_cache() to free the
+The kaolin raster render is light (~700 MB). SDXL tile is ~9.5 GB.
+texture_project is pure CPU. This script renders ALL views first (light GPU),
+then `del`s the raster tensors and calls torch.cuda.empty_cache() to free the
 GPU BEFORE the SDXL stage runs, then reprojects on CPU. It NEVER holds the
-nvdiffrast context and the SDXL pipeline resident at the same time. The SDXL
+raster tensors and the SDXL pipeline resident at the same time. The SDXL
 pipeline lives in a SEPARATE process (sdxl_server.py); we only talk to it over
 HTTP, so the only torch state this process owns is the (now-freed) renderer.
+
+LICENSE — why kaolin, not nvdiffrast
+------------------------------------
+Stage 1 used to rasterize with nvdiffrast, whose NVIDIA "1-Way Commercial"
+license is NON-commercial for a sold product — a licensing blocker for
+FabMesh. It was migrated (2026-07-26) to kaolin.render.mesh.rasterize
+(Apache 2.0, commercial-safe), following the SAME pattern as the validated
+shim scripts/trellis2_kaolin_shim.py (PSNR > 35 dB / IoU > 0.99 / SSIM > 0.95
+vs nvdiffrast on the TRELLIS-2 texturing path). The camera derivation
+(_project_to_clip) and every output convention (bottom-up raster + np.flipud,
+rast channel layout, file names) are kept byte-identical; only the rasterizer
+backend changed. Documented compromises vs nvdiffrast:
+  - barycentrics are screen-space affine, not perspective-correct
+    (negligible at fov 40 deg / distance 1.6 — same compromise the validated
+    TRELLIS-2 shim already accepts);
+  - rast[...,2] carries an affine-interpolated NDC z (only read by the
+    write_depth branch, which main() never enables);
+  - dr.texture's wrap boundary mode is approximated by frac(uv) +
+    grid_sample padding_mode='border' (< 1 texel divergence at the atlas rim);
+  - no dr.antialias equivalent (this script never used it).
 
 CAMERA MATCHING — the load-bearing part
 ---------------------------------------
@@ -55,7 +75,7 @@ with  R_w2c_base = [[0,1,0],[0,0,1],[1,0,0]],  fov_deg = 40, distance = 1.6,
       focal = 0.5 / tan(0.5 * radians(fov_deg)).
 
 To guarantee the reprojection lands on the SAME pixels, this renderer builds
-its nvdiffrast clip-space transform from the SAME R_undo, R_w2c, t_w2c, focal
+its clip-space transform from the SAME R_undo, R_w2c, t_w2c, focal
 and the SAME V-flip, so that a world vertex's final RENDERED pixel (col,row)
 equals texture_project's (p_u, p_v_final) sampling location * image size.
 See _project_to_clip() for the exact derivation.
@@ -79,7 +99,7 @@ import tempfile
 import subprocess
 
 # If anything from trellis ever gets imported transitively, these must be set
-# before that import. We don't import trellis here (only trimesh / nvdiffrast /
+# before that import. We don't import trellis here (only trimesh / kaolin /
 # torch / numpy / PIL / requests), but set them defensively so a future edit
 # that pulls a trellis util in doesn't crash on attention-backend selection.
 os.environ.setdefault('ATTN_BACKEND', 'xformers')
@@ -323,10 +343,10 @@ def load_mesh_for_render(mesh_path):
 
 
 # ---------------------------------------------------------------------------
-# STAGE 1 — render with nvdiffrast.
+# STAGE 1 — render with kaolin (Apache 2.0; replaces nvdiffrast, NVIDIA NC).
 # ---------------------------------------------------------------------------
 def _project_to_clip(verts_cam_t, R_w2c_t, t_w2c_t, focal, near=0.05, far=10.0):
-    """Map camera-frame verts -> nvdiffrast clip-space (homogeneous, V,4).
+    """Map camera-frame verts -> GL-style clip-space (homogeneous, V,4).
 
     DERIVATION (this is the crux of the camera match).
 
@@ -338,11 +358,15 @@ def _project_to_clip(verts_cam_t, R_w2c_t, t_w2c_t, focal, near=0.05, far=10.0):
     i.e. the image is seen looking down -Z (objects have cam_z < 0 in front),
     +x maps to +u (right), +y maps to +p_v-before-flip (up in NDC terms).
 
-    nvdiffrast.rasterize takes CLIP coords (x_c,y_c,z_c,w_c); it divides by w_c
-    to get NDC in [-1,1], and the OUTPUT raster tensor has:
+    _kaolin_rasterize_persp() takes CLIP coords (x_c,y_c,z_c,w_c) — the same
+    contract nvdiffrast.rasterize had; it divides by w_c to get NDC in [-1,1],
+    rasterizes in NDC via kaolin, and returns a buffer in the SAME convention
+    the rest of this file expects:
         - column index increasing with NDC x   (left -> right)
         - ROW 0 at the BOTTOM (NDC y = -1), row H-1 at the TOP (NDC y = +1)
-          (nvdiffrast/OpenGL convention: +y is up, origin bottom-left).
+          (the nvdiffrast/OpenGL convention: +y is up, origin bottom-left —
+          preserved by an internal row-flip, exactly like the validated shim
+          trellis2_kaolin_shim.py).
 
     We want the rendered image, AFTER we flip it to a normal top-left-origin
     PNG, to have a pixel at (col,row) whose (col/W, row/H) == (p_u, p_v_final)
@@ -357,15 +381,15 @@ def _project_to_clip(verts_cam_t, R_w2c_t, t_w2c_t, focal, near=0.05, far=10.0):
     Let p_v_raw = focal*cam_y/(-cam_z) + 0.5  (in [0,1], BEFORE the 1-p_v flip).
     Then p_v_final = 1 - p_v_raw.
     A top-left-origin PNG row index satisfies  row/H = p_v_final.
-    nvdiffrast buffer row r_gl maps to NDC y = (2*r_gl/H + ... ) increasing
+    Raster buffer row r_gl maps to NDC y = (2*r_gl/H + ... ) increasing
     upward; r_gl = 0 is NDC y = -1 (bottom). When we np.flipud() the buffer to
     get a top-left PNG, png_row = H-1-r_gl, so png_row/H increases as r_gl
     decreases, i.e. as NDC y goes DOWN. We want png_row/H = p_v_final =
     1 - p_v_raw, i.e. png_row/H increases as p_v_raw decreases, i.e. as
     cam_y/(-cam_z) decreases, i.e. as cam_y (for cam_z<0) decreases.
 
-    NDC y in nvdiffrast increases UP. png_row (after flipud) increases as NDC y
-    decreases. We need png_row/H to increase as cam_y decreases ->
+    NDC y in the buffer increases UP. png_row (after flipud) increases as NDC
+    y decreases. We need png_row/H to increase as cam_y decreases ->
     NDC y must INCREASE as cam_y increases. So:
 
         ndc_y_gl = 2*p_v_raw - 1 = 2*focal*cam_y/(-cam_z)
@@ -400,11 +424,203 @@ def _project_to_clip(verts_cam_t, R_w2c_t, t_w2c_t, focal, near=0.05, far=10.0):
     return clip
 
 
+def _ensure_kaolin_rasterize():
+    """Deferred kaolin import (keeps --help fast, mirrors the old deferred
+    `import nvdiffrast.torch`). Returns kaolin.render.mesh.rasterize.
+
+    DEV fallback: in the un-packaged app _aiPython() resolves to the system
+    'python', which historically had nvdiffrast but may lack kaolin. If kaolin
+    is missing and the TRELLIS2 venv (which HAS kaolin 0.18 cu128 — see
+    wizard_install_deps.py) exists, re-exec this same command line under that
+    venv's python (same venv_py pattern as mesh_tools.trellis2_retex). A guard
+    env var prevents a re-exec loop. Otherwise exit with an actionable pip hint.
+    """
+    try:
+        from kaolin.render.mesh import rasterize as _kr
+        return _kr
+    except ImportError as e:
+        venv_py = os.path.abspath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', 'external',
+            'TRELLIS2_win', '.venv', 'Scripts', 'python.exe'))
+        same_py = (os.path.normcase(os.path.abspath(sys.executable))
+                   == os.path.normcase(venv_py))
+        already_reexeced = os.environ.get('FABMESH_DETAIL_SYNTH_REEXEC') == '1'
+        if os.path.exists(venv_py) and not same_py and not already_reexeced:
+            log(f'kaolin not importable under {sys.executable} ({e});')
+            log(f'  re-exec under the TRELLIS2 venv: {venv_py}')
+            env = dict(os.environ)
+            env['FABMESH_DETAIL_SYNTH_REEXEC'] = '1'
+            rc = subprocess.run(
+                [venv_py, os.path.abspath(__file__)] + sys.argv[1:],
+                env=env).returncode
+            sys.exit(rc)
+        log(f'ERROR: kaolin is required for the render stage but failed to '
+            f'import ({e}).')
+        log('  Install it in this python (torch 2.8 / cu128 build):')
+        log('    pip install kaolin==0.18.0 -f '
+            'https://nvidia-kaolin.s3.us-east-2.amazonaws.com/'
+            'torch-2.8.0_cu128.html')
+        sys.exit(2)
+
+
+def _kaolin_rasterize_persp(clip, faces_t, res):
+    """Perspective 3D rasterization on kaolin.render.mesh.rasterize (Apache
+    2.0) with an nvdiffrast-compatible output — replaces
+    dr.rasterize(glctx, clip, tri, resolution).
+
+    Derived from the validated scripts/trellis2_kaolin_shim.py (PSNR > 35 dB
+    vs nvdiffrast), extended from UV-space to PERSPECTIVE: real division by w
+    and a real per-vertex depth so occlusion (nearest-face wins) is correct.
+
+    clip    : (1,V,4) clip coords from _project_to_clip (w = -cam_z > 0 in
+              front of the camera).
+    faces_t : (F,3) int32 triangle indices.
+    res     : output height == width.
+
+    Returns (rast, None) with rast (1,H,W,4) in nvdiffrast layout:
+        [...,0] = bary u (weight of vertex 1)
+        [...,1] = bary v (weight of vertex 2)
+        [...,2] = interpolated NDC z (real depth channel — keeps the
+                  write_depth branch functional)
+        [...,3] = triangle_id + 1, 0 = background
+    and rows in nvdiffrast's BOTTOM-UP convention (internal torch.flip, same
+    as the shim), so render_views' existing np.flipud stays valid unchanged.
+
+    Documented compromises vs nvdiffrast (see module docstring LICENSE
+    section): barycentrics are screen-space affine, not perspective-correct
+    (negligible at fov 40 deg / distance 1.6 — same compromise the validated
+    TRELLIS-2 shim accepts); no MSAA (nvdiffrast did none here either);
+    vertices behind the camera are clamped by the w epsilon (never happens
+    with these 6 orbital cameras at distance 1.6).
+    """
+    import torch
+    _kaolin_rasterize = _ensure_kaolin_rasterize()
+
+    B, V, _ = clip.shape                       # B == 1
+    F = faces_t.shape[0]
+    H = W = int(res)
+    tri_long = faces_t.long()
+
+    # Perspective divide: clip -> NDC. w > 0 in front of the camera.
+    w = clip[..., 3:4].clamp(min=1e-6)         # (B,V,1)
+    ndc = clip[..., :3] / w                    # (B,V,3)
+
+    # (a) Per-face NDC xy, +Y up. kaolin receives +Y-up vertices and emits
+    # rows TOP-DOWN — identical constat to trellis2_kaolin_shim.py l.73-77;
+    # we flip rows at the end to return the nvdiffrast bottom-up buffer.
+    face_vertices_image = ndc[..., :2][:, tri_long]              # (B,F,3,2)
+
+    # (b) Depth for occlusion: kaolin (DIB-R convention, camera looks down -Z)
+    # keeps the face with MAX z as the visible one. Camera-space z = -w is
+    # negative in front and LARGER (less negative) when closer -> correct
+    # nearest-face-wins ordering.
+    cam_z = (-w)[..., 0]                                         # (B,V)
+    face_vertices_z = cam_z[:, tri_long]                         # (B,F,3)
+
+    # (c) Features: barycentric basis (so interp yields w0,w1,w2 per pixel,
+    # same trick as the shim) + per-vertex NDC z (real depth channel).
+    bary_basis = torch.eye(3, device=clip.device, dtype=clip.dtype)  # (3,3)
+    feat = torch.cat([
+        bary_basis.unsqueeze(0).unsqueeze(0).expand(B, F, 3, 3),
+        ndc[..., 2:3][:, tri_long],                              # (B,F,3,1)
+    ], dim=-1).contiguous()                                      # (B,F,3,4)
+
+    interp, face_idx = _kaolin_rasterize(
+        height=H, width=W,
+        face_vertices_z=face_vertices_z,
+        face_vertices_image=face_vertices_image,
+        face_features=feat,
+        backend='cuda',
+    )
+    # interp: (B,H,W,4) = (w0, w1, w2, ndc_z); face_idx: (B,H,W), -1 = bg.
+
+    rast = torch.zeros(B, H, W, 4, device=clip.device, dtype=clip.dtype)
+    rast[..., 0] = interp[..., 1]              # nvdiffrast u = weight of v1
+    rast[..., 1] = interp[..., 2]              # nvdiffrast v = weight of v2
+    rast[..., 2] = interp[..., 3]              # NDC z (affine-interpolated)
+    rast[..., 3] = (face_idx + 1).to(clip.dtype)   # tri_id+1, 0 = background
+
+    # kaolin rows are top-down; flip back to nvdiffrast's bottom-up so the
+    # downstream np.flipud (and the whole _project_to_clip derivation) holds.
+    rast = torch.flip(rast, dims=[1])
+    return rast, None
+
+
+def _dr_interpolate(attr, rast, tri, rast_db=None, diff_attrs=None):
+    """Drop-in replacement for dr.interpolate — copied verbatim from the
+    validated scripts/trellis2_kaolin_shim.py interpolate() (kept as a LOCAL
+    copy so detail_synth stays self-contained in the packaged app, where the
+    shim file lives inside the TRELLIS2 venv, not next to this script).
+
+    attr: (B,V,C) vertex attributes (typically B=1); rast: (B,H,W,4) from
+    _kaolin_rasterize_persp; tri: (F,3). Returns (out, None), out (B,H,W,C).
+
+    Behaviour difference vs nvdiffrast: background pixels are 0 instead of
+    extrapolated values — harmless here, all three call sites multiply by the
+    coverage mask afterwards (colour, normal RGB, head weight).
+    """
+    import torch
+    B, H, W, _ = rast.shape
+    bary_u = rast[..., 0:1]              # weight of vertex 1
+    bary_v = rast[..., 1:2]              # weight of vertex 2
+    bary_w = 1.0 - bary_u - bary_v       # weight of vertex 0
+    tri_id_p1 = rast[..., 3].long()
+    valid = tri_id_p1 > 0
+    tri_id = (tri_id_p1 - 1).clamp(min=0)        # (B,H,W)
+
+    face_v_idx = tri.long()[tri_id]              # (B,H,W,3)
+    # attr is (B,V,C). nvdiffrast supports B=1 broadcast; we mirror that.
+    if attr.shape[0] == 1 and B > 1:
+        attr_b = attr.expand(B, -1, -1)
+    else:
+        attr_b = attr
+    batch_idx = torch.arange(B, device=attr.device).view(B, 1, 1, 1) \
+        .expand(B, H, W, 3)
+    gathered = attr_b[batch_idx, face_v_idx]     # (B,H,W,3,C)
+
+    v0 = gathered[..., 0, :]
+    v1 = gathered[..., 1, :]
+    v2 = gathered[..., 2, :]
+
+    out = bary_w * v0 + bary_u * v1 + bary_v * v2
+    out = out * valid.unsqueeze(-1).to(out.dtype)
+    return out, None
+
+
+def _dr_texture(tex, uv, filter_mode='linear'):
+    """Drop-in replacement for dr.texture(tex, uv, filter_mode='linear') via
+    torch.nn.functional.grid_sample.
+
+    tex: (1,H,W,C) float in [0,1]; uv: (1,Ho,Wo,2) with u -> columns and v
+    indexing tex rows DIRECTLY (same as dr.texture; the trimesh-UV V-flip is
+    already done upstream in render_views — do NOT re-flip here).
+
+    - wrap addressing: uv = uv - floor(uv), matching dr.texture's default
+      boundary_mode='wrap' (atlas UVs are already in [0,1], so ~no-op).
+    - grid_sample align_corners=False maps grid 2u-1 to texel u*W-0.5:
+      exactly nvdiffrast's texel-center bilinear sampling.
+
+    Documented compromises: padding_mode='border' instead of a true bilinear
+    wrap AT the texel 0 / W-1 boundary (grid_sample has no 'wrap' padding) —
+    divergence < 1 texel at the atlas rim, invisible after reprojection; no
+    mip-mapping (dr.texture 'linear' did none either).
+    """
+    import torch
+    import torch.nn.functional as _F
+
+    uv = uv - uv.floor()                            # wrap into [0,1)
+    grid = uv * 2.0 - 1.0                           # (1,Ho,Wo,2): gx from u, gy from v
+    out = _F.grid_sample(
+        tex.permute(0, 3, 1, 2),                    # (1,C,H,W)
+        grid, mode='bilinear', padding_mode='border', align_corners=False)
+    return out.permute(0, 2, 3, 1)                  # (1,Ho,Wo,C)
+
+
 def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
                  norm_cam=None, write_normal=True, write_depth=False,
                  head_weight=None, write_head_mask=False):
-    """STAGE 1: rasterize each view with nvdiffrast, sample the baked texture,
-    write render_<i>.png (RGB, white background). Returns
+    """STAGE 1: rasterize each view with kaolin (Apache 2.0), sample the baked
+    texture, write render_<i>.png (RGB, white background). Returns
         (render_paths, normal_paths, depth_paths, head_mask_paths)
     where normal_paths / depth_paths / head_mask_paths are [] when not requested.
 
@@ -423,14 +639,17 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
     write_depth (optional) writes depth_<i>.png from rast z/w — only needed if
     the refine falls back to a depth ControlNet instead of the union normal one.
 
-    Frees the nvdiffrast context + all GPU tensors before returning so the GPU
-    is clear for the SDXL stage.
+    Frees all GPU tensors before returning so the GPU is clear for the SDXL
+    stage.
     """
     import torch
-    import nvdiffrast.torch as dr
+    # Deferred kaolin import; may re-exec under the TRELLIS2 venv in dev if
+    # the current python lacks kaolin (see _ensure_kaolin_rasterize).
+    _ensure_kaolin_rasterize()
 
     if not torch.cuda.is_available():
-        raise RuntimeError('CUDA not available — nvdiffrast render needs a GPU.')
+        raise RuntimeError('CUDA not available — the kaolin raster render '
+                           'needs a GPU (backend="cuda").')
 
     device = torch.device('cuda')
     os.makedirs(out_dir, exist_ok=True)
@@ -450,22 +669,21 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
     if write_head_mask and head_weight is not None and not do_head:
         log('  head freeze requested but head_weight all-zero — skipping mask.')
     if do_head:
-        # (V,1) so dr.interpolate yields a (1,H,W,1) attribute. contiguous() —
-        # nvdiffrast requires contiguous attribute tensors (same fix as normals).
+        # (V,1) so _dr_interpolate yields a (1,H,W,1) attribute. contiguous()
+        # kept from the nvdiffrast days (harmless, cheap).
         head_w_t = torch.tensor(np.asarray(head_weight, dtype=np.float32)[:, None],
                                 dtype=torch.float32, device=device).contiguous()  # (V,1)
-    # UV: nvdiffrast.texture expects uv in [0,1] with origin bottom-left and
-    # V increasing upward. trimesh/glTF UVs use origin top-left (V down), so
-    # flip V to match nvdiffrast's texel sampling.
+    # UV: _dr_texture keeps dr.texture's convention — uv in [0,1], origin
+    # bottom-left, V increasing upward. trimesh/glTF UVs use origin top-left
+    # (V down), so flip V to match that texel sampling. DO NOT change this
+    # flip when touching _dr_texture: the two are calibrated together.
     uv_xy = np.ascontiguousarray(uv[:, :2].astype(np.float32))
     uv_xy[:, 1] = 1.0 - uv_xy[:, 1]
     uv_t = torch.tensor(uv_xy, dtype=torch.float32, device=device)         # (V,2)
 
-    # Texture tensor for dr.texture: (1, H, W, C) float32 in [0,1].
+    # Texture tensor for _dr_texture: (1, H, W, C) float32 in [0,1].
     tex_t = torch.tensor(tex_rgb.astype(np.float32) / 255.0,
                          dtype=torch.float32, device=device)[None, ...]    # (1,H,W,3)
-
-    glctx = dr.RasterizeCudaContext(device=device)
 
     paths = []
     normal_paths = []
@@ -479,14 +697,14 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
         clip = _project_to_clip(verts_t, R_w2c_t, t_w2c_t, FOCAL)  # (V,4)
         clip = clip[None, ...].contiguous()                        # (1,V,4)
 
-        # Rasterize. rast_out: (1,H,W,4) = (u,v,z/w, triangle_id+1).
-        rast, _ = dr.rasterize(glctx, clip, faces_t, resolution=[res, res])
+        # Rasterize (kaolin). rast: (1,H,W,4) = (u, v, ndc_z, triangle_id+1).
+        rast, _ = _kaolin_rasterize_persp(clip, faces_t, res)
 
         # Interpolate per-vertex UV across the raster.
-        uv_interp, _ = dr.interpolate(uv_t[None, ...], rast, faces_t)  # (1,H,W,2)
+        uv_interp, _ = _dr_interpolate(uv_t[None, ...], rast, faces_t)  # (1,H,W,2)
 
         # Sample the baked texture (bilinear).
-        color = dr.texture(tex_t, uv_interp, filter_mode='linear')    # (1,H,W,3)
+        color = _dr_texture(tex_t, uv_interp, filter_mode='linear')    # (1,H,W,3)
 
         # Background mask: rast[...,3]==0 means no triangle hit -> white bg.
         mask = (rast[..., 3:4] > 0).float()                           # (1,H,W,1)
@@ -494,7 +712,8 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
 
         img = color[0].clamp(0.0, 1.0).detach().cpu().numpy()         # (H,W,3)
         img = (img * 255.0 + 0.5).astype(np.uint8)
-        # nvdiffrast buffer is bottom-left origin (row 0 = bottom). Flip to a
+        # The raster buffer is bottom-left origin (row 0 = bottom — nvdiffrast
+        # convention, preserved by _kaolin_rasterize_persp). Flip to a
         # standard top-left-origin PNG so (col/W,row/H) == (p_u, p_v_final).
         img = np.flipud(img)
 
@@ -511,7 +730,7 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
             # (rotation only — normals ignore translation). R_w2c is orthonormal,
             # so plain rotation is the correct normal transform.
             nrm_view = (R_w2c_t @ normals_t.T).T.contiguous()          # (V,3)
-            nrm_interp, _ = dr.interpolate(
+            nrm_interp, _ = _dr_interpolate(
                 nrm_view[None, ...].contiguous(), rast, faces_t)       # (1,H,W,3)
             n = nrm_interp[0]                                          # (H,W,3)
             # Re-normalise interpolated normals (interpolation shortens them).
@@ -532,7 +751,10 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
 
         # --- optional DEPTH map (only for a depth-controlnet fallback) ---
         if write_depth:
-            # rast[...,2] is z/w (NDC depth in [-1,1] over the hit region).
+            # rast[...,2] is the interpolated NDC depth over the hit region.
+            # NOTE (kaolin migration): it is AFFINE-interpolated in screen
+            # space, not perspective-correct — sufficient for a controlnet
+            # depth fallback (and main() never enables this branch anyway).
             z = rast[0, ..., 2]                                        # (H,W)
             m2 = mask[0, ..., 0] > 0.5
             if m2.any():
@@ -556,10 +778,9 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
         # --- HEAD MASK (frozen region; composited back over the refine) -------
         hw_interp = None
         if do_head:
-            # Interpolate the per-vertex head_weight across the raster. The
-            # attribute tensor is already contiguous (same requirement as the
-            # normal fix). Channel 0 is the scalar weight.
-            hw_interp, _ = dr.interpolate(
+            # Interpolate the per-vertex head_weight across the raster.
+            # Channel 0 is the scalar weight.
+            hw_interp, _ = _dr_interpolate(
                 head_w_t[None, ...].contiguous(), rast, faces_t)       # (1,H,W,1)
             hwm = hw_interp[0, ..., 0]                                 # (H,W)
             # Background (no triangle hit) -> 0 so only ON-MESH head pixels freeze.
@@ -579,13 +800,13 @@ def render_views(verts_cam, faces, uv, tex_rgb, out_dir, res=RENDER_RES,
             del hw_interp
 
     # --- free the GPU before SDXL stage ---
-    del glctx, verts_t, faces_t, uv_t, tex_t
+    del verts_t, faces_t, uv_t, tex_t
     if normals_t is not None:
         del normals_t
     if head_w_t is not None:
         del head_w_t
     torch.cuda.empty_cache()
-    log('nvdiffrast context + tensors freed; GPU clear for SDXL stage.')
+    log('kaolin raster tensors freed; GPU clear for SDXL stage.')
     return paths, normal_paths, depth_paths, head_mask_paths
 
 
@@ -897,7 +1118,7 @@ def main():
     log(f'workdir: {work}')
 
     # --- STAGE 1: render ---
-    log('STAGE 1: render (nvdiffrast)')
+    log('STAGE 1: render (kaolin raster, Apache 2.0)')
     verts_cam, faces, uv, tex_rgb, norm_cam, head_weight = \
         load_mesh_for_render(mesh_path)
     log(f'mesh: {len(verts_cam)} verts, {len(faces)} faces, '

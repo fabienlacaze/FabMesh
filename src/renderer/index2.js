@@ -27,7 +27,62 @@ if (!THREE.Mesh.prototype.__bvhPatched) {
   THREE.Mesh.prototype.__bvhPatched = true;
 }
 
-const API = window.meshyAPI;
+// ============================================================
+// PASSERELLE IPC + INTERCEPTION « session cloud requise »
+// ============================================================
+// Cert Store 10.1.2.10 : en mode Cloud, TOUT appel d'outil peut revenir avec
+// { needsCloudLogin: true } si aucune session MyFabmesh n'est active. Avant,
+// seule la génération d'images ouvrait la modale de connexion — les ~15 autres
+// outils (Image→3D, Remove BG, rig, anim, outils mesh…) affichaient « failed /
+// unknown » sans jamais proposer de se connecter, ce qui fait passer la
+// fonctionnalité pour cassée. On enveloppe donc ces méthodes UNE fois ici :
+// réponse needsCloudLogin → modale de connexion → un seul retry.
+const _CLOUD_LOGIN_METHODS = [
+  'generateImages', 'imageTo3D', 'imageToTrellis',
+  'removeBackground', 'img2img', 'maskInpaint', 'autoInpaint', 'imageQuickEdit',
+  'meshTool', 'meshSegment', 'materialAdjust', 'resizeMesh',
+  'generateExplode3d', 'generateConstructionStages3d',
+  'autoRigAI', 'animKimodo', 'animateAI',
+];
+const API = (() => {
+  const raw = window.meshyAPI;
+  // Les objets exposés par contextBridge sont figés : on travaille sur une
+  // COPIE de surface (jamais un Proxy, qui lèverait sur une propriété
+  // non-writable/non-configurable). Si la copie échoue, on retombe sur l'objet
+  // d'origine — l'app doit démarrer quoi qu'il arrive.
+  try {
+    const keys = Object.keys(raw || {});
+    if (keys.length < 20) return raw;
+    const copy = {};
+    for (const k of keys) copy[k] = raw[k];
+    for (const name of _CLOUD_LOGIN_METHODS) {
+      const orig = raw[name];
+      if (typeof orig !== 'function') continue;
+      copy[name] = async (...args) => {
+        let r = await orig(...args);
+        if (r && r.needsCloudLogin) {
+          const ok = await showCloudLoginModal();   // déclaration hoistée
+          if (ok) r = await orig(...args);
+        }
+        return r;
+      };
+    }
+    return copy;
+  } catch (_) { return raw; }
+})();
+
+// Statut GPU mis en cache au boot (le main le cache aussi). Sert à masquer les
+// éléments d'UI purement NVIDIA (moniteur VRAM/température) sur une machine
+// sans carte NVIDIA, au lieu de les laisser figés sur « -- ».
+window._gpuInfo = null;
+(async () => {
+  try { window._gpuInfo = await window.meshyAPI?.gpuStatus?.() || null; } catch (_) {}
+})();
+function _hasNvidia() { return !(window._gpuInfo && window._gpuInfo.hasNvidia === false); }
+function _isCloudMode() {
+  return ((typeof window._computeMode === 'function') && window._computeMode() === 'cloud') || !_hasNvidia();
+}
+window._isCloudMode = _isCloudMode;
 
 // MyFabmesh.AI-styled confirm dialog (replaces the OS-native window.confirm
 // popup, which looks out of place against the dark UI).
@@ -3307,7 +3362,15 @@ _updateGenButtonsEstimate();
 // new version (so the original stays clean), (b) generate 6 MVs on
 // that new version's <stem>_multiview/ dir, (c) reload the project
 // so the gallery shows the new version with MV badge.
+// Garde Cloud (ceinture-bretelles du masquage) : MV-Adapter et la vue arrière
+// sont des moteurs LOCAUX, sans endpoint worker. Un clic en mode Cloud doit
+// afficher un message produit, jamais une traceback Python.
+function _cloudToolUnavailable(label) {
+  showToast(_i18nTf('{x} runs on the local AI engine (NVIDIA GPU) and is not available in Cloud mode.', label),
+            'info', 6000);
+}
 document.getElementById('ws-multiview-btn')?.addEventListener('click', () => {
+  if (_isCloudMode()) { _cloudToolUnavailable(_i18nT('Multi-Views')); return; }
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   const modal = document.getElementById('modal-multiview-options');
@@ -3328,6 +3391,7 @@ document.getElementById('mv-opt-mode')?.addEventListener('change', () => {
 document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
   const modal = document.getElementById('modal-multiview-options');
   if (modal) modal.classList.add('hidden');
+  if (_isCloudMode()) { _cloudToolUnavailable(_i18nT('Multi-Views')); return; }
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   const srcImgPath = p.previewImagePath || p.selectedImagePath;
@@ -3595,9 +3659,10 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
 // (stage index|null).
 // ============================================================
 document.getElementById('ws-buildstages-btn')?.addEventListener('click', () => {
+  if (_isCloudMode()) { _cloudToolUnavailable(_i18nT('Construction stages')); return; }
   const p = state.currentProject;
   const target = (typeof editTarget === 'function' ? editTarget(p) : null) || p?.selectedImagePath || p?.previewImagePath;
-  if (!target) { showToast('Génère ou choisis une image d\'abord.', 'error'); return; }
+  if (!target) { showToast(_i18nT('Generate or pick an image first.'), 'error'); return; }
   document.getElementById('modal-buildstages-options')?.classList.remove('hidden');
 });
 document.getElementById('bs-count')?.addEventListener('input', (e) => {
@@ -3608,9 +3673,10 @@ document.getElementById('bs-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-buildstages-options')?.classList.add('hidden');
 });
 document.getElementById('bs-start')?.addEventListener('click', async () => {
+  if (_isCloudMode()) { _cloudToolUnavailable(_i18nT('Construction stages')); return; }
   const p = state.currentProject;
   const target = (typeof editTarget === 'function' ? editTarget(p) : null) || p?.selectedImagePath || p?.previewImagePath;
-  if (!target) { showToast('Génère ou choisis une image d\'abord.', 'error'); return; }
+  if (!target) { showToast(_i18nT('Generate or pick an image first.'), 'error'); return; }
   const count = Math.max(2, Math.min(20, parseInt(document.getElementById('bs-count')?.value, 10) || 4));
   document.getElementById('modal-buildstages-options')?.classList.add('hidden');
   const prompt = (p && (p.prompt || p.initialPrompt)) || '';
@@ -6243,26 +6309,32 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
     expectedMs += count * mvPerImage;
   }
   gatedRun('image', `Generate images: ${p.name}`, async () => {
+    // Le mode est résolu AVANT pushJob : multi-vues et étapes de construction
+    // sont désactivées en Cloud (pas d'endpoint worker), le détail de tâche doit
+    // donc annoncer ce qui part RÉELLEMENT, pas ce que cochent les cases.
+    const _computeM = _isCloudMode() ? 'cloud' : 'local';
+    const _mvSent = multiView && _computeM !== 'cloud';
+    const _stagesSent = buildStages && _computeM !== 'cloud';
+    const _mv6Sent = mv6view && _computeM !== 'cloud';
+    const _offCloud = _i18nT('off (Cloud mode)');
     const job = pushJob(`Generate images: ${p.name}`, null, {
       'Asset type': assetType,
       Style: assetStyle,
       Engine: engineLabel(engine),
       Count: count,
       Steps: steps,
-      'Multi-view': mv6view ? '6 views' : (multiView ? '2 views (back)' : 'no'),
-      'Construction stages': buildStages ? 'yes' : 'no',
+      'Multi-view': _mv6Sent ? '6 views'
+        : (_mvSent ? '2 views (back)'
+          : ((mv6view || multiView) && _computeM === 'cloud' ? _offCloud : 'no')),
+      'Construction stages': _stagesSent ? 'yes'
+        : (buildStages && _computeM === 'cloud' ? _offCloud : 'no'),
       Prompt: userPrompt,
     }, expectedMs, { projectName: p.name, assetKind: assetType });
     try {
-      const _computeM = (typeof window._computeMode === 'function') ? window._computeMode() : 'local';
-      const _genArgs = { prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView: multiView && _computeM !== 'cloud', buildStages: buildStages && _computeM !== 'cloud', jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100, assetType, computeMode: _computeM };
-      let r = await API.generateImages(_genArgs);
-      // Machine sans GPU NVIDIA : le main a besoin d'une session cloud
-      // MyFabmesh (cert Store 10.1.2.10). On ouvre la connexion puis retry.
-      if (r?.needsCloudLogin) {
-        const ok = await showCloudLoginModal();
-        if (ok) r = await API.generateImages(_genArgs);
-      }
+      const _genArgs = { prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView: _mvSent, buildStages: _stagesSent, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100, assetType, computeMode: _computeM };
+      // La modale de connexion + le retry sont gérés en amont par le wrapper
+      // API (voir _CLOUD_LOGIN_METHODS) — commun à TOUS les outils cloud.
+      const r = await API.generateImages(_genArgs);
       if (r?.creditsRemaining != null) { try { window._refreshTopbarCredits?.(r.creditsRemaining); } catch (_) {} }
       if (r?.success) {
         // Save the creation style for each generated image so the Style
@@ -6353,7 +6425,9 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         // 6-view mode: after image gen, run MV-Adapter on each generated
         // image. The 2-view back gen above is skipped (multiView=false in
         // this branch). Reuses _wsMvSync's UI state (mv6Harmonize/Upscale).
-        if (mv6view && r.images?.length > 0) {
+        // (_mv6Sent : MV-Adapter est local uniquement — aucun endpoint worker,
+        // donc jamais lancé en mode Cloud.)
+        if (_mv6Sent && r.images?.length > 0) {
           if (job.tickTimer) { clearInterval(job.tickTimer); job.tickTimer = null; }
           job.progress = Math.max(job.progress, 60);
           job.name = `Generating 6 views: ${p.name}`;
@@ -17034,8 +17108,18 @@ window._cancelQueuedJob = function(idx) {
 
 // ----- Job details modal -----
 let _jobGpuTimer = null;
+// Le moniteur VRAM/GPU/température n'a de sens que sur une carte NVIDIA lue par
+// nvidia-smi. Sans carte (ou en mode Cloud) il restait figé sur « -- » — l'app
+// avait l'air cassée — et déclenchait 2 spawns nvidia-smi par seconde d'un
+// exécutable inexistant tant que la modale de tâche était ouverte.
+function _jobGpuMonitorAvailable() { return _hasNvidia() && !_isCloudMode(); }
+function _syncJobGpuMonitorVisibility() {
+  const box = document.getElementById('job-gpu-monitor');
+  if (box) box.style.display = _jobGpuMonitorAvailable() ? '' : 'none';
+}
 async function refreshJobGpuMonitor() {
   if (!API.checkGPU) return;
+  if (!_jobGpuMonitorAvailable()) return;
   // Skip the IPC round-trip if the window is not visible — saves CPU when
   // the user has the app in the background while a long job runs.
   if (document.visibilityState === 'hidden') return;
@@ -17093,7 +17177,9 @@ function openJobDetails(id) {
   if (!j) return;
   state._jobDetailsOpenId = id;
   document.getElementById('modal-job-details').classList.remove('hidden');
+  _syncJobGpuMonitorVisibility();
   refreshJobDetailsModal(id);
+  if (!_jobGpuMonitorAvailable()) return;   // pas de carte NVIDIA → pas de timer
   // Start the GPU mini monitor (2s tick — was 1s; halved to reduce nvidia-smi calls)
   refreshJobGpuMonitor();
   if (_jobGpuTimer) clearInterval(_jobGpuTimer);
@@ -17226,17 +17312,33 @@ async function refreshJobDetailsModal(id) {
     const blob = (j.params?.Engine || '') + ' ' + (j.name || '') + ' ' + (j.kind || '');
     const isLocalGpu = /realvis|sf3d|stable fast|unirig|sdxl|inpaint|img2img|style|modify/i.test(blob);
     const isImageJob = /realvis|sdxl|inpaint|img2img|style|modify|image/i.test(blob);
-    let show = isEarly && isLocalGpu;
-    // Image ops reuse the PERSISTENT SDXL server: if it's already loaded (a gen
-    // ran just before), there is no ~7 GB cold load — the op finishes in
-    // seconds — so the "first run after idle" notice is misleading. Hide it when
-    // the AI engine is already resident. (3D/rig spawn a fresh process each run,
-    // so they genuinely cold-load every time → keep the hint for them.)
-    if (show && isImageJob && API.listProcesses) {
-      try {
-        const pl = await API.listProcesses();
-        if (((pl && pl.procs) || []).some(p => p.isAiEngine)) show = false;
-      } catch (_) {}
+    // Mode Cloud : le calcul tourne sur le worker MyFabmesh, PAS sur la carte
+    // de la machine. Le texte « ~7 GB chargés en VRAM / modèles déchargés au
+    // bout de 5 min » serait faux (et absurde sur un PC sans GPU NVIDIA) — on
+    // affiche à la place ce qui se passe vraiment.
+    const txtEl = hintEl.querySelector('.jd-hint-text');
+    if (txtEl && !txtEl.dataset.localTxt) txtEl.dataset.localTxt = txtEl.innerHTML;
+    let show;
+    if (_isCloudMode()) {
+      if (txtEl) {
+        txtEl.textContent = _i18nT('Generated on the MyFabmesh cloud — your GPU is not used. '
+          + 'The result is downloaded to this PC as soon as it is ready.');
+      }
+      show = j.status === 'running';
+    } else {
+      if (txtEl && txtEl.dataset.localTxt) txtEl.innerHTML = txtEl.dataset.localTxt;
+      show = isEarly && isLocalGpu;
+      // Image ops reuse the PERSISTENT SDXL server: if it's already loaded (a gen
+      // ran just before), there is no ~7 GB cold load — the op finishes in
+      // seconds — so the "first run after idle" notice is misleading. Hide it when
+      // the AI engine is already resident. (3D/rig spawn a fresh process each run,
+      // so they genuinely cold-load every time → keep the hint for them.)
+      if (show && isImageJob && API.listProcesses) {
+        try {
+          const pl = await API.listProcesses();
+          if (((pl && pl.procs) || []).some(p => p.isAiEngine)) show = false;
+        } catch (_) {}
+      }
     }
     hintEl.classList.toggle('hidden', !show);
   }
@@ -17458,6 +17560,7 @@ document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
 let _aiSrcPath = null;
 let _aiPreviewTimer = null;
 let _aiFirstDetectDone = false;  // the FIRST detection loads the model (~15s) — reassure the user
+let _aiMaskPreviewOff = false;   // aperçu indisponible (mode Cloud / moteur local absent)
 async function _aiUpdateMaskPreview() {
   const srcImg = document.getElementById('ai-source-img');
   if (!srcImg || !_aiSrcPath) return;
@@ -17468,6 +17571,19 @@ async function _aiUpdateMaskPreview() {
   if (!API.segmentMask) return;
   const spinner = document.getElementById('ai-detect-spinner');
   const label = document.getElementById('ai-detect-label');
+  // L'APERÇU du masque est du CLIPSeg local : aucun endpoint worker. En mode
+  // Cloud on le dit tout de suite (au lieu de promettre « ~15 s de chargement »
+  // puis d'échouer en silence) — « Appliquer » fonctionne bien, lui, via
+  // /api/auto-inpaint.
+  if (_aiMaskPreviewOff || _isCloudMode()) {
+    _aiMaskPreviewOff = true;
+    if (spinner) spinner.style.display = 'none';
+    srcImg.src = origUrl;
+    srcImg.style.opacity = '';
+    if (label) label.textContent = _i18nT('Mask preview needs the local AI engine — type what to replace '
+      + 'and click Apply: the change itself is computed in the cloud.');
+    return;
+  }
   if (label) label.textContent = _aiFirstDetectDone
     ? 'Detecting target…'
     : 'Warming up the AI… the first detection takes ~15s (loading the model), then it’s instant.';
@@ -17479,9 +17595,17 @@ async function _aiUpdateMaskPreview() {
     // Ignore a stale response if the target changed while we were detecting —
     // the newer in-flight call owns the UI (and will hide the spinner).
     if (((document.getElementById('ai-target').value || '').trim()) !== rawTarget) return;
-    _aiFirstDetectDone = true;   // engine warm now → next detections are fast
     srcImg.style.opacity = '';
     if (spinner) spinner.style.display = 'none';
+    // Le moteur local n'est pas installé (setup interrompu, machine sans GPU) :
+    // on arrête définitivement l'aperçu et on affiche le message du main.
+    if (r && r.cloudUnavailable) {
+      _aiMaskPreviewOff = true;
+      srcImg.src = origUrl;
+      if (label) label.textContent = r.error || _i18nT('Mask preview is not available on this device.');
+      return;
+    }
+    _aiFirstDetectDone = true;   // engine warm now → next detections are fast
     if (r && r.success && r.overlayPath) {
       srcImg.src = 'file:///' + r.overlayPath.replace(/\\/g, '/') + '?t=' + Date.now();
     } else {
@@ -22559,7 +22683,10 @@ const _CLOUD_TOOL_PRICES = {
   'ws-resolution-btn': 2,        // upscale x2
   'ws-facefix-btn': 2,           // face_fix_image
   'ws-variant-btn': 2,           // modify (re-roll)
-  'ws-buildstages-btn': 6,       // text2image x3
+  // ws-buildstages-btn : PAS de pastille — generate-construction-stages est un
+  // script SDXL/PIL 100 % local, sans endpoint worker. Annoncer « ⚡6 » puis
+  // échouer au clic était le pire signal possible (feature payante annoncée et
+  // non fonctionnelle) → le bouton est masqué en mode Cloud (_CLOUD_HIDDEN_TOOLS).
   'ws-mask-btn': 3,              // mask_inpaint
   'ws-style-btn': 2,             // style = modify
   // panneau ÉDITER step 2 (outils mesh → /api/mesh-op & co)
@@ -22581,7 +22708,11 @@ const _CLOUD_TOOL_PRICES = {
   'ws-mesh-segment-btn': 15,     // /api/mesh-segment (PartSAM async)
 };
 // Outils SANS équivalent cloud (gaps de parité) : masqués en mode Cloud.
-const _CLOUD_HIDDEN_TOOLS = ['ws-recolor-btn', 'ws-age-btn'];
+const _CLOUD_HIDDEN_TOOLS = [
+  'ws-recolor-btn', 'ws-age-btn',
+  'ws-buildstages-btn',  // étapes de construction 2D : SDXL local, pas d'endpoint
+  'ws-multiview-btn',    // MV-Adapter / vue arrière : local uniquement
+];
 const _CLOUD_LB_PRICES = {
   modify: 2, autoinpaint: 3, removebg: 1, resolution: 2,
   facefix: 2, variant: 2, mask: 3,
@@ -22651,10 +22782,16 @@ const _CLOUD_HIDDEN_MESH_TOOLS = [
   'ws-rig-reskin-btn',         // re-skin SkinTokens local (seul /api/auto-rig existe)
   'ws-mesh-aligntex-btn',      // align_texture retiré de la whitelist /api/mesh-op
                                // (paid no-op côté worker, pas de vraie reprojection)
+  'ws-mesh-center-btn',        // set_pivot absent de la whitelist /api/mesh-op
+                               // (op trimesh locale, pas de venv IA en Cloud)
 ];
 // Entrées lightbox 3D correspondantes : la lightbox route vers les boutons
 // workspace par clic simulé, masquer le bouton workspace ne suffit donc pas.
-const _CLOUD_HIDDEN_LB3D_TOOLS = ['texvar', 'regionretex', 'enhancetex', 'detailsynth', 'aligntex'];
+const _CLOUD_HIDDEN_LB3D_TOOLS = ['texvar', 'regionretex', 'enhancetex', 'detailsynth', 'aligntex', 'center'];
+// Outils qui exigent Blender installé (aucun rapport avec le cloud) : sur une
+// machine de test Store, Blender est absent → clic = « Blender path not
+// configured ». On les grise avec une explication au lieu d'une erreur.
+const _BLENDER_TOOLS = ['ws-mesh-blender-btn', 'ws-rig-blender-btn', 'ws-rig-unreal-btn'];
 
 window._applyCloudFeatureMask = function () {
   try {
@@ -22671,8 +22808,53 @@ window._applyCloudFeatureMask = function () {
     // coming soon » est trompeur quand le switch global est déjà Cloud.
     const animRow = document.getElementById('ws-anim-mode')?.closest('.form-row');
     if (animRow) animRow.style.display = cloud ? 'none' : '';
+    // Case « Garder la forme (varier la texture) » du modal Variante : le mode
+    // texture appelle tex-variant, local uniquement → masqué en Cloud (la
+    // variante normale, elle, passe par /api/modify-image).
+    const texModeEl = document.getElementById('var-tex-mode');
+    if (texModeEl) {
+      if (cloud) texModeEl.checked = false;
+      const row = texModeEl.closest('label');
+      if (row) row.style.display = cloud ? 'none' : '';
+      const hint = document.getElementById('var-tex-hint');
+      if (hint) hint.style.display = cloud ? 'none' : '';
+    }
+    // Formats d'export : la conversion GLTF/OBJ/STL/PLY passe par trimesh
+    // (Python) et le FBX par Blender — indisponibles en mode Cloud. Le GLB est
+    // une copie directe du fichier : il marche partout.
+    const fmtSel = document.getElementById('exp-format');
+    if (fmtSel) {
+      for (const opt of Array.from(fmtSel.options)) {
+        const glb = opt.value === 'glb';
+        opt.disabled = cloud && !glb;
+        if (!opt.dataset.baseLabel) opt.dataset.baseLabel = opt.textContent;
+        opt.textContent = (cloud && !glb)
+          ? `${opt.dataset.baseLabel} — ${_i18nT('local engine required')}`
+          : opt.dataset.baseLabel;
+      }
+      if (cloud && fmtSel.value !== 'glb') fmtSel.value = 'glb';
+    }
   } catch (_) {}
 };
+
+// Blender/Unreal : dépendent d'une installation Blender, pas du mode de calcul.
+// On les désactive avec un titre explicatif quand aucun chemin n'est configuré.
+window._applyBlenderToolState = async function () {
+  try {
+    let blender = '';
+    try { const cfg = await API.getConfig?.(); blender = (cfg && cfg.blenderPath) || ''; } catch (_) {}
+    const msg = _i18nT('Blender is not installed (or its path is not set in Settings). '
+      + 'Export as GLB instead — it opens in Blender, Unreal, Unity and the Windows 3D Viewer.');
+    for (const id of _BLENDER_TOOLS) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.disabled = !blender;
+      el.classList.toggle('disabled', !blender);
+      if (!blender) el.title = msg; else el.removeAttribute('title');
+    }
+  } catch (_) {}
+};
+window._applyBlenderToolState();
 window._applyCloudFeatureMask();
 
 // ============================================================

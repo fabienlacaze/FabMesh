@@ -34,12 +34,12 @@
     <section class="wiz-page" id="page-welcome">
       <div class="wiz-card">
         <h1 class="wiz-h1">Welcome to MyFabmesh.AI</h1>
-        <p class="wiz-lead">Generate 3D meshes from a single image, locally on your GPU.</p>
+        <p class="wiz-lead">Generate 3D meshes from a single image — on your NVIDIA GPU, or in the MyFabmesh cloud on any PC.</p>
         <p class="wiz-text">The setup wizard will:</p>
         <ul class="wiz-list">
-          <li>Check your hardware for compatibility</li>
-          <li>Pick the right install mode for your machine</li>
-          <li>Install the AI engine and download the models (several GB)</li>
+          <li>Check what your PC can run</li>
+          <li>Pick the right mode for your machine</li>
+          <li>Install the local AI engine, or set up Cloud mode (nothing to download)</li>
           <li>Run a quick test to confirm everything works</li>
         </ul>
         <p class="wiz-small">All models are commercial-safe (MIT / Apache / BSD / OpenRAIL++-M).</p>
@@ -64,6 +64,8 @@
         <div id="detect-warnings" class="wiz-warnings hidden"></div>
         <div class="wiz-actions">
           <button class="ghost-btn" data-back="welcome">Back</button>
+          <!-- Retry: la détection ne doit JAMAIS être un cul-de-sac (cert Store). -->
+          <button class="ghost-btn hidden" id="btn-detect-retry">Retry detection</button>
           <button class="primary-btn" data-next="mode" id="btn-detect-next" disabled>Continue</button>
         </div>
       </div>
@@ -89,6 +91,14 @@
             <input type="radio" name="mode" value="lite">
             <div class="wiz-mode-title">Lite <span class="wiz-mode-size">~7 GB</span></div>
             <div class="wiz-mode-desc">Basic mesh generation only. Needs 6+ GB VRAM.</div>
+          </label>
+          <!-- Carte Cloud : JAMAIS désactivée. Filet de sécurité pour qu'une
+               machine sans VRAM NVIDIA suffisante ne se retrouve pas avec les
+               trois cartes grisées et Continue inactif (cert Store 10.1.2.10). -->
+          <label class="wiz-mode-card" data-mode="cloud">
+            <input type="radio" name="mode" value="cloud">
+            <div class="wiz-mode-title">Cloud <span class="wiz-mode-size">0 GB</span></div>
+            <div class="wiz-mode-desc">Works on any PC — no GPU needed, nothing to download. Generation runs in the MyFabmesh cloud and uses credits.</div>
           </label>
         </div>
         <div id="wiz-data-loc" style="margin-top:14px; padding:10px 12px; background:rgba(255,255,255,.04); border-radius:8px; display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px;">
@@ -122,8 +132,8 @@
     <!-- ALT STEP: NO COMPATIBLE GPU (replaces Mode / Download / Test) -->
     <section class="wiz-page" id="page-no-gpu">
       <div class="wiz-card">
-        <h1 class="wiz-h1">No NVIDIA GPU detected — Cloud mode will be used</h1>
-        <p class="wiz-lead">
+        <h1 class="wiz-h1" id="nogpu-title">No NVIDIA GPU detected — Cloud mode will be used</h1>
+        <p class="wiz-lead" id="nogpu-lead">
           This device has no NVIDIA GPU, so MyFabmesh.AI cannot run the AI models
           locally. <b>The app will run in Cloud mode instead: everything still
           works</b> — images, 3D meshes, rigs and animations are generated on the
@@ -131,13 +141,17 @@
         </p>
         <ul class="wiz-list">
           <li><b>Nothing to download</b>: the ~17 GB of local AI models are skipped</li>
-          <li>Same features and same quality as the local version</li>
+          <li>The main features work in Cloud mode — image generation, image editing,
+              Image&nbsp;→&nbsp;3D, mesh tools, auto-rig and animation. A few expert
+              tools stay reserved for local mode</li>
           <li>Sign in with a MyFabmesh account — <b>new accounts get 50 free credits</b></li>
           <li>Generations use credits (2 per image); buy more on our website anytime</li>
-          <li>Add an NVIDIA GPU later and the app switches back to free local mode</li>
+          <li>Add an NVIDIA GPU later and you can switch to free local mode (the AI
+              models are downloaded at that point)</li>
         </ul>
         <div class="wiz-actions">
           <button class="ghost-btn" data-back="detect">Back</button>
+          <button class="ghost-btn" id="btn-create-account">Create a free account</button>
           <button class="ghost-btn" id="btn-open-cloud">Use the website instead</button>
           <button class="primary-btn" id="btn-launch-cloud">Continue in Cloud mode</button>
         </div>

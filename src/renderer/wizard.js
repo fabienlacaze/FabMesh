@@ -62,14 +62,26 @@ function goto(step) {
   }
   currentStep = step;
   // Only initialize a step ONCE — back-navigation must not re-trigger
-  // the detect / download / test side-effects.
+  // the detect / download / test side-effects. `initialized` n'est marqué
+  // qu'en cas de SUCCÈS (voir runDetect) : un échec de détection doit pouvoir
+  // être retenté, sinon le wizard devient un cul-de-sac (cert Store 10.1.2.10).
   if (step === 'detect' && !initialized.has('detect')) {
-    initialized.add('detect'); runDetect();
+    runDetect();
   }
   if (step === 'mode' && hwReport) {
     // Safe to call every time — just re-renders the card states.
     renderModeCards();
     renderDataLocation();
+  }
+  if (step === 'no-gpu') {
+    renderNoGpuPage();
+    // Les étapes « Download » / « Test » ne concernent pas le parcours Cloud :
+    // les afficher laisse croire qu'un téléchargement de plusieurs Go reste à
+    // venir.
+    for (const s of ['download', 'test']) {
+      const tag = document.querySelector(`.wiz-step-tag[data-step="${s}"]`);
+      if (tag) tag.classList.add('hidden');
+    }
   }
   if (step === 'download' && !initialized.has('download')) {
     initialized.add('download'); startDownload();
@@ -77,6 +89,19 @@ function goto(step) {
   if (step === 'test' && !initialized.has('test')) {
     initialized.add('test'); runFinalTest();
   }
+}
+
+// Une machine ne peut faire tourner les moteurs locaux QUE si elle a un GPU
+// NVIDIA avec assez de VRAM. Test tolérant (JSON partiel, casse, futur
+// changement de hw_detect) : tout ce qui n'est pas explicitement un GPU NVIDIA
+// exploitable part sur le parcours Cloud.
+function needsCloudPath() {
+  if (!hwReport) return true;
+  const reco = String(hwReport.recommended_mode || '').toLowerCase();
+  if (reco === 'cloud') return true;
+  const gpu = hwReport.gpu;
+  if (!gpu || String(gpu.vendor || '').toUpperCase() !== 'NVIDIA') return true;
+  return false;
 }
 
 // Use closest() so clicks land even on inner elements (icons, spans).
@@ -88,14 +113,56 @@ document.addEventListener('click', (e) => {
   let target = btn.dataset.next || btn.dataset.back;
   // If user is leaving Detect to go to Mode but hardware is incompatible,
   // detour to the dedicated no-gpu page instead.
-  if (target === 'mode' && hwReport && hwReport.recommended_mode === 'cloud') {
+  if (target === 'mode' && needsCloudPath()) {
+    target = 'no-gpu';
+  }
+  // Mode « Cloud » choisi explicitement sur la page Mode : pas de download.
+  if (target === 'download' && chosenMode === 'cloud') {
     target = 'no-gpu';
   }
   goto(target);
 });
 
+// URL d'inscription (parcours « je n'ai pas encore de compte »). Le mode Cloud
+// exige un compte : sans bouton dédié, le testeur devait deviner que la création
+// se fait depuis une page intitulée « login ».
+const SIGNUP_URL = 'https://myfabmesh-cloud.fabien65400.workers.dev/login?mode=signup&next=/app&src=desktop';
+
+// Titre/texte de la page no-gpu adaptés au matériel réel : la page s'affiche
+// AUSSI pour un GPU NVIDIA à VRAM insuffisante (< 12 Go), où « No NVIDIA GPU
+// detected » serait faux.
+function renderNoGpuPage() {
+  const title = document.getElementById('nogpu-title');
+  const lead = document.getElementById('nogpu-lead');
+  if (!title || !lead) return;
+  const gpu = hwReport && hwReport.gpu;
+  const isNvidia = !!(gpu && String(gpu.vendor || '').toUpperCase() === 'NVIDIA');
+  if (isNvidia) {
+    const gb = Math.round((gpu.vram_mb || 0) / 1024);
+    title.textContent = 'Cloud mode will be used on this PC';
+    lead.innerHTML = `Your GPU (<b>${gpu.model}</b>${gb ? `, ${gb} GB VRAM` : ''}) is below the 12 GB `
+      + 'the local 3D engine needs, so it would run out of memory. <b>The app will run in Cloud mode '
+      + 'instead: everything still works</b> — images, 3D meshes, rigs and animations are generated on '
+      + 'the MyFabmesh cloud and downloaded straight into your projects.';
+  } else if (gpu) {
+    title.textContent = 'Cloud mode will be used on this PC';
+    lead.innerHTML = `This device uses <b>${gpu.model}</b> graphics. The local AI models need an NVIDIA `
+      + 'GPU, so <b>the app will run in Cloud mode instead: everything still works</b> — images, 3D '
+      + 'meshes, rigs and animations are generated on the MyFabmesh cloud and downloaded straight into '
+      + 'your projects.';
+  }
+  // Sinon : le texte par défaut du HTML (aucun GPU rapporté) est correct.
+}
+
 // Cloud redirect button (no-gpu page).
 document.addEventListener('DOMContentLoaded', () => {
+  const signupBtn = document.getElementById('btn-create-account');
+  if (signupBtn) {
+    signupBtn.addEventListener('click', () => {
+      if (window.wizardAPI && window.wizardAPI.openExternal) window.wizardAPI.openExternal(SIGNUP_URL);
+      else window.open(SIGNUP_URL, '_blank');
+    });
+  }
   const cloudBtn = document.getElementById('btn-open-cloud');
   if (cloudBtn) {
     cloudBtn.addEventListener('click', () => {
@@ -115,13 +182,28 @@ document.addEventListener('DOMContentLoaded', () => {
 // ---------- STEP 2: detect ----------
 async function runDetect() {
   const status = document.getElementById('detect-status');
-  status.textContent = 'Detecting hardware (this takes ~10 seconds)...';
-  status.classList.remove('error');
+  const retryBtn = document.getElementById('btn-detect-retry');
+  status.classList.remove('hidden', 'error');
+  status.textContent = 'Checking your system (this takes a few seconds)...';
+  if (retryBtn) retryBtn.classList.add('hidden');
   try {
     hwReport = await window.wizardAPI.detectHardware();
+    if (!hwReport || typeof hwReport !== 'object') throw new Error('empty report');
+    initialized.add('detect');
   } catch (e) {
-    status.classList.add('error');
-    status.textContent = 'Detection failed: ' + e.message;
+    // DÉGRADATION SÛRE : la détection ne doit jamais empêcher d'entrer dans
+    // l'application. Sans rapport matériel exploitable on suppose « pas de GPU
+    // NVIDIA » → parcours Cloud, qui ne télécharge rien et fonctionne partout.
+    console.warn('[wizard] detect failed, falling back to Cloud mode:', (e && e.message) || e);
+    hwReport = {
+      gpu: null, ram_mb: 0, disk_free_gb: 0,
+      recommended_mode: 'cloud', driver_ok: false,
+      warnings: ['Hardware check unavailable on this PC — Cloud mode will be used (nothing to download).'],
+    };
+    status.classList.remove('hidden');
+    status.textContent = 'Hardware check unavailable — MyFabmesh.AI will use Cloud mode. Click Continue.';
+    if (retryBtn) retryBtn.classList.remove('hidden');
+    document.getElementById('btn-detect-next').disabled = false;
     return;
   }
   status.classList.add('hidden');
@@ -135,21 +217,33 @@ async function runDetect() {
     el.className = 'wiz-val ' + (cls || '');
   };
 
-  if (gpu) {
-    setRow('r-gpu', `${gpu.model}`, gpu.vendor === 'NVIDIA' ? 'ok' : 'warn');
+  if (gpu && String(gpu.vendor || '').toUpperCase() === 'NVIDIA') {
+    setRow('r-gpu', `${gpu.model}`, 'ok');
     setRow('r-vram', gpu.vram_mb ? fmtGB(gpu.vram_mb) : 'unknown',
       gpu.vram_mb >= 12 * 1024 ? 'ok' : (gpu.vram_mb >= 6 * 1024 ? 'warn' : 'bad'));
     setRow('r-driver', gpu.driver || '–',
       hwReport.driver_ok ? 'ok' : 'warn');
+  } else if (gpu) {
+    // GPU Intel/AMD : ce n'est PAS une panne, c'est un choix de mode. Affichage
+    // informatif (warn) et non « bad » — sinon le tableau matériel se lit comme
+    // un diagnostic d'échec (retour de certification Store).
+    setRow('r-gpu', `${gpu.model} — Cloud mode`, 'warn');
+    setRow('r-vram', gpu.vram_mb ? fmtGB(gpu.vram_mb) : 'n/a', 'warn');
+    setRow('r-driver', gpu.driver || 'n/a', 'warn');
   } else {
-    setRow('r-gpu', 'Not detected', 'bad');
-    setRow('r-vram', '–', 'bad');
-    setRow('r-driver', '–', 'bad');
+    setRow('r-gpu', 'No NVIDIA GPU — Cloud mode', 'warn');
+    setRow('r-vram', 'n/a', 'warn');
+    setRow('r-driver', 'n/a', 'warn');
   }
-  setRow('r-ram', fmtGB(hwReport.ram_mb),
-    hwReport.ram_mb >= 16 * 1024 ? 'ok' : (hwReport.ram_mb >= 8 * 1024 ? 'warn' : 'bad'));
-  setRow('r-disk', hwReport.disk_free_gb + ' GB',
-    hwReport.disk_free_gb >= 25 ? 'ok' : (hwReport.disk_free_gb >= 15 ? 'warn' : 'bad'));
+  const ramMb = hwReport.ram_mb || 0;
+  setRow('r-ram', ramMb ? fmtGB(ramMb) : 'n/a',
+    ramMb >= 16 * 1024 ? 'ok' : (ramMb >= 8 * 1024 ? 'warn' : 'bad'));
+  const diskGb = hwReport.disk_free_gb || 0;
+  // En parcours Cloud rien n'est téléchargé : l'espace disque n'est pas un
+  // critère bloquant, on ne l'affiche donc pas en rouge.
+  const diskCls = needsCloudPath() ? (diskGb >= 2 ? 'ok' : 'warn')
+    : (diskGb >= 25 ? 'ok' : (diskGb >= 15 ? 'warn' : 'bad'));
+  setRow('r-disk', diskGb + ' GB', diskCls);
 
   if (hwReport.warnings && hwReport.warnings.length) {
     const wbox = document.getElementById('detect-warnings');
@@ -159,34 +253,51 @@ async function runDetect() {
   document.getElementById('btn-detect-next').disabled = false;
 }
 
+// Retry manuel de la détection (affiché uniquement après un échec).
+document.getElementById('btn-detect-retry')?.addEventListener('click', () => {
+  initialized.delete('detect');
+  runDetect();
+});
+
 // ---------- STEP 3: mode ----------
 // VRAM thresholds in MB. 16 GB cards (RTX 4080/5080) report ~16300 MB
 // after driver overhead, so we use 15 GB as the Full threshold rather
 // than a strict 16384 that would lock them out for ~80 MB of fluff.
-const MODE_VRAM_REQ = { full: 15 * 1024, standard: 11 * 1024, lite: 6 * 1024 };
+// La carte « cloud » n'a AUCUNE exigence VRAM : elle reste toujours activable,
+// pour qu'aucune machine ne puisse se retrouver avec toutes les cartes grisées.
+const MODE_VRAM_REQ = { full: 15 * 1024, standard: 11 * 1024, lite: 6 * 1024, cloud: 0 };
 
 function renderModeCards() {
   const reco = hwReport.recommended_mode;
   const vram = (hwReport.gpu && hwReport.gpu.vram_mb) || 0;
+  const isNvidia = !!(hwReport.gpu && String(hwReport.gpu.vendor || '').toUpperCase() === 'NVIDIA');
   for (const card of document.querySelectorAll('.wiz-mode-card')) {
     const m = card.dataset.mode;
     card.classList.toggle('recommended', m === reco);
-    const tooLowVram = vram < MODE_VRAM_REQ[m];
-    card.classList.toggle('disabled', tooLowVram);
-    card.querySelector('input').disabled = tooLowVram;
+    // Les modes locaux exigent un GPU NVIDIA ET assez de VRAM ; 'cloud' jamais.
+    const req = MODE_VRAM_REQ[m];
+    const unavailable = (m !== 'cloud') && (!isNvidia || vram < (req || 0));
+    card.classList.toggle('disabled', unavailable);
+    const input = card.querySelector('input');
+    if (input) input.disabled = unavailable;
   }
   // Auto-select reco if it's not disabled, otherwise the highest
-  // available mode (full > standard > lite).
+  // available mode (full > standard > lite), Cloud en dernier recours.
   let target = reco;
-  if (!document.querySelector(`.wiz-mode-card[data-mode="${target}"]`)
-      || document.querySelector(`.wiz-mode-card[data-mode="${target}"]`).classList.contains('disabled')) {
-    for (const m of ['full', 'standard', 'lite']) {
-      const c = document.querySelector(`.wiz-mode-card[data-mode="${m}"]`);
+  const cardFor = (m) => document.querySelector(`.wiz-mode-card[data-mode="${m}"]`);
+  if (!cardFor(target) || cardFor(target).classList.contains('disabled')) {
+    target = null;
+    for (const m of ['full', 'standard', 'lite', 'cloud']) {
+      const c = cardFor(m);
       if (c && !c.classList.contains('disabled')) { target = m; break; }
     }
   }
-  const recoCard = document.querySelector(`.wiz-mode-card[data-mode="${target}"]`);
+  // Aucune carte disponible (ne devrait plus arriver grâce à la carte Cloud) :
+  // on ne laisse SURTOUT pas l'utilisateur bloqué avec Continue grisé.
+  if (!target) { goto('no-gpu'); return; }
+  const recoCard = cardFor(target);
   if (recoCard) {
+    for (const c of document.querySelectorAll('.wiz-mode-card')) c.classList.remove('selected');
     recoCard.querySelector('input').checked = true;
     recoCard.classList.add('selected');
     chosenMode = target;

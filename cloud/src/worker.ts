@@ -1290,6 +1290,26 @@ const MODAL_COST_USD: Record<string, number> = {
   'mesh':        0.060,   // base mesh (no face_fix, warm container)
   'mesh-face':   0.110,   // mesh + face_fix lazy SDXL inpaint
   'remove-bg':   0.005,
+  // 2026-07-26 — the four async Modal op types had NO entry here AND no
+  // cost_usd on their jobs row, so the admin dashboard reported a 100%
+  // margin on every rig / segmentation / animation. Values MUST stay in
+  // sync with the ESTIMATED_USD_* constants the budget guard actually
+  // charges (they live further down the file, hence literals here):
+  //   'rig'          ↔ ESTIMATED_USD_RIG      (l.~7770)
+  //   'segment'      ↔ ESTIMATED_USD_SEGMENT  (l.~7822)
+  //   'animate'      ↔ ESTIMATED_USD_ANIM     (l.~7871)
+  //   'animate_fbx'  ↔ ESTIMATED_USD_ANIM     (same app family, CPU)
+  //   'mesh-op'      ↔ estimatedTotal in handleMeshOp
+  //   'construction3d' ↔ estimatedTotal in handleConstructionStages3d
+  //   'mesh-op-client' → 0 (pure R2 upload, no GPU, no credits)
+  // A mismatch is a silent accounting drift — grep both sides when tuning.
+  'rig':            0.05,
+  'segment':        0.60,
+  'animate':        0.06,
+  'animate_fbx':    0.06,
+  'mesh-op':        0.005,
+  'construction3d': 0.01,
+  'mesh-op-client': 0,
 };
 
 /** Persist a single non-mesh operation in the jobs table so the
@@ -1299,7 +1319,9 @@ const MODAL_COST_USD: Record<string, number> = {
 async function logOperation(
   env: Env,
   userId: string,
-  opType: keyof typeof MODAL_COST_USD,
+  // Free-form so callers can log a granular op type; unknown keys simply
+  // fall back to cost 0 in the MODAL_COST_USD lookup below.
+  opType: string,
   credits: number,
   startTs: number,
   endTs: number,
@@ -3117,7 +3139,13 @@ type UserNotificationKind =
   | 'market_approved'
   | 'market_rejected'
   | 'market_sale'
-  | 'market_unpublished';
+  | 'market_unpublished'
+  // Credit movements performed by an admin (Stripe reconciliation, manual
+  // grant/deduct). The client inbox renderer already has a `default: '📬'`
+  // icon + empty default title and its nav allow-list excludes unknown
+  // kinds, so these degrade gracefully with no client change.
+  | 'credits_granted'
+  | 'credits_adjusted';
 
 type UserNotification = {
   id: string;
@@ -4094,6 +4122,35 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   return json({ received: true });
 }
 
+/** Preset-aware GPU cost estimate for ONE mesh generation, in USD.
+ *
+ *  Before 2026-07-26 two different numbers coexisted: the budget guard
+ *  charged a flat $0.16 (Modal) / $0.50 (Replicate) while the jobs row
+ *  recorded MODAL_COST_USD['mesh'] = $0.060 — and neither looked at the
+ *  preset, so a 1536_cascade ultra_q mesh (≈2.2× the GPU seconds of a
+ *  plain 1024) was booked at the same price as a 512 lite. This helper is
+ *  now the SINGLE source: it feeds both the guard and the recorded
+ *  cost_usd, so the two can never diverge again.
+ *
+ *  The multiplier ladder mirrors the trellisMode ladder in handleGenerate
+ *  1:1 (ultra_q → quality_plus → mode) — keep them in sync. */
+function _meshCostUsd(input: GenerateInput, useModalMesh: boolean): number {
+  // Replicate runs the full Cog pipeline; one flat, much higher price.
+  if (!useModalMesh) return 0.50;
+  const BASE = 0.16;  // TRELLIS-2 ~5 min L40S × $0.000542 + R2 ops
+  const mult = input.ultra_q            ? 2.2   // 1536_cascade
+             : input.quality_plus       ? 1.6   // 1024_cascade
+             : input.mode === 'full'    ? 1.6   // 1024_cascade
+             : input.mode === 'lite'    ? 1.0   // 512
+             : 1.0;                             // 1024
+  // face_fix lazily spins the SDXL inpaint model — same delta as the
+  // historical 'mesh-face' vs 'mesh' entries in MODAL_COST_USD.
+  const faceFixDelta = input.face_fix
+    ? (MODAL_COST_USD['mesh-face'] - MODAL_COST_USD['mesh'])
+    : 0;
+  return +(BASE * mult + faceFixDelta).toFixed(4);
+}
+
 async function handleGenerate(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -4192,8 +4249,11 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   // backend has its own daily $ cap (and own counter in R2).
   const useModalMesh = !!(env.MODAL_MESH_START_URL && env.MODAL_MESH_STATUS_URL);
   // Cost estimates: Replicate ~$0.50/mesh (full mode all post-process),
-  // Modal ~$0.16/mesh (TRELLIS-2 5min L40S × $0.000542 + R2 ops).
-  const ESTIMATED_USD_MESH = useModalMesh ? 0.16 : 0.50;
+  // Modal ~$0.16/mesh base (TRELLIS-2 5min L40S × $0.000542 + R2 ops),
+  // scaled by the resolution preset — see _meshCostUsd. The SAME number is
+  // written to jobs.options.cost_usd below so the budget guard and the
+  // reported margin always agree.
+  const ESTIMATED_USD_MESH = _meshCostUsd(input, useModalMesh);
 
   const remainingBudget = useModalMesh
     ? await checkAndIncrementModalSpend(env, ESTIMATED_USD_MESH, user.id)
@@ -4422,7 +4482,8 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         face_fix: input.face_fix, ultra_hd: input.ultra_hd, fast: input.fast,
         backend: 'modal',
         operation_type: 'mesh',
-        cost_usd: input.face_fix ? MODAL_COST_USD['mesh-face'] : MODAL_COST_USD['mesh'],
+        // Same value the budget guard just charged (preset-aware).
+        cost_usd: ESTIMATED_USD_MESH,
         // 2026-06-01: store the source image URL so handleListMeshes
         // can show it as the mesh thumbnail (each mesh version gets
         // the image it was generated FROM, not the project's default).
@@ -4508,6 +4569,11 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     options: {
       rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
       face_fix: input.face_fix, ultra_hd: input.ultra_hd, fast: input.fast,
+      // Without these two the row fell back to operation_type 'mesh' +
+      // MODAL_COST_USD['mesh'] = $0.060 for a ~$0.50 Replicate call.
+      operation_type: 'mesh',
+      backend: 'replicate',
+      cost_usd: ESTIMATED_USD_MESH,
     },
     created_at: new Date().toISOString(),
   });
@@ -6600,7 +6666,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     if (useModal) await refundModalSpend(env, estimatedTotal);
     else await refundDailySpend(env, estimatedTotal);
     // Log the failure so the history CSV reflects the refunded attempt.
-    await logOperation(env, user.id, opType as keyof typeof MODAL_COST_USD,
+    await logOperation(env, user.id, opType,
                        0, opStart, Date.now(), 'failed',
                        { error: e instanceof Error ? e.message : String(e), n, asset_type });
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
@@ -6608,7 +6674,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // Success path — record each generation as a separate row so the
   // CSV totals match the actual GPU calls (e.g. count=3 logs 3 entries).
   for (let i = 0; i < n; i++) {
-    await logOperation(env, user.id, opType as keyof typeof MODAL_COST_USD,
+    await logOperation(env, user.id, opType,
                        COST_PER_IMAGE, opStart, Date.now(), 'succeeded',
                        { asset_type, asset_style });
   }
@@ -7245,7 +7311,10 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
       if (s.verdict) logCtx.verdict = s.verdict;
       if (typeof s.holes_filled_delta_faces === 'number') logCtx.holes_filled_delta_faces = s.holes_filled_delta_faces;
     }
-    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+    // 'mesh-op' (not 'mesh'): these CPU ops cost ~$0.005, not the $0.060 of a
+    // real mesh generation — booking them under 'mesh' made both buckets
+    // unreadable. meta.op_type keeps the granular name (smooth/decimate/…).
+    await logOperation(env, user.id, 'mesh-op',
                        COST_PER, opStart, Date.now(), 'succeeded', logCtx);
     return json({
       ok: true, success: true,
@@ -7257,7 +7326,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal);
     const errMsg = e instanceof Error ? e.message : String(e);
-    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+    await logOperation(env, user.id, 'mesh-op',
                        0, opStart, Date.now(), 'failed',
                        { op_type: op, error: errMsg });
     console.error('[mesh-op]', op, errMsg, e);
@@ -7382,7 +7451,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
       stageUrls.push(await signedR2Url(env, key, 'mesh'));
     }
 
-    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+    await logOperation(env, user.id, 'construction3d',
                        COST_PER, opStart, Date.now(), 'succeeded',
                        { op_type: 'construction3d', stages: start.count });
     return json({
@@ -7397,7 +7466,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal);
     const errMsg = e instanceof Error ? e.message : String(e);
-    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+    await logOperation(env, user.id, 'construction3d',
                        0, opStart, Date.now(), 'failed',
                        { op_type: 'construction3d', error: errMsg });
     console.error('[construction-stages-3d]', errMsg, e);
@@ -7477,12 +7546,14 @@ async function handleMeshOpClientResult(req: Request, env: Env): Promise<Respons
     const key = `${user.id}/mesh-op/${Date.now()}_${op}_client.glb`;
     await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
     const url = await signedR2Url(env, key, 'mesh');
-    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+    // Pure R2 upload — zero GPU, zero credits. Booking it as 'mesh' billed a
+    // free client-side op at $0.060 a pop.
+    await logOperation(env, user.id, 'mesh-op-client',
                        0, opStart, Date.now(), 'succeeded',
                        { op_type: op, client_side: true, size_bytes: bytes.length });
     return json({ ok: true, success: true, path: url, newPath: url, mesh_url: url });
   } catch (e) {
-    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+    await logOperation(env, user.id, 'mesh-op-client',
                        0, opStart, Date.now(), 'failed',
                        { op_type: op, client_side: true,
                          error: e instanceof Error ? e.message : String(e) });
@@ -8031,10 +8102,14 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
       id: jobId, user_id: user.id,
       asset_type: 'rig', mode: 'rig', seed: 0,
       credit_cost: RIG_COST, status: 'processing',
-      options: { operation_type: 'rig', sourceMesh: meshUrl, backend: 'modal', skeleton },
+      options: {
+        operation_type: 'rig', sourceMesh: meshUrl, backend: 'modal', skeleton,
+        // Without cost_usd the admin stats fell back to 0 → 100% margin.
+        cost_usd: ESTIMATED_USD_RIG,
+      },
       created_at: new Date().toISOString(),
     });
-  } catch (e) { console.warn('[auto-rig] jobs.insert failed', e); }
+  } catch (e) { console.error('[auto-rig] jobs.insert failed', e); }
 
   return json({
     success: true,
@@ -8358,10 +8433,23 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
       id: jobId, user_id: user.id,
       asset_type: 'segment', mode: 'segment', seed: 0,
       credit_cost: SEGMENT_COST, status: 'processing',
-      options: { operation_type: 'segment', sourceMesh: meshUrl, backend: 'modal', scale, project_name: projectName },
+      options: {
+        operation_type: 'segment', sourceMesh: meshUrl, backend: 'modal',
+        // 2026-07-26 CRITICAL FIX: this used to read a bare `scale`, which
+        // is NOT bound anywhere in this function (the local is
+        // `granularity`) — and tsconfig.json excludes src/worker.ts so tsc
+        // never caught it. In strict-mode module scope the object literal
+        // threw ReferenceError BEFORE the insert, the surrounding catch
+        // swallowed it, and segmentation jobs ended up with NO row in
+        // `jobs` at all: invisible to history, admin Active jobs, by_type
+        // stats AND to every refund/reaper path.
+        granularity,
+        project_name: projectName,
+        cost_usd: ESTIMATED_USD_SEGMENT,
+      },
       created_at: new Date().toISOString(),
     });
-  } catch (e) { console.warn('[mesh-segment] jobs.insert failed', e); }
+  } catch (e) { console.error('[mesh-segment] jobs.insert failed', e); }
 
   return json({
     success: true,
@@ -9410,10 +9498,11 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
       options: {
         operation_type: 'animate', sourceRig: rigUrl, anim_type: animType,
         prompt: prompt || null, batch_id: batchId || null, backend: 'modal',
+        cost_usd: ESTIMATED_USD_ANIM,
       },
       created_at: new Date().toISOString(),
     });
-  } catch (e) { console.warn('[animate] jobs.insert failed', e); }
+  } catch (e) { console.error('[animate] jobs.insert failed', e); }
   return json({ success: true, job_id: jobId, status: 'queued', creditsRemaining: remaining });
 }
 
@@ -9447,10 +9536,20 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
   // (le delete inconditionnel rendait la perte de crédits définitive).
   const refundOnFailure = async () => {
     if (!record) return;
+    // Atomic + idempotent credit refund via the shared jobs-row primitive
+    // (conditional UPDATE out of a non-terminal status) — two racing failure
+    // polls, or a poll racing the cron reaper, refund EXACTLY once. This was
+    // the LAST of the four async op families still calling a plain
+    // addCredits(), which double-refunded as soon as reapStuckJobs learned to
+    // sweep animation jobs (2026-07-26).
     try {
-      await addCredits(env, user.id, record.credits);
+      await _failAndRefundJob(
+        env,
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        'animation failed',
+      );
     } catch (e) {
-      console.error(`[anim-status] REFUND FAILED job=${jobId} user=${user.id} `
+      console.error(`[anim-status] REFUND FAILED job=${jobId} user=${record.user_id} `
         + `credits=${record.credits} — record kept for retry:`,
         e instanceof Error ? e.message : String(e));
       return;
@@ -9683,10 +9782,11 @@ async function handleAnimateFromReference(req: Request, env: Env): Promise<Respo
         ref_anim: refAnimUrl,
         source_skeleton_id_hint: hint, target_family: targetFamily,
         batch_id: batchId || null, backend: 'modal',
+        cost_usd: ESTIMATED_USD_ANIM,
       },
       created_at: new Date().toISOString(),
     });
-  } catch (e) { console.warn('[animate-from-reference] jobs.insert failed', e); }
+  } catch (e) { console.error('[animate-from-reference] jobs.insert failed', e); }
   return json({ success: true, job_id: jobId, status: 'queued', creditsRemaining: remaining });
 }
 
@@ -10608,6 +10708,12 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const DAY = 86400_000;
 
   const uniqueUsers = new Set<string>();
+  // Real rolling-window activity. active_7d used to be
+  // `new Set(last7.flatMap(() => []).concat([...uniqueUsers])).size` — the
+  // flatMap yielded nothing, so it was literally uniqueUsers.size, i.e.
+  // active_7d == total, forever.
+  const active7 = new Set<string>();
+  const active30 = new Set<string>();
   const ops = { total: 0, succeeded: 0, failed: 0 };
   const byType: Record<string, { count: number; revenue_eur: number; cost_eur: number; margin_eur: number }> = {};
   let totalRevenueEur = 0, totalCostEur = 0;
@@ -10644,6 +10750,8 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
 
     const t = new Date(j.created_at).getTime();
     if (now - t < 30 * DAY) {
+      active30.add(j.user_id);
+      if (now - t < 7 * DAY) active7.add(j.user_id);
       const day = new Date(j.created_at).toISOString().slice(0, 10);
       const s = (seriesByDay[day] ??= { ops: 0, users: new Set(), revenue_eur: 0, cost_eur: 0, margin_eur: 0 });
       s.ops += 1;
@@ -10671,6 +10779,16 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
       paymentsCount += 1;
     }
   } catch { /* payments table optional */ }
+
+  // EXACT signup count. `uniqueUsers` above only holds user_ids that appear in
+  // `jobs`, i.e. users who ran at least one operation — every signed-up user
+  // who never generated anything was invisible in the "Users (total)" tile.
+  // head:true returns zero rows, so this is one cheap round-trip.
+  let signupsTotal: number | null = null;
+  try {
+    const { count } = await sb.from('profiles').select('id', { count: 'exact', head: true });
+    signupsTotal = count ?? null;
+  } catch { /* null → the UI shows '—' rather than a lying 0 */ }
 
   // Desktop downloads — both the all-time total and the 30-day series
   // (one R2 file per day, _meta/desktop_downloads_YYYY-MM-DD.txt). Total
@@ -10726,12 +10844,72 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const realCostEur = realUsageUsd == null ? null : +(realUsageUsd * USD_TO_EUR).toFixed(2);
   const realMarginEur = realCostEur == null ? null : +(totalRevenueEur - realCostEur).toFixed(2);
 
+  // ── Cron liveness receipt (written by scheduled(), see _meta/cron/last_run.json).
+  // One extra tiny R2 GET on an endpoint that already issues ~32 of them, so no
+  // new endpoint is needed: the dashboard already polls stats.json.
+  let cron: unknown = null;
+  try {
+    const ct = await r2GetText(env, '_meta/cron/last_run.json');
+    cron = ct ? JSON.parse(ct) : null;
+  } catch { /* never ran yet, or malformed — the UI shows 'unknown' */ }
+
+  // ── GPU burn rate (item 8b): €/day over 7d and 30d, today's spend vs the
+  // daily cap, and how long the prepaid Modal budget lasts at the current rate.
+  // Derived from series_30d (already computed) + the three tiny budget counters.
+  let budgetTotalUsd = 0, budgetSpentUsd = 0, todaySpendUsd = 0;
+  try { budgetTotalUsd = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0; } catch {}
+  try { budgetSpentUsd = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0; } catch {}
+  try { todaySpendUsd  = parseFloat(await r2GetText(env, `_meta/modal_spend/${todayUTC()}`) || '0') || 0; } catch {}
+  const dailyCapUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
+  // Prefer the REAL Modal usage when it is fresh (<26h), same rule as
+  // handleAdminModalCredits, so the runway isn't computed off a stale estimate.
+  const realFresh = realUsageTs ? (Date.now() - Date.parse(realUsageTs)) < 26 * 3600 * 1000 : false;
+  const usedUsd = (realFresh && realUsageUsd != null) ? realUsageUsd : budgetSpentUsd;
+  const budgetRemainingUsd = budgetTotalUsd > 0 ? Math.max(0, budgetTotalUsd - usedUsd) : 0;
+  const cost7 = last7.reduce((a, b) => a + b.cost_eur, 0);
+  const cost30 = series30.reduce((a, b) => a + b.cost_eur, 0);
+  const eurPerDay7  = +(cost7 / 7).toFixed(3);
+  const eurPerDay30 = +(cost30 / 30).toFixed(3);
+  // Runway uses the 7-day rate (most representative of current traffic) and
+  // falls back to the 30-day rate when the last week was idle.
+  const rateEurPerDay = eurPerDay7 > 0 ? eurPerDay7 : eurPerDay30;
+  const remainingEur = budgetRemainingUsd * USD_TO_EUR;
+  const daysLeft = (budgetTotalUsd > 0 && rateEurPerDay > 0)
+    ? Math.floor(remainingEur / rateEurPerDay) : null;
+  const burn = {
+    eur_per_day_7d: eurPerDay7,
+    eur_per_day_30d: eurPerDay30,
+    cost_7d_eur: +cost7.toFixed(2),
+    cost_30d_eur: +cost30.toFixed(2),
+    today_spend_usd: +todaySpendUsd.toFixed(4),
+    daily_cap_usd: dailyCapUsd,
+    daily_cap_pct: dailyCapUsd > 0 ? +Math.min(100, (todaySpendUsd / dailyCapUsd) * 100).toFixed(1) : 0,
+    budget_total_usd: +budgetTotalUsd.toFixed(2),
+    budget_remaining_usd: +budgetRemainingUsd.toFixed(2),
+    budget_source: (realFresh && realUsageUsd != null) ? 'real' : 'estimate',
+    days_left: daysLeft,
+    depletion_date: daysLeft == null ? null
+      : new Date(now + daysLeft * DAY).toISOString().slice(0, 10),
+  };
+
   return json({
     generated_at: new Date().toISOString(),
     users: {
+      // `total` is KEPT as-is (= users_with_ops) so the two existing tiles
+      // don't change meaning under the UI's feet; the UI item renames them.
       total: uniqueUsers.size,
-      active_7d: new Set(last7.flatMap(d => []).concat([...new Set([...uniqueUsers])])).size,  // proxy
+      users_with_ops: uniqueUsers.size,
+      signups_total: signupsTotal,
+      active_7d: active7.size,
+      active_30d: active30.size,
     },
+    // The 20 000-row cap orders by created_at DESC, so the OLDEST jobs are the
+    // ones dropped: every all-time total below silently understates once the
+    // cap bites. Surfaced instead of silently raising the limit (worker memory).
+    jobs_scanned: (jobs ?? []).length,
+    jobs_truncated: (jobs ?? []).length >= 20000,
+    cron,
+    burn,
     operations: ops,
     by_type: byType,
     revenue: {
@@ -11200,10 +11378,298 @@ async function handleAdminBanUser(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, banned: ban, total: set.size });
 }
 
-/** GET /api/admin/users — ADMIN ONLY. Profiles + ban flag + counts. */
+/** POST /api/admin/users/credits  body { userId, delta, reason, password }
+ *  ADMIN ONLY. Grant (delta > 0) or deduct (delta < 0) credits on one account.
+ *
+ *  Same second-factor pattern as handleAdminSetPricing: Supabase admin session
+ *  (_requireAdmin) + the admin password. `reason` is MANDATORY — a balance
+ *  change with no stated motive is unauditable.
+ *
+ *  A deduction goes through spend_credits, never addCredits(-n): the RPC's
+ *  non-negative guard is what stops us pushing a balance below zero. */
+async function handleAdminAdjustCredits(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  type Body = { userId?: string; delta?: unknown; reason?: string; password?: string };
+  let body: Body | null = null;
+  try { body = await req.json() as Body; } catch { return err(400, 'body required'); }
+  const userId = String(body?.userId || '').trim();
+  if (!userId) return err(400, 'userId required');
+  const delta = Math.trunc(Number(body?.delta));
+  if (!Number.isFinite(delta) || delta === 0) return err(400, 'delta must be a non-zero integer');
+  // Same sanity ceiling as the Stripe webhook's _packCredits fallback.
+  if (Math.abs(delta) > 10_000) return err(400, 'delta out of range (max ±10000)');
+  const reason = String(body?.reason || '').trim().slice(0, 300);
+  if (reason.length < 3) return err(400, 'reason required');
+  if (!(await _verifyAdminPassword(env, String(body?.password || '')))) {
+    return err(401, 'invalid password');
+  }
+
+  const sb = supabaseAdmin(env);
+  const { data: prof } = await sb.from('profiles')
+    .select('id, email, credits').eq('id', userId).maybeSingle();
+  if (!prof) return err(404, 'user not found');
+  const before = (prof as { credits: number | null }).credits ?? 0;
+  const email = (prof as { email: string | null }).email ?? null;
+
+  const newBalance = delta > 0
+    ? await addCredits(env, userId, delta)
+    : await spendCredits(env, userId, -delta);
+  if (newBalance == null) {
+    return delta < 0
+      ? err(409, 'insufficient credits — the balance would go negative')
+      : err(502, 'credit RPC failed');
+  }
+
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: delta > 0 ? 'grant_credits' : 'deduct_credits',
+    target: userId,
+    details: { email, delta, reason, before, after: newBalance },
+  });
+  await _addUserNotification(env, userId, {
+    kind: 'credits_adjusted',
+    subject: delta > 0 ? 'Credits added' : 'Credits adjusted',
+    message: `${delta > 0 ? '+' : ''}${delta} credits — ${reason}`,
+  });
+  return json({ ok: true, userId, delta, credits: newBalance, before });
+}
+
+/** Credits + EUR a pack is worth, straight from the server-side PACKS table.
+ *  Never from a request body — that is exactly how a forged reconciliation
+ *  would mint free credits. */
+function _packPayout(packId: string | null | undefined): { credits: number; eur: number } | null {
+  const p = (PACKS as Record<string, { credits: number; euros: number } | undefined>)[String(packId ?? '')];
+  return p ? { credits: p.credits, eur: p.euros } : null;
+}
+
+/** GET /api/admin/payments/unreconciled — ADMIN ONLY.
+ *
+ *  _processPayment (Stripe webhook) INSERTs a placeholder row
+ *  { credits: 0, amount_eur: 0 } before calling add_credits, then patches it.
+ *  Any crash/timeout in between leaves money taken and credits missing — and
+ *  nothing surfaced it: handleAdminStats only sums amount_eur, so the row
+ *  silently contributed 0 to gross revenue.
+ *
+ *  NOTE on the predicate: amount_eur is INSERTed as 0, never NULL, so
+ *  `credits = 0 (or NULL)` is the only reliable signal. amount_eur = 0 is
+ *  corroborating evidence, not the test. */
+async function handleAdminUnreconciledPayments(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('payments')
+    .select('id, stripe_session_id, user_id, pack_id, credits, amount_eur, created_at')
+    .or('credits.is.null,credits.eq.0')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) return err(500, error.message);
+  const rows = (data || []) as Array<{
+    id: unknown; stripe_session_id: string | null; user_id: string | null;
+    pack_id: string | null; credits: number | null; amount_eur: number | null;
+    created_at: string | null;
+  }>;
+  // Resolve emails in ONE query, same pattern as handleAdminActiveJobs.
+  const userIds = [...new Set(rows.map((p) => p.user_id).filter((x): x is string => !!x))];
+  const emails = new Map<string, string | null>();
+  if (userIds.length) {
+    const { data: profiles } = await sb.from('profiles').select('id, email').in('id', userIds);
+    for (const p of (profiles || []) as Array<{ id: string; email: string | null }>) {
+      emails.set(p.id, p.email);
+    }
+  }
+  return json({
+    ok: true,
+    count: rows.length,
+    payments: rows.map((p) => {
+      const payout = _packPayout(p.pack_id);
+      return {
+        ...p,
+        email: p.user_id ? (emails.get(p.user_id) ?? null) : null,
+        // What the "Grant credits" button WOULD apply.
+        expected_credits: payout?.credits ?? null,
+        expected_amount_eur: payout?.eur ?? null,
+      };
+    }),
+  });
+}
+
+/** POST /api/admin/payments/reconcile  body { sessionId, password }
+ *  ADMIN ONLY. Finish a half-processed Stripe payment: grant the pack's
+ *  credits and complete the accounting row.
+ *
+ *  Idempotent under double-click because we CLAIM the row FIRST
+ *  (`.eq('credits', 0)` conditional UPDATE) and only grant credits when the
+ *  claim actually returned a row. Doing it the other way round (grant then
+ *  claim) is precisely the double-credit window the webhook already documents.
+ *  If the grant then fails we roll the row back to credits:0 so it stays
+ *  visible as unreconciled — we never leave credits>0 with no grant. */
+async function handleAdminReconcilePayment(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  type Body = { sessionId?: string; password?: string };
+  let body: Body | null = null;
+  try { body = await req.json() as Body; } catch { return err(400, 'body required'); }
+  const sessionId = String(body?.sessionId || '').trim();
+  if (!sessionId) return err(400, 'sessionId required');
+  if (!(await _verifyAdminPassword(env, String(body?.password || '')))) {
+    return err(401, 'invalid password');
+  }
+
+  const sb = supabaseAdmin(env);
+  const { data: probe } = await sb.from('payments')
+    .select('id, user_id, pack_id, credits')
+    .eq('stripe_session_id', sessionId)
+    .maybeSingle();
+  if (!probe) return err(404, 'payment not found');
+  const packId = (probe as { pack_id: string | null }).pack_id;
+  const payout = _packPayout(packId);
+  if (!payout) return err(400, `unknown pack_id '${packId}' — cannot determine the payout`);
+
+  // Claim: only one caller can flip an unreconciled row (credits 0 or NULL)
+  // to the pack payout. Matches the predicate used by the GET listing.
+  const { data: claimed, error: claimErr } = await sb.from('payments')
+    .update({ credits: payout.credits, amount_eur: payout.eur })
+    .eq('stripe_session_id', sessionId)
+    .or('credits.is.null,credits.eq.0')
+    .select('id, user_id, pack_id');
+  if (claimErr) return err(500, claimErr.message);
+  if (!claimed || claimed.length === 0) {
+    return json({ ok: true, already: true, sessionId });
+  }
+  const row = claimed[0] as { user_id: string | null; pack_id: string | null };
+  if (!row.user_id) {
+    await sb.from('payments').update({ credits: 0, amount_eur: 0 }).eq('stripe_session_id', sessionId);
+    return err(400, 'payment row has no user_id');
+  }
+
+  const newBalance = await addCredits(env, row.user_id, payout.credits);
+  if (newBalance == null) {
+    // Roll the claim back so the row stays listed and the admin can retry.
+    await sb.from('payments').update({ credits: 0, amount_eur: 0 }).eq('stripe_session_id', sessionId);
+    return err(502, 'add_credits RPC failed — nothing was granted, retry');
+  }
+
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: 'reconcile_payment', target: sessionId,
+    details: {
+      user_id: row.user_id, pack_id: row.pack_id,
+      credits: payout.credits, amount_eur: payout.eur, new_balance: newBalance,
+    },
+  });
+  await _addUserNotification(env, row.user_id, {
+    kind: 'credits_granted',
+    subject: 'Credits added',
+    message: `${payout.credits} credits were added to your account for your ${packId} purchase.`,
+  });
+  return json({
+    ok: true, sessionId, userId: row.user_id,
+    credits: payout.credits, amount_eur: payout.eur, balance: newBalance,
+  });
+}
+
+/** GET /api/admin/badges — ADMIN ONLY. Three integers for the tab badges.
+ *
+ *  Replaces the dashboard's 30-second poller that used to hit
+ *  /api/admin/market/list (N+1 R2 reads over every listing),
+ *  /api/admin/contact-messages (N+1 over every message) and
+ *  /api/admin/jobs/active (200 rows + a profiles join) just to render three
+ *  numbers.
+ *
+ *  Active jobs is a head-only COUNT (one round-trip). The two R2-backed
+ *  counts still need to open the JSON bodies (the read/status flag lives
+ *  inside the file, not the key), so the result is cached in R2 for 60 s —
+ *  a 30 s poller therefore recomputes at most every other tick. ?fresh=1
+ *  bypasses the cache for an immediate refresh after a moderation action. */
+async function handleAdminBadges(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const CACHE_KEY = '_meta/admin_badges_cache.json';
+  const TTL_MS = 60_000;
+  const fresh = new URL(req.url).searchParams.get('fresh') === '1';
+
+  if (!fresh && env.MESHES) {
+    try {
+      const txt = await r2GetText(env, CACHE_KEY);
+      const c = txt ? JSON.parse(txt) : null;
+      if (c && c.ts && (Date.now() - Date.parse(c.ts)) < TTL_MS) {
+        return json({ ...c, cached: true });
+      }
+    } catch { /* fall through and recompute */ }
+  }
+
+  // Active jobs — head:true, so zero rows come back over the wire.
+  let active = 0;
+  try {
+    const { count } = await supabaseAdmin(env).from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['starting', 'processing', 'queued', 'running']);
+    active = count ?? 0;
+  } catch { /* leave 0 */ }
+
+  // Pending listings + unread messages. Both are bounded so one huge folder
+  // can never blow the subrequest budget on a badge poll.
+  const SCAN_CAP = 400;
+  const countJson = async (prefix: string, pred: (o: Record<string, unknown>) => boolean) => {
+    if (!env.MESHES) return 0;
+    let n = 0, seen = 0;
+    let cursor: string | undefined = undefined;
+    do {
+      const page = await env.MESHES.list({ prefix, limit: 1000, cursor });
+      for (const obj of page.objects) {
+        if (!obj.key.startsWith(prefix) || !obj.key.endsWith('.json')) continue;
+        if (++seen > SCAN_CAP) return n;
+        try {
+          const txt = await r2GetText(env, obj.key);
+          if (!txt) continue;
+          const parsed = JSON.parse(txt);
+          if (parsed && typeof parsed === 'object' && pred(parsed)) n++;
+        } catch { /* one corrupt file must not break a badge */ }
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    return n;
+  };
+  let marketPending = 0, messagesUnread = 0;
+  try { marketPending = await countJson('_market/listings/', (l) => l.status === 'pending'); } catch {}
+  try { messagesUnread = await countJson('_meta/contact/', (m) => !m.read); } catch {}
+
+  const rec = {
+    ok: true,
+    ts: new Date().toISOString(),
+    active,
+    market_pending: marketPending,
+    messages_unread: messagesUnread,
+  };
+  if (env.MESHES) {
+    try {
+      await env.MESHES.put(CACHE_KEY, JSON.stringify(rec),
+        { httpMetadata: { contentType: 'application/json' } });
+    } catch { /* cache is best-effort */ }
+  }
+  return json({ ...rec, cached: false });
+}
+
+/** GET /api/admin/users — ADMIN ONLY. Profiles + ban flag + per-user aggregates.
+ *
+ *  Query: ?withAssets=1 opts into the R2 asset scan (images_count).
+ *
+ *  The R2 scan used to run UNCONDITIONALLY: up to 5 MESHES.list() calls per
+ *  user × 500 users = ~2500 subrequests in a single invocation, well over
+ *  Cloudflare's 1000-per-request cap — so the whole tab broke as soon as the
+ *  user base grew. It is now opt-in AND hard-capped, and images_count is
+ *  `null` (not 0) when it wasn't scanned so the UI can print '—' instead of a
+ *  lying zero.
+ *
+ *  Everything else (ops_total, ops_failed, credits_spent, last_activity,
+ *  rigs_count) comes from the SAME single jobs query that was already being
+ *  issued — it just fetched three columns and threw the rest away. Zero extra
+ *  queries. */
 async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
   if (guard instanceof Response) return guard;
+  const withAssets = new URL(req.url).searchParams.get('withAssets') === '1';
   const sb = supabaseAdmin(env);
   const { data, error } = await sb.from('profiles')
     .select('id, email, credits, created_at')
@@ -11213,35 +11679,62 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
   const banned = await _getBannedUserIds(env);
   const users = (data || []) as Array<{ id: string; [k: string]: unknown }>;
 
-  // Aggregate counts from jobs in one query. project_name and mesh_url
-  // come straight from the table — we count distinct projects + every
-  // succeeded mesh per user. Image count comes from R2 (logged jobs
-  // never stored the result URL).
+  // Aggregate everything from jobs in ONE query.
   const { data: jobsRows } = await sb.from('jobs')
-    .select('user_id, project_name, mesh_url, status')
+    .select('user_id, project_name, mesh_url, status, credit_cost, created_at, options')
     .limit(50_000);
-  type ProjectsMap = Map<string, Set<string>>;
-  const projects: ProjectsMap = new Map();
+  const projects = new Map<string, Set<string>>();
   const meshes = new Map<string, number>();
-  for (const row of (jobsRows || []) as Array<{
-    user_id: string; project_name: string | null; mesh_url: string | null; status: string;
-  }>) {
+  const opsTotal = new Map<string, number>();
+  const opsFailed = new Map<string, number>();
+  const opsSucceeded = new Map<string, number>();
+  const creditsSpent = new Map<string, number>();
+  const rigsCount = new Map<string, number>();
+  const lastActivity = new Map<string, number>();
+  const bump = (m: Map<string, number>, k: string, by = 1) => m.set(k, (m.get(k) || 0) + by);
+  const jobsList = (jobsRows || []) as Array<{
+    user_id: string; project_name: string | null; mesh_url: string | null;
+    status: string; credit_cost: number | null; created_at: string | null;
+    options: Record<string, unknown> | null;
+  }>;
+  for (const row of jobsList) {
+    if (!row.user_id) continue;
     if (row.project_name) {
       const set = projects.get(row.user_id) || new Set<string>();
       set.add(row.project_name);
       projects.set(row.user_id, set);
     }
-    if (row.mesh_url && row.status === 'succeeded') {
-      meshes.set(row.user_id, (meshes.get(row.user_id) || 0) + 1);
+    if (row.mesh_url && row.status === 'succeeded') bump(meshes, row.user_id);
+    bump(opsTotal, row.user_id);
+    if (row.status === 'failed') bump(opsFailed, row.user_id);
+    if (row.status === 'succeeded') {
+      bump(opsSucceeded, row.user_id);
+      // Only successful ops are counted as spend — SAME convention as
+      // handleAdminStats, so the two screens can never disagree.
+      bump(creditsSpent, row.user_id, row.credit_cost ?? 0);
+    }
+    if (String((row.options as Record<string, unknown> | null)?.operation_type ?? '') === 'rig') {
+      bump(rigsCount, row.user_id);
+    }
+    if (row.created_at) {
+      const t = new Date(row.created_at).getTime();
+      if (Number.isFinite(t) && t > (lastActivity.get(row.user_id) ?? 0)) {
+        lastActivity.set(row.user_id, t);
+      }
     }
   }
 
-  // Image counts via R2 — only computed for the users we'll actually
-  // display (limit 500) and capped at 200 listings each so the
-  // endpoint stays under a few seconds. Parallel.
-  let imageCounts = new Map<string, number>();
-  if (env.MESHES) {
-    const tasks = users.slice(0, 500).map(async (u) => {
+  // Image counts via R2 — OPT-IN (?withAssets=1) and hard-capped so the
+  // fan-out can never blow the 1000-subrequest budget: 2 pages/user
+  // (2000 objects) × 300 users = 600 list() calls worst case.
+  const ASSET_USER_CAP = 300;
+  const ASSET_PAGE_CAP = 2;
+  const imageCounts = new Map<string, number>();
+  let assetsScanPartial = false;
+  if (withAssets && env.MESHES) {
+    const scanned = users.slice(0, ASSET_USER_CAP);
+    if (users.length > ASSET_USER_CAP) assetsScanPartial = true;
+    const tasks = scanned.map(async (u) => {
       let n = 0;
       let cursor: string | undefined;
       let pages = 0;
@@ -11254,11 +11747,19 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
         }
         cursor = result.truncated ? result.cursor : undefined;
         pages++;
-      } while (cursor && pages < 5);
+        if (cursor && pages >= ASSET_PAGE_CAP) assetsScanPartial = true;
+      } while (cursor && pages < ASSET_PAGE_CAP);
       imageCounts.set(u.id, n);
     });
     await Promise.all(tasks);
   }
+
+  // Exact signup count so the UI can show "X users (Y shown)" honestly.
+  let total: number | null = null;
+  try {
+    const { count } = await sb.from('profiles').select('id', { count: 'exact', head: true });
+    total = count ?? null;
+  } catch {}
 
   return json({
     users: users.map((u) => ({
@@ -11266,8 +11767,25 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
       banned: banned.has(u.id),
       projects_count: projects.get(u.id)?.size || 0,
       meshes_count: meshes.get(u.id) || 0,
-      images_count: imageCounts.get(u.id) || 0,
+      // null = 'not scanned' (see ?withAssets), NOT 'zero images'.
+      images_count: withAssets ? (imageCounts.get(u.id) ?? 0) : null,
+      ops_total: opsTotal.get(u.id) || 0,
+      ops_failed: opsFailed.get(u.id) || 0,
+      ops_succeeded: opsSucceeded.get(u.id) || 0,
+      credits_spent: creditsSpent.get(u.id) || 0,
+      rigs_count: rigsCount.get(u.id) || 0,
+      last_activity: lastActivity.has(u.id)
+        ? new Date(lastActivity.get(u.id) as number).toISOString() : null,
     })),
+    total,
+    returned: users.length,
+    truncated: users.length >= 500,
+    assets_scanned: withAssets,
+    assets_scan_partial: assetsScanPartial,
+    jobs_scanned: jobsList.length,
+    // The 50 000-row jobs cap is UNORDERED: past it the per-user aggregates
+    // become an arbitrary subset. Surfaced rather than raised (worker memory).
+    jobs_truncated: jobsList.length >= 50_000,
   });
 }
 
@@ -11974,51 +12492,220 @@ async function purgeTransientUploads(env: Env): Promise<void> {
   console.log(`[retention] scanned ${listed.objects.length}, deleted ${deleted} transient masks/canvas >30d, cursor=${nextCursor ? 'more' : 'reset'}`);
 }
 
-// Idempotent: mark a Modal mesh job failed + refund its credits EXACTLY ONCE,
-// even if the client poll and the cron reaper race. Only the request that flips
-// the row out of a non-terminal status refunds (conditional UPDATE + select).
-async function _failAndRefundJob(env: Env, job: { id: unknown; user_id?: unknown; credit_cost?: unknown }, errMsg: string): Promise<void> {
+// Every status a job can sit in while still in flight. The mesh insert writes
+// 'queued', the Replicate insert writes Replicate's own 'starting', the async
+// op inserts write 'processing', and some Modal paths flip to 'running'
+// mid-pipeline. Anything not in this list is terminal (succeeded / failed /
+// canceled) and must never be re-refunded.
+const NON_TERMINAL_JOB_STATUSES = ['queued', 'starting', 'running', 'processing', 'pending'] as const;
+
+// Idempotent: mark a job failed + refund its credits EXACTLY ONCE, even if the
+// client poll and the cron reaper race. Only the request that flips the row out
+// of a non-terminal status refunds (conditional UPDATE + select) — that claim
+// IS the exactly-once guarantee, do not loosen it.
+// Returns true when THIS call claimed the row (i.e. it performed the refund),
+// false when someone else had already finalised it. Callers use the return
+// value to decide whether to also refund the Modal $ budget / delete the R2
+// job record, so those side effects stay exactly-once too.
+async function _failAndRefundJob(env: Env, job: { id: unknown; user_id?: unknown; credit_cost?: unknown }, errMsg: string): Promise<boolean> {
   const sb = supabaseAdmin(env);
   const { data, error } = await sb.from('jobs')
     .update({ status: 'failed', error: String(errMsg).slice(0, 500), finished_at: new Date().toISOString() })
     .eq('id', job.id as string)
-    .in('status', ['processing', 'pending'])
+    // 2026-07-26: widened from ['processing','pending']. Jobs inserted as
+    // 'queued' (mesh) or 'starting' (Replicate) were invisible to this claim,
+    // so their credits could never be refunded at all.
+    .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
     .select('id');
-  if (error || !data || data.length === 0) return;  // already finalized by someone else
+  if (error || !data || data.length === 0) return false;  // already finalized by someone else
   if (typeof job.user_id === 'string' && typeof job.credit_cost === 'number') {
     await addCredits(env, job.user_id, job.credit_cost);
   }
+  return true;
 }
 
-// Reaper: a mesh job whose client stopped polling (tab closed / container died)
-// would sit in 'processing' forever and the spent credits would be lost. Sweep
-// old processing jobs, re-poll Modal, and fail+refund the dead ones (idempotent).
-async function reapStuckJobs(env: Env): Promise<void> {
-  if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return;
+/** Reaper routing table: how to re-poll each async Modal op family, what its
+ *  GPU $ estimate is, and which R2 job record to drop once it is reaped.
+ *
+ *  All four endpoints take the SAME request shape
+ *  (POST { _auth, job_id }) and return the SAME response shape
+ *  ({ ready?: boolean, error?: string }) — verified against
+ *  handleAutoRigStatus / handleMeshSegmentStatus / handleAutoAnimStatus /
+ *  handleAnimateFromReferenceStatus, which is why one generic poller covers
+ *  them all. `envKey` holds the BASE url of the Modal app; `path` is appended. */
+const _REAP_BACKENDS: Record<string, {
+  envKey: 'MODAL_PUPPETEER_RIG_URL' | 'MODAL_SEGMENT_URL' | 'MODAL_ANYTOP_ANIM_URL' | 'MODAL_FBX_RETARGET_URL';
+  path: string;
+  usd: number;
+  delRecord?: (env: Env, id: string) => Promise<void>;
+}> = {
+  rig:         { envKey: 'MODAL_PUPPETEER_RIG_URL', path: '/rig-status',          usd: ESTIMATED_USD_RIG,     delRecord: deleteRigJobRecord },
+  segment:     { envKey: 'MODAL_SEGMENT_URL',       path: '/segment-status',      usd: ESTIMATED_USD_SEGMENT, delRecord: deleteSegmentJobRecord },
+  animate:     { envKey: 'MODAL_ANYTOP_ANIM_URL',   path: '/anim-status',         usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
+  animate_fbx: { envKey: 'MODAL_FBX_RETARGET_URL',  path: '/fbx-retarget-status', usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
+};
+
+/** One generic status poll against any of the four async Modal op apps. */
+async function _pollModalOpStatus(
+  env: Env, baseUrl: string, path: string, jobId: string,
+): Promise<{ ready?: boolean; error?: string }> {
+  if (!env.MODAL_SHARED_SECRET) throw new Error('MODAL_SHARED_SECRET not set');
+  const r = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!r.ok) throw new Error(`${path} HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  return await r.json() as { ready?: boolean; error?: string };
+}
+
+interface ReapResult {
+  scanned: number;
+  reaped: number;
+  credits_refunded: number;
+  skipped: number;
+  errors: string[];
+}
+
+// Reaper: a job whose client stopped polling (tab closed / container died)
+// would sit in a non-terminal status forever and the spent credits would be
+// lost. Sweep old in-flight jobs, re-poll the RIGHT Modal endpoint for each op
+// type, and fail+refund the dead ones (idempotent).
+//
+// 2026-07-26 — this used to `.eq('status','processing')` and then
+// `if (!id.startsWith('modal_')) continue`, i.e. it ONLY ever handled mesh
+// jobs minted by handleGenerate. Rig (5 cr), segment (15 cr), animate (5 cr)
+// and animate_fbx (5 cr) ids come from Modal's own *-start responses and never
+// carry that prefix, so an abandoned rig/segmentation/animation was NEVER
+// refunded: the user paid for nothing. Jobs inserted as 'queued'/'starting'
+// were doubly invisible (neither the select nor the refund claim matched them).
+async function reapStuckJobs(env: Env): Promise<ReapResult> {
+  const out: ReapResult = { scanned: 0, reaped: 0, credits_refunded: 0, skipped: 0, errors: [] };
+  if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return out;
+  // Bounded: this array is serialised into the R2 cron receipt, and 200 dead
+  // jobs × 200 chars would bloat a file the dashboard reads on every poll.
+  const noteErr = (m: string) => { if (out.errors.length < 20) out.errors.push(m.slice(0, 200)); };
   const sb = supabaseAdmin(env);
+  const GRACE_MS = 30 * 60 * 1000;   // segmentation legitimately runs 8-10 min
   const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-  const { data: stuck } = await sb.from('jobs')
-    .select('id, user_id, credit_cost, created_at, status')
-    .eq('status', 'processing')
+  const { data: stuck, error: selErr } = await sb.from('jobs')
+    .select('id, user_id, credit_cost, created_at, status, options, asset_type')
+    .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
     .lt('created_at', cutoff)
-    .limit(50);
-  if (!stuck || !stuck.length) return;
-  let reaped = 0;
-  for (const job of stuck) {
+    // 200 max: each job costs up to 1 status POST + 1 UPDATE + 1 RPC + 1-2 R2
+    // ops, which approaches Cloudflare's 1000-subrequest cap on a scheduled
+    // invocation. Do NOT raise this further.
+    .limit(200);
+  if (selErr) { noteErr('select: ' + selErr.message); return out; }
+  if (!stuck || !stuck.length) return out;
+  out.scanned = stuck.length;
+
+  for (const job of stuck as Array<{
+    id: unknown; user_id?: unknown; credit_cost?: unknown;
+    created_at?: unknown; status?: unknown;
+    options?: Record<string, unknown> | null; asset_type?: unknown;
+  }>) {
     const id = String(job.id);
-    if (!id.startsWith('modal_')) continue;  // only Modal jobs are re-pollable here
+    const at = String(job.asset_type ?? '');
+    // options.operation_type is authoritative (every insert writes it since
+    // 2026-07-26); asset_type then the 'modal_' id prefix are fallbacks for
+    // rows written by older deploys.
+    const opType = String((job.options as Record<string, unknown> | null)?.operation_type || '')
+      || (at === 'rig' ? 'rig'
+        : at === 'segment' ? 'segment'
+        : at === 'animation' ? 'animate'
+        : '')
+      || (id.startsWith('modal_') ? 'mesh' : '');
+    if (!opType) { out.skipped++; continue; }
     const age = job.created_at ? Date.now() - new Date(String(job.created_at)).getTime() : 0;
+    const creditCost = typeof job.credit_cost === 'number' ? job.credit_cost : 0;
+    // The GPU $ the budget guard actually charged for this job. Since
+    // 2026-07-26 every insert records it; older rows fall back to the op-type
+    // table so we never over-refund the budget counter.
+    const recordedUsd = Number(
+      (job.options as Record<string, unknown> | null)?.cost_usd
+      ?? MODAL_COST_USD[opType]
+      ?? 0,
+    ) || 0;
+
+    // ── Mesh: the original path, unchanged semantics ──
+    if (opType === 'mesh') {
+      // Only Modal-minted ids are re-pollable via callModalMeshStatus;
+      // Replicate predictions are reaped on the grace timer alone.
+      const pollable = id.startsWith('modal_');
+      const refundMeshBudget = async () => {
+        // Mesh routes to Modal or Replicate and each has its OWN counter —
+        // refund the one the job was charged against (backend is recorded on
+        // the row; the 'modal_' prefix is the fallback for legacy rows).
+        const backend = String((job.options as Record<string, unknown> | null)?.backend
+          || (pollable ? 'modal' : 'replicate'));
+        if (backend === 'replicate') await refundDailySpend(env, recordedUsd).catch(() => {});
+        else await refundModalSpend(env, recordedUsd).catch(() => {});
+      };
+      try {
+        const status = pollable
+          ? await callModalMeshStatus(env, id)
+          : { ready: false } as ModalMeshStatusResp;
+        let claimed = false;
+        if (status.error) claimed = await _failAndRefundJob(env, job, status.error);
+        else if (status.ready && status.glb_base64) { /* finished; a client/admin poll persists it */ }
+        else if (age > GRACE_MS) claimed = await _failAndRefundJob(env, job, 'reaped: no result after 30 min');
+        if (claimed) {
+          out.reaped++; out.credits_refunded += creditCost;
+          // Give the GPU budget back too — the old reaper never did.
+          await refundMeshBudget();
+        }
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        if (age > GRACE_MS) {
+          if (await _failAndRefundJob(env, job, 'reaped: unreachable after 30 min')) {
+            out.reaped++; out.credits_refunded += creditCost;
+            await refundMeshBudget();
+          }
+        } else { noteErr(`${id}: ${m}`); }
+      }
+      continue;
+    }
+
+    // ── rig / segment / animate / animate_fbx ──
+    const cfg = _REAP_BACKENDS[opType];
+    if (!cfg) { out.skipped++; continue; }
+    const base = env[cfg.envKey];
+    const finalize = async (why: string) => {
+      if (!(await _failAndRefundJob(env, job, why))) return;   // someone else got there first
+      out.reaped++; out.credits_refunded += creditCost;
+      await refundModalSpend(env, recordedUsd || cfg.usd).catch(() => {});
+      if (cfg.delRecord) await cfg.delRecord(env, id).catch(() => {});
+    };
+    if (!base) {
+      // Backend disabled/rotated since the job started — it can never finish.
+      if (age > GRACE_MS) await finalize(`reaped: ${opType} backend unavailable`);
+      else out.skipped++;
+      continue;
+    }
     try {
-      const status = await callModalMeshStatus(env, id);
-      if (status.error) { await _failAndRefundJob(env, job, status.error); reaped++; }
-      else if (status.ready && status.glb_base64) { /* finished; a client/admin poll persists it */ }
-      else if (age > 30 * 60 * 1000) { await _failAndRefundJob(env, job, 'reaped: no result after 30 min'); reaped++; }
+      const resp = await _pollModalOpStatus(env, base, cfg.path, id);
+      // Same semantics as the four status handlers: ready===false && !error →
+      // still running; ready===false && error → failed; ready===true →
+      // finished, leave it (a client/admin poll persists the asset).
+      if (resp?.ready === false && resp?.error) {
+        await finalize(String(resp.error).slice(0, 300));
+      } else if (resp?.ready === true) {
+        /* done — the asset is on the Modal volume, a poll will fetch it */
+      } else if (age > GRACE_MS) {
+        await finalize(`reaped: ${opType} produced no result after 30 min`);
+      }
     } catch (e) {
-      if (age > 30 * 60 * 1000) { await _failAndRefundJob(env, job, 'reaped: unreachable after 30 min'); reaped++; }
-      else console.log(`[reaper] ${id} poll failed: ${e instanceof Error ? e.message : String(e)}`);
+      const m = e instanceof Error ? e.message : String(e);
+      if (age > GRACE_MS) await finalize(`reaped: ${opType} unreachable after 30 min`);
+      else noteErr(`${id}: ${m}`);
     }
   }
-  console.log(`[reaper] scanned ${stuck.length} processing jobs >20min, failed+refunded ${reaped}`);
+  console.log(`[reaper] scanned ${out.scanned} in-flight jobs >20min, `
+    + `failed+refunded ${out.reaped} (${out.credits_refunded} credits), `
+    + `skipped ${out.skipped}, errors ${out.errors.length}`);
+  return out;
 }
 
 // Weekly keep-alive so the free-tier Supabase project doesn't auto-pause after
@@ -12044,9 +12731,44 @@ export default {
     // Heavier maintenance (pre-warm / purge / reap) runs only on the frequent
     // heartbeat cron — NOT the weekly keep-alive ping (avoids any credit burn).
     if (event.cron !== '0 6 * * 1') {
-      ctx.waitUntil(preWarmCog(env));
-      ctx.waitUntil(purgeTransientUploads(env));
-      ctx.waitUntil(reapStuckJobs(env));
+      // ONE waitUntil around the whole block (they used to be three
+      // fire-and-forget promises) so the receipt below can measure the real
+      // duration and capture a throw from any of the three. All three are
+      // I/O-light and the 15-min cron window is ample, so running them
+      // sequentially costs nothing.
+      //
+      // The receipt is the ONLY proof of life the dashboard has: before this,
+      // a reaper that died at the last deploy was indistinguishable from one
+      // that ran 30 seconds ago.
+      ctx.waitUntil((async () => {
+        const t0 = Date.now();
+        const emsg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
+        const rec = {
+          ts: new Date().toISOString(),
+          cron: event.cron ?? null,
+          duration_ms: 0,
+          scanned: 0,
+          reaped: 0,
+          credits_refunded: 0,
+          skipped: 0,
+          errors: [] as string[],
+        };
+        try { await preWarmCog(env); } catch (e) { rec.errors.push('preWarm: ' + emsg(e)); }
+        try { await purgeTransientUploads(env); } catch (e) { rec.errors.push('purge: ' + emsg(e)); }
+        try {
+          const r = await reapStuckJobs(env);
+          rec.scanned = r.scanned; rec.reaped = r.reaped;
+          rec.credits_refunded = r.credits_refunded; rec.skipped = r.skipped;
+          rec.errors.push(...r.errors.map((m) => 'reaper: ' + m));
+        } catch (e) { rec.errors.push('reaper: ' + emsg(e)); }
+        rec.duration_ms = Date.now() - t0;
+        try {
+          if (env.MESHES) {
+            await env.MESHES.put('_meta/cron/last_run.json', JSON.stringify(rec),
+              { httpMetadata: { contentType: 'application/json' } });
+          }
+        } catch { /* best-effort receipt — never fail the tick over it */ }
+      })());
     }
   },
 
@@ -12278,6 +13000,12 @@ export default {
         if (pathname === '/api/admin/jobs/cancel'     && method === 'POST') return await handleAdminCancelJob(req, env);
         if (pathname === '/api/admin/users'           && method === 'GET')  return await handleAdminListUsers(req, env);
         if (pathname === '/api/admin/users/ban'       && method === 'POST') return await handleAdminBanUser(req, env);
+        // Exact-match block, so this is reached BEFORE the dynamic
+        // /api/admin/users/<id>/... patterns further down the chain.
+        if (pathname === '/api/admin/users/credits'   && method === 'POST') return await handleAdminAdjustCredits(req, env);
+        if (pathname === '/api/admin/badges'          && method === 'GET')  return await handleAdminBadges(req, env);
+        if (pathname === '/api/admin/payments/unreconciled' && method === 'GET')  return await handleAdminUnreconciledPayments(req, env);
+        if (pathname === '/api/admin/payments/reconcile'    && method === 'POST') return await handleAdminReconcilePayment(req, env);
         if (pathname === '/api/admin/services'        && method === 'GET')  return await handleAdminServices(req, env);
         if (pathname === '/api/admin/services'        && method === 'POST') return await handleAdminServicesToggle(req, env);
         if (pathname === '/api/admin/audit'           && method === 'GET')  return await handleAdminAuditLog(req, env);

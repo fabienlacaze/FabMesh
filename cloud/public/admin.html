@@ -141,12 +141,14 @@
     .grid { display: grid; gap: 12px; }
     .grid-4 { grid-template-columns: repeat(4, 1fr); }
     .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
     @media (max-width: 1100px) {
       .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-3 { grid-template-columns: repeat(2, 1fr); }
+      .grid-2 { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
-      .grid-4, .grid-3 { grid-template-columns: 1fr; }
+      .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
     }
     .card {
       background: var(--bg-1); border: 1px solid var(--border);
@@ -165,6 +167,24 @@
     .card.revenue .value { color: var(--revenue); }
     .card.cost    .value { color: var(--cost); }
     .card.margin  .value { color: var(--margin); }
+    /* .metric-card / -label / -value were used by the Modal-credits card
+       since forever WITHOUT any matching rule, so those four figures
+       rendered as naked divs. Defined here once (same visual language as
+       .card) — fixes the existing card and styles the new burn-rate cells
+       in the same pass. */
+    .metric-card {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px;
+    }
+    .metric-label {
+      text-transform: uppercase; letter-spacing: 1px;
+      font-size: 10px; color: var(--text-2);
+    }
+    .metric-value {
+      font-size: 20px; font-weight: 700; margin-top: 3px;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-sub { font-size: 11px; color: var(--text-2); margin-top: 2px; }
     table {
       width: 100%; border-collapse: collapse;
       background: var(--bg-1); border: 1px solid var(--border);
@@ -179,17 +199,24 @@
       text-transform: uppercase; font-size: 10px; letter-spacing: 1px;
     }
     th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    /* Users table — fixed column sizing so Status doesn't gap into Actions */
+    /* Users table — CLASS-based column sizing. It used to be nth-child
+       indexed, which silently right-aligned the wrong columns the moment
+       the column list changed; the v2 table has 10 columns so every rule
+       here is keyed off a class emitted by renderUsers() instead. */
     #users-table { width:100%; table-layout:auto; border-collapse:collapse; }
     #users-table th, #users-table td { padding:10px 12px; vertical-align:middle; border-bottom:1px solid var(--border); white-space:nowrap; }
-    /* Email column expands; everything else hugs its content */
-    #users-table th:nth-child(1), #users-table td:nth-child(1) { width:auto; white-space:normal; word-break:break-all; }
-    #users-table th:nth-child(2), #users-table td:nth-child(2) { width:1%; }   /* ID */
-    #users-table th:nth-child(3), #users-table td:nth-child(3) { width:1%; text-align:right; }   /* Credits */
-    #users-table th:nth-child(4), #users-table td:nth-child(4) { width:1%; }   /* Joined */
-    #users-table th:nth-child(5), #users-table td:nth-child(5) { width:1%; text-align:center; }  /* Status */
-    #users-table th:nth-child(6), #users-table td:nth-child(6) { width:1%; text-align:right; }   /* Actions */
-    #users-table td:nth-child(6) .btn { margin-left:6px; }
+    /* Email column is the only one that expands; everything else hugs. */
+    #users-table td.col-email, #users-table th.col-email { width:auto; white-space:normal; word-break:break-all; min-width:180px; }
+    #users-table td.col-num,   #users-table th.col-num   { width:1%; text-align:right; font-variant-numeric:tabular-nums; }
+    #users-table td.col-tight, #users-table th.col-tight { width:1%; }
+    #users-table td.col-actions, #users-table th.col-actions { width:1%; text-align:right; }
+    #users-table td.col-actions .btn { margin-left:6px; margin-bottom:2px; }
+    #users-table th.sortable { cursor:pointer; user-select:none; }
+    #users-table th.sortable:hover { color:var(--text-0); }
+    #users-table th.sortable .sort-arrow { font-size:9px; margin-left:3px; opacity:0.9; }
+    /* 10 columns + 6 action buttons overflow narrow screens; scroll INSIDE
+       the table wrapper so <body> never scrolls horizontally. */
+    #users-table-wrap { overflow-x:auto; }
     .actions {
       display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
       align-items: center;
@@ -270,7 +297,13 @@
   <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
     <div>
       <h1>📊 MyFabmesh — Admin</h1>
-      <div class="sub" id="generated_at">Loading…</div>
+      <div class="sub" id="generated_at" style="margin-bottom:4px;">Loading…</div>
+      <!-- Cron proof-of-life. The reaper is what refunds credits for jobs
+           whose client stopped polling; a reaper that silently died at the
+           last deploy used to be indistinguishable from one that ran 30 s
+           ago. Fed by stats.json → cron (written to _meta/cron/last_run.json
+           at every tick). -->
+      <div class="sub" id="cron-liveness" style="display:none; font-size:12px; margin-bottom:0;"></div>
     </div>
     <!-- Live kill-switch summary, clickable: jumps to the Services tab. -->
     <div id="kill-switch-summary" class="kill-switch-summary" style="display:none;" title="Click to manage services">
@@ -403,9 +436,21 @@
     <!-- Tab: Trafic & acquisition -->
     <div class="tab-panel" data-panel="traffic">
       <div class="grid grid-4" id="cards-traffic"></div>
-      <div class="chart-card" style="margin-top:16px;">
-        <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Desktop downloads — last 30 days</div>
-        <svg class="chart" id="chart-downloads" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+      <!-- ONE TILE = ONE CURVE. Each chart is titled with the EXACT label of
+           the tile above it, so a graph can never be misread as belonging to
+           the neighbouring number (the old single chart said "Desktop
+           downloads" right under a tile called "Users (total)"). -->
+      <div class="grid grid-2" style="margin-top:16px;">
+        <div class="chart-card">
+          <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Desktop downloads — daily, last 30 days</div>
+          <svg class="chart" id="chart-downloads" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+          <div class="legend"><span><span class="legend-dot" style="background:var(--accent)"></span>Downloads / day</span></div>
+        </div>
+        <div class="chart-card">
+          <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Active users (7d) — daily, last 30 days</div>
+          <svg class="chart" id="chart-users" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+          <div class="legend"><span><span class="legend-dot" style="background:var(--ok)"></span>Distinct users / day</span></div>
+        </div>
       </div>
     </div>
 
@@ -413,13 +458,47 @@
     <div class="tab-panel" data-panel="ops">
       <div class="grid grid-4" id="cards-ops"></div>
       <div class="chart-card" style="margin-top:16px;">
-        <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Activity — last 30 days (ops/day)</div>
+        <!-- Titled after its tile ("Ops total") — same one-tile-one-curve rule. -->
+        <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Ops total — daily, last 30 days</div>
         <svg class="chart" id="chart-ops" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
       </div>
     </div>
 
     <!-- Tab: Finances -->
     <div class="tab-panel" data-panel="finance">
+      <!-- STRIPE RECONCILIATION — hidden entirely when count == 0 so the tab
+           stays calm in the normal case. A row listed here means Stripe took
+           the customer's money but the credit grant never completed: the
+           webhook INSERTs a placeholder payments row (credits = 0) BEFORE
+           calling add_credits and patches it after, so a row still at 0 is
+           money in with nothing delivered. -->
+      <div id="recon-card" class="chart-card" style="display:none; margin-bottom:16px; border-color:var(--err); background:rgba(255,82,82,0.07);">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div style="font-weight:700; color:var(--err); font-size:15px;">🚨 Payments to reconcile: <span id="recon-count">0</span></div>
+          <button class="btn" onclick="loadUnreconciledPayments()">🔄 Refresh</button>
+        </div>
+        <div class="muted" style="font-size:12px; margin:6px 0 10px;">
+          Stripe charged the customer but the credit grant never completed
+          (placeholder row still at credits = 0). Granting is idempotent
+          (server-side claim before grant) and audited.
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="recon-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Email</th>
+                <th>Pack</th>
+                <th class="num">Amount</th>
+                <th>Stripe session</th>
+                <th class="num">Credits due</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
       <!-- Modal credit balance — admin-managed (top up budget on Modal,
            paste the new total here, the worker sums every daily spend
            file under _meta/modal_spend/ to give remaining). -->
@@ -433,6 +512,39 @@
           <div class="metric-card"><div class="metric-label">Total spent</div><div class="metric-value" id="mc-spent">—</div></div>
           <div class="metric-card"><div class="metric-label">Remaining</div><div class="metric-value" id="mc-remaining">—</div></div>
           <div class="metric-card"><div class="metric-label">Today</div><div class="metric-value" id="mc-today">—</div></div>
+        </div>
+        <!-- GPU BURN RATE — €/day over 7d and 30d, plus how long the prepaid
+             Modal budget lasts at that rate. All three figures come from
+             stats.json → burn (server-computed from series_30d + the R2
+             budget counters), so the dashboard and the budget guard can't
+             drift apart. -->
+        <div class="grid grid-3" id="burn-grid" style="margin-top:10px;">
+          <div class="metric-card">
+            <div class="metric-label">Burn rate (7d)</div>
+            <div class="metric-value" id="burn-7d">—</div>
+            <div class="metric-sub" id="burn-7d-sub"></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Burn rate (30d)</div>
+            <div class="metric-value" id="burn-30d">—</div>
+            <div class="metric-sub" id="burn-30d-sub"></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Runway</div>
+            <div class="metric-value" id="burn-runway">—</div>
+            <div class="metric-sub" id="burn-eta"></div>
+          </div>
+        </div>
+        <div id="cap-bar-wrap" style="display:none; margin-top:12px;">
+          <div class="metric-label" style="margin-bottom:5px;">Today's GPU cost vs daily cap</div>
+          <div style="height:10px; background:var(--bg-2); border:1px solid var(--border); border-radius:999px; overflow:hidden;">
+            <div id="cap-bar-fill" style="height:100%; width:0%; transition:width .3s;"></div>
+          </div>
+          <div class="metric-sub" id="cap-bar-text" style="margin-top:4px;"></div>
+        </div>
+        <div class="muted" style="font-size:11px; margin-top:8px;">
+          Burn rate is derived from the per-operation cost <em>estimate</em>
+          (series_30d.cost_eur), not the Modal invoice.
         </div>
         <div style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap;">
           <label style="font-size:12px; color:var(--text-2);">Limite d'usage Modal ($):</label>
@@ -502,21 +614,39 @@
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
         <input id="user-search" type="search" placeholder="Search by email or id…"
                style="flex:1; min-width:200px; padding:8px 12px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:13px;" />
+        <!-- OPT-IN R2 scan. Unticked, /api/admin/users runs ZERO R2 list()
+             calls; ticked it fans out per user (up to 2 pages × 300 users)
+             which used to be unconditional at 5 pages × 500 users ≈ 2500
+             sub-requests — over Cloudflare's 1000/request ceiling, i.e. the
+             tab simply broke as the user base grew. -->
+        <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-2); cursor:pointer;">
+          <input type="checkbox" id="users-with-assets"> Load asset counts (slow — scans R2 per user)
+        </label>
         <button class="btn" onclick="loadUsers()">🔄 Reload</button>
       </div>
-      <table id="users-table">
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>ID</th>
-            <th class="num">Credits</th>
-            <th>Joined</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody><tr><td colspan="6" style="color:var(--text-2)">Loading…</td></tr></tbody>
-      </table>
+      <!-- Truncation banner: the search box filters CLIENT-side only, so
+           whenever the server capped the list the box silently cannot find
+           the users it never received. Say so out loud. -->
+      <div id="users-truncated" class="err-msg" style="display:none; border-color:var(--warn); background:rgba(255,170,51,0.1); color:var(--warn);"></div>
+      <div id="users-status" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; font-size:12px; color:var(--text-2);"></div>
+      <div id="users-table-wrap">
+        <table id="users-table">
+          <thead>
+            <tr>
+              <th class="col-email sortable" data-sort="email"      role="button" tabindex="0">Email <span class="sort-arrow"></span></th>
+              <th class="col-num   sortable" data-sort="credits"    role="button" tabindex="0">Credits <span class="sort-arrow"></span></th>
+              <th class="col-num   sortable" data-sort="credits_spent" role="button" tabindex="0">Spent <span class="sort-arrow"></span></th>
+              <th class="col-tight sortable" data-sort="last_activity" role="button" tabindex="0">Last activity <span class="sort-arrow"></span></th>
+              <th class="col-num   sortable" data-sort="ops_total"  role="button" tabindex="0">Ops <span class="sort-arrow"></span></th>
+              <th class="col-num   sortable" data-sort="ops_failed" role="button" tabindex="0">Failed <span class="sort-arrow"></span></th>
+              <th class="col-tight sortable" data-sort="created_at" role="button" tabindex="0">Joined <span class="sort-arrow"></span></th>
+              <th class="col-tight">Status</th>
+              <th class="col-actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="9" style="color:var(--text-2)">Loading…</td></tr></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Tab: Services kill-switches (password-gated) -->
@@ -820,6 +950,44 @@
       </div>
     </div>
 
+    <!-- Adjust-credits modal — a MONETARY action, so it always asks for the
+         admin password again even though the Users tab is already unlocked
+         (_sensitivePassword is deliberately NOT pre-filled: explicit
+         re-entry is the whole point of the second factor). Reused in
+         'reconcile' mode by the Stripe reconciliation card, where the delta
+         and reason are pre-filled read-only.
+         STATIC markup (not built with inline onclick) so the auto-injected
+         password eye picks the field up, and so no user-supplied email or
+         reason ever ends up inside an attribute string. -->
+    <div id="credits-overlay"
+         style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1002; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-1); border:1px solid var(--accent); border-radius:12px; padding:24px; max-width:420px; width:92%;">
+        <h3 id="credits-heading" style="margin:0 0 10px;">⚡ Adjust credits</h3>
+        <div id="credits-who" style="font-size:13px; color:var(--text-1); margin-bottom:12px; word-break:break-all;"></div>
+        <label style="display:block; font-size:12px; color:var(--text-2); margin-bottom:4px;">Delta (+ grant / − deduct)</label>
+        <input id="credits-delta" type="number" step="1" placeholder="e.g. 25 or -10"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:14px; margin-bottom:8px;" />
+        <div id="credits-presets" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+          <button type="button" class="btn credits-preset" data-delta="25"  style="font-size:12px; padding:4px 10px;">+25</button>
+          <button type="button" class="btn credits-preset" data-delta="120" style="font-size:12px; padding:4px 10px;">+120</button>
+          <button type="button" class="btn credits-preset" data-delta="350" style="font-size:12px; padding:4px 10px;">+350</button>
+          <button type="button" class="btn credits-preset" data-delta="-10" style="font-size:12px; padding:4px 10px;">−10</button>
+        </div>
+        <label style="display:block; font-size:12px; color:var(--text-2); margin-bottom:4px;">Reason (required)</label>
+        <input id="credits-reason" type="text" maxlength="200"
+               placeholder="e.g. Stripe session cs_… not credited"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px; margin-bottom:10px;" />
+        <input id="credits-password" type="password" autocomplete="off" placeholder="Admin password"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:14px; margin-bottom:8px;" />
+        <div id="credits-preview" style="font-size:12px; color:var(--text-2); margin-bottom:6px;"></div>
+        <div id="credits-err" style="font-size:12px; color:var(--err); margin-bottom:10px; display:none;"></div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="btn" id="credits-cancel">Cancel</button>
+          <button class="btn btn-accent" id="credits-apply">Apply</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Mesh viewer modal -->
     <div id="meshes-overlay"
          style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1001; align-items:center; justify-content:center;">
@@ -1078,6 +1246,17 @@
         p => `${p.day}: ${p.downloads || 0} downloads`);
     }
 
+    // series_30d[].users was computed by the worker and never plotted, so the
+    // "Active users" tile had no curve. Deliberately a DIFFERENT colour from
+    // downloads (--ok vs --accent) since the two cards now sit side by side.
+    // Reuses renderLineChartInto verbatim — it assumes a non-empty series and
+    // series_30d is always exactly 30 entries, so never pass a filtered array.
+    function renderUsersChart(series) {
+      renderLineChartInto('chart-users', series, 'var(--ok)',
+        p => p.users || 0,
+        p => `${p.day}: ${p.users || 0} active users · ${p.ops} ops`);
+    }
+
     // Three overlaid line/area series — revenue (green), cost (orange),
     // margin (purple). Reused for the Finances tab (H=220) and Overview
     // (H=200). Areas are filled with a low-alpha rgba so the lines stay
@@ -1147,9 +1326,97 @@
       document.getElementById(elId).innerHTML = yTicks + areas + lines + dots + xTicks;
     }
 
+    // Last stats.json payload. loadModalCredits() needs burn/series data that
+    // render() used to throw away, and the Finance tab can be opened before
+    // (or without) a stats refresh.
+    let _lastStats = null;
+
+    /* ─── Cron proof-of-life ("Reaper: N min ago") ───
+       stats.json → cron mirrors _meta/cron/last_run.json, written at every
+       scheduled tick. No receipt at all (null) means the cron has not run
+       since the receipt was introduced — treated as UNKNOWN, not as OK. The
+       heartbeat cron is ~15 min, so >45 min stale is a real alarm. */
+    function renderCronLiveness(cron) {
+      const el = document.getElementById('cron-liveness');
+      if (!el) return;
+      el.style.display = '';
+      if (!cron || !cron.ts) {
+        el.style.color = 'var(--warn)';
+        el.textContent = '⚠️ Reaper: never ran (no receipt on R2) — stuck jobs are NOT being refunded.';
+        return;
+      }
+      const ageMin = Math.max(0, Math.round((Date.now() - Date.parse(cron.ts)) / 60000));
+      const stale = ageMin > 45;
+      const errs = Array.isArray(cron.errors) ? cron.errors.length : 0;
+      el.style.color = stale ? 'var(--err)' : (errs ? 'var(--warn)' : 'var(--text-2)');
+      const bits = [
+        `${stale ? '🚨' : '🩺'} Reaper: ${ageMin} min ago`,
+        `${cron.scanned ?? 0} scanned`,
+        `${cron.reaped ?? 0} reaped`,
+        `${cron.credits_refunded ?? 0} credits refunded`,
+        `${Math.round((cron.duration_ms || 0) / 100) / 10}s`,
+      ];
+      if (errs) bits.push(`${errs} error(s)`);
+      if (stale) bits.push('cron may be dead');
+      el.textContent = bits.join(' · ');
+      // Full error list on hover — too noisy for the one-liner.
+      el.title = errs ? cron.errors.join('\n') : '';
+    }
+
+    /* ─── GPU burn rate / runway / daily-cap bar ───
+       Everything is server-computed in stats.json → burn so the dashboard
+       cannot diverge from the budget guard. Degrades to '—' (never NaN) when
+       the field is missing, e.g. this page deployed ahead of the worker. */
+    function renderBurn(burn) {
+      const set = (id, txt, color) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = txt;
+        if (color !== undefined) el.style.color = color;
+      };
+      const b = burn || {};
+      const rate = (v) => (v == null || !isFinite(Number(v)) ? null : Number(v));
+      const r7 = rate(b.eur_per_day_7d), r30 = rate(b.eur_per_day_30d);
+      set('burn-7d',  r7  == null ? '—' : r7.toFixed(2) + ' €/day', '');
+      set('burn-30d', r30 == null ? '—' : r30.toFixed(2) + ' €/day', '');
+      set('burn-7d-sub',  b.cost_7d_eur  == null ? '' : `${Number(b.cost_7d_eur).toFixed(2)} € over 7 days`);
+      set('burn-30d-sub', b.cost_30d_eur == null ? '' : `${Number(b.cost_30d_eur).toFixed(2)} € over 30 days`);
+
+      // Runway. days_left is null either because no budget is configured or
+      // because nothing was spent — distinguish the two, an unexplained '∞'
+      // reads as a bug.
+      const days = b.days_left;
+      if (days == null) {
+        const noBudget = !Number(b.budget_total_usd);
+        set('burn-runway', noBudget ? '—' : '∞', 'var(--text-2)');
+        set('burn-eta', noBudget ? 'no Modal budget set' : 'no GPU spend in the last 30 days');
+      } else {
+        const col = days < 7 ? 'var(--err)' : (days < 21 ? 'var(--warn)' : '');
+        set('burn-runway', `${days} days`, col);
+        set('burn-eta', (b.depletion_date ? `est. empty ${b.depletion_date}` : '')
+          + (b.budget_remaining_usd != null ? ` · $${Number(b.budget_remaining_usd).toFixed(2)} left (${b.budget_source || 'estimate'})` : ''));
+      }
+
+      // Today vs daily cap. Hidden when no cap is exposed (older worker).
+      const wrap = document.getElementById('cap-bar-wrap');
+      const fill = document.getElementById('cap-bar-fill');
+      const cap = Number(b.daily_cap_usd) || 0;
+      if (!wrap || !fill) return;
+      if (cap <= 0) { wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      const today = Number(b.today_spend_usd) || 0;
+      const pct = Math.min(100, (today / cap) * 100);
+      fill.style.width = pct.toFixed(1) + '%';
+      fill.style.background = pct < 70 ? 'var(--ok)' : (pct < 90 ? 'var(--warn)' : 'var(--err)');
+      set('cap-bar-text', `$${today.toFixed(2)} / $${cap.toFixed(2)} (${Math.round(pct)}%)`,
+        pct >= 90 ? 'var(--err)' : '');
+    }
+
     function render(d) {
+      _lastStats = d;
       document.getElementById('generated_at').textContent =
         'Generated ' + new Date(d.generated_at).toLocaleString('fr');
+      renderCronLiveness(d.cron);
 
       // Computed values
       const successRate = d.operations.total
@@ -1171,8 +1438,22 @@
       const _hasReal = _realCost != null;
       const _realPct = (_hasReal && _net > 0) ? Math.round((_realMargin / _net) * 100) + '% réel' : '⚠️ poller off';
       const _fmtv = (v) => (v == null ? '—' : Number(v).toFixed(2));
+
+      // ── Honest user counts. The old single "Users (total)" tile showed
+      // users.total, which is the count of DISTINCT user_id present in the
+      // jobs table — i.e. users who ran at least one operation, NOT signups.
+      // Every account that registered and never generated anything was
+      // invisible. The `?? _u.total` fallbacks keep the page working if it is
+      // deployed before the worker exposes the new fields ('—' rather than
+      // NaN); do not remove the read of users.total, the Overview delta and
+      // back-compat both rely on it.
+      const _u = d.users || {};
+      const _signups = _u.signups_total ?? null;
+      const _withOps = _u.users_with_ops ?? _u.total ?? 0;
+      const _act7 = _u.active_7d ?? null;
+
       document.getElementById('cards-overview').innerHTML = [
-        card('Users (total)',          d.users.total,                          '', 'accent'),
+        card('Signups (total)',        _signups == null ? '—' : _signups,       `${_withOps} with ops`, 'accent'),
         card('Ops total',              d.operations.total,                     successRate + ' success'),
         card('Revenue net (€)',        d.revenue.total_net_eur.toFixed(2),     '', 'revenue'),
         card('Marge RÉELLE (€)',       _fmtv(_realMargin),                     _realPct, 'margin'),
@@ -1185,14 +1466,19 @@
       ].join('');
       renderMoneyChartInto('chart-money-overview', d.series_30d, 200);
 
-      // ── Tab: Trafic
+      // ── Tab: Trafic. Three distinct user tiles instead of one ambiguous
+      // "USERS TOTAL". Labels are load-bearing: the two charts below are
+      // titled with these exact strings.
       document.getElementById('cards-traffic').innerHTML = [
-        card('Users (total)',          d.users.total,                     '', 'accent'),
+        card('Signups (total)',        _signups == null ? '—' : _signups, 'registered profiles', 'accent'),
+        card('Users with ops',         _withOps,                          'ran ≥1 operation'),
+        card('Active users (7d)',      _act7 == null ? '—' : _act7,       'distinct users, last 7 days', 'ok'),
         card('Desktop downloads',      d.desktop_downloads_total,         `${totalDownloadsLast30} in last 30d`),
         card('Last 7d ops',            d.last_7d.ops),
         card('Paid orders (Stripe)',   d.revenue.payments_count,          `${d.revenue.total_gross_eur.toFixed(2)}€ gross`),
       ].join('');
       renderDownloadsChart(d.series_30d);
+      renderUsersChart(d.series_30d);
 
       // ── Tab: Opérations
       document.getElementById('cards-ops').innerHTML = [
@@ -1213,6 +1499,7 @@
         card('Last 7d margin (€)',     d.last_7d.margin_eur.toFixed(2),        '', 'ok'),
       ].join('');
       renderMoneyChartInto('chart-money', d.series_30d, 220);
+      renderBurn(d.burn);
 
       // ── Tab: Par type
       const rows = Object.entries(d.by_type)
@@ -1404,64 +1691,146 @@
       );
     }
 
+    /* ═══════════════════════════════════════════════════════════════
+       USERS TAB v2 — enriched columns, sortable headers, pagination.
+       Every per-user aggregate (ops, failures, credits spent, last
+       activity, rigs) comes from the SAME single jobs query the endpoint
+       already ran; the only optional cost is the R2 asset scan, gated
+       behind the "Load asset counts" checkbox (?withAssets=1).
+       ═══════════════════════════════════════════════════════════════ */
+    const USERS_COLSPAN = 9;
+    const USERS_PAGE_SIZE = 50;
     let _allUsers = [];
+    let _usersMeta = { total: 0, returned: 0, truncated: false, assets_scanned: false, assets_scan_partial: false };
+    let _usersSort = { key: 'last_activity', dir: 'desc' };
+    let _usersPage = 0;
+
     async function loadUsers() {
       const tbody = document.querySelector('#users-table tbody');
-      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-2)">Loading…</td></tr>';
+      tbody.innerHTML = `<tr><td colspan="${USERS_COLSPAN}" style="color:var(--text-2)">Loading…</td></tr>`;
+      const withAssets = document.getElementById('users-with-assets')?.checked ? '1' : '0';
       try {
-        const r = await fetch('/api/admin/users', { credentials: 'include' });
+        const r = await fetch('/api/admin/users?withAssets=' + withAssets, { credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         _allUsers = data.users || [];
+        _usersMeta = {
+          total: Number(data.total) || _allUsers.length,
+          returned: Number(data.returned) || _allUsers.length,
+          truncated: !!data.truncated,
+          // Trust the SERVER's flag, not the checkbox — a stale response must
+          // never make the UI claim counts it doesn't have.
+          assets_scanned: !!data.assets_scanned,
+          assets_scan_partial: !!data.assets_scan_partial,
+          jobs_truncated: !!data.jobs_truncated,
+        };
+        _usersPage = 0;
         renderUsers();
       } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="6" style="color:var(--err)">${escapeHtml(e.message || e)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${USERS_COLSPAN}" style="color:var(--err)">${escapeHtml(e.message || e)}</td></tr>`;
       }
+    }
+
+    // Comparator that always sinks nulls to the bottom whichever way the
+    // column is sorted — a user who never ran an op has last_activity null and
+    // must not win the "most recent" sort.
+    function _usersCompare(a, b, key, dir) {
+      const mul = dir === 'asc' ? 1 : -1;
+      let va = a[key], vb = b[key];
+      if (key === 'last_activity' || key === 'created_at') {
+        va = va ? Date.parse(va) : null;
+        vb = vb ? Date.parse(vb) : null;
+        if (!Number.isFinite(va)) va = null;
+        if (!Number.isFinite(vb)) vb = null;
+      }
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === 'string' || typeof vb === 'string') {
+        return String(va).localeCompare(String(vb)) * mul;
+      }
+      return ((Number(va) || 0) - (Number(vb) || 0)) * mul;
     }
 
     function renderUsers() {
       const q = (document.getElementById('user-search')?.value || '').toLowerCase();
-      const list = q
-        ? _allUsers.filter((u) => (u.email || '').toLowerCase().includes(q) || u.id.toLowerCase().includes(q))
+      const filtered = q
+        ? _allUsers.filter((u) => (u.email || '').toLowerCase().includes(q) || String(u.id || '').toLowerCase().includes(q))
         : _allUsers;
+      // Sort a COPY — _allUsers stays in the server's order.
+      const list = filtered.slice().sort((a, b) => _usersCompare(a, b, _usersSort.key, _usersSort.dir));
+
+      const pageCount = Math.max(1, Math.ceil(list.length / USERS_PAGE_SIZE));
+      if (_usersPage > pageCount - 1) _usersPage = pageCount - 1;
+      if (_usersPage < 0) _usersPage = 0;
+      const start = _usersPage * USERS_PAGE_SIZE;
+      const page = list.slice(start, start + USERS_PAGE_SIZE);
+
+      _renderUsersSortArrows();
+      _renderUsersTruncationBanner();
+      _renderUsersStatusBar(list.length, page.length, pageCount);
+
       const tbody = document.querySelector('#users-table tbody');
-      if (!list.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="muted">No users.</td></tr>';
+      if (!page.length) {
+        tbody.innerHTML = `<tr><td colspan="${USERS_COLSPAN}" class="muted">No users.</td></tr>`;
         return;
       }
+      const assetsOn = _usersMeta.assets_scanned;
+      const now = Date.now();
       // SECURITY: do not inline `onclick="fn('${escapeHtml(email)}')"`
       // — apostrophes-as-entities get decoded by the HTML parser
       // BEFORE JS evaluation, allowing email-borne XSS. Use data-*
       // attributes and a delegated listener instead.
-      tbody.innerHTML = list.map((u) => {
+      tbody.innerHTML = page.map((u) => {
         const emailText = u.email || '—';
+        const uid = String(u.id || '');
+        const who = u.email || uid.slice(0, 8);
         // Defensive: legacy rows may be missing id — fall back to plain text.
-        const emailCell = u.id
-          ? `<a href="/market/author?id=${encodeURIComponent(u.id)}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:none;" title="Open public profile">${escapeHtml(emailText)}</a>`
+        // The short id moved into the title= (the standalone ID column would
+        // have pushed the table to 10 columns of horizontal scroll).
+        const emailCell = uid
+          ? `<a href="/market/author?id=${encodeURIComponent(uid)}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:none;" title="${escapeHtml(uid)} — open public profile">${escapeHtml(emailText)}</a>`
           : escapeHtml(emailText);
+        const last = u.last_activity ? Date.parse(u.last_activity) : NaN;
+        const lastCell = Number.isFinite(last)
+          // Dim activity older than 30 days so live accounts stand out.
+          ? `<span style="${now - last > 30 * 86400000 ? 'color:var(--text-2);' : ''}" title="${escapeHtml(u.last_activity)}">${escapeHtml(fmtDate(u.last_activity))}</span>`
+          : '<span class="muted">—</span>';
+        const failed = Number(u.ops_failed) || 0;
+        const imgLabel = assetsOn ? `🖼 Images (${u.images_count ?? 0})` : '🖼 Images';
+        const imgTitle = assetsOn ? 'Browse this user\'s images' : 'Asset counts not loaded — tick \'Load asset counts\'';
         return `
         <tr>
-          <td>${emailCell}</td>
-          <td style="font-family:ui-monospace,monospace; font-size:11px;">${escapeHtml(u.id.slice(0,8))}…</td>
-          <td class="num"><span class="credit-badge">${u.credits ?? 0}</span></td>
-          <td>${escapeHtml(fmtDate(u.created_at))}</td>
-          <td>${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNED</span>' : '<span style="color:var(--ok)">active</span>'}</td>
-          <td style="white-space:nowrap;">
+          <td class="col-email">${emailCell}</td>
+          <td class="col-num"><span class="credit-badge">${Number(u.credits) || 0}</span></td>
+          <td class="col-num"><span class="credit-badge">${Number(u.credits_spent) || 0}</span></td>
+          <td class="col-tight">${lastCell}</td>
+          <td class="col-num">${Number(u.ops_total) || 0}</td>
+          <td class="col-num"${failed > 0 ? ' style="color:var(--err); font-weight:700;"' : ''}>${failed}</td>
+          <td class="col-tight">${escapeHtml(fmtDate(u.created_at))}</td>
+          <td class="col-tight">${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNED</span>' : '<span style="color:var(--ok)">active</span>'}</td>
+          <td class="col-actions">
             <button class="btn btn-user-projects"
-                    data-uid="${escapeHtml(u.id)}"
-                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">📁 Projects (${u.projects_count ?? 0})</button>
+                    data-uid="${escapeHtml(uid)}"
+                    data-uwho="${escapeHtml(who)}">📁 Projects (${u.projects_count ?? 0})</button>
             <button class="btn btn-user-images"
-                    data-uid="${escapeHtml(u.id)}"
-                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">🖼 Images (${u.images_count ?? 0})</button>
+                    data-uid="${escapeHtml(uid)}"
+                    data-uwho="${escapeHtml(who)}"
+                    title="${escapeHtml(imgTitle)}">${imgLabel}</button>
             <button class="btn btn-user-meshes"
-                    data-uid="${escapeHtml(u.id)}"
-                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">🧊 Meshes (${u.meshes_count ?? 0})</button>
+                    data-uid="${escapeHtml(uid)}"
+                    data-uwho="${escapeHtml(who)}">🧊 Meshes (${u.meshes_count ?? 0})</button>
             <button class="btn btn-user-rigs"
-                    data-uid="${escapeHtml(u.id)}"
-                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">🦴 Rigs (${u.rigs_count ?? 0})</button>
+                    data-uid="${escapeHtml(uid)}"
+                    data-uwho="${escapeHtml(who)}">🦴 Rigs (${u.rigs_count ?? 0})</button>
+            <button class="btn btn-user-credits"
+                    data-uid="${escapeHtml(uid)}"
+                    data-uwho="${escapeHtml(who)}"
+                    data-ucredits="${Number(u.credits) || 0}"
+                    title="Grant or remove credits">⚡ Credits</button>
             <button class="btn btn-user-ban"
-                    data-uid="${escapeHtml(u.id)}"
-                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}"
+                    data-uid="${escapeHtml(uid)}"
+                    data-uwho="${escapeHtml(who)}"
                     data-uban="${!u.banned}"
                     style="background:${u.banned ? 'var(--ok)' : 'var(--err)'}; border-color:${u.banned ? 'var(--ok)' : 'var(--err)'};">
               ${u.banned ? '✓ Unban' : '🚫 Ban'}
@@ -1484,11 +1853,95 @@
       tbody.querySelectorAll('.btn-user-rigs').forEach((b) => {
         b.addEventListener('click', () => viewUserRigs(b.dataset.uid, b.dataset.uwho));
       });
+      tbody.querySelectorAll('.btn-user-credits').forEach((b) => {
+        b.addEventListener('click', () => openCreditsModal(b.dataset.uid, b.dataset.uwho, Number(b.dataset.ucredits) || 0));
+      });
       tbody.querySelectorAll('.btn-user-ban').forEach((b) => {
         b.addEventListener('click', () => toggleBan(b.dataset.uid, b.dataset.uwho, b.dataset.uban === 'true'));
       });
     }
-    document.getElementById('user-search')?.addEventListener('input', renderUsers);
+
+    function _renderUsersSortArrows() {
+      document.querySelectorAll('#users-table th.sortable').forEach((th) => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (!arrow) return;
+        if (th.dataset.sort === _usersSort.key) {
+          arrow.textContent = _usersSort.dir === 'asc' ? '▲' : '▼';
+          th.style.color = 'var(--text-0)';
+        } else {
+          arrow.textContent = '';
+          th.style.color = '';
+        }
+      });
+    }
+
+    function _renderUsersTruncationBanner() {
+      const el = document.getElementById('users-truncated');
+      if (!el) return;
+      const msgs = [];
+      if (_usersMeta.truncated) {
+        msgs.push(`Showing the ${_usersMeta.returned} most recent profiles of ${_usersMeta.total} — older accounts are not listed, and the search box (which filters client-side only) cannot find them.`);
+      }
+      if (_usersMeta.jobs_truncated) {
+        msgs.push('The per-user job aggregates hit the 50 000-row scan cap: ops / spent / last activity are computed on an arbitrary subset.');
+      }
+      if (_usersMeta.assets_scan_partial) {
+        msgs.push('Asset scan was partial (per-user page cap or user cap reached) — image counts understate.');
+      }
+      if (!msgs.length) { el.style.display = 'none'; el.textContent = ''; return; }
+      el.style.display = '';
+      el.textContent = '⚠️ ' + msgs.join(' ');
+    }
+
+    function _renderUsersStatusBar(matching, shown, pageCount) {
+      const bar = document.getElementById('users-status');
+      if (!bar) return;
+      const total = _usersMeta.total || _allUsers.length;
+      const notes = [];
+      if (!_usersMeta.assets_scanned) {
+        notes.push('Asset counts (images) not loaded — tick the checkbox to scan R2.');
+      }
+      bar.innerHTML =
+        `<span><strong style="color:var(--text-1);">${total}</strong> users (${shown} shown`
+        + (matching !== total ? `, ${matching} matching` : '')
+        + `)</span>`
+        + `<span>page ${_usersPage + 1}/${pageCount}</span>`
+        + `<button class="btn" id="users-prev" style="font-size:12px; padding:4px 10px;"${_usersPage <= 0 ? ' disabled' : ''}>‹ Prev</button>`
+        + `<button class="btn" id="users-next" style="font-size:12px; padding:4px 10px;"${_usersPage >= pageCount - 1 ? ' disabled' : ''}>Next ›</button>`
+        + (notes.length ? `<span style="flex-basis:100%; color:var(--warn);">${escapeHtml(notes.join(' '))}</span>` : '');
+      // Bound after the innerHTML swap, same convention as the row buttons.
+      const prev = document.getElementById('users-prev');
+      const next = document.getElementById('users-next');
+      if (prev) prev.addEventListener('click', () => { _usersPage--; renderUsers(); });
+      if (next) next.addEventListener('click', () => { _usersPage++; renderUsers(); });
+    }
+
+    document.getElementById('user-search')?.addEventListener('input', () => {
+      _usersPage = 0;
+      renderUsers();
+    });
+    document.getElementById('users-with-assets')?.addEventListener('change', () => loadUsers());
+    // Header sort listeners are bound ONCE — the thead is static markup
+    // (unlike the tbody, which is rebuilt via innerHTML on every render).
+    document.querySelectorAll('#users-table th.sortable').forEach((th) => {
+      const onSort = () => {
+        const key = th.dataset.sort;
+        if (!key) return;
+        if (_usersSort.key === key) {
+          _usersSort.dir = _usersSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          // Text sorts read best ascending; numbers and dates descending.
+          _usersSort.key = key;
+          _usersSort.dir = key === 'email' ? 'asc' : 'desc';
+        }
+        _usersPage = 0;
+        renderUsers();
+      };
+      th.addEventListener('click', onSort);
+      th.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSort(); }
+      });
+    });
 
     function toggleBan(userId, who, ban) {
       confirmAction(
@@ -1507,6 +1960,175 @@
         },
       );
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       CREDIT / DEBIT A USER — monetary, so: mandatory reason + admin
+       password re-entry (never pre-filled from _sensitivePassword, the
+       explicit re-entry IS the second factor), audited + user-notified
+       server-side. Doubles as the confirmation dialog for Stripe
+       reconciliation ('reconcile' mode) so there is exactly ONE place in
+       the dashboard where credits can be created.
+       ═══════════════════════════════════════════════════════════════ */
+    let _creditsTarget = null;
+    let _creditsInFlight = false;
+
+    function _creditsEl(id) { return document.getElementById(id); }
+
+    function _openCreditsOverlay() {
+      _creditsEl('credits-err').style.display = 'none';
+      _creditsEl('credits-err').textContent = '';
+      _creditsEl('credits-password').value = '';
+      _creditsEl('credits-overlay').style.display = 'flex';
+      _creditsInFlight = false;
+      _creditsEl('credits-apply').disabled = false;
+      _creditsEl('credits-apply').textContent = 'Apply';
+    }
+
+    function openCreditsModal(userId, who, credits) {
+      _creditsTarget = { mode: 'adjust', userId, who, credits: Number(credits) || 0 };
+      _creditsEl('credits-heading').textContent = '⚡ Adjust credits';
+      // textContent, never innerHTML — the email is untrusted input.
+      _creditsEl('credits-who').textContent = `${who} — current balance: ${_creditsTarget.credits} credits`;
+      const delta = _creditsEl('credits-delta');
+      const reason = _creditsEl('credits-reason');
+      delta.value = ''; delta.readOnly = false;
+      reason.value = ''; reason.readOnly = false;
+      _creditsEl('credits-presets').style.display = '';
+      _updateCreditsPreview();
+      _openCreditsOverlay();
+      setTimeout(() => delta.focus(), 50);
+    }
+
+    // Reconcile mode: the payout is decided SERVER-side from the pack id, so
+    // the delta shown here is informational and the field is read-only — the
+    // POST carries only { sessionId, password }.
+    function openCreditsModalForReconcile(sessionId, who, expectedCredits, packId) {
+      _creditsTarget = { mode: 'reconcile', sessionId, who, credits: 0 };
+      _creditsEl('credits-heading').textContent = '⚡ Grant credits (Stripe reconciliation)';
+      _creditsEl('credits-who').textContent =
+        `${who} — pack ${packId || '?'} · ${expectedCredits == null ? '?' : expectedCredits} credits due · session ${sessionId}`;
+      const delta = _creditsEl('credits-delta');
+      const reason = _creditsEl('credits-reason');
+      delta.value = expectedCredits == null ? '' : String(expectedCredits);
+      delta.readOnly = true;
+      reason.value = 'Stripe reconciliation ' + sessionId;
+      reason.readOnly = true;
+      _creditsEl('credits-presets').style.display = 'none';
+      _creditsEl('credits-preview').textContent =
+        'The payout is recomputed server-side from the pack id and applied only once (idempotent claim).';
+      _openCreditsOverlay();
+      setTimeout(() => _creditsEl('credits-password').focus(), 50);
+    }
+
+    function closeCreditsModal() {
+      _creditsEl('credits-overlay').style.display = 'none';
+      _creditsEl('credits-password').value = '';
+      _creditsTarget = null;
+    }
+
+    function _updateCreditsPreview() {
+      const el = _creditsEl('credits-preview');
+      if (!el || !_creditsTarget || _creditsTarget.mode !== 'adjust') return;
+      const raw = _creditsEl('credits-delta').value;
+      const delta = Math.trunc(Number(raw));
+      if (!raw || !Number.isFinite(delta) || delta === 0) {
+        el.style.color = 'var(--text-2)';
+        el.textContent = 'Enter a non-zero whole number.';
+        return;
+      }
+      const next = _creditsTarget.credits + delta;
+      el.style.color = next < 0 ? 'var(--err)' : 'var(--text-2)';
+      el.textContent = `New balance: ${next}`
+        + (next < 0 ? ' — refused: spend_credits will not push a balance below zero.' : '');
+    }
+
+    async function submitCredits() {
+      if (_creditsInFlight || !_creditsTarget) return;
+      const errEl = _creditsEl('credits-err');
+      const applyBtn = _creditsEl('credits-apply');
+      const fail = (msg) => { errEl.textContent = msg; errEl.style.display = ''; };
+      errEl.style.display = 'none';
+
+      const password = _creditsEl('credits-password').value;
+      if (!password) { fail('Admin password required.'); _creditsEl('credits-password').focus(); return; }
+
+      let url, body, deltaForMsg = null;
+      if (_creditsTarget.mode === 'reconcile') {
+        url = '/api/admin/payments/reconcile';
+        body = { sessionId: _creditsTarget.sessionId, password };
+      } else {
+        const delta = Math.trunc(Number(_creditsEl('credits-delta').value));
+        if (!Number.isFinite(delta) || delta === 0) { fail('Delta must be a non-zero whole number.'); return; }
+        const reason = _creditsEl('credits-reason').value.trim();
+        if (reason.length < 3) { fail('A reason is required (min 3 characters).'); _creditsEl('credits-reason').focus(); return; }
+        url = '/api/admin/users/credits';
+        // delta as a NUMBER, never a string.
+        body = { userId: _creditsTarget.userId, delta, reason, password };
+        deltaForMsg = delta;
+      }
+
+      // Disable during flight so a double-click cannot double-credit.
+      _creditsInFlight = true;
+      applyBtn.disabled = true;
+      applyBtn.textContent = 'Applying…';
+      try {
+        const r = await fetch(url, {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 401) {
+          // Do NOT close — same behaviour as the other password re-entries.
+          fail('Wrong admin password.');
+          _creditsEl('credits-password').select();
+          return;
+        }
+        if (!r.ok) { fail(j.error || ('HTTP ' + r.status)); return; }
+        const who = _creditsTarget.who;
+        const mode = _creditsTarget.mode;
+        closeCreditsModal();
+        if (mode === 'reconcile') {
+          showAdminInfo(
+            j.already ? 'Already reconciled' : 'Credits granted',
+            j.already
+              ? `Session ${body.sessionId} was already credited — nothing changed.`
+              : `${who}: +${j.credits} credits (${Number(j.amount_eur || 0).toFixed(2)}€) → balance ${j.balance}.`,
+            'ok',
+          );
+          loadUnreconciledPayments();
+        } else {
+          showAdminInfo('Credits updated',
+            `${who}: ${deltaForMsg > 0 ? '+' : ''}${deltaForMsg} → ${j.credits} credits`, 'ok');
+          loadUsers();
+        }
+      } catch (e) {
+        fail('Network error: ' + (e?.message || e));
+      } finally {
+        _creditsInFlight = false;
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Apply';
+      }
+    }
+
+    _creditsEl('credits-cancel')?.addEventListener('click', closeCreditsModal);
+    _creditsEl('credits-apply')?.addEventListener('click', submitCredits);
+    _creditsEl('credits-delta')?.addEventListener('input', _updateCreditsPreview);
+    _creditsEl('credits-password')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submitCredits(); }
+    });
+    _creditsEl('credits-presets')?.querySelectorAll('.credits-preset').forEach((b) => {
+      b.addEventListener('click', () => {
+        _creditsEl('credits-delta').value = b.dataset.delta;
+        _updateCreditsPreview();
+        _creditsEl('credits-delta').focus();
+      });
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const ov = document.getElementById('credits-overlay');
+      if (ov && ov.style.display === 'flex') closeCreditsModal();
+    });
 
     async function viewUserProjects(userId, who) {
       const grid = document.getElementById('meshes-grid');
@@ -2583,6 +3205,9 @@
                               { method: 'POST', credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         loadContactMessages();
+        // fresh=1: /api/admin/badges caches for 60 s server-side, so without
+        // this the 30 s poller would restore the stale unread count.
+        refreshAllTabBadges(true);
       } catch (e) { alert('Mark-read failed: ' + (e?.message || e)); }
     }
     async function deleteMessage(id) {
@@ -2592,6 +3217,7 @@
                               { method: 'DELETE', credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         loadContactMessages();
+        refreshAllTabBadges(true);
       } catch (e) { alert('Delete failed: ' + (e?.message || e)); }
     }
     // Inline reply dialog — admin types the response, we POST it to
@@ -2752,6 +3378,8 @@
                               { method: 'POST', credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         loadMarketListings();
+        // fresh=1 so the cached /api/admin/badges pending count can't bounce back.
+        refreshAllTabBadges(true);
       } catch (e) { alert('Approve failed: ' + (e?.message || e)); }
     }
     function rejectListing(id) {
@@ -2784,6 +3412,7 @@
         if (!r.ok) throw new Error('HTTP ' + r.status);
         document.getElementById('reject-modal-' + id)?.remove();
         loadMarketListings();
+        refreshAllTabBadges(true);
       } catch (e) { alert('Reject failed: ' + (e?.message || e)); }
     }
     async function deleteListing(id) {
@@ -2793,6 +3422,7 @@
                               { method: 'DELETE', credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         loadMarketListings();
+        refreshAllTabBadges(true);
       } catch (e) { alert('Delete failed: ' + (e?.message || e)); }
     }
     // Scroll a market card with the given listing id into view and
@@ -2864,20 +3494,10 @@
     document.addEventListener('DOMContentLoaded', () => {
       const tab = document.querySelector('.tab[data-tab="messages"]');
       tab?.addEventListener('click', () => loadContactMessages());
-      // Also refresh the unread badge every 60s while the admin is on
-      // any other tab — gives a quiet ping when a new message arrives.
-      setInterval(async () => {
-        try {
-          const r = await fetch('/api/admin/contact-messages', { credentials: 'include' });
-          if (!r.ok) return;
-          const j = await r.json();
-          const unread = (j.messages || []).filter((m) => !m.read).length;
-          const badge = document.getElementById('badge-messages');
-          if (!badge) return;
-          if (unread > 0) { badge.textContent = String(unread); badge.style.display = ''; }
-          else { badge.style.display = 'none'; }
-        } catch {}
-      }, 60_000);
+      // The dedicated 60 s unread-badge poller used to live here and re-fetched
+      // the FULL /api/admin/contact-messages listing (N+1 R2 reads) purely to
+      // count `!read`. The 30 s refreshAllTabBadges() → /api/admin/badges call
+      // now covers badge-messages, so this duplicate is gone.
     });
 
     // ── Modal-budget alert banner (fixed, visible on any tab) ──
@@ -2958,6 +3578,11 @@
           }
         }
         _updateModalBanner(j.alert);
+        // Burn rate / runway / cap bar come from stats.json (server-computed),
+        // NOT from this endpoint. Re-render from the last payload so opening
+        // Finance directly still fills the cells; if refresh() has not landed
+        // yet they stay '—' and populate on the next cycle.
+        renderBurn(_lastStats && _lastStats.burn);
       } catch (e) {
         // Replace the cryptic "!" with the real reason (HTTP code +
         // body snippet) so the admin can act on it (401 → log back in,
@@ -2976,6 +3601,70 @@
         console.warn('[admin] modal credits load failed:', e);
       }
     }
+    /* ═══════════════════════════════════════════════════════════════
+       STRIPE RECONCILIATION — payments rows still at credits = 0, i.e.
+       the customer was charged and never credited. No poller: loaded with
+       the Finance tab and after each grant.
+       ═══════════════════════════════════════════════════════════════ */
+    async function loadUnreconciledPayments() {
+      const card = document.getElementById('recon-card');
+      const tbody = document.querySelector('#recon-table tbody');
+      if (!card || !tbody) return;
+      try {
+        const r = await fetch('/api/admin/payments/unreconciled', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        const rows = j.payments || [];
+        document.getElementById('recon-count').textContent = String(j.count ?? rows.length);
+        // Hidden at zero so the Finance tab stays calm in the normal case.
+        if (!rows.length) { card.style.display = 'none'; tbody.innerHTML = ''; return; }
+        card.style.display = '';
+        tbody.innerHTML = rows.map((p) => {
+          const sid = String(p.stripe_session_id || '');
+          const who = p.email || (p.user_id ? String(p.user_id).slice(0, 8) + '…' : '—');
+          const amount = p.amount_eur == null
+            ? '<span style="color:var(--warn)">null</span>'
+            : (Number(p.amount_eur) || 0).toFixed(2) + '€';
+          const due = p.expected_credits == null
+            ? '<span style="color:var(--warn)" title="Unknown pack_id — the server refuses to guess a payout">?</span>'
+            : String(p.expected_credits);
+          return `
+          <tr>
+            <td>${escapeHtml(fmtDate(p.created_at))}</td>
+            <td style="word-break:break-all;">${escapeHtml(who)}</td>
+            <td>${escapeHtml(p.pack_id || '—')}</td>
+            <td class="num">${amount}</td>
+            <td style="font-family:ui-monospace,monospace; font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis;"
+                title="${escapeHtml(sid)}">${escapeHtml(sid.slice(0, 22))}${sid.length > 22 ? '…' : ''}</td>
+            <td class="num">${due}</td>
+            <td><button class="btn btn-recon-grant"
+                        data-psid="${escapeHtml(sid)}"
+                        data-pwho="${escapeHtml(who)}"
+                        data-pcred="${p.expected_credits == null ? '' : Number(p.expected_credits)}"
+                        data-ppack="${escapeHtml(p.pack_id || '')}"
+                        ${sid ? '' : 'disabled'}
+                        style="background:var(--ok); border-color:var(--ok); color:#0a0a0e;">Grant credits</button></td>
+          </tr>`;
+        }).join('');
+        // Bound after the innerHTML swap — the Stripe session id is never
+        // interpolated into an onclick.
+        tbody.querySelectorAll('.btn-recon-grant').forEach((b) => {
+          b.addEventListener('click', () => openCreditsModalForReconcile(
+            b.dataset.psid, b.dataset.pwho,
+            b.dataset.pcred === '' ? null : Number(b.dataset.pcred),
+            b.dataset.ppack,
+          ));
+        });
+      } catch (e) {
+        // A failed probe must not hide a real backlog silently — surface it
+        // in the card itself if it is already open, stay quiet otherwise.
+        console.warn('[admin] unreconciled payments load failed:', e);
+        if (card.style.display !== 'none') {
+          tbody.innerHTML = `<tr><td colspan="7" style="color:var(--err)">${escapeHtml(e?.message || e)}</td></tr>`;
+        }
+      }
+    }
+
     async function saveModalBudget() {
       const v = parseFloat(document.getElementById('mc-budget-input').value);
       if (!isFinite(v) || v < 0) { alert('Enter a non-negative number'); return; }
@@ -2992,14 +3681,18 @@
     // Auto-load when Finance tab opens + refresh every 60 s while it's open.
     document.addEventListener('DOMContentLoaded', () => {
       const tab = document.querySelector('.tab[data-tab="finance"]');
-      tab?.addEventListener('click', loadModalCredits);
+      tab?.addEventListener('click', () => {
+        loadModalCredits();
+        loadUnreconciledPayments();
+      });
       setInterval(() => {
+        if (document.hidden) return;
         const active = document.querySelector('.tab.active');
         if (active?.dataset?.tab === 'finance') loadModalCredits();
       }, 60_000);
       // Global Modal-budget banner: check on load + every 5 min, on any tab.
       checkModalAlert();
-      setInterval(checkModalAlert, 300_000);
+      setInterval(() => { if (!document.hidden) checkModalAlert(); }, 300_000);
     });
     /* ─── Debug logs tab (remote browser-console retrieval) ─── */
     let _debugLogCurrentText = '';
@@ -3176,6 +3869,7 @@
     // reqs/min is fine. silent=true so the table doesn't flash
     // "Loading…" every cycle.
     setInterval(() => {
+      if (document.hidden) return;   // no polling in a background tab
       const activeTab = document.querySelector('.tab.active');
       if (activeTab?.dataset?.tab === 'active') loadActiveJobs(true);
     }, 3_000);
@@ -3230,14 +3924,18 @@
       } catch {}
     }
     refreshKillSwitchSummary();
-    setInterval(refreshKillSwitchSummary, 30_000);
+    setInterval(() => { if (!document.hidden) refreshKillSwitchSummary(); }, 30_000);
 
     /* ═══════════════════════════════════════════════════════════════
-       GLOBAL TAB-BADGE REFRESH — single 30s interval keeps every tab
-       pill (Marketplace pending, Active running, Messages unread) in
-       sync with the backend even when the admin is on a different tab.
-       Belt-and-suspenders next to the per-tab pollers (Messages 60s,
-       Modal credits 60s) which we leave untouched.
+       GLOBAL TAB-BADGE REFRESH — single 30 s interval, single request.
+       It used to fan out to THREE heavy endpoints every 30 s just to
+       render three integers: /api/admin/market/list (N+1 R2 reads over
+       every listing), /api/admin/contact-messages (N+1 over every
+       message) and /api/admin/jobs/active (200 rows + a profiles join).
+       GET /api/admin/badges returns the three counts directly (server-side
+       60 s cache; ?fresh=1 bypasses it after a moderation action).
+       The poller is also suspended while the tab is hidden — a dashboard
+       left open in a background tab was burning those requests all day.
        ═══════════════════════════════════════════════════════════════ */
     function updateTabBadge(id, count) {
       const el = document.getElementById(id);
@@ -3250,43 +3948,32 @@
         el.style.display = 'none';
       }
     }
-    async function refreshAllTabBadges() {
-      // Marketplace pending — count listings with status==="pending".
+    // fresh=true bypasses the worker's 60 s cache — use it right after a
+    // moderation action so the pill drops immediately.
+    async function refreshAllTabBadges(fresh = false) {
       try {
-        const r = await fetch('/api/admin/market/list', { credentials: 'include' });
-        if (r.ok) {
-          const j = await r.json();
-          const pending = (j.listings || []).filter((l) => l.status === 'pending').length;
-          updateTabBadge('badge-market', pending);
-        }
-      } catch {}
-      // Messages unread — count !read.
-      try {
-        const r = await fetch('/api/admin/contact-messages', { credentials: 'include' });
-        if (r.ok) {
-          const j = await r.json();
-          const unread = (j.messages || []).filter((m) => !m.read).length;
-          updateTabBadge('badge-messages', unread);
-        }
-      } catch {}
-      // Active running — count jobs with status==="running" (fallback:
-      // anything returned by /jobs/active that isn't a terminal state).
-      try {
-        const r = await fetch('/api/admin/jobs/active', { credentials: 'include' });
-        if (r.ok) {
-          const j = await r.json();
-          const jobs = j.jobs || [];
-          const running = jobs.filter((x) => {
-            const s = String(x.status || '').toLowerCase();
-            return s === 'running' || s === 'in_progress' || s === 'queued' || s === 'pending' || s === '';
-          }).length;
-          updateTabBadge('badge-active', running || jobs.length);
-        }
+        const r = await fetch('/api/admin/badges' + (fresh ? '?fresh=1' : ''), { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        updateTabBadge('badge-market', j.market_pending);
+        updateTabBadge('badge-messages', j.messages_unread);
+        updateTabBadge('badge-active', j.active);
       } catch {}
     }
     document.addEventListener('DOMContentLoaded', () => {
       refreshAllTabBadges();
-      setInterval(refreshAllTabBadges, 30_000);
+      setInterval(() => { if (!document.hidden) refreshAllTabBadges(); }, 30_000);
+    });
+    // Catch-up on return: every poller below skips its tick while hidden, so
+    // without this the dashboard would show data as old as the moment the
+    // admin switched away.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      refreshAllTabBadges();
+      refreshKillSwitchSummary();
+      const active = document.querySelector('.tab.active')?.dataset?.tab;
+      if (active === 'active') loadActiveJobs(true);
+      if (active === 'finance') loadModalCredits();
     });
 
     refresh();
