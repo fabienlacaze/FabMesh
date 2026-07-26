@@ -616,7 +616,11 @@ def trellis2_retex(input_path, output_path, source_image, preset='fast', seed=42
     # installed in the texturing venv → ModuleNotFoundError: flash_attn.
     env['SPARSE_ATTN_BACKEND'] = 'sdpa'
     # Use kaolin (Apache 2.0) rasterizer instead of nvdiffrast (NVIDIA NC).
-    env.setdefault('TRELLIS2_USE_KAOLIN_RASTER', '1')
+    # Forced, NOT setdefault: an inherited TRELLIS2_USE_KAOLIN_RASTER=0 from
+    # the parent env would otherwise silently re-enable the non-commercial
+    # rasterizer in the child. (Belt-and-braces — install_kaolin_shim.py no
+    # longer writes an nvdiffrast fallback branch at all.)
+    env['TRELLIS2_USE_KAOLIN_RASTER'] = '1'
     quality_args = _TRELLIS2_PRESETS.get(str(preset), _TRELLIS2_PRESETS['fast'])
     try:
         seed_args = ['--seed', str(int(seed))]

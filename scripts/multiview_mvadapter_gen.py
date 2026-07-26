@@ -34,7 +34,7 @@ MVA_ROOT = os.path.join(ROOT, 'external', 'MV-Adapter')
 sys.path.insert(0, MVA_ROOT)
 
 
-def _patch_mvadapter_nvdiffrast():
+def _stub_mvadapter_optional_deps():
     """Monkey-patch MV-Adapter's mesh_utils package so importing `camera`
     (the only thing we use) doesn't pull in `mesh.py`, `render.py`, etc.,
     all of which hard-import nvdiffrast (not installed — FabMesh doesn't
@@ -42,6 +42,15 @@ def _patch_mvadapter_nvdiffrast():
 
     Done in-place at runtime so the submodule stays pristine and the
     patch is versioned with FabMesh.
+
+    LICENSING NOTE — this is what keeps nvdiffrast (NVIDIA Source Code
+    License, non-commercial) OUT of the process, not a use of it. The
+    string 'nvdiffrast' below is only a sys.modules key for an empty
+    stub module; no NVIDIA code is imported, linked or distributed by
+    this script. Do not "fix" this file in a licensing sweep, and do not
+    remove the stub — MV-Adapter's mesh_utils import chain fails without
+    it. (FabMesh's real rasterizer is kaolin, Apache 2.0; see
+    scripts/detail_synth.py and scripts/trellis2_kaolin_shim.py.)
     """
     import importlib, types
 
@@ -72,7 +81,7 @@ def _patch_mvadapter_nvdiffrast():
             setattr(sys.modules[parent], name.split('.')[-1], mod)
 
 
-_patch_mvadapter_nvdiffrast()
+_stub_mvadapter_optional_deps()
 
 # Patch MV-Adapter for accelerate cpu_offload compatibility (idempotent).
 try:

@@ -24,7 +24,13 @@ Usage:
     python trellis2_native_full_pipeline.py <input_image> <out_glb> [tex_res=2048]
 """
 import os
-os.environ.setdefault('TRELLIS2_USE_KAOLIN_RASTER', '1')
+# Forced, NOT setdefault: this is the default production engine, so an
+# inherited TRELLIS2_USE_KAOLIN_RASTER=0 must not be able to route it onto
+# nvdiffrast (NVIDIA Source Code License = non-commercial) inside a sold
+# build. Same hardening as scripts/mesh_tools.py:trellis2_retex().
+# Belt-and-braces: install_kaolin_shim.py no longer writes an nvdiffrast
+# fallback branch at all, so this var is inert on a correctly patched tree.
+os.environ['TRELLIS2_USE_KAOLIN_RASTER'] = '1'
 # garbage_collection_threshold:0.8 → PyTorch reclaims cached-but-unused VRAM
 # blocks BEFORE hitting OOM (graceful), instead of fragmenting until it fails.
 os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True,garbage_collection_threshold:0.8')

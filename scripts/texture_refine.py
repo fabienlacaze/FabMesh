@@ -297,7 +297,18 @@ def replace_glb_atlas(input_glb: str, output_glb: str,
         bct = pbr.get('baseColorTexture') or {}
         tex_idx = bct.get('index')
         if tex_idx is not None and tex_idx < len(textures):
-            src_idx = textures[tex_idx].get('source')
+            tex = textures[tex_idx]
+            src_idx = tex.get('source')
+            if src_idx is None:
+                # GLB TRELLIS-2 : la source vit sous EXT_texture_webp (pas de
+                # cle `source` a la racine). Sans ce repli on retombait sur
+                # l'index 0 par defaut -> risque d'ecraser la metallicRoughness.
+                exts = tex.get('extensions') or {}
+                for ext_name in ('EXT_texture_webp', 'KHR_texture_basisu'):
+                    cand = (exts.get(ext_name) or {}).get('source')
+                    if cand is not None:
+                        src_idx = cand
+                        break
             if src_idx is not None:
                 base_color_image_idx = src_idx
                 break
@@ -311,9 +322,37 @@ def replace_glb_atlas(input_glb: str, output_glb: str,
     buf = io.BytesIO()
     new_atlas.save(buf, format='JPEG', quality=92)
     new_bytes = buf.getvalue()
-    img_info['mimeType'] = 'image/jpeg'
 
-    if len(new_bytes) <= img_length:
+    # On ecrit du JPEG : le JSON doit suivre, sinon le GLB declare du WEBP
+    # sur des octets JPEG (three.js tolere, Blender non). Le chemin rapide
+    # ci-dessous re-ecrit les octets SANS re-serialiser le JSON : on ne le
+    # prend donc que si aucune modification JSON n'est necessaire.
+    json_dirty = img_info.get('mimeType') != 'image/jpeg'
+    img_info['mimeType'] = 'image/jpeg'
+    for tex in textures:
+        exts = tex.get('extensions') or {}
+        webp = exts.get('EXT_texture_webp') or {}
+        if webp.get('source') == base_color_image_idx:
+            # L'image n'est plus du webp : on expose la source standard et on
+            # retire l'extension pour CETTE texture.
+            tex['source'] = base_color_image_idx
+            exts.pop('EXT_texture_webp', None)
+            if not exts:
+                tex.pop('extensions', None)
+            json_dirty = True
+    if json_dirty and json_chunk is not None:
+        still_webp = any(
+            'EXT_texture_webp' in (t.get('extensions') or {}) for t in textures)
+        if not still_webp:
+            for key in ('extensionsUsed', 'extensionsRequired'):
+                lst = json_chunk.get(key)
+                if lst and 'EXT_texture_webp' in lst:
+                    json_chunk[key] = [e for e in lst
+                                       if e != 'EXT_texture_webp']
+                    if not json_chunk[key]:
+                        json_chunk.pop(key, None)
+
+    if len(new_bytes) <= img_length and not json_dirty:
         data[img_offset: img_offset + len(new_bytes)] = new_bytes
         data[img_offset + len(new_bytes): img_offset + img_length] = b'\x00' * (img_length - len(new_bytes))
         with open(output_glb, 'wb') as f:

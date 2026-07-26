@@ -127,7 +127,7 @@ except Exception as e:
 
 print("TRELLIS2: Simplifying mesh...", flush=True)
 try:
-    mesh.simplify(16777216)   # nvdiffrast vertex limit
+    mesh.simplify(16777216)   # vertex cap for the downstream baker
 except Exception as e:
     print(f"TRELLIS2: simplify warning: {{e}}", flush=True)
 

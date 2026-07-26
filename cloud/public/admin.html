@@ -639,12 +639,16 @@
               <th class="col-tight sortable" data-sort="last_activity" role="button" tabindex="0">Last activity <span class="sort-arrow"></span></th>
               <th class="col-num   sortable" data-sort="ops_total"  role="button" tabindex="0">Ops <span class="sort-arrow"></span></th>
               <th class="col-num   sortable" data-sort="ops_failed" role="button" tabindex="0">Failed <span class="sort-arrow"></span></th>
+              <!-- Clé DÉRIVÉE (ops_failed / ops_total) : absente de la réponse
+                   API, calculée par _usersCompare (branche dédiée). -->
+              <th class="col-num   sortable" data-sort="fail_rate" role="button" tabindex="0" title="Failed / total ops">% fail <span class="sort-arrow"></span></th>
+              <th class="col-num   sortable" data-sort="rigs_count" role="button" tabindex="0">Rigs <span class="sort-arrow"></span></th>
               <th class="col-tight sortable" data-sort="created_at" role="button" tabindex="0">Joined <span class="sort-arrow"></span></th>
               <th class="col-tight">Status</th>
               <th class="col-actions">Actions</th>
             </tr>
           </thead>
-          <tbody><tr><td colspan="9" style="color:var(--text-2)">Loading…</td></tr></tbody>
+          <tbody><tr><td colspan="11" style="color:var(--text-2)">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1698,7 +1702,9 @@
        already ran; the only optional cost is the R2 asset scan, gated
        behind the "Load asset counts" checkbox (?withAssets=1).
        ═══════════════════════════════════════════════════════════════ */
-    const USERS_COLSPAN = 9;
+    // Doit rester égal au nombre de <th> du thead ci-dessus (11), sinon les
+    // lignes de secours « Loading… » / erreur / « No users. » se désalignent.
+    const USERS_COLSPAN = 11;
     const USERS_PAGE_SIZE = 50;
     let _allUsers = [];
     let _usersMeta = { total: 0, returned: 0, truncated: false, assets_scanned: false, assets_scan_partial: false };
@@ -1731,12 +1737,27 @@
       }
     }
 
+    // Taux d'échec dérivé : null quand l'utilisateur n'a lancé aucune op —
+    // 0 % serait mensonger et le ferait remonter dans le tri « meilleurs ».
+    function _userFailRate(u) {
+      const total = Number(u.ops_total) || 0;
+      if (total <= 0) return null;
+      return (100 * (Number(u.ops_failed) || 0)) / total;
+    }
+
     // Comparator that always sinks nulls to the bottom whichever way the
     // column is sorted — a user who never ran an op has last_activity null and
     // must not win the "most recent" sort.
     function _usersCompare(a, b, key, dir) {
       const mul = dir === 'asc' ? 1 : -1;
-      let va = a[key], vb = b[key];
+      let va, vb;
+      // fail_rate n'existe pas dans la réponse API : on le dérive ici, sinon
+      // a[key] vaudrait undefined et toutes les lignes seraient « égales ».
+      if (key === 'fail_rate') {
+        va = _userFailRate(a); vb = _userFailRate(b);
+      } else {
+        va = a[key]; vb = b[key];
+      }
       if (key === 'last_activity' || key === 'created_at') {
         va = va ? Date.parse(va) : null;
         vb = vb ? Date.parse(vb) : null;
@@ -1797,6 +1818,13 @@
           ? `<span style="${now - last > 30 * 86400000 ? 'color:var(--text-2);' : ''}" title="${escapeHtml(u.last_activity)}">${escapeHtml(fmtDate(u.last_activity))}</span>`
           : '<span class="muted">—</span>';
         const failed = Number(u.ops_failed) || 0;
+        const rate = _userFailRate(u);
+        // Au-delà de 20 % d'échec, l'utilisateur brûle des crédits sans
+        // résultat : à repérer d'un coup d'œil.
+        const rateCell = rate == null
+          ? '<span class="muted">—</span>'
+          : `<span${rate > 20 ? ' style="color:var(--err); font-weight:700;"' : ''} title="${failed} failed / ${Number(u.ops_total) || 0} ops">${rate.toFixed(rate >= 10 ? 0 : 1)}%</span>`;
+        const rigs = Number(u.rigs_count) || 0;
         const imgLabel = assetsOn ? `🖼 Images (${u.images_count ?? 0})` : '🖼 Images';
         const imgTitle = assetsOn ? 'Browse this user\'s images' : 'Asset counts not loaded — tick \'Load asset counts\'';
         return `
@@ -1807,6 +1835,8 @@
           <td class="col-tight">${lastCell}</td>
           <td class="col-num">${Number(u.ops_total) || 0}</td>
           <td class="col-num"${failed > 0 ? ' style="color:var(--err); font-weight:700;"' : ''}>${failed}</td>
+          <td class="col-num">${rateCell}</td>
+          <td class="col-num">${rigs}</td>
           <td class="col-tight">${escapeHtml(fmtDate(u.created_at))}</td>
           <td class="col-tight">${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNED</span>' : '<span style="color:var(--ok)">active</span>'}</td>
           <td class="col-actions">
@@ -1820,9 +1850,11 @@
             <button class="btn btn-user-meshes"
                     data-uid="${escapeHtml(uid)}"
                     data-uwho="${escapeHtml(who)}">🧊 Meshes (${u.meshes_count ?? 0})</button>
+            <!-- Compteur retiré du libellé : il a sa propre colonne triable. -->
             <button class="btn btn-user-rigs"
                     data-uid="${escapeHtml(uid)}"
-                    data-uwho="${escapeHtml(who)}">🦴 Rigs (${u.rigs_count ?? 0})</button>
+                    data-uwho="${escapeHtml(who)}"
+                    title="Browse this user's rigs (${rigs})">🦴 Rigs</button>
             <button class="btn btn-user-credits"
                     data-uid="${escapeHtml(uid)}"
                     data-uwho="${escapeHtml(who)}"
@@ -2042,6 +2074,17 @@
         + (next < 0 ? ' — refused: spend_credits will not push a balance below zero.' : '');
     }
 
+    // Applique le nouveau solde renvoyé par le serveur à la ligne concernée
+    // sans refaire d'appel réseau. Retombe sur loadUsers() si l'utilisateur
+    // n'est pas dans la liste en mémoire ou si le solde n'est pas exploitable.
+    function _applyCreditsToRow(userId, newCredits) {
+      const credits = Number(newCredits);
+      const u = Array.isArray(_allUsers) ? _allUsers.find((x) => String(x.id) === String(userId)) : null;
+      if (!u || !Number.isFinite(credits)) { loadUsers(); return; }
+      u.credits = credits;
+      renderUsers();
+    }
+
     async function submitCredits() {
       if (_creditsInFlight || !_creditsTarget) return;
       const errEl = _creditsEl('credits-err');
@@ -2100,7 +2143,12 @@
         } else {
           showAdminInfo('Credits updated',
             `${who}: ${deltaForMsg > 0 ? '+' : ''}${deltaForMsg} → ${j.credits} credits`, 'ok');
-          loadUsers();
+          // Mise à jour EN PLACE : recharger toute la liste remettrait la
+          // pagination à la page 0 et ferait perdre tri + filtre de recherche.
+          // Le solde appliqué vient de j.credits (vérité serveur), jamais
+          // d'un calcul local ; si la ligne est introuvable (liste tronquée
+          // ou rechargée entre-temps), on retombe sur le rechargement complet.
+          _applyCreditsToRow(body.userId, j.credits);
         }
       } catch (e) {
         fail('Network error: ' + (e?.message || e));

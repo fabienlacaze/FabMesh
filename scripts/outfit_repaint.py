@@ -109,9 +109,19 @@ VIEWS_4 = [('front', 0.0, 0.0), ('back', 180.0, 0.0),
            ('right', 90.0, 0.0), ('left', 270.0, 0.0)]
 VIEWS_6 = VIEWS_4 + [('top', 0.0, 89.99), ('bottom', 0.0, -89.99)]
 
-GARMENT_LABELS = {'torso', 'arm', 'leg'}
+# `pelvis` est emis par la voie squelette du namer (bone_zones.json /
+# coarse_labels_from_positions) : c'est le bas du vetement (pantalon, jupe,
+# ceinture) — sans lui la tenue s'arretait a la taille.
+GARMENT_LABELS = {'torso', 'arm', 'leg', 'pelvis'}
 EXCLUDED_LABELS = {'head', 'hair', 'hand', 'foot', 'weapon', 'shield',
                    'tail', 'wing'}
+
+# Un masque « visage » qui couvre plus que ca n'est pas un visage : sur les
+# atlas confettis la projection UV d'une bbox ecran deborde partout.
+FACE_PROTECT_MAX_FRAC = 0.15
+# Distance max (en texels) sur laquelle on propage une couleur peinte vers un
+# texel non couvert. Au-dela, on garde la texture d'origine.
+FILL_MAX_DIST = 8.0
 
 _last_progress = [-1]
 
@@ -235,8 +245,14 @@ def segment_mesh(mesh_in, scratch, granularity, segmented_arg):
     env['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
     cmd = [seg_py, os.path.join(SCRIPTS, 'partsam_bridge.py'),
            mesh_in, seg_out, str(granularity)]
-    rc, _ = _run_streaming(cmd, env, timeout_s=600, tag='partsam',
+    # 900 s et non 600 : sur un mesh ~500k faces a num_points=200000 le
+    # bridge annonce lui-meme 6-10 min — 600 s tuait le process pile a la
+    # limite et basculait en fallback sans le dire.
+    rc, _ = _run_streaming(cmd, env, timeout_s=900, tag='partsam',
                            prog_lo=3, prog_hi=17)
+    if rc is None:
+        log('partsam_bridge: fallback heuristique car TIMEOUT (900 s)')
+        return None
     if rc != 0 or not os.path.isfile(seg_out):
         log(f'partsam_bridge a echoue (rc={rc}) -> fallback heuristique')
         return None
@@ -387,9 +403,47 @@ def fallback_face_mask(mesh):
     arm_band = (rel >= 0.45) & (rel < 0.75)
     hands = arm_band & (np.abs(x - x_mid) > (1.0 - 0.08) * half_w)
     mask &= ~hands
+
+    # Accessoires tenus (baton, arme) : composantes connexes petites ET
+    # excentrees. L'heuristique « mains » ci-dessus suppose une T/A-pose ;
+    # bras le long du corps elle n'exclut rien (mesure : 0 face).
+    n_acc = 0
+    try:
+        labels = _face_components(mesh)
+        if labels is not None:
+            n_faces = len(mesh.faces)
+            for lab in np.unique(labels):
+                sel = labels == lab
+                frac = sel.sum() / float(n_faces)
+                if frac >= 0.03:
+                    continue  # composante principale (corps)
+                off = float(np.abs(c[sel, 0] - x_mid).mean()) / half_w
+                if off > 0.35:
+                    mask &= ~sel
+                    n_acc += int(sel.sum())
+    except Exception as e:
+        log(f'fallback: detection accessoires ignoree ({e})')
+
     log(f'fallback heuristique: {int(mask.sum())}/{len(mask)} faces '
-        f'({int(hands.sum())} faces mains exclues)')
+        f'({int(hands.sum())} faces mains exclues, {n_acc} faces accessoires)')
     return mask
+
+
+def _face_components(mesh):
+    """Etiquette de composante connexe par face (ou None si indisponible)."""
+    try:
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import connected_components
+        adj = np.asarray(mesh.face_adjacency)
+        n = len(mesh.faces)
+        if len(adj) == 0:
+            return None
+        g = coo_matrix(
+            (np.ones(len(adj)), (adj[:, 0], adj[:, 1])), shape=(n, n))
+        _, labels = connected_components(g, directed=False)
+        return labels
+    except Exception:
+        return None
 
 
 # ===========================================================================
@@ -412,62 +466,107 @@ def rasterize_faces_to_atlas(uv, faces, face_mask, tex_res):
 def build_face_protect_mask(in_glb, tex_res):
     """Masque atlas bool du VISAGE (pipeline texture_refine --protect-face :
     render front pyrender -> Haar -> bande haute fallback -> UV project).
-    None si le pipeline echoue completement."""
+    None si le pipeline echoue completement OU si le masque produit est trop
+    gros pour etre credible.
+
+    MESURE (mesh de test 499k faces, atlas 1024) : Haar renvoie une bbox de
+    248x247 px, 93 144 faces la touchent et la projection UV donne 65 % de
+    l'atlas — les atlas TRELLIS-2 sont des confettis, une bbox ecran attrape
+    des iles UV appartenant a tout le corps. Soustraire ca ampute les deux
+    tiers du vetement au hasard : on refuse donc tout masque > FACE_PROTECT_MAX.
+    """
     try:
         from texture_refine import _make_face_protect_mask
         m = _make_face_protect_mask(in_glb, tex_res)
         if m is None:
             return None
         arr = np.asarray(m.resize((tex_res, tex_res), Image.LANCZOS))
-        return arr > 16  # attrape le feather du GaussianBlur(8)
+        mask = arr > 16  # attrape le feather du GaussianBlur(8)
+        frac = float(mask.mean())
+        if frac > FACE_PROTECT_MAX_FRAC:
+            log(f'masque visage atlas IGNORE: {frac*100:.1f}% de l\'atlas '
+                f'(> {FACE_PROTECT_MAX_FRAC*100:.0f}%) — projection UV non '
+                f'discriminante sur cet atlas, il amputerait le vetement')
+            return None
+        log(f'masque visage atlas: {int(mask.sum())} texels '
+            f'({frac*100:.1f}% de l\'atlas)')
+        return mask
     except Exception as e:
         log(f'masque visage atlas indisponible ({type(e).__name__}: {e})')
         return None
 
 
+def _dilate_iters(tex_res, n_faces):
+    """Dilatation proportionnelle a la densite de l'atlas.
+
+    Les atlas TRELLIS-2 packent ~500k triangles dans 1024^2, soit ~2 texels
+    par triangle et AUCUN gutter : dilater de 6 texels pontait toutes les
+    iles UV et faisait passer le masque de 547k a 1 025k texels (97,7 % de
+    l'atlas). On borne donc a 1-2 iterations, et uniquement pour le feather.
+    """
+    if n_faces <= 0:
+        return 2
+    texels_per_face = (tex_res * tex_res) / float(n_faces)
+    if texels_per_face < 8.0:      # atlas confetti (TRELLIS-2)
+        return 1
+    if texels_per_face < 64.0:
+        return 2
+    return 3
+
+
 def build_texel_mask(mesh, in_glb, face_mask, tex_res, fallback_mode):
-    """(mask_bin, mask_feather, face_mask maj). Dilate 6 texels, soustrait
-    le masque visage, feather GaussianBlur 3 pour le composite final."""
+    """Retourne (mask_paint, mask_feather, face_mask maj).
+
+    DEUX masques distincts (correctif du bloqueur n°1) :
+      - mask_paint   : rasterisation NON dilatee des faces vetement. C'est la
+                       reference d'APPARTENANCE : seul lui autorise le fill et
+                       compte dans la couverture.
+      - mask_feather : version legerement dilatee + floue, utilisee UNIQUEMENT
+                       comme poids de composite (anti-couture).
+    Melanger les deux (l'ancien `mask_bin` dilate de 6) faisait croire que
+    92 % du masque restait « non couvert » et lachait un EDT-nearest sur tout
+    l'atlas -> texture detruite.
+    """
     from scipy import ndimage
 
-    mask_bin = rasterize_faces_to_atlas(
-        np.asarray(mesh.visual.uv, dtype=np.float64),
-        np.asarray(mesh.faces), face_mask, tex_res)
-    n0 = int(mask_bin.sum())
-    mask_bin = ndimage.binary_dilation(mask_bin, iterations=6)
-    log(f'masque texels: {n0} -> {int(mask_bin.sum())} apres dilatation '
-        f'(6 texels), atlas {tex_res}x{tex_res}')
+    uv = np.asarray(mesh.visual.uv, dtype=np.float64)
+    faces_np = np.asarray(mesh.faces)
+
+    mask_paint = rasterize_faces_to_atlas(uv, faces_np, face_mask, tex_res)
+    log(f'masque texels (non dilate): {int(mask_paint.sum())} texels, '
+        f'atlas {tex_res}x{tex_res}')
 
     face_protect = build_face_protect_mask(in_glb, tex_res)
     if face_protect is not None:
-        before = int(mask_bin.sum())
-        mask_bin &= ~face_protect
-        log(f'protection visage: -{before - int(mask_bin.sum())} texels')
+        before = int(mask_paint.sum())
+        mask_paint &= ~face_protect
+        log(f'protection visage: -{before - int(mask_paint.sum())} texels')
     elif fallback_mode:
-        # En fallback la protection visage est la SEULE ceinture pour la
-        # tete : echec => on reduit le masque a la bande tronc (faces sous
-        # y_max - 0.30h) par securite, puis on re-rasterise.
+        # En fallback, la protection visage est la SEULE ceinture pour la
+        # tete : sans elle on reduit par bande de hauteur (< 0.70h) puis on
+        # re-rasterise.
         log('fallback SANS masque visage -> reduction bande tronc (<0.70h)')
         c = mesh.triangles_center
         y = c[:, 1]
         h = max(float(y.max()) - float(y.min()), 1e-9)
         face_mask = face_mask & ((y - float(y.min())) / h < 0.70)
-        mask_bin = ndimage.binary_dilation(
-            rasterize_faces_to_atlas(
-                np.asarray(mesh.visual.uv, dtype=np.float64),
-                np.asarray(mesh.faces), face_mask, tex_res),
-            iterations=6)
+        mask_paint = rasterize_faces_to_atlas(uv, faces_np, face_mask, tex_res)
+        log(f'masque texels apres bande: {int(mask_paint.sum())} texels')
     else:
         log('parts head/hair deja exclues par le namer — on continue '
             'sans masque visage atlas')
 
-    if not mask_bin.any():
+    if not mask_paint.any():
         raise RuntimeError('masque texels vide apres protection visage')
 
-    feather = Image.fromarray((mask_bin * 255).astype(np.uint8), 'L') \
-        .filter(ImageFilter.GaussianBlur(3))
+    iters = _dilate_iters(tex_res, int(face_mask.sum()))
+    mask_dil = ndimage.binary_dilation(mask_paint, iterations=iters)
+    log(f'feather: dilatation {iters} texel(s) -> {int(mask_dil.sum())} '
+        f'({100.0*mask_dil.mean():.1f}% de l\'atlas)')
+    feather = Image.fromarray((mask_dil * 255).astype(np.uint8), 'L') \
+        .filter(ImageFilter.GaussianBlur(1.5))
     mask_feather = np.asarray(feather, dtype=np.float64) / 255.0
-    return mask_bin, mask_feather, face_mask
+    return mask_paint, mask_feather, face_mask
 
 
 # ===========================================================================
@@ -598,6 +697,14 @@ class ViewRenderer:
 
         self._tex_node = None
         self._mask_node = None
+
+        # Rendu de chauffe jete : le tout premier render() apres creation du
+        # contexte GL peut revenir noir (observe sur pyglet 2.x).
+        try:
+            self.renderer.render(self.scene_dfull,
+                                 flags=pyrender.RenderFlags.DEPTH_ONLY)
+        except Exception as e:
+            log(f'rendu de chauffe ignore ({e})')
 
     def _textured_node(self, scene, old_node, atlas_pil):
         pyrender = self._pyrender
@@ -800,11 +907,13 @@ def load_inpaint_pipeline():
     return pipe
 
 
-def free_pipeline(pipe):
+def free_pipeline():
+    """A appeler APRES avoir mis la variable `pipe` de l'appelant a None :
+    `del pipe` a l'interieur d'une fonction ne supprimait que la reference
+    locale, la frame appelante gardait les ~7 Go de SDXL vivants."""
     import gc
     try:
         import torch
-        del pipe
         gc.collect()
         torch.cuda.empty_cache()
         log('SDXL inpaint libere (empty_cache)')
@@ -840,43 +949,58 @@ def inpaint_view(pipe, render_img, mask2d, prompt, strength, seed, steps=32):
 # (8) Remplissage des texels jamais couverts (aisselles, entrejambe)
 # ===========================================================================
 
-def fill_uncovered(atlas_painted, coverage, mask_bin):
-    """Texels du masque jamais vus par aucune vue : fill nearest (EDT)
-    depuis les texels PEINTS + lissage Telea rayon 3.
+def fill_uncovered(atlas_painted, coverage, mask_paint):
+    """Bouche les trous du masque PEIGNABLE laisses par les vues (aisselles,
+    entrejambe, micro-triangles rates par la rasterisation conservative).
 
-    COMPROMIS : la spec renvoie au pattern _push_pull_fill de
-    texture_project — c'est une closure locale non importable. Le fill
-    EDT-nearest (scipy) donne la meme intention (couleur locale continue
-    propagee depuis les texels couverts) sur les petites zones concernees,
-    et Telea (le meme que FABMESH_TEXPROJ_UV_INPAINT) recolle la structure."""
+    Retourne (atlas, touched) ou `touched` = coverage | texels effectivement
+    remplis. C'est CE masque, et pas le masque vetement, qui autorise ensuite
+    l'ecriture dans l'atlas final.
+
+    BORNE DURE (correctif du bloqueur n°1) : on ne propage une couleur que sur
+    FILL_MAX_DIST texels. Sans borne, l'EDT-nearest recopiait la couleur du
+    texel peint le plus proche sur 92 % de l'atlas et le resultat etait une
+    bouillie. Au-dela de la borne, la texture d'origine est conservee.
+    """
     from scipy import ndimage
 
-    pending = mask_bin & ~coverage
+    pending = mask_paint & ~coverage
     n_pending = int(pending.sum())
-    if n_pending == 0:
-        log('fill: tous les texels du masque sont couverts')
-        return atlas_painted
+    n_mask = max(1, int(mask_paint.sum()))
     if not coverage.any():
         log('fill: AUCUN texel couvert — atlas repeint laisse tel quel')
-        return atlas_painted
+        return atlas_painted, coverage
+    if n_pending == 0:
+        log('fill: tous les texels peignables sont couverts')
+        return atlas_painted, coverage
     log(f'fill: {n_pending} texels non couverts '
-        f'({100.0*n_pending/max(1, int(mask_bin.sum())):.1f}% du masque)')
+        f'({100.0*n_pending/n_mask:.1f}% du masque peignable)')
 
-    ind = ndimage.distance_transform_edt(
-        ~coverage, return_distances=False, return_indices=True)
+    dist, ind = ndimage.distance_transform_edt(
+        ~coverage, return_distances=True, return_indices=True)
+    fillable = pending & (dist <= FILL_MAX_DIST)
+    n_fill = int(fillable.sum())
+    log(f'fill: {n_fill} texels a <= {FILL_MAX_DIST:.0f} texels d\'un texel '
+        f'peint (les {n_pending - n_fill} autres gardent la texture source)')
+    if n_fill == 0:
+        return atlas_painted, coverage
+
     out = atlas_painted.copy()
-    out[pending] = atlas_painted[ind[0][pending], ind[1][pending]]
+    out[fillable] = atlas_painted[ind[0][fillable], ind[1][fillable]]
 
     try:
         import cv2
         bgr = np.clip(out, 0, 255).astype(np.uint8)[:, :, ::-1].copy()
-        hole = (pending * 255).astype(np.uint8)
+        hole = (fillable * 255).astype(np.uint8)
         inp = cv2.inpaint(bgr, hole, 3, cv2.INPAINT_TELEA)
-        out = inp[:, :, ::-1].astype(np.float64).copy()
-        log('fill: Telea rayon 3 applique')
+        # Telea repeint AUSSI un anneau autour des trous : on ne reprend son
+        # resultat que sur les texels a boucher.
+        smoothed = inp[:, :, ::-1].astype(np.float64)
+        out[fillable] = smoothed[fillable]
+        log('fill: Telea rayon 3 applique (restreint aux trous)')
     except Exception as e:
         log(f'fill: Telea indisponible ({e}) — EDT nearest seul')
-    return out
+    return out, (coverage | fillable)
 
 
 # ===========================================================================
@@ -948,6 +1072,11 @@ def parse_args():
                     help='GLB deja segmente (part_00..NN) a reutiliser')
     ap.add_argument('--steps', type=int, default=32,
                     help='steps SDXL par vue (30-40)')
+    ap.add_argument('--tex-res', type=int, default=0,
+                    help='resolution de travail de l\'atlas (0 = celle du '
+                         'GLB). 2048 sur un atlas 1024 quadruple le nombre '
+                         'de texels par triangle et augmente nettement la '
+                         'couverture des micro-triangles TRELLIS-2.')
     return ap.parse_args()
 
 
@@ -973,8 +1102,17 @@ def run(args):
     # ------------------------------------------------------------------
     mesh = load_source_mesh(mesh_in)
     atlas_pil, tex_res = load_atlas(mesh)
+    want_res = int(getattr(args, 'tex_res', 0) or 0)
+    if want_res and want_res != tex_res:
+        # Sur-echantillonnage : ~2 texels/triangle sur les atlas TRELLIS-2,
+        # la rasterisation conservative du kernel en perd la majorite.
+        # replace_glb_atlas re-encode de toute facon.
+        log(f'atlas sur-echantillonne {tex_res} -> {want_res} '
+            f'(--tex-res) pour la reprojection')
+        atlas_pil = atlas_pil.resize((want_res, want_res), Image.LANCZOS)
+        tex_res = want_res
     log(f'mesh: {len(mesh.vertices)} verts, {len(mesh.faces)} faces, '
-        f'atlas {tex_res}x{tex_res}')
+        f'atlas de travail {tex_res}x{tex_res}')
     progress(2)
 
     # ------------------------------------------------------------------
@@ -1005,9 +1143,9 @@ def run(args):
     # ------------------------------------------------------------------
     # (4) Masque texels [24 -> 28]  (+ protection visage brique 6)
     # ------------------------------------------------------------------
-    mask_bin, mask_feather, face_mask = build_texel_mask(
+    mask_paint, mask_feather, face_mask = build_texel_mask(
         mesh, mesh_in, face_mask, tex_res, fallback_mode)
-    Image.fromarray((mask_bin * 255).astype(np.uint8), 'L').save(
+    Image.fromarray((mask_paint * 255).astype(np.uint8), 'L').save(
         os.path.join(scratch, 'mask_texels.png'))
     progress(28)
 
@@ -1031,6 +1169,14 @@ def run(args):
     renderer = ViewRenderer(v_std, faces, uv, face_mask, render_size=1024)
     progress(30)
 
+    # Definis AVANT le try : ils sont consommes apres le finally. S'ils
+    # naissaient dans le try, un echec de load_inpaint_pipeline() (HF hors
+    # ligne, OOM, variante fp16 absente) declenchait un NameError qui
+    # masquait l'erreur reelle.
+    atlas_orig = np.asarray(atlas_pil, dtype=np.float64)
+    atlas_cur = atlas_orig.copy()
+    coverage = np.zeros((tex_res, tex_res), dtype=bool)
+
     pipe = None
     try:
         # --------------------------------------------------------------
@@ -1038,10 +1184,6 @@ def run(args):
         # --------------------------------------------------------------
         unload_sdxl_server_best_effort()
         pipe = load_inpaint_pipeline()
-
-        atlas_orig = np.asarray(atlas_pil, dtype=np.float64)
-        atlas_cur = atlas_orig.copy()
-        coverage = np.zeros((tex_res, tex_res), dtype=bool)
 
         n_views = len(views)
         budget = 50.0 / n_views
@@ -1061,7 +1203,7 @@ def run(args):
 
             # Vue front : masque = tout le vetement visible. Vues
             # suivantes : seulement les texels PAS encore couverts.
-            pending_tex = mask_bin & ~coverage
+            pending_tex = mask_paint & ~coverage
             renderer.set_pending_mask_texture(pending_tex)
             pending2d = renderer.render_pending2d(c2w)
             mask2d = garment2d & pending2d
@@ -1099,32 +1241,51 @@ def run(args):
             log(f'  reprojection en {time.time()-t0:.1f}s '
                 f'({int((weight_arr > 0).sum())} texels touches)')
 
-            # Composite restreint : m = feather_texels * (weight > 0)
+            # Composite restreint : m = feather_texels * (weight > 0).
+            # Le feather ne sert QUE de poids ; il n'autorise jamais a lui
+            # seul l'ecriture (c'est `weight > 0` qui decide).
             m = mask_feather * (weight_arr > 0)
             atlas_cur = atlas_cur * (1.0 - m[:, :, None]) \
                 + proj_arr * m[:, :, None]
-            coverage |= (weight_arr > 0) & mask_bin
+            coverage |= (weight_arr > 0) & mask_paint
             log(f'  couverture cumulee: {int(coverage.sum())}/'
-                f'{int(mask_bin.sum())} texels du masque')
+                f'{int(mask_paint.sum())} texels peignables '
+                f'({100.0*coverage.sum()/max(1,int(mask_paint.sum())):.1f}%)')
             progress(base + budget)
 
         progress(80)
     finally:
         renderer.close()
-        if pipe is not None:
-            free_pipeline(pipe)
+        # `del pipe` dans une fonction ne libere rien : la frame de run()
+        # garde la reference. On la coupe ICI, avant empty_cache().
+        pipe = None
+        free_pipeline()
 
     # ------------------------------------------------------------------
     # (7) Remplissage des texels non couverts [80 -> 88]
     # ------------------------------------------------------------------
-    atlas_cur = fill_uncovered(atlas_cur, coverage, mask_bin)
+    atlas_cur, touched = fill_uncovered(atlas_cur, coverage, mask_paint)
     progress(88)
 
     # ------------------------------------------------------------------
     # (8) Export [88 -> 99] — composite final + swap baseColor IN-PLACE
     #     (jamais de re-export trimesh : le skinning serait perdu)
     # ------------------------------------------------------------------
-    m = mask_feather[:, :, None]
+    # Le composite final est gate par `touched` (texels reellement peints ou
+    # remplis), PAS par le masque vetement : partout ailleurs la texture
+    # d'origine passe telle quelle. Le feather ne module que l'intensite.
+    if not touched.any():
+        raise RuntimeError(
+            'aucun texel peint : rien a ecrire (masque 2D vide sur toutes '
+            'les vues ?) — voir les mask2d_*.png du scratch')
+    from scipy import ndimage as _ndi
+    gate = _ndi.binary_dilation(touched, iterations=1)
+    gate_soft = np.asarray(
+        Image.fromarray((gate * 255).astype(np.uint8), 'L')
+        .filter(ImageFilter.GaussianBlur(1.0)), dtype=np.float64) / 255.0
+    m = (mask_feather * gate_soft)[:, :, None]
+    log(f'composite final: {int(touched.sum())} texels peints '
+        f'({100.0*touched.mean():.1f}% de l\'atlas)')
     atlas_out = np.clip(atlas_orig * (1.0 - m) + atlas_cur * m,
                         0, 255).astype(np.uint8)
     atlas_out_pil = Image.fromarray(atlas_out, 'RGB')
