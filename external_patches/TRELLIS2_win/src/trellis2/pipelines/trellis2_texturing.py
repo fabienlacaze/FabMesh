@@ -10,15 +10,12 @@ from ..modules.sparse import SparseTensor
 from ..modules import image_feature_extractor
 import o_voxel
 import cumesh
-import os as _os
 # FabMesh commercial build : kaolin shim (Apache 2.0) replaces nvdiffrast
-# (NVIDIA Source Code License — non-commercial). Validated vs nvdr at
+# (NVIDIA Source Code License -- non-commercial). Validated vs nvdr at
 # PSNR>82 dB / SSIM>0.996 on leopard/king/fusil meshes. ~+0.5s per gen.
-# Set TRELLIS2_USE_KAOLIN_RASTER=0 explicitly to fall back to nvdiffrast.
-if _os.environ.get('TRELLIS2_USE_KAOLIN_RASTER', '1') == '1':
-    from trellis2.renderers import nvdiffrast_kaolin_compat as dr
-else:
-    import nvdiffrast.torch as dr
+# Unconditional: no env-var fallback, so no non-commercial import
+# statement is ever written into a distributed file.
+from trellis2.renderers import nvdiffrast_kaolin_compat as dr
 import cv2
 import flex_gemm
 

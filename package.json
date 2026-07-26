@@ -12,16 +12,18 @@
     "note": "Metadata only — ignored by npm and electron-builder. Documents packaging constraints that must not be violated.",
     "doNotBundleMotionLibrary": "NE PAS ajouter external/apovivor (ni aucun pack de motions FBX Mixamo/Rokoko/apovivor) à build.files ni à build.extraResources tant que la provenance de CHAQUE clip FBX n'est pas tracée et ses droits de redistribution vérifiés. Ces licences interdisent la redistribution des motions brutes. Voir THIRD_PARTY_LICENSES.txt (clause 'motion library') et src/main/animation.js (chargement DEV-ONLY hors-arbre).",
     "doNotBundlePuppeteer": "NE JAMAIS remettre external/Puppeteer dans build.extraResources : il embarque Michelangelo (GPL-3.0, contamine tout le produit) et PartField (NVIDIA non-commercial, interdit la vente). Le moteur de rig commercial est SkinTokens (MIT), telecharge au premier lancement comme les modeles IA ; en mode Cloud le rig passe par le worker. Constate le 2026-07-26 dans le package 1.0.11 : 108 fichiers Michelangelo + 37 PartField etaient distribues.",
-    "puppeteerExcludesAnimation": "Le bloc extraResources de external/Puppeteer exclut volontairement animation/ examples/ inputs/ assets/ et les checkpoints. Ne pas retirer ces exclusions."
+    "puppeteerExcludesAnimation": "Le bloc extraResources de external/Puppeteer exclut volontairement animation/ examples/ inputs/ assets/ et les checkpoints. Ne pas retirer ces exclusions.",
+    "doNotShipNvdiffrast": "nvdiffrast est sous NVIDIA Source Code License = NON COMMERCIAL. Aucun fichier distribue ne doit contenir 'import nvdiffrast'. Trois endroits l'embarquaient : external/TRELLIS2_win/src/trellis2/pipelines/trellis2_texturing.py, external_patches/ (miroir git-tracke) et surtout build/wheels/o_voxel-*.whl (installe chez le client par wizard_install_deps.py). Correctifs : 'python scripts/install_kaolin_shim.py' pour les deux premiers, 'python build/patch_ovoxel_wheel.py' pour le wheel. Le script npm prebuild:licence-check verifie le wheel avant chaque packaging - ne pas le retirer des scripts build:*."
   },
   "scripts": {
     "start": "set ELECTRON_RUN_AS_NODE= && electron .",
     "dev": "set ELECTRON_RUN_AS_NODE= && electron . --dev",
     "launch": "start.bat",
-    "build:installer": "electron-builder --win nsis && node build/organize_dist.js",
+    "prebuild:licence-check": "python build/patch_ovoxel_wheel.py --verify",
+    "build:installer": "npm run prebuild:licence-check && electron-builder --win nsis && node build/organize_dist.js",
     "build:installer:dir": "electron-builder --win nsis --dir",
-    "build:msix": "electron-builder --win appx && node build/organize_dist.js",
-    "build:all": "electron-builder --win nsis appx && node build/organize_dist.js"
+    "build:msix": "npm run prebuild:licence-check && electron-builder --win appx && node build/organize_dist.js",
+    "build:all": "npm run prebuild:licence-check && electron-builder --win nsis appx && node build/organize_dist.js"
   },
   "dependencies": {
     "@google/model-viewer": "^4.2.0",

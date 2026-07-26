@@ -21,12 +21,22 @@ the working dev venv external/TRELLIS2_win/.venv):
 The folder is then copied by electron-builder via extraResources to
 <install_dir>/resources/wheels/ and wizard_install_deps.py installs
 from it (FABMESH_WHEELS_DIR) before trying the network fallback.
+
+LICENSING: the upstream o_voxel wheel imports nvdiffrast (NVIDIA Source
+Code License -- non-commercial) in postprocess.py, which
+o_voxel/__init__.py imports eagerly. Since this wheel ships in the sold
+package, it is rewritten right after download by
+build/patch_ovoxel_wheel.py (kaolin shim, Apache-2.0). That step is part
+of provisioning, NOT an optional extra -- see the module docstring there.
 """
 import hashlib
 import os
 import pathlib
 import sys
 import urllib.request
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import patch_ovoxel_wheel  # noqa: E402  (same directory)
 
 RELEASE_BASE = ('https://github.com/fabienlacaze/MyFabmesh/releases/'
                 'download/trellis2-wheels-v1/')
@@ -61,6 +71,13 @@ def main():
     failed = []
     for name, expected in WHEELS.items():
         dest = OUT_DIR / name
+        # o_voxel is rewritten after download (see module docstring), so its
+        # sha256 no longer matches upstream. Detect the patch instead, or we
+        # would re-download the non-commercial version on every run.
+        if (dest.is_file() and dest == patch_ovoxel_wheel.WHEEL
+                and patch_ovoxel_wheel.is_patched(dest)):
+            print(f'[ok] {name} (already present, kaolin patch verified)')
+            continue
         if dest.is_file() and sha256_of(dest) == expected:
             print(f'[ok] {name} (already present, sha256 verified)')
             continue
@@ -84,6 +101,14 @@ def main():
               'manually into build/wheels/ (see AGENT_LOG 2026-07-06 for '
               'the original local paths).')
         sys.exit(1)
+
+    # Strip the non-commercial nvdiffrast import from o_voxel before it can
+    # reach extraResources. Hard failure: shipping it is a sale blocker.
+    rc = patch_ovoxel_wheel.main_no_args()
+    if rc != 0:
+        print('\nFAILED: could not remove nvdiffrast from the o_voxel wheel.')
+        sys.exit(1)
+
     print(f'\nAll {len(WHEELS)} wheels ready in {OUT_DIR}')
 
 
