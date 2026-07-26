@@ -156,6 +156,9 @@
     },
     "appx": {
       "identityName": "AyrosStudio.MyFabmesh.AI",
+      "capabilities": [
+        "internetClient"
+      ],
       "publisher": "CN=3767FC33-F877-4481-9639-BC9CFF9D1371",
       "publisherDisplayName": "Ayros Studio",
       "applicationId": "MyFabmeshAI",
