@@ -218,6 +218,16 @@ function isTrustedAssetHost(env: Env, u: string): boolean {
     if (host === 'replicate.delivery') return true;
     if (host.endsWith('.replicate.delivery')) return true;
     if (host === 'image.pollinations.ai') return true;
+    // Nos PROPRES URLs signées (/r2/<clé>?exp&sig servies par ce worker) :
+    // le desktop uploade via /api/upload-image|mesh puis renvoie l'URL
+    // reçue aux endpoints d'op — même origine que SITE_URL/workers.dev.
+    if (host.endsWith('.workers.dev') && parsed.pathname.startsWith('/r2/')) return true;
+    if (env.NEXT_PUBLIC_SITE_URL) {
+      try {
+        const own = new URL(env.NEXT_PUBLIC_SITE_URL).hostname.toLowerCase();
+        if (host === own && parsed.pathname.startsWith('/r2/')) return true;
+      } catch {}
+    }
     if (env.R2_PUBLIC_URL) {
       try {
         const pub = new URL(env.R2_PUBLIC_URL).hostname.toLowerCase();
