@@ -6072,6 +6072,9 @@ function _promptShowEnhanced(ta, fullPrompt, userPart) {
   const up = (userPart || '').trim();
   if (up) { const esc = _escapeHtml(up); html = html.replace(esc, '<span class="uhl">' + esc + '</span>'); }
   ov.className = 'prompt-overlay';
+  // Contenu technique (prompt du moteur d'images) : jamais auto-traduit.
+  ov.setAttribute('data-i18n-skip', '');
+  ov.setAttribute('translate', 'no');
   ov.innerHTML = html;
   ov.style.display = '';
 }

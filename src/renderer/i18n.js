@@ -945,11 +945,28 @@
 
   function _dict() { return _lang === 'en' ? null : (I18N[_lang] || null); }
 
+  // Contenu utilisateur / technique à NE JAMAIS traduire : prompts, sorties de
+  // modèles, logs. Un élément (ou un de ses parents) portant [data-i18n-skip]
+  // ou .prompt-overlay est ignoré, texte ET attributs.
+  // Bug corrigé 2026-07-26 : l'aperçu du prompt enrichi (.prompt-overlay) est
+  // un <div>, il était donc auto-traduit en français — le gabarit anglais du
+  // moteur d'images devenait « style réaliste, photoréaliste… » et le sujet
+  // de l'utilisateur était réinterprété (« brasier eteind » → « Bois de
+  // chauffage »). Le <textarea> lui-même était déjà protégé par SKIP_TAGS.
+  function _isNoTranslate(el) {
+    for (let n = el; n; n = n.parentElement) {
+      if (n.nodeType === 1 && (n.hasAttribute?.('data-i18n-skip')
+          || n.classList?.contains('prompt-overlay'))) return true;
+    }
+    return false;
+  }
+
   function _translateText(root, dict) {
     const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         const pn = n.parentNode;
         if (pn && SKIP_TAGS.has(pn.nodeName)) return NodeFilter.FILTER_REJECT;
+        if (pn && _isNoTranslate(pn)) return NodeFilter.FILTER_REJECT;
         return n.nodeValue && n.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
       },
     });
@@ -997,6 +1014,7 @@
   function _translateAttrs(root, dict) {
     ['placeholder', 'title', 'aria-label'].forEach((attr) => {
       root.querySelectorAll('[' + attr + ']').forEach((el) => {
+        if (_isNoTranslate(el)) return;
         const ck = '__i18n_' + attr;
         if (el[ck] === undefined) el[ck] = el.getAttribute(attr);
         const orig = el[ck];
