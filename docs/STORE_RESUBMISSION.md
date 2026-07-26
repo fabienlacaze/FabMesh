@@ -1,5 +1,38 @@
 # Resoumission Microsoft Store — checklist (rapport de certification du 23/07/2026)
 
+> ## ✅ PACKAGE PRÊT À SOUMETTRE
+> **`dist/installer/MicrosoftStore/MyFabmesh.AI 1.0.12.appx`** (191 Mo, 576 entrées)
+> Version 1.0.12 — 1.0.11 est la version refusée le 23/07, Partner Center exige un numéro supérieur.
+> Manifeste : `internetClient` + `runFullTrust`. Audit licence : Michelangelo 0 · PartField 0 · nvdiffrec 0 · sources Puppeteer 0.
+> ⚠️ Ne PAS soumettre les anciens .appx présents dans le même dossier.
+
+### Notes for certification — texte prêt à coller
+
+```
+This app works on machines WITHOUT an NVIDIA GPU.
+On such devices (e.g. Surface Laptop) the setup wizard detects the absence of an
+NVIDIA GPU and the app automatically runs in Cloud mode: image generation, 3D mesh
+generation, rigging and animation all run on the MyFabmesh cloud service. Nothing
+is downloaded, no local AI model is used.
+
+Test account (already funded with credits):
+  email:    <A REMPLIR>
+  password: <A REMPLIR>
+
+Steps to test image generation:
+  1. Launch the app. The wizard shows "No NVIDIA GPU detected - Cloud mode will be
+     used". Click "Continue in Cloud mode".
+  2. Create a project, type any prompt, click "Generate".
+  3. Sign in with the test account when prompted (first time only).
+  4. Images are generated in the cloud and appear in the project.
+
+In-app purchases: credits are sold on our website
+(https://myfabmesh-cloud.fabien65400.workers.dev), never inside the app - declared
+under "This app allows users to make purchases, but does not use the Microsoft
+Store commerce system".
+```
+
+
 Rapport : Partner Center → MyFabmesh.AI (Product ID 9PH6GT8XKQDW) → Certification report.
 Deux échecs à corriger avant resoumission.
 
