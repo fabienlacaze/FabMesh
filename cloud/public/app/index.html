@@ -25,15 +25,24 @@
        (✂ segmenté, 💡 émissif, ✓ coche, vN, pastille marketplace) restent
        visibles sur la vignette. -->
   <style>
-    .version-thumb .version-delete-btn,
-    .version-thumb .version-source-btn,
-    .version-thumb .version-mesh-btn,
-    .version-thumb .version-rig-btn,
-    .version-thumb .version-history-btn,
-    .version-thumb .v-rail-mid > .version-source-btn,
-    .version-thumb .v-rail-mid > .version-mesh-btn,
-    .version-thumb .v-rail-mid > .version-rig-btn,
-    .version-thumb .v-rail-bot > .version-history-btn {
+    /* SÉCURITÉ (ajout vérif 2026-07-27) : tout le masquage ci-dessous est
+       conditionné à [data-vkm], l'attribut que l'IIFE kebab pose sur une
+       vignette APRÈS y avoir installé le ⋮ (index2.js, enhanceThumb).
+       Sans cette garde, le CSS masquait les 5 boutons d'action de façon
+       inconditionnelle alors que leur seul remplacement vient d'un JS situé
+       tout à la fin d'un module de 22 000 lignes : la moindre erreur en amont
+       (ou un blocage du module) supprimait Delete / Source / Mesh / Rig /
+       History sans rien offrir à la place. Avec la garde, le pire cas est un
+       retour à l'ancienne UI (boutons visibles), jamais une vignette morte. */
+    .version-thumb[data-vkm] .version-delete-btn,
+    .version-thumb[data-vkm] .version-source-btn,
+    .version-thumb[data-vkm] .version-mesh-btn,
+    .version-thumb[data-vkm] .version-rig-btn,
+    .version-thumb[data-vkm] .version-history-btn,
+    .version-thumb[data-vkm] .v-rail-mid > .version-source-btn,
+    .version-thumb[data-vkm] .v-rail-mid > .version-mesh-btn,
+    .version-thumb[data-vkm] .v-rail-mid > .version-rig-btn,
+    .version-thumb[data-vkm] .v-rail-bot > .version-history-btn {
       display: none !important;
     }
     .version-thumb .v-kebab {
@@ -106,21 +115,21 @@
        gagnent dans tous les cas. Les badges de statut (✂ 💡 ✓) restent
        visibles. Idem pour `.versions-strip .version-thumb:hover
        .version-delete-btn { display:inline-flex }` (styles/index2.css:1474). */
-    .versions-strip .version-thumb:hover .v-rail-mid > .version-source-btn,
-    .versions-strip .version-thumb:hover .v-rail-mid > .version-mesh-btn,
-    .versions-strip .version-thumb:hover .v-rail-mid > .version-rig-btn,
-    .versions-strip .version-thumb:hover .v-rail-mid > .version-delete-btn,
-    .versions-strip .version-thumb:hover .v-rail-mid > .version-history-btn,
-    .versions-strip .version-thumb:hover .v-rail-bot > .version-source-btn,
-    .versions-strip .version-thumb:hover .v-rail-bot > .version-mesh-btn,
-    .versions-strip .version-thumb:hover .v-rail-bot > .version-rig-btn,
-    .versions-strip .version-thumb:hover .v-rail-bot > .version-delete-btn,
-    .versions-strip .version-thumb:hover .v-rail-bot > .version-history-btn,
-    .versions-strip .version-thumb:hover .version-delete-btn,
-    .versions-strip .version-thumb:hover .version-source-btn,
-    .versions-strip .version-thumb:hover .version-mesh-btn,
-    .versions-strip .version-thumb:hover .version-rig-btn,
-    .versions-strip .version-thumb:hover .version-history-btn {
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-mid > .version-source-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-mid > .version-mesh-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-mid > .version-rig-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-mid > .version-delete-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-mid > .version-history-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-bot > .version-source-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-bot > .version-mesh-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-bot > .version-rig-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-bot > .version-delete-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .v-rail-bot > .version-history-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .version-delete-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .version-source-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .version-mesh-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .version-rig-btn,
+    .versions-strip .version-thumb[data-vkm]:hover .version-history-btn {
       display: none !important;
     }
   </style>
@@ -834,7 +843,11 @@
                       <div class="step-tools-label">Manual tools</div>
                       <div class="step-tools-grid">
                         <button id="ws-mesh-sculpt-btn" class="ghost-btn tool-btn">&#9997; Sculpt</button>
-                        <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
+                        <!-- Tooltip is cloud-only (desktop has no title here): the cloud
+                             also ships "Paint Mesh" just below, and two 🎨 buttons side by
+                             side needed disambiguating — this one writes VERTEX colours
+                             (no UV / texture needed), Paint Mesh writes the texture. -->
+                        <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn" title="Vertex paint — brush colours straight onto the vertices (works even with no UVs / no texture). For pixel-precise painting on the texture itself, use Paint Mesh.">&#127912; Paint</button>
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
                         <button id="ws-mesh-explode-btn" class="ghost-btn tool-btn" title="Fracture the mesh into shards and blast them outward with the viewer explode slider (explosion / destruction). Texture preserved, exportable.">&#128165; Explode / destroy</button>
                         <button id="ws-mesh-stages3d-btn" class="ghost-btn tool-btn" title="Fabricate the 3D meshes of the construction stages (sliced building + frame + scaffolding), navigable and exportable">&#127959;&#65039; 3D construction stages</button>
@@ -3251,6 +3264,15 @@
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
             <input type="color" id="me-paint-color" value="#ff0000" style="width:36px; height:36px; border:none; cursor:pointer; border-radius:6px;" />
             <button id="me-paint-pick" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Eyedropper — click then click the mesh to sample a colour"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle; margin-right:5px;"><path d="M17.66 5.41l.92.92-2.69 2.69-.92-.92 2.69-2.69M17.67 3c-.26 0-.51.1-.71.29l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.4.4-1.03.01-1.42l-2.34-2.34c-.2-.19-.45-.29-.71-.29z"/></svg>Pick colour</button>
+            <!-- Fill / Smooth / Reset — ported from desktop src/renderer/index2.html
+                 (#me-paint-fill / #me-paint-smooth / #me-paint-reset). The cloud
+                 had the brush + eyedropper but not these 3 actions, so vertex
+                 paint was amputated. Labels kept IDENTICAL to desktop so the
+                 existing lang/_additions.js entries ("Fill all", "Reset paint",
+                 "Smooth") translate them without any new i18n key. -->
+            <button id="me-paint-fill" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Fill every vertex with the current colour">&#129529; Fill all</button>
+            <button id="me-paint-smooth" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Blur the vertex colours across neighbours">&#10024; Smooth</button>
+            <button id="me-paint-reset" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Reset every vertex colour back to white (texture untinted)">&#8634; Reset paint</button>
           </div>
           <!-- Brush size -->
           <div style="display:flex; flex-direction:column; gap:2px;">

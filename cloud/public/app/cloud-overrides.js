@@ -619,7 +619,15 @@
   // + X/Y/Z symmetry — runs in the browser, no server dep).
   // Each remaining ID is kept hidden for its own reason below.
   const CLOUD_HIDE_BUTTONS = [
-    'ws-mesh-paintvert-btn',   // vertex paint — still WIP UX-wise
+    // 'ws-mesh-paintvert-btn' — VISIBLE since 2026-07-27. The old comment
+    // ("vertex paint — still WIP UX-wise") was stale on two counts: (1) the
+    // brush itself (radius / strength / falloff blend, BVH fast path,
+    // eyedropper, colour picker, Ctrl+Z undo, Save as new version) was already
+    // ported verbatim from desktop AND already reachable in production via the
+    // "Paint" tab inside the Sculpt/Select modal — hiding the button hid the
+    // entry point, not the tool; (2) the only real gaps were the 3 desktop
+    // actions Fill all / Smooth / Reset paint and symmetry-mirrored strokes,
+    // all four ported in index2.js + index.html on 2026-07-27.
     // 'ws-mesh-selectface-btn' — VISIBLE since 2026-07-27. The old comment
     // ("useless without delete-faces") was stale: Delete/Crop/Duplicate/Flip/
     // Smooth/Grow/Shrink/Isolate/Hide all shipped on cloud, and the missing
