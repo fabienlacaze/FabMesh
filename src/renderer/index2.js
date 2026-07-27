@@ -497,6 +497,23 @@ function showToast(message, type = 'info', durationMs = 3000) {
   const toast = document.createElement('div');
   toast.style.cssText = `background:${colors[type] || colors.info}; color:white; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; pointer-events:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3); transition:opacity 0.3s; max-width:500px; text-align:center;`;
   toast.textContent = message;
+  // « Plus de credits » -> proposer le rechargement DANS la notification.
+  // Place ici et non dans chaque appelant : showToast est le point de passage
+  // unique de ces messages (outils mesh, variantes, regeneration...), donc un
+  // seul ajout couvre tous les cas presents ET futurs.
+  if (/insufficient credits|not enough .*credits/i.test(String(message || ''))) {
+    durationMs = Math.max(durationMs, 12000);
+    const buy = document.createElement('a');
+    buy.href = '#';
+    buy.textContent = '⚡ Buy credits';
+    buy.style.cssText = 'margin-left:10px; color:#fff; text-decoration:underline; font-weight:700;';
+    buy.onclick = (e) => {
+      e.preventDefault();
+      if (typeof _openCloudSite === 'function') _openCloudSite('/buy');
+      toast.remove();
+    };
+    toast.appendChild(buy);
+  }
   container.appendChild(toast);
   const entry = { el: toast, count: 1, hideTimer: null, removeTimer: null };
   entry.hideTimer = setTimeout(() => {
