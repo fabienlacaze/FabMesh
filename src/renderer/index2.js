@@ -431,6 +431,16 @@ function reportPipelineError(errMsg, title) {
       });
     return;
   }
+  // Plus assez de credits -> proposer directement le rechargement. Sans ce
+  // bouton la boite est un CUL-DE-SAC : elle annonce « insufficient credits »
+  // et n'offre que « OK », sans dire ou recharger. Le lien 'Buy credits' qui
+  // existait deja cote desktop vit dans un BANDEAU, pas dans cette boite.
+  // _openCloudSite gere l'ouverture externe et son repli presse-papier.
+  if (/insufficient credits|not enough .*credits/i.test(raw)) {
+    customErrorWithAction(raw, title || 'Not enough credits', '⚡ Buy credits')
+      .then((buy) => { if (buy && typeof _openCloudSite === 'function') _openCloudSite('/buy'); });
+    return;
+  }
   // Extract the most useful error line from a potentially huge Python dump.
   // Python tracebacks end with the actual error on the last non-empty line
   // (e.g. "OutOfMemoryError: CUDA out of memory. Tried to allocate 1.69 GiB.")

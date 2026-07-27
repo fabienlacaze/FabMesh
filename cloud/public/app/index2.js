@@ -428,6 +428,16 @@ function reportPipelineError(errMsg, title) {
       .then((unlock) => { if (unlock) setTimeout(() => { _unlockThenRetry(); }, 60); });
     return;
   }
+  // Plus assez de credits -> proposer directement le rechargement. Sans ce
+  // bouton la boite est un CUL-DE-SAC : elle annonce « insufficient credits »
+  // et n'offre que « OK », sans dire ou recharger. Le lien pointe sur /buy
+  // (et pas /pricing, qui renvoie un 404). Ouverture dans un nouvel onglet
+  // pour ne pas perdre le projet en cours.
+  if (/insufficient credits|not enough .*credits/i.test(raw)) {
+    customErrorWithAction(raw, title || 'Not enough credits', '⚡ Buy credits')
+      .then((buy) => { if (buy) window.open('/buy', '_blank', 'noopener'); });
+    return;
+  }
   // Extract the most useful error line from a potentially huge Python dump.
   // Python tracebacks end with the actual error on the last non-empty line
   // (e.g. "OutOfMemoryError: CUDA out of memory. Tried to allocate 1.69 GiB.")
