@@ -260,7 +260,13 @@ image = (
     # mapbox_earcut: polygon triangulation engine for trimesh — needed by
     # construction3d's cross-section cap (planar.triangulate()); without it
     # the cap silently degrades to open cuts.
-    .pip_install("opencv-python-headless", "trimesh>=4.0", "scipy>=1.10", "mapbox_earcut")
+    # fast_simplification: moteur de decimation requis par
+    # trimesh>=4 pour Trimesh.simplify_quadric_decimation(). Sans lui,
+    # l'appel leve et l'outil « Nombre de triangles » renvoyait le maillage
+    # INTACT tout en debitant 1 credit (constate en production le 2026-07-27 :
+    # cible 4 500, resultat 481 202 triangles). Voir _mesh_op.decimate().
+    .pip_install("opencv-python-headless", "trimesh>=4.0", "scipy>=1.10", "mapbox_earcut",
+                 "fast_simplification")
     .add_local_python_source("modal_app")
     .add_local_file(
         "modal_app/back_tpose_skeleton.png",

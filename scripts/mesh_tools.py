@@ -181,7 +181,10 @@ def decimate(input_path, output_path, target_faces=None):
                 # Fallback: trimesh's built-in (itself fast_simplification on
                 # trimesh 4.x) - also drops UVs.
                 n = max(50, int(len(g.faces) * ratio))
-                g_new = g.simplify_quadric_decimation(n)
+                # face_count= OBLIGATOIRE (cf. modal_app/_mesh_op.py) : le 1er
+                # argument positionnel de trimesh 4.x est `percent`, pas un
+                # nombre de faces. watertight_seal.py:67 le faisait deja bien.
+                g_new = g.simplify_quadric_decimation(face_count=n)
                 g.vertices = g_new.vertices
                 g.faces = g_new.faces
                 log('decimate fallback (quadric) - UVs/texture not preserved')

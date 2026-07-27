@@ -63,20 +63,48 @@ def decimate(glb_bytes: bytes, target_faces: int = 50_000) -> bytes:
     max_faces = max(len(m.faces) for m in meshes if hasattr(m, 'faces'))
     if max_faces <= target_faces:
         return glb_bytes  # already at or below the target
-    ratio = max(0.05, min(1.0, target_faces / max_faces))
+    # PLUS DE PLANCHER A 0.05 : il bornait silencieusement la reduction a 5 %
+    # du maillage d'origine. Viser 4 500 triangles sur un maillage de 489 000
+    # donnait en fait ~24 000 — l'utilisateur ne pouvait pas comprendre
+    # pourquoi sa cible n'etait pas respectee. Le garde-fou utile est le
+    # max(50, ...) par maillage plus bas.
+    ratio = min(1.0, target_faces / max_faces)
+    reduits = 0
+    erreurs = []
     for m in meshes:
         if not hasattr(m, 'faces') or len(m.faces) < 100:
             continue
+        avant = len(m.faces)
         try:
-            n = max(50, int(len(m.faces) * ratio))
-            m_new = m.simplify_quadric_decimation(n)
+            n = max(50, int(avant * ratio))
+            # face_count= OBLIGATOIRE : le 1er argument positionnel de trimesh 4.x
+            # est `percent` (0..1), pas un nombre de faces. Passer n=24464 en
+            # positionnel levait 'target_reduction must be between 0 and 1',
+            # exception avalee plus bas -> maillage renvoye INTACT.
+            m_new = m.simplify_quadric_decimation(face_count=n)
             m.vertices = m_new.vertices
             m.faces = m_new.faces
             # visual (uv/texture) is dropped by simplify — that's a
             # known trimesh limitation; the desktop accepts the same
             # trade-off (texture re-bake is a separate Re-Texture op).
+            if len(m.faces) < avant:
+                reduits += 1
         except Exception as e:
+            erreurs.append(f'{type(e).__name__}: {e}')
             print(f'[mesh-op] decimate skipped: {e}', flush=True)
+    # ECHOUER PLUTOT QUE DE RENVOYER LE MAILLAGE INTACT. Avant, toute
+    # exception etait simplement affichee et la fonction renvoyait la scene
+    # telle quelle : l'utilisateur recevait une « nouvelle version » avec le
+    # meme nombre de triangles et etait quand meme debite. C'est exactement ce
+    # qui se produisait en production, trimesh>=4 exigeant le paquet
+    # fast_simplification (absent de l'image Modal) pour
+    # simplify_quadric_decimation. En levant ici, l'operation est marquee en
+    # echec et le credit est rembourse.
+    if reduits == 0:
+        raise RuntimeError(
+            'decimation impossible ('
+            + ('; '.join(erreurs[:2]) if erreurs else 'aucun maillage reduit')
+            + ')')
     return _export(scene)
 
 
