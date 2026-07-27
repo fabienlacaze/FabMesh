@@ -891,6 +891,35 @@ function _toFileUrl(path) {
 }
 window._toFileUrl = _toFileUrl;
 
+/**
+ * Ajoute un cache-buster SANS casser l'URL.
+ *
+ * POURQUOI : depuis le passage aux URLs R2 signees, une URL d'asset porte deja
+ * une query string (`...png?exp=<unix>&sig=<hex>`). Coller `'?t=' + Date.now()`
+ * derriere produit un SECOND '?', que le navigateur ne traite pas comme un
+ * separateur : tout ce qui suit est avale par la valeur du dernier parametre.
+ * Le worker recoit alors sig="<hex>?t=1785..." , la comparaison HMAC echoue et
+ * /r2/ repond 403 -> <img> declenche onerror -> "Image unavailable".
+ * Verifie en production sur une vraie image : URL propre = 200 (871 Ko),
+ * la meme + '?t=' = 403 Forbidden, la meme + '&t=' = 200.
+ *
+ * Une URL signee n'a de toute facon PAS besoin d'etre bustee : exp et sig
+ * changent a chaque emission, donc chaque nouvelle URL est deja unique. On la
+ * renvoie telle quelle, ce qui laisse en prime jouer le `cache-control:
+ * private, max-age=...` renvoye par le worker au lieu de retelecharger
+ * plusieurs Mo a chaque rendu.
+ */
+function _bust(u, cb) {
+  if (!u) return '';
+  const s = String(u);
+  // blob:/data: = handles immuables en memoire, jamais de cache-buster.
+  if (/^(?:blob|data):/i.test(s)) return s;
+  // URL signee : deja unique par construction.
+  if (/[?&]sig=/.test(s)) return s;
+  return s + (s.includes('?') ? '&' : '?') + 't=' + (cb || Date.now());
+}
+window._bust = _bust;
+
 function renderAllImagesGrid() {
   const grid = document.getElementById('all-images-grid');
   if (!grid) return;
@@ -2173,7 +2202,7 @@ async function renderImageVersions(p) {
     // bare filesystem paths get the file:/// prefix as before. Skip cache-bust
     // for blob URLs (they're immutable in-memory handles).
     const _thumbSrc = _imgSrc(img.path);
-    const _thumbUrl = /^(blob|data):/i.test(img.path) ? _thumbSrc : `${_thumbSrc}?t=${_cb}`;
+    const _thumbUrl = _bust(_thumbSrc, _cb);
     t.innerHTML = `
       <img src="${_thumbUrl}">
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
@@ -2828,7 +2857,7 @@ function showStep1Preview(imgPath) {
   imgEl.style.display = '';
   {
     const _src = _imgSrc(imgPath);
-    imgEl.src = /^(blob|data):/i.test(imgPath) ? _src : (_src + '?t=' + Date.now());
+    imgEl.src = /^(blob|data):/i.test(imgPath) ? _src : _bust(_src);
   }
   setViewerFilename('ws-image-filename', imgPath);
   preview.classList.add('clickable');
@@ -3221,7 +3250,7 @@ function _showMultiviewBar(multiviewDir, availableViews) {
       const preview = document.getElementById('step1-preview');
       const imgEl = preview?.querySelector('img');
       if (imgEl) {
-        imgEl.src = _toFileUrl(imgPath) + '?t=' + Date.now();
+        imgEl.src = _bust(_toFileUrl(imgPath));
       }
     }
   }
@@ -3315,7 +3344,7 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
   const preview = document.getElementById('step1-preview');
   const imgEl = preview?.querySelector('img');
   if (imgEl) {
-    imgEl.src = _toFileUrl(imgPath) + '?t=' + Date.now();
+    imgEl.src = _bust(_toFileUrl(imgPath));
   }
 });
 
@@ -4293,7 +4322,7 @@ async function openLightbox(imgPath) {
   const p = state.currentProject;
   _lightboxImages = (p && p.images) ? p.images.map(i => i.path) : [imgPath];
   _lightboxIndex = Math.max(0, _lightboxImages.indexOf(imgPath));
-  img.src = _toFileUrl(imgPath) + '?t=' + Date.now();
+  img.src = _bust(_toFileUrl(imgPath));
   updateLightboxBottom(imgPath);
   updateLightboxNavButtons();
   // Show multiview bar in lightbox if available for this image
@@ -4329,7 +4358,7 @@ async function openLightbox(imgPath) {
         if (viewPath) {
           setTimeout(() => {
             const lbImg = document.getElementById('lightbox-2-img');
-            if (lbImg) lbImg.src = _toFileUrl(viewPath) + '?t=' + Date.now();
+            if (lbImg) lbImg.src = _bust(_toFileUrl(viewPath));
           }, 0);
         }
       }
@@ -4368,14 +4397,14 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     if (p) { p._activeMultiview = imgPath; p._activeMultiviewKey = view; }
   }
   if (!imgPath) return;
-  document.getElementById('lightbox-2-img').src = _toFileUrl(imgPath) + '?t=' + Date.now();
+  document.getElementById('lightbox-2-img').src = _bust(_toFileUrl(imgPath));
   // Also sync the SMALL preview so when the lightbox closes the
   // user sees the same view they were looking at.
   try {
     const smallPreview = document.getElementById('step1-preview');
     const smallImg = smallPreview?.querySelector('img');
     if (smallImg) {
-      smallImg.src = _toFileUrl(imgPath) + '?t=' + Date.now();
+      smallImg.src = _bust(_toFileUrl(imgPath));
     }
     // Mirror active button state in the small bar too.
     const smallBar = document.getElementById('ws-multiview-bar');
@@ -4436,7 +4465,7 @@ function lightboxShowAt(idx) {
   if (idx < 0 || idx >= _lightboxImages.length) return;
   _lightboxIndex = idx;
   const path_ = _lightboxImages[idx];
-  document.getElementById('lightbox-2-img').src = _toFileUrl(path_) + '?t=' + Date.now();
+  document.getElementById('lightbox-2-img').src = _bust(_toFileUrl(path_));
   updateLightboxBottom(path_);
   updateLightboxNavButtons();
 }
@@ -5145,7 +5174,7 @@ document.getElementById('ws-modify-btn').addEventListener('click', () => {
   if (!target) { showToast('Pick an image first.', 'error'); return; }
   // Show the source image inside the modal
   const srcImg = document.getElementById('mod-source-img');
-  if (srcImg) srcImg.src = _toFileUrl(target) + '?t=' + Date.now();
+  if (srcImg) srcImg.src = _bust(_toFileUrl(target));
   modifyModal.dataset.targetPath = target;
   modifyModal.classList.remove('hidden');
   setTimeout(() => document.getElementById('mod-prompt').focus(), 50);
@@ -5513,7 +5542,7 @@ function openSymmetrize() {
     }
   } else {
     // Desktop filesystem path.
-    loadFrom(_toFileUrl(src) + '?t=' + Date.now());
+    loadFrom(_bust(_toFileUrl(src)));
   }
 }
 
@@ -5889,7 +5918,7 @@ function openResolutionModal() {
   const current = document.getElementById('res-current');
   const target = document.getElementById('res-target');
   if (!modal) return;
-  preview.src = _toFileUrl(tgt) + '?t=' + Date.now();
+  preview.src = _bust(_toFileUrl(tgt));
   const img = new Image();
   img.onload = () => {
     _resW = img.naturalWidth; _resH = img.naturalHeight;
@@ -5964,7 +5993,7 @@ document.getElementById('ws-brightness-btn')?.addEventListener('click', () => {
   const preview = document.getElementById('bright-preview');
   if (!modal || !preview) return;
   modal.dataset.targetPath = tgt;
-  preview.src = _toFileUrl(tgt) + '?t=' + Date.now();
+  preview.src = _bust(_toFileUrl(tgt));
   // Reset sliders
   ['brightness', 'contrast', 'saturation', 'sharpness'].forEach(k => {
     const sl = document.getElementById('bright-' + k);
@@ -6125,7 +6154,7 @@ document.getElementById('ws-crop-btn')?.addEventListener('click', () => {
     document.querySelectorAll('[id^="crop-preset-"]').forEach(b => b.classList.remove('tool-active'));
     document.getElementById('crop-preset-free')?.classList.add('tool-active');
   };
-  img.src = _toFileUrl(cropState.imgPath) + '?t=' + Date.now();
+  img.src = _bust(_toFileUrl(cropState.imgPath));
 });
 
 function _cropDrawOverlay() {
@@ -6434,7 +6463,7 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
   } else if (/^(?:blob|data):/i.test(tgt)) {
     loadFrom(tgt);
   } else {
-    loadFrom(_toFileUrl(tgt) + '?t=' + Date.now());
+    loadFrom(_bust(_toFileUrl(tgt)));
   }
 });
 (() => {
@@ -10554,9 +10583,9 @@ async function _atLoadMesh(meshPath) {
     // / data); only the desktop-style raw filesystem path gets the
     // file:// prefix.
     const url = _atResolveUrl(meshPath);
-    const cacheBuster = '?t=' + Date.now();
-    console.log('[align-tex] loading mesh from', url + cacheBuster);
-    loader.load(url + cacheBuster, (gltf) => {
+    const bustedUrl = _bust(url);
+    console.log('[align-tex] loading mesh from', bustedUrl);
+    loader.load(bustedUrl, (gltf) => {
       console.log('[align-tex] mesh loaded', gltf);
       const obj = gltf.scene || gltf.scenes[0];
       // Center + frame mesh
@@ -10749,7 +10778,7 @@ function _atResolveUrl(path) {
 
 function _atMakeOverlayPlane(imgPath, opacity) {
   const tex = new THREE.TextureLoader().load(
-    _atResolveUrl(imgPath) + '?t=' + Date.now()
+    _bust(_atResolveUrl(imgPath))
   );
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.MeshBasicMaterial({
@@ -10769,14 +10798,14 @@ function _atUpdateOverlay() {
   // Load textures (shared with projective shader)
   if (!atState.frontTex) {
     atState.frontTex = new THREE.TextureLoader().load(
-      _atResolveUrl(p.selectedImagePath) + '?t=' + Date.now()
+      _bust(_atResolveUrl(p.selectedImagePath))
     );
     atState.frontTex.colorSpace = THREE.SRGBColorSpace;
   }
   const backPath = p._backPhotos?.[p.selectedImagePath] || p.backImagePath;
   if (backPath && !atState.backTex) {
     atState.backTex = new THREE.TextureLoader().load(
-      _atResolveUrl(backPath) + '?t=' + Date.now()
+      _bust(_atResolveUrl(backPath))
     );
     atState.backTex.colorSpace = THREE.SRGBColorSpace;
   }
@@ -17145,9 +17174,9 @@ async function refreshJobDetailsModal(id) {
   if (j.sourceImageUrl && !isImageGenJob) {
     const u = j.sourceImageUrl;
     if (/^https?:|^file:|^data:|^blob:/i.test(u)) {
-      thumbUrl = u + (u.includes('?') ? '&' : '?') + 't=' + Date.now();
+      thumbUrl = _bust(u);
     } else {
-      thumbUrl = _toFileUrl(u) + '?t=' + Date.now();
+      thumbUrl = _bust(_toFileUrl(u));
     }
     thumbSource = 'job.sourceImageUrl';
   }
@@ -17155,7 +17184,7 @@ async function refreshJobDetailsModal(id) {
   if (!thumbUrl && isRigJob && p && p.selectedMeshPath && API.getThumbnail) {
     try {
       const t = await API.getThumbnail(p.selectedMeshPath);
-      if (t) { thumbUrl = t + '?t=' + Date.now(); thumbSource = 'mesh.thumbnail'; }
+      if (t) { thumbUrl = _bust(t); thumbSource = 'mesh.thumbnail'; }
     } catch (_) {}
   }
   // 3) Fallback to the current project's image path (legacy behaviour).
@@ -17163,7 +17192,7 @@ async function refreshJobDetailsModal(id) {
   if (!thumbUrl && p && !isImageGenJob) {
     const imgPath = p.selectedImagePath || p.previewImagePath || p.thumb;
     if (imgPath) {
-      thumbUrl = _toFileUrl(imgPath) + '?t=' + Date.now();
+      thumbUrl = _bust(_toFileUrl(imgPath));
       thumbSource = 'state.currentProject (fallback)';
     }
   }
@@ -17369,7 +17398,7 @@ document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   // (multiview angle if selected, else front) so the preview matches
   // what the user is looking at in the workspace.
   const srcImg = document.getElementById('ai-source-img');
-  if (srcImg) srcImg.src = _toFileUrl(target) + '?t=' + Date.now();
+  if (srcImg) srcImg.src = _bust(_toFileUrl(target));
   _aiHideMaskOverlay();  // fresh modal → clear any stale mask preview
   document.getElementById('modal-auto-inpaint').classList.remove('hidden');
 });

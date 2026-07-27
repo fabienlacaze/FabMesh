@@ -1084,6 +1084,26 @@ function _toFileUrl(path) {
 }
 window._toFileUrl = _toFileUrl;
 
+/**
+ * Ajoute un cache-buster SANS casser l'URL. Miroir du helper cloud.
+ *
+ * En mode Cloud, un chemin d'asset peut etre une URL R2 SIGNEE qui porte deja
+ * une query string (`...png?exp=<unix>&sig=<hex>`). Coller `'?t=' + Date.now()`
+ * derriere produit un second '?', que le navigateur n'interprete pas comme un
+ * separateur : le suffixe est avale par la valeur du dernier parametre, le
+ * worker recoit une signature invalide et /r2/ repond 403.
+ * Une URL signee n'a pas besoin d'etre bustee (exp+sig la rendent deja unique
+ * a chaque emission), on la renvoie telle quelle.
+ */
+function _bust(u, cb) {
+  if (!u) return '';
+  const s = String(u);
+  if (/^(?:blob|data):/i.test(s)) return s;
+  if (/[?&]sig=/.test(s)) return s;
+  return s + (s.includes('?') ? '&' : '?') + 't=' + (cb || Date.now());
+}
+window._bust = _bust;
+
 // Unified viewer-loading spinner overlay. Works on a CONTAINER id —
 // creates/removes a position:absolute overlay with the spinner CSS
 // classes. Idempotent; safe to call repeatedly. msg defaults to "Loading…".
@@ -3142,7 +3162,7 @@ function showStep1Preview(imgPath) {
   imgEl.style.display = '';
   // Cache-bust — see version-thumb notes above; Electron holds onto the
   // previous bytes unless we change the URL.
-  imgEl.src = _toFileUrl(imgPath) + '?t=' + Date.now();
+  imgEl.src = _bust(_toFileUrl(imgPath));
   setViewerFilename('ws-image-filename', imgPath);
   preview.classList.add('clickable');
   preview.onclick = (e) => {
