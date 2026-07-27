@@ -2808,11 +2808,11 @@
     async function unlockServicesPanel(auto) {
       const input = document.getElementById('services-password-input');
       const errEl = document.getElementById('services-lock-err');
-      // `auto` = deverrouillage automatique avec le mot de passe deja saisi a
-      // la connexion. L'endpoint le verifie VRAIMENT cote serveur, on ne peut
-      // donc pas s'en passer — mais on ne le redemande pas a l'utilisateur.
-      const pw = auto ? _loginPassword : input.value;
-      if (auto && !pw) return;   // pas de mot de passe en memoire -> on laisse la carte
+      // Plus aucun mot de passe n'est necessaire : l'API s'appuie desormais
+      // sur le seul cookie admin (emis apres mot de passe + authenticator a la
+      // connexion). La carte de verrouillage n'a donc plus de raison d'etre et
+      // ces fonctions s'executent toutes seules.
+      const pw = input ? input.value : '';
       errEl.style.display = 'none';
       // Probe with a no-op toggle that re-applies the current state.
       // First fetch the current state, then "toggle" modal to its own
@@ -3255,9 +3255,8 @@
     async function unlockPricing(auto) {
       const input = document.getElementById('pricing-unlock-input');
       const errEl = document.getElementById('pricing-lock-err');
-      // Voir unlockServicesPanel : meme raison, meme mecanisme.
-      const pw = auto ? _loginPassword : input.value;
-      if (auto && !pw) return;
+      // Voir unlockServicesPanel : plus de mot de passe necessaire.
+      const pw = input ? input.value : '';
       errEl.style.display = 'none';
       // Probe by issuing a no-op save (re-saves current state). Wrong
       // password -> 401, right password -> 200 and we reveal the editor.
@@ -4053,8 +4052,8 @@
         // passe de la connexion. En cas d'echec (page rechargee, cookie encore
         // valide mais mot de passe plus en memoire) la carte reste affichee et
         // l'utilisateur peut le saisir — aucun cul-de-sac.
-        if (t === 'pricing'  && _loginPassword) { unlockPricing(true); }
-        if (t === 'services' && _loginPassword) { unlockServicesPanel(true); }
+        if (t === 'pricing'  && !btn.dataset.unlocked) { btn.dataset.unlocked = '1'; unlockPricing(true); }
+        if (t === 'services' && !btn.dataset.unlocked) { btn.dataset.unlocked = '1'; unlockServicesPanel(true); }
         if (t === 'audit'   && !btn.dataset.loaded) {
           btn.dataset.loaded = '1';
           document.getElementById('audit-day-input').value = new Date().toISOString().slice(0, 10);

@@ -12220,8 +12220,13 @@ async function handleAdminSetPricing(req: Request, env: Env): Promise<Response> 
   let body: { prices?: Record<string, number>; password?: string } | null = null;
   try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
   const prices = body?.prices;
-  const password = String(body?.password || '');
-  if (!(await _verifyAdminPassword(env, password))) return err(401, 'invalid password');
+  // Mot de passe NON redemande ici : _requireAdmin ci-dessus a deja exige
+  // une session Supabase admin ET le cookie admin signe, lequel n'est emis
+  // QUE par /api/admin/login apres verification du mot de passe. Le
+  // redemander dans le corps ne prouvait donc rien de plus, et obligeait
+  // l'utilisateur a le retaper a chaque ouverture de l'onglet. Retire a sa
+  // demande le 2026-07-27. Toute modification reste tracee (_auditLog).
+
   if (!prices || typeof prices !== 'object') return err(400, 'prices object required');
   // Only persist keys we know about — silently drop unknown keys.
   const sanitized: Record<string, number> = {};
@@ -12265,11 +12270,14 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
   const service = String(body?.service || '').trim();
   const enabled = !!body?.enabled;
-  const password = String(body?.password || '');
   if (!['modal', 'site', 'stripe', 'all'].includes(service)) {
     return err(400, 'service must be modal|site|stripe|all');
   }
-  if (!(await _verifyAdminPassword(env, password))) return err(401, 'invalid password');
+  // Mot de passe NON redemande ici : _requireAdmin en tete de fonction a deja
+  // exige une session Supabase admin ET le cookie admin signe, lequel n'est
+  // emis QUE par /api/admin/login apres verification du mot de passe. Le
+  // redemander ne prouvait rien de plus. Retire le 2026-07-27 a la demande du
+  // user. Chaque bascule reste tracee dans le journal (_auditLog plus bas).
 
   let current: Partial<ServiceFlags> = {};
   try {
