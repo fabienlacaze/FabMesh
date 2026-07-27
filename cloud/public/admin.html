@@ -361,16 +361,17 @@
   </div>
 
   <!-- Forgot-password modal — gated by Supabase admin email auth only
-       (no email link / 2FA). The user is already logged in as an admin
+       (code par mail, meme rail Supabase que les utilisateurs). The user is already logged in as an admin
        Supabase account by the time they reach this modal; that's the
        recovery factor. New password must be ≥20 chars. -->
   <div id="forgot-password-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
     <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; width:420px; max-width:92vw;">
       <h3 style="margin:0 0 8px 0;">🔑 Reset admin password</h3>
       <p style="color:var(--text-2); font-size:12px; margin-bottom:16px;">
-        You're signed in as an admin Supabase account — that's enough to
-        rotate the dashboard password. Every attempt is written to the
-        connection log. New password must be at least 20 characters.
+        A 6-digit code is sent to the admin mailbox — the same email a normal
+        MyFabmesh user gets when resetting their password. Your Supabase session
+        alone is not enough. Every attempt is written to the connection log.
+        New password must be at least 20 characters.
       </p>
       <!-- Etape 1 : recevoir un code par mail. Le bouton reste visible meme si
            l'envoi n'est pas configure : dans ce cas le worker repond 503
@@ -1108,12 +1109,6 @@
           headers: { 'content-type': 'application/json' }, body: '{}',
         });
         const j = await r.json().catch(() => ({}));
-        if (r.status === 503 || j.error === 'email_not_configured') {
-          msg.style.color = 'var(--err)';
-          msg.textContent = 'Email sending is not configured on the server (RESEND_API_KEY missing), '
-            + 'so no code can be sent. You can still rotate the password without a code for now.';
-          return;
-        }
         if (!r.ok) {
           msg.style.color = 'var(--err)';
           msg.textContent = j.error || ('HTTP ' + r.status);
@@ -1121,7 +1116,7 @@
         }
         msg.style.color = 'var(--ok, #4caf50)';
         msg.textContent = '✓ Code sent to ' + (j.sent_to || 'the admin mailbox')
-          + ' — valid for 10 minutes.';
+          + ' — same email you would get as a normal MyFabmesh user.';
       } catch (e) {
         msg.style.color = 'var(--err)';
         msg.textContent = String(e && e.message || e);
@@ -1163,10 +1158,8 @@
           msg.style.color = 'var(--err)';
           const e = j.error || `HTTP ${r.status}`;
           msg.textContent =
-            e === 'no_code_requested' ? 'Click “Send code” first — a code is required to rotate the password.'
-            : e === 'code_expired'    ? 'That code has expired. Request a new one.'
-            : e === 'invalid_code'    ? 'Wrong code. Check the email and retry.'
-            : e === 'too_many_attempts' ? 'Too many wrong codes — the code was burned. Request a new one.'
+            e === 'code_required' ? 'Click “Send code”, then type the 6-digit code from the email.'
+            : e === 'invalid_code' ? 'Wrong or expired code. Request a new one and retry.'
             : e;
           return;
         }

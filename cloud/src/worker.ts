@@ -10583,123 +10583,78 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
  *  the gate. */
 
 // ---------------------------------------------------------------------------
-// Rotation du mot de passe admin PAR CODE ENVOYE PAR MAIL
+// Rotation du mot de passe admin — MEME RAIL QUE LES UTILISATEURS
 // ---------------------------------------------------------------------------
-// Demande du user : le meme parcours que pour un utilisateur normal — on
-// recoit un code par mail, on le saisit, on choisit son nouveau mot de passe.
+// Le parcours est celui de n'importe quel client MyFabmesh, a l'identique :
+//   1. resetPasswordForEmail  -> Supabase envoie un mail contenant {{ .Token }},
+//      un code a 6 chiffres (cf. cloud/src/app/login/LoginForm.tsx:187)
+//   2. verifyOtp type:'recovery' -> Supabase valide le code
+//      (cf. cloud/src/app/auth/reset-password/page.tsx:76)
+// On appelle donc les MEMES endpoints Supabase, avec les MEMES gabarits de mail
+// et le MEME SMTP. Aucune dependance supplementaire : la premiere version
+// passait par Resend, ce qui exigeait une cle absente du worker et affichait
+// une erreur a l'utilisateur au lieu d'envoyer quoi que ce soit.
 //
-// Ce que ca apporte : le facteur « je detiens une session Supabase admin »
-// (contournable : cette session SUFFISAIT a rotationner le mot de passe, donc
-// le mot de passe du dashboard ne protegeait rien face a son detenteur) est
-// remplace par « j'ai acces a la boite mail admin ».
+// Supabase gere lui-meme l'expiration, l'usage unique et la limitation de
+// debit du code : rien a stocker de notre cote.
 //
-// GARDE-FOU ANTI-ENFERMEMENT : le code n'est EXIGE que si l'envoi de mail est
-// reellement configure (RESEND_API_KEY pose). Sans cle, le worker ne sait
-// envoyer aucun mail ; exiger un code qui n'arrivera jamais rendrait la
-// rotation impossible pour toujours. Des que la cle est posee, le code devient
-// obligatoire automatiquement, sans redeploiement.
-const ADMIN_RESET_CODE_KEY = '_meta/admin_reset_code.json';
-const ADMIN_RESET_CODE_TTL_MS = 10 * 60 * 1000;  // 10 minutes
-const ADMIN_RESET_CODE_MAX_TRIES = 5;
+// SORTIE DE SECOURS si le mail Supabase ne part pas : poser
+// `wrangler secret put ADMIN_PASSWORD` remet un mot de passe litteral en
+// vigueur (cf. _getAdminPasswordSource). Il n'y a donc pas d'enfermement
+// possible, meme si l'envoi de mail tombe.
 
-/** L'envoi de mail est-il reellement operationnel ? */
-function _adminMailConfigured(env: Env): boolean {
-  return !!env.RESEND_API_KEY && ADMIN_EMAILS.size > 0;
+/** Envoie le code de recuperation Supabase sur la boite admin. */
+async function _supabaseSendRecovery(env: Env, email: string): Promise<{ ok: boolean; error?: string }> {
+  const url = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  if (!url || !anon) return { ok: false, error: 'supabase_not_configured' };
+  try {
+    const r = await fetch(`${url}/auth/v1/recover`, {
+      method: 'POST',
+      headers: { apikey: anon, 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!r.ok) return { ok: false, error: (await r.text()).slice(0, 200) };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
-/** POST /api/admin/reset-request — envoie un code a 6 chiffres sur la boite
- *  admin. Exige la session Supabase admin (sinon n'importe qui declencherait
- *  des mails). Le code n'est JAMAIS renvoye dans la reponse HTTP : il doit
- *  transiter par le mail, sinon le facteur « acces a la boite » ne vaut rien. */
+/** Valide le code recu par mail via Supabase (type 'recovery', comme la page
+ *  de reset des utilisateurs). Supabase consomme le code : il ne peut pas
+ *  resservir. */
+async function _supabaseVerifyRecovery(env: Env, email: string, token: string): Promise<boolean> {
+  const url = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  if (!url || !anon || !token) return false;
+  try {
+    const r = await fetch(`${url}/auth/v1/verify`, {
+      method: 'POST',
+      headers: { apikey: anon, 'content-type': 'application/json' },
+      body: JSON.stringify({ email, token, type: 'recovery' }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+/** POST /api/admin/reset-request — declenche l'envoi du code Supabase. */
 async function handleAdminResetRequest(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized — sign in with your admin Supabase account first');
   if (!user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
     return err(403, 'forbidden — your Supabase email is not in the admin allow-list');
   }
-  if (!env.MESHES) return err(500, 'R2 binding required');
-  if (!_adminMailConfigured(env)) {
-    return err(503, 'email_not_configured');
+  const sent = await _supabaseSendRecovery(env, user.email);
+  if (!sent.ok) {
+    await _auditLog(env, { req, actorEmail: user.email,
+      action: 'admin_password_reset_code_failed', details: { error: sent.error ?? '' } });
+    return err(502, `could not send the code: ${sent.error ?? 'unknown'}`);
   }
-
-  // 6 chiffres tires du CSPRNG. On stocke un HASH sale, pas le code : une
-  // lecture du bucket R2 ne doit pas suffire a rotationner le mot de passe.
-  const bytes = crypto.getRandomValues(new Uint32Array(1));
-  const code = String(bytes[0] % 1000000).padStart(6, '0');
-  const saltBuf = new Uint8Array(16);
-  crypto.getRandomValues(saltBuf);
-  const salt = Array.from(saltBuf).map(b => b.toString(16).padStart(2, '0')).join('');
-  await env.MESHES.put(ADMIN_RESET_CODE_KEY, JSON.stringify({
-    salt,
-    hash: await _hashAdminPassword(salt, code),
-    exp: Date.now() + ADMIN_RESET_CODE_TTL_MS,
-    tries: 0,
-    requested_by: user.email,
-  }), { httpMetadata: { contentType: 'application/json' } });
-
-  await _sendAdminAlertEmail(env,
-    'MyFabmesh — code de rotation du mot de passe admin',
-    `Votre code de verification : ${code}
-
-`
-    + `Il expire dans 10 minutes et ne peut servir qu'une seule fois.
-
-`
-    + `Demande par : ${user.email}
-`
-    + `Si vous n'etes pas a l'origine de cette demande, ignorez ce message — `
-    + `le mot de passe actuel reste valable, et la tentative est tracee dans le `
-    + `journal de connexion du dashboard.`);
-
-  await _auditLog(env, {
-    req, actorEmail: user.email,
-    action: 'admin_password_reset_code_sent',
-    details: { to: [...ADMIN_EMAILS].join(', ') },
-  });
-
-  // On masque l'adresse : l'ecran doit rappeler OU le code est parti sans
-  // exposer l'adresse complete a quelqu'un qui passerait derriere l'ecran.
-  const to = [...ADMIN_EMAILS][0] ?? '';
-  const masked = to.replace(/^(.{2}).*(@.*)$/, '$1***$2');
-  return json({ ok: true, sent_to: masked, expires_in_s: ADMIN_RESET_CODE_TTL_MS / 1000 });
-}
-
-/** Verifie le code recu par mail. Renvoie null si tout va bien, sinon la
- *  reponse d'erreur a retourner tel quel. Consomme le code en cas de succes. */
-async function _checkAdminResetCode(req: Request, env: Env, provided: string,
-                                    actorEmail: string): Promise<Response | null> {
-  const obj = await env.MESHES!.get(ADMIN_RESET_CODE_KEY);
-  if (!obj) return err(400, 'no_code_requested');
-  let rec: { salt?: string; hash?: string; exp?: number; tries?: number };
-  try { rec = await obj.json(); } catch { return err(400, 'no_code_requested'); }
-  if (!rec?.salt || !rec?.hash) return err(400, 'no_code_requested');
-  if (!rec.exp || Date.now() > rec.exp) {
-    await env.MESHES!.delete(ADMIN_RESET_CODE_KEY);
-    return err(400, 'code_expired');
-  }
-  const tries = (rec.tries ?? 0) + 1;
-  if (tries > ADMIN_RESET_CODE_MAX_TRIES) {
-    // On brule le code plutot que de laisser forcer les 10^6 combinaisons.
-    await env.MESHES!.delete(ADMIN_RESET_CODE_KEY);
-    await _auditLog(env, { req, actorEmail, action: 'admin_password_reset_denied',
-      details: { reason: 'too_many_code_attempts' } });
-    return err(429, 'too_many_attempts');
-  }
-  const computed = await _hashAdminPassword(rec.salt, provided);
-  let diff = computed.length ^ rec.hash.length;
-  for (let i = 0; i < computed.length && i < rec.hash.length; i++) {
-    diff |= computed.charCodeAt(i) ^ rec.hash.charCodeAt(i);
-  }
-  if (diff !== 0) {
-    await env.MESHES!.put(ADMIN_RESET_CODE_KEY,
-      JSON.stringify({ ...rec, tries }), { httpMetadata: { contentType: 'application/json' } });
-    await _auditLog(env, { req, actorEmail, action: 'admin_password_reset_denied',
-      details: { reason: 'invalid_code', tries } });
-    return err(401, 'invalid_code');
-  }
-  // Usage unique.
-  await env.MESHES!.delete(ADMIN_RESET_CODE_KEY);
-  return null;
+  await _auditLog(env, { req, actorEmail: user.email,
+    action: 'admin_password_reset_code_sent', details: {} });
+  const masked = user.email.replace(/^(.{2}).*(@.*)$/, '$1***$2');
+  return json({ ok: true, sent_to: masked });
 }
 
 async function handleAdminResetPassword(req: Request, env: Env): Promise<Response> {
@@ -10710,13 +10665,17 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
   }
   if (!env.MESHES) return err(500, 'R2 binding required');
   const body = await req.json().catch(() => ({})) as { newPassword?: string; username?: string; code?: string; totp?: string };
-  // Code recu par mail : OBLIGATOIRE des que l'envoi de mail est configure.
-  // Sans cle Resend, on retombe sur l'ancien comportement (session admin
-  // seule) plutot que de rendre la rotation impossible — voir le commentaire
-  // du bloc ci-dessus.
-  if (_adminMailConfigured(env)) {
-    const codeErr = await _checkAdminResetCode(req, env, String(body?.code ?? '').trim(), user.email);
-    if (codeErr) return codeErr;
+  // Code recu par mail : TOUJOURS obligatoire. C'est lui qui prouve l'acces a
+  // la boite admin ; sans ca, la session Supabase seule suffirait a rotationner
+  // le mot de passe, et le mot de passe du dashboard ne protegerait rien face a
+  // son detenteur. La sortie de secours en cas de panne de mail est
+  // `wrangler secret put ADMIN_PASSWORD`, pas un contournement dans l'UI.
+  const code = String(body?.code ?? '').trim();
+  if (!code) return err(400, 'code_required');
+  if (!(await _supabaseVerifyRecovery(env, user.email, code))) {
+    await _auditLog(env, { req, actorEmail: user.email,
+      action: 'admin_password_reset_denied', details: { reason: 'invalid_code' } });
+    return err(401, 'invalid_code');
   }
   // 2FA OBLIGATOIRE sur la rotation dès que le TOTP est enrôlé. Sans ce
   // contrôle, le compte Supabase admin seul suffisait à réinitialiser le
