@@ -1399,7 +1399,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,   // skin pores, hair detail
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // face detail matters
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     true,
   },
   creature: {
@@ -1408,7 +1408,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // creature faces too
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     true,
   },
   insect: {
@@ -1417,7 +1417,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      false,  // no human face to gain from 1536
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,   // insects have no human face
   },
   vehicle: {
@@ -1426,7 +1426,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // hallucinates wear on smooth surfaces
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,   // no face to gain from 1536
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   building: {
@@ -1435,7 +1435,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   weapon: {
@@ -1444,7 +1444,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   prop: {
@@ -1453,7 +1453,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   environment: {
@@ -1462,7 +1462,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   icon: {
@@ -1471,7 +1471,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // no pores/fur on a flat icon
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,   // overkill for a small icon
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   avion: {
@@ -1480,7 +1480,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // hallucinates wear on smooth fuselage
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   bateau: {
@@ -1489,7 +1489,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // hallucinates wear on smooth hull
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   animal: {
@@ -1498,7 +1498,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // animal faces matter
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     true,
   },
   custom: {
@@ -1507,7 +1507,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       false,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      false,
-'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
+    'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     false,
   },
 };
@@ -13790,6 +13790,57 @@ function _meVertsNearPoint(geom, px, py, pz, r) {
   });
   return set;
 }
+// Same, but for SEVERAL brush points at once (main hit + its symmetry mirrors).
+// Ported from desktop `_meVertsNearPoints` — the singular version above is kept
+// untouched because Sculpt/Select still call it (don't break what already ships).
+function _meVertsNearPoints(geom, pts, r) {
+  if (!geom.boundsTree && geom.computeBoundsTree) { try { geom.computeBoundsTree(); } catch (_) {} }
+  const bvh = geom.boundsTree;
+  if (!bvh) return null;
+  const set = new Set();
+  const index = geom.index;
+  for (const pt of pts) {
+    _meSphere.center.set(pt.x, pt.y, pt.z); _meSphere.radius = r;
+    bvh.shapecast({
+      intersectsBounds: (box) => _meSphere.intersectsBox(box),
+      intersectsTriangle: (_tri, triIndex) => {
+        const b = triIndex * 3;
+        if (index) { set.add(index.getX(b)); set.add(index.getX(b + 1)); set.add(index.getX(b + 2)); }
+        else { set.add(b); set.add(b + 1); set.add(b + 2); }
+        return false;
+      },
+    });
+  }
+  return set;
+}
+// Brush application points: the hit point + its mirror across each active
+// symmetry axis (mesh-local space), so Paint honours the X/Y/Z buttons like
+// Sculpt already does. Ported from desktop `_meBrushPoints`, MINUS the
+// `symOffset` term: the cloud editor has no draggable symmetry-plane gizmo
+// (meState.symOffset does not exist here), so the mirror plane is the mesh
+// origin — exactly what the cloud Sculpt branch already assumes.
+function _meBrushPoints(point) {
+  const pts = [point];
+  const ax = meState.symmetryAxes;
+  if (ax.x || ax.y || ax.z) {
+    const combos = [];
+    if (ax.x) combos.push([1, 0, 0]);
+    if (ax.y) combos.push([0, 1, 0]);
+    if (ax.z) combos.push([0, 0, 1]);
+    if (ax.x && ax.y) combos.push([1, 1, 0]);
+    if (ax.x && ax.z) combos.push([1, 0, 1]);
+    if (ax.y && ax.z) combos.push([0, 1, 1]);
+    if (ax.x && ax.y && ax.z) combos.push([1, 1, 1]);
+    for (const c of combos) {
+      const mp = point.clone();
+      if (c[0]) mp.x = -point.x;
+      if (c[1]) mp.y = -point.y;
+      if (c[2]) mp.z = -point.z;
+      pts.push(mp);
+    }
+  }
+  return pts;
+}
 
 // BVH lifecycle: keep the cached boundsTree in sync with geometry mutations,
 // else raycasts (where you click) and the brush's vertsNearPoint drift.
@@ -13836,21 +13887,28 @@ function _meApplyBrush(hit) {
     const r = meState.brushRadius;
     const rSq = r * r;
     const strength = meState.strength;
-    const px = point.x, py = point.y, pz = point.z;
-    // Ensure vertex colors exist
-    if (!geom.attributes.color) {
-      const colors = new Float32Array(pos.count * 3).fill(1);
-      geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      hit.object.material.vertexColors = true;
-      hit.object.material.needsUpdate = true;
-    }
-    const colorAttr = geom.attributes.color;
+    // Ensure vertex colours exist. Routed through the shared helper (same
+    // white "no tint" base as before) instead of the old inline create-if-
+    // missing: the helper also lifts a 0.7 grey base left behind by the SELECT
+    // tool and clears geom._selOnlyColor, which is what tells the exporter this
+    // attribute now holds real user paint and must be written to the GLB.
+    // _mePaintEnsureColor is a hoisted `function` declaration defined below.
+    const colorAttr = _mePaintEnsureColor(hit.object);
     const c = new THREE.Color(meState.color);
+    // Symmetry parity with desktop: paint the hit point AND its mirrors. With
+    // no axis active, pts === [point] and this is byte-for-byte the previous
+    // single-point behaviour (the nearest-distance loop runs once).
+    const pts = _meBrushPoints(point);  // main point + symmetry mirrors
+    const cand = _meVertsNearPoints(geom, pts, r);   // BVH: only in-radius verts
     const paintVert = (i) => {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-      const dx = vx - px, dy = vy - py, dz = vz - pz;
-      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) return;
-      const distSq = dx * dx + dy * dy + dz * dz;
+      let distSq = Infinity;  // nearest brush point (main or mirrored)
+      for (const pt of pts) {
+        const dx = vx - pt.x, dy = vy - pt.y, dz = vz - pt.z;
+        if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < distSq) distSq = d2;
+      }
       if (distSq > rSq) return;
       const dist = Math.sqrt(distSq);
       const falloff = 1 - (dist / r);
@@ -13862,7 +13920,6 @@ function _meApplyBrush(hit) {
         cb * (1 - blend) + c.b * blend
       );
     };
-    const cand = _meVertsNearPoint(geom, px, py, pz, r);   // BVH: only in-radius verts
     if (cand) { for (const i of cand) paintVert(i); }
     else { for (let i = 0; i < pos.count; i++) paintVert(i); }
     colorAttr.needsUpdate = true;
@@ -13978,6 +14035,86 @@ document.getElementById('me-paint-pick')?.addEventListener('click', async () => 
 document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
   meState.color = e.target.value;
 });
+// --- Extra Paint tools: Fill / Smooth / Reset (ported from desktop) ---
+// Creates the vertex-colour attribute filled WHITE, i.e. "no tint" (COLOR_0
+// multiplies the base texture in glTF). Deliberately NOT _meEnsureSelColor(),
+// which fills 0.7 grey because on cloud the SELECTION lives in that same
+// attribute — reusing it here would darken the whole mesh by 30%.
+function _mePaintEnsureColor(c) {
+  const geom = c.geometry;
+  if (!geom.attributes.color) {
+    geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geom.attributes.position.count * 3).fill(1), 3));
+  } else if (geom._selOnlyColor) {
+    // The attribute exists but was created by the SELECT tool, so its base is
+    // 0.7 grey. Painting on top of it would bake a 30% darkening into the mesh.
+    // Lift every non-selected vertex back to white ("no tint") before the first
+    // paint stroke; the orange selection itself is left untouched so switching
+    // Paint ⇄ Select back and forth never loses the current selection.
+    const col = geom.attributes.color;
+    for (let i = 0; i < col.count; i++) if (!_meOrange(col, i)) col.setXYZ(i, 1, 1, 1);
+    col.needsUpdate = true;
+  }
+  // From here on the attribute carries real user colour: it must survive into
+  // the exported GLB, so it is no longer "selection-only".
+  geom._selOnlyColor = false;
+  if (!c.material.vertexColors) { c.material.vertexColors = true; c.material.needsUpdate = true; }
+  return geom.attributes.color;
+}
+document.getElementById('me-paint-fill')?.addEventListener('click', () => {
+  if (!meState.mesh) return;
+  _mePushUndo();
+  const col = new THREE.Color(meState.color);
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.position) return;
+    const color = _mePaintEnsureColor(c);
+    for (let i = 0; i < color.count; i++) color.setXYZ(i, col.r, col.g, col.b);
+    color.needsUpdate = true;
+  });
+  showToast('Filled with current colour', 'success', 1200);
+});
+document.getElementById('me-paint-reset')?.addEventListener('click', () => {
+  if (!meState.mesh) return;
+  _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.color) return;
+    const color = c.geometry.attributes.color;
+    for (let i = 0; i < color.count; i++) color.setXYZ(i, 1, 1, 1);
+    color.needsUpdate = true;
+    // Cloud-specific: the face selection is encoded IN the colours (orange),
+    // so wiping them to white also wipes the selection — drop the side map too
+    // (kept in sync by _meSnapshot/_meRestore) or undo would resurrect a
+    // selection that no longer exists on screen.
+    c.geometry._selSaved = new Map();
+  });
+  // Same guarded call as _meRestore: cloud has no _meUpdateSelButtons yet (its
+  // Select buttons are always enabled and toast "Select faces first" instead),
+  // so this is a no-op today and wires itself up if that helper ever lands.
+  if (typeof _meUpdateSelButtons === 'function') _meUpdateSelButtons();
+  showToast('Paint reset', 'success', 1200);
+});
+document.getElementById('me-paint-smooth')?.addEventListener('click', () => {
+  if (!meState.mesh) return;
+  _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, color = geom.attributes.color, idx = geom.index.array, n = color.count;
+    const sr = new Float32Array(n), sg = new Float32Array(n), sb = new Float32Array(n), cnt = new Float32Array(n);
+    const acc = (i, j) => { sr[i] += color.getX(j); sg[i] += color.getY(j); sb[i] += color.getZ(j); cnt[i]++; };
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t], b = idx[t + 1], d = idx[t + 2];
+      acc(a, b); acc(a, d); acc(b, a); acc(b, d); acc(d, a); acc(d, b);
+    }
+    for (let i = 0; i < n; i++) {
+      if (!cnt[i]) continue;
+      color.setXYZ(i,
+        color.getX(i) * 0.4 + (sr[i] / cnt[i]) * 0.6,
+        color.getY(i) * 0.4 + (sg[i] / cnt[i]) * 0.6,
+        color.getZ(i) * 0.4 + (sb[i] / cnt[i]) * 0.6);
+    }
+    color.needsUpdate = true;
+  });
+  showToast('Colours smoothed', 'success', 1200);
+});
 // Select actions
 document.getElementById('me-sel-delete')?.addEventListener('click', () => {
   if (!meState.mesh) return;
@@ -14033,12 +14170,32 @@ document.getElementById('me-sel-clear')?.addEventListener('click', () => {
 });
 
 // ── Extended Select tools (ported from desktop, adapted to the cloud's
-// orange-selection model: a vertex is selected when r>0.9 & g<0.5). ──
-const _meOrange = (col, i) => col.getX(i) > 0.9 && col.getY(i) < 0.5;
+// orange-selection model: the selection lives IN the COLOR_0 attribute as the
+// exact triple SEL_RGB below, over a 0.7 grey base). ──
+//
+// The test used to be the loose `r > 0.9 && g < 0.5`. That was safe while the
+// attribute only ever held selection bookkeeping, but vertex Paint writes real
+// user colours into the SAME attribute — and the paint picker defaults to RED
+// (#ff0000 → 1,0,0), which satisfies the loose test. Consequence: paint a few
+// strokes with the default colour, switch to the Select tab, and every painted
+// vertex reads back as "selected" — Delete / Crop / Isolate would then destroy
+// exactly the geometry the user had just painted.
+// Every writer in this file sets the triple EXACTLY (grep `1.0, 0.3, 0.1`), so
+// an exact match with a small float32 epsilon is both sufficient and strict:
+// only the literal selection colour counts as a selection.
+const SEL_RGB = [1.0, 0.3, 0.1];
+const _meOrange = (col, i) => Math.abs(col.getX(i) - SEL_RGB[0]) < 0.02
+                           && Math.abs(col.getY(i) - SEL_RGB[1]) < 0.02
+                           && Math.abs(col.getZ(i) - SEL_RGB[2]) < 0.02;
 function _meEnsureSelColor(c) {
   const geom = c.geometry;
   if (!geom.attributes.color) {
     geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geom.attributes.position.count * 3).fill(0.7), 3));
+    // Mark the attribute as pure selection bookkeeping: it carries no user
+    // colour, so it must NOT be written to the exported GLB (its 0.7 grey base
+    // would darken the whole mesh by 30%). Vertex Paint clears the flag as soon
+    // as it writes real colours — see _mePaintEnsureColor / _meSetSelectionTint.
+    geom._selOnlyColor = true;
   }
   // Only flip the material when it actually changes: `needsUpdate = true` forces
   // a shader re-acquisition, and the Add/Erase brush now calls this ~15x/s.
@@ -22073,3 +22230,139 @@ if (API.onAppCloseRequested) {
 // INIT
 // ============================================================
 showPage('projects');
+
+// ============================================================
+// MENU ⋮ DES VIGNETTES — port verbatim du desktop (2026-07-25)
+// Remplace les boutons d'action qui apparaissaient PAR-DESSUS la
+// vignette au survol par un menu déroulant ouvert au survol du ⋮.
+// Proxy pattern : les boutons originaux restent dans le DOM (masqués
+// par CSS) ; chaque item du menu relaie son .click() vers l'original,
+// donc les handlers existants marchent sans aucune modification.
+//
+// Conséquence côté CLOUD : tout bouton d'action présent DANS une
+// .version-thumb et portant une des classes de ACTION_SEL est embarqué
+// automatiquement, y compris ceux ajoutés plus tard par
+// cloud-overrides.js. Les actions cloud-only actuelles (« Publier sur
+// la marketplace » #ws-mesh-publish-btn / #ws-image-publish-btn) vivent
+// dans la barre du workspace, PAS dans la vignette : elles ne sont donc
+// ni masquées ni déplacées — comportement inchangé. Le badge marketplace
+// (.published-badge, posé sur .version-thumb par _badgeAllCards) est un
+// badge de STATUT : il reste sur la vignette (bas-gauche), le ⋮ est en
+// haut-droite, aucun chevauchement.
+// ============================================================
+(() => {
+  const ACTION_SEL = ['.version-delete-btn', '.version-source-btn',
+    '.version-mesh-btn', '.version-rig-btn', '.version-history-btn'].join(',');
+
+  let menu = null;          // singleton #v-kebab-menu
+  let anchorThumb = null;   // vignette dont le menu est ouvert
+  let anchorKebab = null;
+  let closeTimer = 0;
+
+  function ensureMenu() {
+    if (menu) return menu;
+    menu = document.createElement('div');
+    menu.id = 'v-kebab-menu';
+    menu.addEventListener('mouseenter', () => clearTimeout(closeTimer));
+    menu.addEventListener('mouseleave', scheduleClose);
+    document.body.appendChild(menu);
+    // Fermer si on scrolle/redimensionne (le menu est en position fixed).
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('resize', closeMenu);
+    return menu;
+  }
+
+  function scheduleClose() {
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(closeMenu, 280);
+  }
+
+  function closeMenu() {
+    clearTimeout(closeTimer);
+    if (menu) { menu.classList.remove('open'); menu.innerHTML = ''; }
+    if (anchorKebab) anchorKebab.classList.remove('menu-open');
+    anchorThumb = null; anchorKebab = null;
+  }
+
+  function openMenu(thumb, kebab) {
+    const m = ensureMenu();
+    closeMenu();
+    const actions = Array.from(thumb.querySelectorAll(ACTION_SEL));
+    if (!actions.length) return;
+    anchorThumb = thumb; anchorKebab = kebab;
+    kebab.classList.add('menu-open');
+    for (const orig of actions) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'vkm-item'
+        + (orig.classList.contains('version-delete-btn') ? ' vkm-delete' : '');
+      const ico = document.createElement('span');
+      ico.className = 'vkm-ico';
+      ico.innerHTML = orig.innerHTML;
+      const label = document.createElement('span');
+      label.className = 'vkm-label';
+      label.textContent = orig.getAttribute('title') || '';
+      item.append(ico, label);
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeMenu();
+        orig.click();   // relaie vers le handler d'origine
+      });
+      m.appendChild(item);
+    }
+    // Position : sous le ⋮, aligné à droite ; remonte si déborde en bas.
+    m.classList.add('open');
+    const kr = kebab.getBoundingClientRect();
+    const mw = m.offsetWidth, mh = m.offsetHeight;
+    let left = Math.min(Math.max(8, kr.right - mw), window.innerWidth - mw - 8);
+    let top = kr.bottom + 4;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, kr.top - mh - 4);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+  }
+
+  function enhanceThumb(thumb) {
+    if (thumb.dataset.vkm) return;
+    if (!thumb.querySelector(ACTION_SEL)) return;   // rien à proposer
+    thumb.dataset.vkm = '1';
+    const kebab = document.createElement('button');
+    kebab.type = 'button';
+    kebab.className = 'v-kebab';
+    kebab.title = 'Actions';   // traduit par la passe i18n des attributs title
+    kebab.textContent = '\u22EE';   // ⋮
+    kebab.addEventListener('mouseenter', () => openMenu(thumb, kebab));
+    kebab.addEventListener('mouseleave', scheduleClose);
+    kebab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (anchorThumb === thumb) closeMenu();
+      else openMenu(thumb, kebab);
+    });
+    thumb.appendChild(kebab);
+  }
+
+  function enhanceAll() {
+    document.querySelectorAll('.version-thumb:not([data-vkm])').forEach(enhanceThumb);
+    // Le strip a pu être re-rendu pendant que le menu était ouvert.
+    if (anchorThumb && !anchorThumb.isConnected) closeMenu();
+  }
+
+  // Les strips se re-rendent par innerHTML → observer léger (childList).
+  const mo = new MutationObserver((muts) => {
+    for (const mu of muts) {
+      for (const n of mu.addedNodes) {
+        if (n.nodeType === 1 && (n.matches?.('.version-thumb')
+            || n.querySelector?.('.version-thumb'))) {
+          enhanceAll();
+          return;
+        }
+      }
+      for (const n of mu.removedNodes) {
+        if (anchorThumb && n.nodeType === 1 && n.contains?.(anchorThumb)) {
+          closeMenu();
+        }
+      }
+    }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+  enhanceAll();
+})();
