@@ -145,7 +145,14 @@
     var scaleX = rect.width / cloneCanvas.width || 1;
     var displaySize = Math.max(4, cloneState.brushSize * scaleX);
     var sx, sy;
-    if (cloneState.offset) {
+    // Le decalage ne vaut QUE pendant un trait en cours. Entre deux traits,
+    // onMouseDown recalcule offset = sourcePoint - point_de_clic, donc le
+    // prochain trait repartira TOUJOURS de sourcePoint : afficher
+    // "curseur + ancien decalage" au survol montrait une zone source qui
+    // ne sera jamais utilisee, et le marqueur SAUTAIT au moment du clic
+    // (bug signale : "a chaque clic gauche la zone copiee bouge").
+    // Au survol on montre donc la vraie source du prochain trait.
+    if (cloneState.offset && mgr && mgr.painting) {
       sx = x + cloneState.offset.dx;
       sy = y + cloneState.offset.dy;
     } else {
