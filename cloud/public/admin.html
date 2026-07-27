@@ -323,6 +323,15 @@
     <h3>🔐 Admin password</h3>
     <p class="muted" style="margin-bottom:16px">Even logged in as admin, this dashboard needs the admin password (separate from the Supabase login).</p>
     <form id="password-form" autocomplete="off" onsubmit="return adminLogin(event)">
+      <!-- Nom d'utilisateur : second champ demande le 2026-07-27. La valeur qui
+           fait foi est stockee dans _meta/admin_password.json (modifiable depuis
+           l'ecran de rotation) ; a defaut 'admin'. Ce n'est pas un secret, c'est
+           un champ de plus a connaitre — le worker renvoie le MEME message
+           d'erreur pour un nom faux et un mot de passe faux, pour qu'on ne
+           puisse pas enumerer les noms valides. -->
+      <input id="username-input" type="text" autocomplete="username"
+             placeholder="Admin username"
+             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
       <input id="password-input" type="password" autocomplete="current-password"
              placeholder="Admin password"
              style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:12px;" />
@@ -363,6 +372,12 @@
         rotate the dashboard password. Every attempt is written to the
         connection log. New password must be at least 20 characters.
       </p>
+      <!-- Le nom d'utilisateur se change ICI, en meme temps que le mot de passe.
+           Laisse vide = on garde le nom en vigueur (le worker ne le remet pas
+           a 'admin'). Evite d'avoir a passer par `wrangler secret put`. -->
+      <input id="forgot-pw-username" type="text" autocomplete="username"
+             placeholder="Admin username (leave empty to keep the current one)"
+             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
       <input id="forgot-pw-input" type="password" autocomplete="new-password"
              placeholder="New admin password (≥20 chars)"
              style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
@@ -1088,7 +1103,10 @@
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ newPassword: a }),
+          body: JSON.stringify({
+            newPassword: a,
+            username: (document.getElementById('forgot-pw-username')?.value || '').trim(),
+          }),
         });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
@@ -1111,6 +1129,7 @@
     async function adminLogin(ev) {
       ev.preventDefault();
       const input = document.getElementById('password-input');
+      const userInput = document.getElementById('username-input');
       const totpInput = document.getElementById('totp-input');
       const totpRow = document.getElementById('totp-row');
       const errEl = document.getElementById('password-error');
@@ -1121,6 +1140,7 @@
           headers: { 'content-type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
+            username: userInput?.value || '',
             password: input.value,
             totp: totpInput?.value || undefined,
           }),

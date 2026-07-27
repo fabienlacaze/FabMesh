@@ -141,6 +141,10 @@ export interface Env {
   // valid admin_session cookie set by POST /api/admin/login with this
   // password. Stored as a Cloudflare Worker secret — never logged.
   ADMIN_PASSWORD?: string;
+  // Nom d'utilisateur du dashboard. Source de secours uniquement : la
+  // valeur qui fait foi est celle stockee dans _meta/admin_password.json
+  // (modifiable depuis l'ecran de rotation, sans wrangler).
+  ADMIN_USERNAME?: string;
 
   SUPABASE_SERVICE_ROLE_KEY?: string;
 
@@ -10362,6 +10366,30 @@ async function _getAdminPasswordSource(env: Env): Promise<AdminPwSource> {
   return { mode: 'none' };
 }
 
+/** Nom d'utilisateur admin en vigueur.
+ *  Ordre : ce qui est stocke dans _meta/admin_password.json (pose par l'ecran
+ *  de rotation) > env.ADMIN_USERNAME > 'admin'.
+ *  Il y a TOUJOURS une valeur : sans repli, une installation qui n'a jamais
+ *  rotationne son mot de passe n'aurait aucun nom valide et serait enfermee
+ *  dehors. Le nom n'est pas un secret, c'est un second champ a connaitre. */
+async function _getAdminUsername(env: Env): Promise<string> {
+  if (env.MESHES) {
+    try {
+      const obj = await env.MESHES.get('_meta/admin_password.json');
+      if (obj) {
+        const parsed = await obj.json() as { username?: string };
+        if (parsed?.username && String(parsed.username).trim()) {
+          return String(parsed.username).trim().toLowerCase();
+        }
+      }
+    } catch { /* repli ci-dessous */ }
+  }
+  if (env.ADMIN_USERNAME && env.ADMIN_USERNAME.trim()) {
+    return env.ADMIN_USERNAME.trim().toLowerCase();
+  }
+  return 'admin';
+}
+
 async function _hashAdminPassword(salt: string, password: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256',
     new TextEncoder().encode(salt + ':' + password));
@@ -10458,16 +10486,32 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   // Stale window — reset.
   if (Date.now() - fails.first_ts > HOUR) fails = { count: 0, first_ts: 0 };
 
-  let body: { password?: string; totp?: string };
-  try { body = await req.json() as { password?: string; totp?: string }; } catch { return err(400, 'bad json'); }
+  let body: { username?: string; password?: string; totp?: string };
+  try { body = await req.json() as { username?: string; password?: string; totp?: string }; } catch { return err(400, 'bad json'); }
   const provided = String(body.password ?? '');
   if (!provided) return err(400, 'password required');
+  const providedUser = String(body.username ?? '').trim().toLowerCase();
+  if (!providedUser) return err(400, 'username required');
   const _recordFail = async () => {
     fails.count += 1;
     if (fails.first_ts === 0) fails.first_ts = Date.now();
     try { await env.MESHES?.put(lockoutKey, JSON.stringify(fails)); } catch {}
   };
-  let ok = false;
+  // Le nom d'utilisateur doit correspondre. On ne dit JAMAIS lequel des deux
+  // champs est faux : un message distinct permettrait d'enumerer les noms
+  // valides. Meme message, meme compteur d'echecs, meme verrouillage.
+  const expectedUser = await _getAdminUsername(env);
+  let ok = providedUser === expectedUser;
+  if (!ok) {
+    await _recordFail();
+    await _auditLog(env, {
+      req, actorEmail: user.email,
+      action: 'admin_login_failed',
+      details: { reason: 'invalid_username', tried: providedUser.slice(0, 40), fails: fails.count + 1 },
+    });
+    return err(401, 'invalid credentials');
+  }
+  ok = false;
   if (pwSrc.mode === 'env') {
     if (provided.length === pwSrc.literal.length) {
       let diff = 0;
@@ -10491,7 +10535,7 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
       action: 'admin_login_failed',
       details: { reason: 'invalid_password', fails: fails.count },
     });
-    return err(401, 'invalid password');
+    return err(401, 'invalid credentials');
   }
   // Successful password check — wipe the IP's failure counter so the
   // admin isn't locked out after a typo + correct retry.
@@ -10544,7 +10588,7 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
     return err(403, 'forbidden — your Supabase email is not in the admin allow-list');
   }
   if (!env.MESHES) return err(500, 'R2 binding required');
-  const body = await req.json().catch(() => ({})) as { newPassword?: string; totp?: string };
+  const body = await req.json().catch(() => ({})) as { newPassword?: string; username?: string; totp?: string };
   // 2FA OBLIGATOIRE sur la rotation dès que le TOTP est enrôlé. Sans ce
   // contrôle, le compte Supabase admin seul suffisait à réinitialiser le
   // mot de passe du dashboard — le second facteur ne servait à rien
@@ -10572,8 +10616,14 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
   crypto.getRandomValues(saltBuf);
   const salt = Array.from(saltBuf).map(b => b.toString(16).padStart(2, '0')).join('');
   const hash = await _hashAdminPassword(salt, newPassword);
+  // Le nom d'utilisateur est persiste a cote du hash : il devient ainsi
+  // modifiable depuis le dashboard, sans passer par `wrangler secret put`.
+  // Champ vide = on garde le nom en vigueur (on ne le remet pas a 'admin').
+  const newUsername = String(body?.username ?? '').trim().toLowerCase()
+    || await _getAdminUsername(env);
   await env.MESHES.put('_meta/admin_password.json', JSON.stringify({
     salt, hash,
+    username: newUsername,
     rotated_at: new Date().toISOString(),
     rotated_by: user.email,
   }), { httpMetadata: { contentType: 'application/json' } });
@@ -10589,7 +10639,7 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
   await _auditLog(env, {
     req, actorEmail: user.email,
     action: 'admin_password_reset',
-    details: { mode: 'r2_hash' },
+    details: { mode: 'r2_hash', username: newUsername },
   });
   return json({ ok: true, message: 'Password rotated. Sign in with your new password.' });
 }
