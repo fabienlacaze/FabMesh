@@ -762,7 +762,12 @@
           <div id="totp-status-line" style="color:var(--text-2);">Loading…</div>
           <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-accent" id="totp-enroll-btn" style="display:none;" onclick="startTotpEnroll()">📱 Enroll Microsoft Authenticator</button>
-            <button class="btn" id="totp-disable-btn" style="display:none; background:var(--err); border-color:var(--err);" onclick="startTotpDisable()">Disable 2FA</button>
+            <!-- Bouton « Disable 2FA » RETIRE le 2026-07-27 : on ne doit pas
+                 pouvoir desactiver l'authentification depuis le dashboard.
+                 L'endpoint refuse desormais (403 totp_disable_unavailable).
+                 Recuperation en cas de perte de l'authenticator :
+                 npx wrangler r2 object delete
+                   "myfabmesh-meshes/_meta/admin-totp.json" --remote -->
           </div>
         </div>
 

@@ -12146,18 +12146,24 @@ async function handleAdminTotpConfirm(req: Request, env: Env): Promise<Response>
 async function handleAdminTotpDisable(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
   if (guard instanceof Response) return guard;
-  let body: { password?: string; code?: string };
-  try { body = await req.json() as { password?: string; code?: string }; } catch { return err(400, 'bad json'); }
-  const pw = String(body.password || '');
-  if (!(await _verifyAdminPassword(env, pw))) return err(401, 'invalid password');
-  const cur = await _getAdminTotpSecret(env);
-  if (cur) {
-    const code = String(body.code || '').trim();
-    if (!(await _totpVerify(cur, code))) return err(401, 'invalid code');
-  }
-  await env.MESHES.delete(TOTP_KEY);
-  await _auditLog(env, { req, actorEmail: guard.email, action: 'totp_disable' });
-  return json({ ok: true });
+  // DESACTIVATION DEPUIS LE WEB REFUSEE (decision user du 2026-07-27) :
+  // « on ne doit pas pouvoir desactiver l'authentification depuis la dashboard
+  // admin ». Le controle precedent (mot de passe + code courant) empechait deja
+  // qu'un cookie vole suffise, mais laissait la 2FA retirable par quelqu'un
+  // ayant obtenu les deux — c'est-a-dire exactement le scenario contre lequel
+  // la 2FA existe.
+  //
+  // RECUPERATION en cas de perte de l'authenticator, hors du web et donc hors
+  // de portee d'un attaquant qui n'aurait que des identifiants :
+  //   npx wrangler r2 object delete "myfabmesh-meshes/_meta/admin-totp.json" --remote
+  // Cela exige un acces au compte Cloudflare depuis une machine autorisee —
+  // un facteur reellement distinct. La tentative est journalisee.
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: 'totp_disable_refused',
+    details: { reason: 'web_disable_removed_by_policy' },
+  });
+  return err(403, 'totp_disable_unavailable');
 }
 
 /** POST /api/admin/force-logout-all — invalidate every active Supabase
