@@ -338,9 +338,10 @@
       <!-- TOTP field shown only after the first login attempt returns
            "totp_required" — keeps the form clean for the initial
            (pre-enrolment) login. -->
-      <!-- 2FA retiree le 2026-07-27 : le worker ne renvoie plus jamais
-           'totp_required', donc cette ligne ne s'affiche plus. Conservee
-           masquee pour ne pas casser le JS qui la reference. -->
+      <!-- Champ 2FA. Masque par defaut : il n'apparait QUE si le worker
+           repond 'totp_required', c'est-a-dire uniquement lorsqu'un secret
+           est enrole. Garde l'ecran de connexion sobre tant que la 2FA n'est
+           pas activee. -->
       <div id="totp-row" style="display:none; margin-bottom:12px;">
         <label style="display:block; font-size:12px; color:var(--text-2); margin-bottom:6px;">
           🔑 Microsoft Authenticator code (6 digits)
@@ -1062,6 +1063,10 @@
     // down once the rest of the admin script has loaded.
     const SENSITIVE_TABS = new Set(['active', 'messages', 'finance', 'bytype', 'pricing', 'users', 'services', 'audit']);
     let _sensitiveUnlocked = false;
+    // Mot de passe saisi a la connexion, garde en memoire pour la duree de la
+    // page. Sert a pre-remplir les cartes qui en ont REELLEMENT besoin cote
+    // serveur (Pricing, Services) sans redemander la meme preuve a l'ecran.
+    let _loginPassword = '';
     let _sensitivePassword = '';
     let _sensitivePendingTab = null;
 
@@ -1249,6 +1254,12 @@
       ev.preventDefault();
       const input = document.getElementById('password-input');
       const userInput = document.getElementById('username-input');
+      // Memorise en MEMOIRE (jamais en localStorage/sessionStorage) le mot de
+      // passe saisi ici, pour que les cartes Pricing et Services n'aient pas a
+      // le redemander : leurs endpoints le verifient VRAIMENT cote serveur
+      // (_verifyAdminPassword), on ne peut donc pas s'en passer — mais rien
+      // n'oblige a le faire retaper par l'utilisateur qui vient de le fournir.
+      _loginPassword = input.value;
       const totpInput = document.getElementById('totp-input');
       const totpRow = document.getElementById('totp-row');
       const errEl = document.getElementById('password-error');
@@ -2794,10 +2805,14 @@
     let _killswitchPassword = '';
     let _servicesState = { modal_enabled: true, site_enabled: true };
 
-    async function unlockServicesPanel() {
+    async function unlockServicesPanel(auto) {
       const input = document.getElementById('services-password-input');
       const errEl = document.getElementById('services-lock-err');
-      const pw = input.value;
+      // `auto` = deverrouillage automatique avec le mot de passe deja saisi a
+      // la connexion. L'endpoint le verifie VRAIMENT cote serveur, on ne peut
+      // donc pas s'en passer — mais on ne le redemande pas a l'utilisateur.
+      const pw = auto ? _loginPassword : input.value;
+      if (auto && !pw) return;   // pas de mot de passe en memoire -> on laisse la carte
       errEl.style.display = 'none';
       // Probe with a no-op toggle that re-applies the current state.
       // First fetch the current state, then "toggle" modal to its own
@@ -3237,10 +3252,12 @@
     // sessionStorage / localStorage, same convention as Services.
     let _pricingPassword = '';
 
-    async function unlockPricing() {
+    async function unlockPricing(auto) {
       const input = document.getElementById('pricing-unlock-input');
       const errEl = document.getElementById('pricing-lock-err');
-      const pw = input.value;
+      // Voir unlockServicesPanel : meme raison, meme mecanisme.
+      const pw = auto ? _loginPassword : input.value;
+      if (auto && !pw) return;
       errEl.style.display = 'none';
       // Probe by issuing a no-op save (re-saves current state). Wrong
       // password -> 401, right password -> 200 and we reveal the editor.
@@ -4032,6 +4049,12 @@
         if (t === 'active') { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'active'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'users'   && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
+        // Pricing et Services : on tente le deverrouillage avec le mot de
+        // passe de la connexion. En cas d'echec (page rechargee, cookie encore
+        // valide mais mot de passe plus en memoire) la carte reste affichee et
+        // l'utilisateur peut le saisir — aucun cul-de-sac.
+        if (t === 'pricing'  && _loginPassword) { unlockPricing(true); }
+        if (t === 'services' && _loginPassword) { unlockServicesPanel(true); }
         if (t === 'audit'   && !btn.dataset.loaded) {
           btn.dataset.loaded = '1';
           document.getElementById('audit-day-input').value = new Date().toISOString().slice(0, 10);

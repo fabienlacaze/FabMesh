@@ -10541,13 +10541,31 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   // admin isn't locked out after a typo + correct retry.
   try { await env.MESHES?.delete(lockoutKey); } catch {}
 
-  // 2FA RETIREE (decision produit du 2026-07-27). L'acces admin repose
-  // desormais sur DEUX choses et deux seulement : une session Supabase de
-  // compte admin, et le mot de passe du dashboard. Le JOURNAL DE CONNEXION
-  // est conserve (_auditLog plus bas) — c'est lui qui donne la tracabilite.
-  // Le code TOTP ajoutait une marche de plus a chaque connexion et bloquait
-  // la rotation du mot de passe sans porte de sortie.
+  // 2FA REACTIVEE A LA CONNEXION (demande user du 2026-07-27, apres l'avoir
+  // retiree plus tot le meme jour). Ce qui avait motive le retrait n'etait pas
+  // le second facteur lui-meme mais l'IMPASSE qu'il creait : la rotation du
+  // mot de passe l'exigeait sans offrir de champ pour le saisir. Cette impasse
+  // n'existe plus — la rotation passe desormais par un code recu par mail
+  // (meme rail que les utilisateurs), qui ne demande AUCUN code TOTP. Un
+  // authenticator perdu ne peut donc plus enfermer dehors.
+  //
+  // Le controle reste conditionnel a l'enrolement : tant qu'aucun secret n'est
+  // pose, la connexion se fait au mot de passe seul, ce qui permet d'atteindre
+  // l'ecran d'enrolement (onglet System > 2FA) sans oeuf-et-poule.
   const totpSecret = await _getAdminTotpSecret(env);
+  if (totpSecret) {
+    const code = String(body.totp ?? '').trim();
+    if (!code) return err(401, 'totp_required');
+    if (!(await _totpVerify(totpSecret, code))) {
+      await _recordFail();
+      await _auditLog(env, {
+        req, actorEmail: user.email,
+        action: 'admin_login_failed',
+        details: { reason: 'invalid_totp' },
+      });
+      return err(401, 'invalid totp');
+    }
+  }
   // Connexion admin réussie — tracée avec l'IP par _auditLog.
   await _auditLog(env, {
     req, actorEmail: user.email,
