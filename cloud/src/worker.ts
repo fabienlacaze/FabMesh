@@ -10664,7 +10664,11 @@ async function handleAdminResetRequest(req: Request, env: Env): Promise<Response
  *  au moment du changement de mot de passe — d'ou ce ticket.
  *  Stocke HASHE, valable 5 minutes, usage unique. */
 const ADMIN_RESET_TICKET_KEY = '_meta/admin_reset_ticket.json';
-const ADMIN_RESET_TICKET_TTL_MS = 5 * 60 * 1000;
+// 15 minutes, pas 5. Le ticket est delivre APRES validation du code, et il
+// reste ensuite a CHOISIR un mot de passe d'au moins 20 caracteres — ce qui
+// prend souvent plus de 5 minutes. Constate en production le 2026-07-27 :
+// code accepte, puis « Your verification expired » au moment de valider.
+const ADMIN_RESET_TICKET_TTL_MS = 15 * 60 * 1000;
 
 /** POST /api/admin/reset-verify — valide le code recu par mail et rend un
  *  ticket. Etape intermediaire, calquee sur la page utilisateur qui verifie le
@@ -10704,7 +10708,7 @@ async function handleAdminResetVerify(req: Request, env: Env): Promise<Response>
 async function _consumeAdminResetTicket(env: Env, provided: string, email: string): Promise<Response | null> {
   const obj = await env.MESHES!.get(ADMIN_RESET_TICKET_KEY);
   if (!obj) return err(400, 'code_required');
-  let rec: { salt?: string; hash?: string; exp?: number; email?: string };
+  let rec: { salt?: string; hash?: string; exp?: number; email?: string; tries?: number };
   try { rec = await obj.json(); } catch { return err(400, 'code_required'); }
   if (!rec?.salt || !rec?.hash || !rec.exp || Date.now() > rec.exp) {
     await env.MESHES!.delete(ADMIN_RESET_TICKET_KEY);
@@ -10716,8 +10720,23 @@ async function _consumeAdminResetTicket(env: Env, provided: string, email: strin
   for (let i = 0; i < computed.length && i < rec.hash.length; i++) {
     diff |= computed.charCodeAt(i) ^ rec.hash.charCodeAt(i);
   }
-  await env.MESHES!.delete(ADMIN_RESET_TICKET_KEY);   // usage unique, succes ou echec
-  return diff === 0 ? null : err(401, 'ticket_invalid');
+  if (diff !== 0) {
+    // On NE DETRUIT PAS le ticket sur un simple echec de comparaison : la
+    // premiere version le brulait a chaque appel, si bien qu'un mot de passe
+    // trop court ou toute autre erreur cote client condamnait definitivement
+    // la tentative et forcait a redemander un code. On compte les essais a la
+    // place, et on ne brule qu'au-dela de 5.
+    const tries = (rec.tries ?? 0) + 1;
+    if (tries >= 5) {
+      await env.MESHES!.delete(ADMIN_RESET_TICKET_KEY);
+      return err(429, 'too_many_attempts');
+    }
+    await env.MESHES!.put(ADMIN_RESET_TICKET_KEY,
+      JSON.stringify({ ...rec, tries }), { httpMetadata: { contentType: 'application/json' } });
+    return err(401, 'ticket_invalid');
+  }
+  await env.MESHES!.delete(ADMIN_RESET_TICKET_KEY);   // consomme au SUCCES seulement
+  return null;
 }
 
 async function handleAdminResetPassword(req: Request, env: Env): Promise<Response> {
@@ -10733,17 +10752,6 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
   // le mot de passe, et le mot de passe du dashboard ne protegerait rien face a
   // son detenteur. La sortie de secours en cas de panne de mail est
   // `wrangler secret put ADMIN_PASSWORD`, pas un contournement dans l'UI.
-  const code = String(body?.code ?? '').trim();
-  if (!code) return err(400, 'code_required');
-  if (!(await _supabaseVerifyRecovery(env, user.email, code))) {
-    await _auditLog(env, { req, actorEmail: user.email,
-      action: 'admin_password_reset_denied', details: { reason: 'invalid_code' } });
-    return err(401, 'invalid_code');
-  }
-  // 2FA OBLIGATOIRE sur la rotation dès que le TOTP est enrôlé. Sans ce
-  // contrôle, le compte Supabase admin seul suffisait à réinitialiser le
-  // mot de passe du dashboard — le second facteur ne servait à rien
-  // puisqu'il était contournable par « Forgot password ».
   // Le TICKET delivre par /api/admin/reset-verify est OBLIGATOIRE. Il prouve
   // qu'un code recu sur la boite admin vient d'etre valide par Supabase — le
   // meme code que recoit un utilisateur normal. Sans lui, la session Supabase

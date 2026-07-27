@@ -1216,9 +1216,11 @@
           msg.style.color = 'var(--err)';
           const e = j.error || `HTTP ${r.status}`;
           msg.textContent =
-            e === 'code_required' || e === 'ticket_expired' || e === 'ticket_invalid'
-              ? 'Your verification expired. Start again with “Send code”.'
-              : e;
+            e === 'ticket_expired'    ? 'Your verification expired (15 min). Start again with “Send code”.'
+            : e === 'code_required'   ? 'No verified code found — click “Send code” and verify it first.'
+            : e === 'ticket_invalid'  ? 'Verification mismatch. Start again with “Send code”.'
+            : e === 'too_many_attempts' ? 'Too many attempts. Start again with “Send code”.'
+            : e;
           return;
         }
         msg.style.color = 'var(--ok, #4caf50)';
