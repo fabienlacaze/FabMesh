@@ -10657,6 +10657,69 @@ async function handleAdminResetRequest(req: Request, env: Env): Promise<Response
   return json({ ok: true, sent_to: masked });
 }
 
+/** Ticket de rotation : delivre APRES validation du code, consomme par la
+ *  rotation. Il joue le role que la SESSION Supabase joue pour un utilisateur
+ *  normal : verifyOtp cree une session, puis updateUser s'en sert. Ici
+ *  verifyOtp consomme le code cote Supabase, donc on ne peut pas le revalider
+ *  au moment du changement de mot de passe — d'ou ce ticket.
+ *  Stocke HASHE, valable 5 minutes, usage unique. */
+const ADMIN_RESET_TICKET_KEY = '_meta/admin_reset_ticket.json';
+const ADMIN_RESET_TICKET_TTL_MS = 5 * 60 * 1000;
+
+/** POST /api/admin/reset-verify — valide le code recu par mail et rend un
+ *  ticket. Etape intermediaire, calquee sur la page utilisateur qui verifie le
+ *  code AVANT d'afficher le choix du mot de passe. */
+async function handleAdminResetVerify(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized — sign in with your admin Supabase account first');
+  if (!user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
+    return err(403, 'forbidden — your Supabase email is not in the admin allow-list');
+  }
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  const body = await req.json().catch(() => ({})) as { code?: string };
+  const code = String(body?.code ?? '').trim();
+  if (!code) return err(400, 'code_required');
+  if (!(await _supabaseVerifyRecovery(env, user.email, code))) {
+    await _auditLog(env, { req, actorEmail: user.email,
+      action: 'admin_password_reset_denied', details: { reason: 'invalid_code' } });
+    return err(401, 'invalid_code');
+  }
+  const raw = new Uint8Array(24);
+  crypto.getRandomValues(raw);
+  const ticket = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
+  const saltBuf = new Uint8Array(16);
+  crypto.getRandomValues(saltBuf);
+  const salt = Array.from(saltBuf).map(b => b.toString(16).padStart(2, '0')).join('');
+  await env.MESHES.put(ADMIN_RESET_TICKET_KEY, JSON.stringify({
+    salt, hash: await _hashAdminPassword(salt, ticket),
+    exp: Date.now() + ADMIN_RESET_TICKET_TTL_MS,
+    email: user.email,
+  }), { httpMetadata: { contentType: 'application/json' } });
+  await _auditLog(env, { req, actorEmail: user.email,
+    action: 'admin_password_reset_code_ok', details: {} });
+  return json({ ok: true, ticket, expires_in_s: ADMIN_RESET_TICKET_TTL_MS / 1000 });
+}
+
+/** Consomme le ticket. Renvoie null si valide, sinon la reponse d'erreur. */
+async function _consumeAdminResetTicket(env: Env, provided: string, email: string): Promise<Response | null> {
+  const obj = await env.MESHES!.get(ADMIN_RESET_TICKET_KEY);
+  if (!obj) return err(400, 'code_required');
+  let rec: { salt?: string; hash?: string; exp?: number; email?: string };
+  try { rec = await obj.json(); } catch { return err(400, 'code_required'); }
+  if (!rec?.salt || !rec?.hash || !rec.exp || Date.now() > rec.exp) {
+    await env.MESHES!.delete(ADMIN_RESET_TICKET_KEY);
+    return err(400, 'ticket_expired');
+  }
+  if ((rec.email ?? '').toLowerCase() !== email.toLowerCase()) return err(403, 'forbidden');
+  const computed = await _hashAdminPassword(rec.salt, provided);
+  let diff = computed.length ^ rec.hash.length;
+  for (let i = 0; i < computed.length && i < rec.hash.length; i++) {
+    diff |= computed.charCodeAt(i) ^ rec.hash.charCodeAt(i);
+  }
+  await env.MESHES!.delete(ADMIN_RESET_TICKET_KEY);   // usage unique, succes ou echec
+  return diff === 0 ? null : err(401, 'ticket_invalid');
+}
+
 async function handleAdminResetPassword(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized — sign in with your admin Supabase account first');
@@ -10664,7 +10727,7 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
     return err(403, 'forbidden — your Supabase email is not in the admin allow-list');
   }
   if (!env.MESHES) return err(500, 'R2 binding required');
-  const body = await req.json().catch(() => ({})) as { newPassword?: string; username?: string; code?: string; totp?: string };
+  const body = await req.json().catch(() => ({})) as { newPassword?: string; username?: string; ticket?: string; totp?: string };
   // Code recu par mail : TOUJOURS obligatoire. C'est lui qui prouve l'acces a
   // la boite admin ; sans ca, la session Supabase seule suffirait a rotationner
   // le mot de passe, et le mot de passe du dashboard ne protegerait rien face a
@@ -10681,16 +10744,17 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
   // contrôle, le compte Supabase admin seul suffisait à réinitialiser le
   // mot de passe du dashboard — le second facteur ne servait à rien
   // puisqu'il était contournable par « Forgot password ».
-  // 2FA RETIREE ici aussi (meme decision). La rotation exige donc une session
-  // Supabase de compte admin, et rien de plus.
-  //
-  // CONSEQUENCE ASSUMEE, a connaitre : quiconque detient une session Supabase
-  // admin peut rotationner le mot de passe du dashboard, donc entrer. Le mot
-  // de passe protege contre un acces au dashboard SANS session admin, pas
-  // contre le detenteur d'une session admin. Si on veut refermer ca sans
-  // reintroduire de 2FA, il faut retirer cet ecran de rotation et ne rotationner
-  // que par `wrangler secret put ADMIN_PASSWORD`. Toute tentative reste tracee
-  // dans le journal ci-dessous.
+  // Le TICKET delivre par /api/admin/reset-verify est OBLIGATOIRE. Il prouve
+  // qu'un code recu sur la boite admin vient d'etre valide par Supabase — le
+  // meme code que recoit un utilisateur normal. Sans lui, la session Supabase
+  // seule suffirait a rotationner le mot de passe, et le mot de passe du
+  // dashboard ne protegerait rien face a son detenteur.
+  // Sortie de secours en cas de panne SMTP : `wrangler secret put
+  // ADMIN_PASSWORD`, pas un contournement dans l'interface.
+  const ticket = String(body?.ticket ?? '').trim();
+  if (!ticket) return err(400, 'code_required');
+  const ticketErr = await _consumeAdminResetTicket(env, ticket, user.email);
+  if (ticketErr) return ticketErr;
   const newPassword = String(body?.newPassword ?? '');
   if (newPassword.length < 20) {
     return err(400, 'newPassword must be at least 20 characters');
@@ -13334,6 +13398,7 @@ export default {
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
         if (pathname === '/api/admin/login'           && method === 'POST') return await handleAdminLogin(req, env);
         if (pathname === '/api/admin/reset-request'   && method === 'POST') return await handleAdminResetRequest(req, env);
+        if (pathname === '/api/admin/reset-verify'    && method === 'POST') return await handleAdminResetVerify(req, env);
         if (pathname === '/api/admin/reset-password'  && method === 'POST') return await handleAdminResetPassword(req, env);
         if (pathname === '/api/admin/logout'          && method === 'POST') return await handleAdminLogout(req, env);
         if (pathname === '/api/admin/history.csv'     && method === 'GET')  return await handleAdminHistoryCsv(req, env);

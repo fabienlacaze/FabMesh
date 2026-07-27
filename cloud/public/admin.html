@@ -367,39 +367,59 @@
   <div id="forgot-password-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
     <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; width:420px; max-width:92vw;">
       <h3 style="margin:0 0 8px 0;">🔑 Reset admin password</h3>
-      <p style="color:var(--text-2); font-size:12px; margin-bottom:16px;">
-        A 6-digit code is sent to the admin mailbox — the same email a normal
-        MyFabmesh user gets when resetting their password. Your Supabase session
-        alone is not enough. Every attempt is written to the connection log.
-        New password must be at least 20 characters.
-      </p>
-      <!-- Etape 1 : recevoir un code par mail. Le bouton reste visible meme si
-           l'envoi n'est pas configure : dans ce cas le worker repond 503
-           email_not_configured et on l'explique, au lieu de laisser un bouton
-           qui ne fait rien. -->
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <input id="forgot-pw-code" type="text" inputmode="numeric" maxlength="6"
-               placeholder="6-digit code from email"
-               style="flex:1; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; letter-spacing:3px;" />
-        <button class="btn" type="button" id="forgot-pw-send" onclick="requestResetCode()"
-                style="white-space:nowrap;">Send code</button>
+
+      <!-- Assistant en 3 etapes, calque sur la page de reset des utilisateurs
+           (cloud/src/app/auth/reset-password/page.tsx) : on envoie le code, on
+           le VERIFIE, et seulement ensuite on choisit le mot de passe.
+           Afficher les 4 champs d'un bloc ne correspondait pas au parcours
+           utilisateur et obligeait a saisir un mot de passe avant de savoir si
+           le code etait bon. -->
+
+      <!-- Etape 1 -->
+      <div id="fp-step1">
+        <p style="color:var(--text-2); font-size:12px; margin-bottom:16px;">
+          We'll email a 6-digit code to the admin mailbox — the same email a
+          normal MyFabmesh user receives when resetting their password.
+        </p>
+        <button class="btn btn-accent" type="button" style="width:100%;"
+                onclick="fpSendCode()">Send code</button>
       </div>
-      <!-- Le nom d'utilisateur se change ICI, en meme temps que le mot de passe.
-           Laisse vide = on garde le nom en vigueur (le worker ne le remet pas
-           a 'admin'). Evite d'avoir a passer par `wrangler secret put`. -->
-      <input id="forgot-pw-username" type="text" autocomplete="username"
-             placeholder="Admin username (leave empty to keep the current one)"
-             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
-      <input id="forgot-pw-input" type="password" autocomplete="new-password"
-             placeholder="New admin password (≥20 chars)"
-             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
-      <input id="forgot-pw-confirm" type="password" autocomplete="new-password"
-             placeholder="Confirm new password"
-             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
-      <div id="forgot-pw-msg" style="font-size:12px; margin-bottom:12px; display:none;"></div>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
+
+      <!-- Etape 2 -->
+      <div id="fp-step2" style="display:none;">
+        <p style="color:var(--text-2); font-size:12px; margin-bottom:16px;">
+          Enter the 6-digit code from the email.
+        </p>
+        <input id="forgot-pw-code" type="text" inputmode="numeric" maxlength="6"
+               placeholder="6-digit code"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:16px; letter-spacing:6px; text-align:center; margin-bottom:10px;" />
+        <div style="display:flex; gap:8px;">
+          <button class="btn" type="button" style="flex:1;" onclick="fpSendCode()">Resend</button>
+          <button class="btn btn-accent" type="button" style="flex:2;" onclick="fpVerifyCode()">Verify code</button>
+        </div>
+      </div>
+
+      <!-- Etape 3 -->
+      <div id="fp-step3" style="display:none;">
+        <p style="color:var(--text-2); font-size:12px; margin-bottom:16px;">
+          Code accepted. Choose your new password — at least 20 characters.
+        </p>
+        <input id="forgot-pw-username" type="text" autocomplete="username"
+               placeholder="Admin username (leave empty to keep the current one)"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
+        <input id="forgot-pw-input" type="password" autocomplete="new-password"
+               placeholder="New admin password (≥20 chars)"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
+        <input id="forgot-pw-confirm" type="password" autocomplete="new-password"
+               placeholder="Confirm new password"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
+        <button class="btn btn-accent" type="button" style="width:100%;"
+                onclick="submitForgotPassword()">Set new password</button>
+      </div>
+
+      <div id="forgot-pw-msg" style="font-size:12px; margin-top:12px; display:none;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
         <button class="btn" onclick="closeForgotPassword()">Cancel</button>
-        <button class="btn btn-accent" onclick="submitForgotPassword()">Reset</button>
       </div>
     </div>
   </div>
@@ -1084,6 +1104,15 @@
 
     /* ─── Forgot-password modal ─── */
     function openForgotPassword() {
+      // On repart TOUJOURS de l'etape 1 : un ticket perime d'une tentative
+      // precedente ne doit pas laisser croire que la verification est faite.
+      _fpTicket = null;
+      _fpStep(1);
+      const _m = document.getElementById('forgot-pw-msg');
+      if (_m) _m.style.display = 'none';
+      ['forgot-pw-code', 'forgot-pw-username', 'forgot-pw-input', 'forgot-pw-confirm']
+        .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+
       document.getElementById('forgot-password-modal').style.display = 'flex';
       document.getElementById('forgot-pw-input').focus();
     }
@@ -1093,36 +1122,65 @@
       document.getElementById('forgot-pw-confirm').value = '';
       document.getElementById('forgot-pw-msg').style.display = 'none';
     }
-    // Demande l'envoi du code sur la boite admin. Le code n'est JAMAIS renvoye
-    // par l'API : il doit transiter par le mail, sinon le facteur « acces a la
-    // boite » ne vaudrait rien.
-    async function requestResetCode() {
-      const btn = document.getElementById('forgot-pw-send');
-      const msg = document.getElementById('forgot-pw-msg');
-      msg.style.display = '';
-      msg.style.color = 'var(--text-2)';
-      msg.textContent = 'Sending…';
-      btn.disabled = true;
+    // --- Assistant de rotation, calque sur la page utilisateur ---------------
+    // Etat local : le ticket delivre par le worker apres validation du code.
+    // Il remplace la SESSION que verifyOtp cree pour un utilisateur normal :
+    // Supabase consomme le code a la verification, on ne peut donc pas le
+    // revalider au moment du changement de mot de passe.
+    let _fpTicket = null;
+
+    function _fpMsg(text, kind) {
+      const m = document.getElementById('forgot-pw-msg');
+      m.style.display = '';
+      m.style.color = kind === 'err' ? 'var(--err)'
+                    : kind === 'ok'  ? 'var(--ok, #4caf50)' : 'var(--text-2)';
+      m.textContent = text;
+    }
+    function _fpStep(n) {
+      for (const i of [1, 2, 3]) {
+        const el = document.getElementById('fp-step' + i);
+        if (el) el.style.display = (i === n) ? '' : 'none';
+      }
+    }
+
+    async function fpSendCode() {
+      _fpMsg('Sending…');
       try {
         const r = await fetch('/api/admin/reset-request', {
           method: 'POST', credentials: 'include',
           headers: { 'content-type': 'application/json' }, body: '{}',
         });
         const j = await r.json().catch(() => ({}));
+        if (!r.ok) { _fpMsg(j.error || ('HTTP ' + r.status), 'err'); return; }
+        _fpStep(2);
+        _fpMsg('✓ Code sent to ' + (j.sent_to || 'the admin mailbox') + '.', 'ok');
+        document.getElementById('forgot-pw-code')?.focus();
+      } catch (e) { _fpMsg(String(e && e.message || e), 'err'); }
+    }
+
+    async function fpVerifyCode() {
+      const code = (document.getElementById('forgot-pw-code')?.value || '').trim();
+      if (!code) { _fpMsg('Type the 6-digit code from the email.', 'err'); return; }
+      _fpMsg('Checking…');
+      try {
+        const r = await fetch('/api/admin/reset-verify', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        const j = await r.json().catch(() => ({}));
         if (!r.ok) {
-          msg.style.color = 'var(--err)';
-          msg.textContent = j.error || ('HTTP ' + r.status);
+          _fpMsg(j.error === 'invalid_code'
+            ? 'Wrong or expired code. Use “Resend” to get a new one.'
+            : (j.error || ('HTTP ' + r.status)), 'err');
           return;
         }
-        msg.style.color = 'var(--ok, #4caf50)';
-        msg.textContent = '✓ Code sent to ' + (j.sent_to || 'the admin mailbox')
-          + ' — same email you would get as a normal MyFabmesh user.';
-      } catch (e) {
-        msg.style.color = 'var(--err)';
-        msg.textContent = String(e && e.message || e);
-      } finally {
-        btn.disabled = false;
-      }
+        _fpTicket = j.ticket;
+        _fpStep(3);
+        _fpMsg('', 'info');
+        document.getElementById('forgot-pw-msg').style.display = 'none';
+        document.getElementById('forgot-pw-input')?.focus();
+      } catch (e) { _fpMsg(String(e && e.message || e), 'err'); }
     }
 
     async function submitForgotPassword() {
@@ -1150,7 +1208,7 @@
           body: JSON.stringify({
             newPassword: a,
             username: (document.getElementById('forgot-pw-username')?.value || '').trim(),
-            code: (document.getElementById('forgot-pw-code')?.value || '').trim(),
+            ticket: _fpTicket,
           }),
         });
         const j = await r.json().catch(() => ({}));
@@ -1158,9 +1216,9 @@
           msg.style.color = 'var(--err)';
           const e = j.error || `HTTP ${r.status}`;
           msg.textContent =
-            e === 'code_required' ? 'Click “Send code”, then type the 6-digit code from the email.'
-            : e === 'invalid_code' ? 'Wrong or expired code. Request a new one and retry.'
-            : e;
+            e === 'code_required' || e === 'ticket_expired' || e === 'ticket_invalid'
+              ? 'Your verification expired. Start again with “Send code”.'
+              : e;
           return;
         }
         msg.style.color = 'var(--ok, #4caf50)';
