@@ -372,6 +372,17 @@
         rotate the dashboard password. Every attempt is written to the
         connection log. New password must be at least 20 characters.
       </p>
+      <!-- Etape 1 : recevoir un code par mail. Le bouton reste visible meme si
+           l'envoi n'est pas configure : dans ce cas le worker repond 503
+           email_not_configured et on l'explique, au lieu de laisser un bouton
+           qui ne fait rien. -->
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <input id="forgot-pw-code" type="text" inputmode="numeric" maxlength="6"
+               placeholder="6-digit code from email"
+               style="flex:1; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; letter-spacing:3px;" />
+        <button class="btn" type="button" id="forgot-pw-send" onclick="requestResetCode()"
+                style="white-space:nowrap;">Send code</button>
+      </div>
       <!-- Le nom d'utilisateur se change ICI, en meme temps que le mot de passe.
            Laisse vide = on garde le nom en vigueur (le worker ne le remet pas
            a 'admin'). Evite d'avoir a passer par `wrangler secret put`. -->
@@ -1081,6 +1092,44 @@
       document.getElementById('forgot-pw-confirm').value = '';
       document.getElementById('forgot-pw-msg').style.display = 'none';
     }
+    // Demande l'envoi du code sur la boite admin. Le code n'est JAMAIS renvoye
+    // par l'API : il doit transiter par le mail, sinon le facteur « acces a la
+    // boite » ne vaudrait rien.
+    async function requestResetCode() {
+      const btn = document.getElementById('forgot-pw-send');
+      const msg = document.getElementById('forgot-pw-msg');
+      msg.style.display = '';
+      msg.style.color = 'var(--text-2)';
+      msg.textContent = 'Sending…';
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/admin/reset-request', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' }, body: '{}',
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 503 || j.error === 'email_not_configured') {
+          msg.style.color = 'var(--err)';
+          msg.textContent = 'Email sending is not configured on the server (RESEND_API_KEY missing), '
+            + 'so no code can be sent. You can still rotate the password without a code for now.';
+          return;
+        }
+        if (!r.ok) {
+          msg.style.color = 'var(--err)';
+          msg.textContent = j.error || ('HTTP ' + r.status);
+          return;
+        }
+        msg.style.color = 'var(--ok, #4caf50)';
+        msg.textContent = '✓ Code sent to ' + (j.sent_to || 'the admin mailbox')
+          + ' — valid for 10 minutes.';
+      } catch (e) {
+        msg.style.color = 'var(--err)';
+        msg.textContent = String(e && e.message || e);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     async function submitForgotPassword() {
       const a = document.getElementById('forgot-pw-input').value;
       const b = document.getElementById('forgot-pw-confirm').value;
@@ -1106,12 +1155,19 @@
           body: JSON.stringify({
             newPassword: a,
             username: (document.getElementById('forgot-pw-username')?.value || '').trim(),
+            code: (document.getElementById('forgot-pw-code')?.value || '').trim(),
           }),
         });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
           msg.style.color = 'var(--err)';
-          msg.textContent = j.error || `HTTP ${r.status}`;
+          const e = j.error || `HTTP ${r.status}`;
+          msg.textContent =
+            e === 'no_code_requested' ? 'Click “Send code” first — a code is required to rotate the password.'
+            : e === 'code_expired'    ? 'That code has expired. Request a new one.'
+            : e === 'invalid_code'    ? 'Wrong code. Check the email and retry.'
+            : e === 'too_many_attempts' ? 'Too many wrong codes — the code was burned. Request a new one.'
+            : e;
           return;
         }
         msg.style.color = 'var(--ok, #4caf50)';
