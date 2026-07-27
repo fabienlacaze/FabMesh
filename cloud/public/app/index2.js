@@ -434,8 +434,7 @@ function reportPipelineError(errMsg, title) {
   // (et pas /pricing, qui renvoie un 404). Ouverture dans un nouvel onglet
   // pour ne pas perdre le projet en cours.
   if (/insufficient credits|not enough .*credits/i.test(raw)) {
-    customErrorWithAction(raw, title || 'Not enough credits', '⚡ Buy credits')
-      .then((buy) => { if (buy) window.open('/buy', '_blank', 'noopener'); });
+    promptBuyCredits(raw);
     return;
   }
   // Extract the most useful error line from a potentially huge Python dump.
@@ -460,6 +459,24 @@ function reportPipelineError(errMsg, title) {
 
 // Inline toast banner — appears at the bottom of the screen for 3s then fades.
 // type: 'error' (red), 'success' (green), 'info' (blue)
+// Boite « plus assez de credits ». Point d'entree UNIQUE, partage par la boite
+// d'erreur de pipeline et par les notifications : l'utilisateur doit tomber sur
+// une vraie boite avec un bouton d'achat, pas seulement sur un lien discret
+// dans une notification qui s'efface. Garde anti-empilement : plusieurs echecs
+// consecutifs (un batch qui rate en entier) ne doivent pas ouvrir 8 boites.
+let _creditsPromptOpen = false;
+function promptBuyCredits(message) {
+  if (_creditsPromptOpen) return;
+  _creditsPromptOpen = true;
+  const txt = String(message || 'You are out of credits.');
+  customErrorWithAction(txt, 'Not enough credits', '⚡ Buy credits')
+    .then((buy) => {
+      _creditsPromptOpen = false;
+      if (buy) { window.open('/buy', '_blank', 'noopener'); }
+    })
+    .catch(() => { _creditsPromptOpen = false; });
+}
+
 function showToast(message, type = 'info', durationMs = 3000) {
   let container = document.getElementById('toast-container');
   if (!container) {
@@ -493,6 +510,8 @@ function showToast(message, type = 'info', durationMs = 3000) {
       toast.remove();
     };
     toast.appendChild(buy);
+    // ...et on ouvre la BOITE, plus visible qu'un lien qui disparait.
+    promptBuyCredits(message);
   }
   container.appendChild(toast);
   setTimeout(() => {
