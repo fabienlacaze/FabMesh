@@ -1008,10 +1008,17 @@
   function installMeshCostMeter() {
     const preset = document.getElementById('ws-trellis2-preset');
     if (!preset) return;
+    // ws-trellis2-ultra-hd VOLONTAIREMENT ABSENT : la qualite de texture se
+    // choisit dans le menu deroulant QUALITY PRESET et nulle part ailleurs.
+    // La case faisait doublon avec le prereglage « Ultra 8K » (qui pose
+    // forceUltraHd) et donnait deux reglages « Ultra » a l'ecran. Elle est
+    // masquee plus bas et le drapeau ultra_hd est desormais derive du seul
+    // prereglage (voir index2.js, effectiveUltraHD). Le desktop fait pareil
+    // depuis toujours (index2.html : display:none en dur).
     const optionIds = [
       'ws-trellis2-multiref', 'ws-trellis2-refine', 'ws-trellis2-rectify',
       'ws-trellis2-smooth',   'ws-trellis2-quality-plus',
-      'ws-trellis2-ultra-q',  'ws-trellis2-ultra-hd', 'ws-trellis2-face-fix',
+      'ws-trellis2-ultra-q',  'ws-trellis2-face-fix',
     ];
 
     // Re-query #ws-mesh-cost-value on every tick — refreshButtonLabelsAndHiding
@@ -1019,28 +1026,27 @@
     // mesh, replacing the span we'd otherwise cache here. Without this
     // lookup, the cost meter writes to a detached node and the user
     // sees a frozen "12 credits" no matter which option they toggle.
-    // Le prereglage « Ultra 8K » INCLUT deja l'option Ultra HD 8K (il pose
-    // forceUltraHd) et le worker ne la facture donc pas en plus :
-    //   worker.ts -> if (i.ultra_hd && i.preset !== 'ultra_8k') n += 3
-    // La case faisait donc double emploi a l'ecran (« deux fois le reglage
-    // Ultra ») et la pastille annoncait 3 credits de trop. On applique ici
-    // la MEME regle que le worker, et on masque la case tant que le
-    // prereglage la rend redondante.
-    const ultraHdEl = document.getElementById('ws-trellis2-ultra-hd');
-    const ultraHdRow = ultraHdEl?.closest('.form-row');
-
-    function ultraHdRedundant() {
-      return preset.value === 'ultra_8k';
-    }
+    // Retire la case « Ultra HD 8K texture » de l'interface. Elle etait
+    // cochee par defaut et facturee +3, alors que la qualite de texture est
+    // deja pilotee par le menu QUALITY PRESET — d'ou deux reglages « Ultra »
+    // a l'ecran. On la decoche AUSSI : le tableau de valeurs par defaut par
+    // type d'asset la remet a true, et une case cochee mais invisible
+    // continuerait d'envoyer ultra_hd au serveur sans que l'utilisateur
+    // puisse le voir ni l'annuler.
+    (function removeUltraHdRow() {
+      const el = document.getElementById('ws-trellis2-ultra-hd');
+      if (!el) return;
+      const row = el.closest('.form-row');
+      if (row) row.style.display = 'none';
+      el.checked = false;
+      // Le tableau par type d'asset s'applique apres le boot : on re-decoche
+      // a chaque tentative de cochage tant que la case est hors interface.
+      el.addEventListener('change', () => { if (el.checked) el.checked = false; });
+    })();
 
     function recompute() {
-      const redundant = ultraHdRedundant();
-      if (ultraHdRow) ultraHdRow.style.display = redundant ? 'none' : '';
       let total = parseInt(preset.selectedOptions[0]?.dataset?.credits || '1', 10);
       for (const id of optionIds) {
-        // Meme exclusion que cote serveur : ne pas compter Ultra HD quand
-        // le prereglage le fournit deja.
-        if (id === 'ws-trellis2-ultra-hd' && redundant) continue;
         const el = document.getElementById(id);
         if (el?.checked) total += parseInt(el.dataset.credits || '0', 10);
       }
