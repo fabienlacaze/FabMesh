@@ -9666,6 +9666,17 @@ function _deviceCanRunMeshClient() {
   } catch { return false; }
 }
 
+// Ecrit la valeur affichee a cote d'un curseur. Depuis que les parametres de
+// type « range » exposent une ZONE DE SAISIE editable a la place d'un simple
+// <span>, ecrire .textContent sur un <input> n'affiche RIEN (un input rend son
+// .value) : la zone serait restee figee apres un reset, un « ajuster au
+// maillage » ou un tirage aleatoire.
+function _mtSetLabVal(el, v) {
+  if (!el) return;
+  if (el.tagName === 'INPUT') el.value = String(v);
+  else el.textContent = String(v);
+}
+
 function _mtCollectVals(body) {
   const vals = {};
   body.querySelectorAll('[data-param-id]').forEach((el) => {
@@ -9961,7 +9972,7 @@ async function _mtEnsureTransformGizmo() {
       el.value = clamped.toFixed(2);
       const lab = el.previousElementSibling;
       const labVal = lab && lab.lastElementChild;
-      if (labVal) labVal.textContent = el.value;
+      _mtSetLabVal(labVal, el.value);
     }
     _mtSchedulePreview();
   });
@@ -10109,7 +10120,7 @@ function _mtLoadMesh(meshPath) {
             input.value = String(v);
             const lab = input.previousElementSibling;
             const labVal = lab && lab.lastElementChild;
-            if (labVal) labVal.textContent = String(v);
+            _mtSetLabVal(labVal, v);
           }
         }
         // Run the initial preview. Skip for `expensivePreview` tools
@@ -10167,9 +10178,28 @@ function openMeshToolModal(toolName) {
       const labText = document.createElement('span');
       labText.style.cssText = 'color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;';
       labText.textContent = spec.label;
-      const labVal = document.createElement('span');
-      labVal.style.cssText = 'color:var(--text-1);';
-      labVal.textContent = String(spec.default);
+      // Pour un curseur, la valeur devient une ZONE DE SAISIE : sur une plage
+      // de 200 a 1 000 000 (compte de triangles), viser une valeur precise au
+      // curseur est impossible. Les deux restent synchronises ; le curseur
+      // garde data-param-id, donc _mtCollectVals ne lit qu'une seule source.
+      let labVal;
+      if (spec.type === 'range') {
+        labVal = document.createElement('input');
+        labVal.type = 'number';
+        if (spec.min !== undefined) labVal.min = String(spec.min);
+        if (spec.max !== undefined) labVal.max = String(spec.max);
+        if (spec.step !== undefined) labVal.step = String(spec.step);
+        labVal.value = String(spec.default);
+        labVal.style.cssText = 'color:var(--text-1); background:var(--bg-2,#15151f);'
+          + ' border:1px solid var(--border,#33334a); border-radius:4px;'
+          + ' padding:1px 6px; width:11ch; text-align:right; font-size:11px;'
+          + ' font-family:inherit;';
+        labVal.title = 'Saisir la valeur exacte';
+      } else {
+        labVal = document.createElement('span');
+        labVal.style.cssText = 'color:var(--text-1);';
+        labVal.textContent = String(spec.default);
+      }
       lab.appendChild(labText); lab.appendChild(labVal);
       wrap.appendChild(lab);
 
@@ -10229,10 +10259,41 @@ function openMeshToolModal(toolName) {
       }
       input.dataset.paramId = spec.id;
       input.dataset.paramType = spec.type || 'number';
-      input.addEventListener('input', () => {
-        if (spec.type === 'range' || spec.type === 'number') labVal.textContent = String(input.value);
-        _mtSchedulePreview();
-      });
+      if (spec.type === 'range') {
+        // curseur -> zone de saisie
+        input.addEventListener('input', () => {
+          labVal.value = String(input.value);
+          _mtSchedulePreview();
+        });
+        // zone de saisie -> curseur, en bornant a la plage du curseur pour ne
+        // jamais transmettre une valeur que l'outil ne sait pas traiter.
+        const pushFromBox = () => {
+          const raw = Number(labVal.value);
+          if (!Number.isFinite(raw)) return;
+          const lo = spec.min !== undefined ? Number(spec.min) : -Infinity;
+          const hi = spec.max !== undefined ? Number(spec.max) : Infinity;
+          const clamped = Math.min(hi, Math.max(lo, raw));
+          input.value = String(clamped);
+          _mtSchedulePreview();
+        };
+        labVal.addEventListener('input', pushFromBox);
+        // Au blur / Entree on RECOPIE la valeur bornee dans la zone, pour que
+        // l'utilisateur voie ce qui sera reellement applique s'il a saisi
+        // hors plage. On ne le fait pas a chaque frappe, sinon taper « 45 »
+        // en route vers « 4500 » serait aussitot remonte au minimum.
+        const commit = () => { pushFromBox(); labVal.value = String(input.value); };
+        labVal.addEventListener('change', commit);
+        labVal.addEventListener('blur', commit);
+        labVal.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+          ev.stopPropagation();   // ne pas laisser la modale intercepter la frappe
+        });
+      } else {
+        input.addEventListener('input', () => {
+          if (spec.type === 'number') _mtSetLabVal(labVal, input.value);
+          _mtSchedulePreview();
+        });
+      }
       input.addEventListener('change', () => _mtSchedulePreview());
       wrap.appendChild(input);
       body.appendChild(wrap);
@@ -10256,7 +10317,7 @@ function openMeshToolModal(toolName) {
         el.value = String(spec.default);
         const lab = el.previousElementSibling;
         const labVal = lab && lab.lastElementChild;
-        if (labVal) labVal.textContent = String(spec.default);
+        _mtSetLabVal(labVal, spec.default);
       });
       _mtSchedulePreview();
     });
