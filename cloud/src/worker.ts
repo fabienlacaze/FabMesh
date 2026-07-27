@@ -10497,23 +10497,13 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   // admin isn't locked out after a typo + correct retry.
   try { await env.MESHES?.delete(lockoutKey); } catch {}
 
-  // TOTP second factor — only enforced after the admin has enrolled.
-  // First-ever login uses password only so the admin can reach the
-  // setup page and enrol; afterwards every login also needs a code.
+  // 2FA RETIREE (decision produit du 2026-07-27). L'acces admin repose
+  // desormais sur DEUX choses et deux seulement : une session Supabase de
+  // compte admin, et le mot de passe du dashboard. Le JOURNAL DE CONNEXION
+  // est conserve (_auditLog plus bas) — c'est lui qui donne la tracabilite.
+  // Le code TOTP ajoutait une marche de plus a chaque connexion et bloquait
+  // la rotation du mot de passe sans porte de sortie.
   const totpSecret = await _getAdminTotpSecret(env);
-  if (totpSecret) {
-    const code = String(body.totp ?? '').trim();
-    if (!code) return err(401, 'totp_required');
-    if (!(await _totpVerify(totpSecret, code))) {
-      await _recordFail();
-      await _auditLog(env, {
-        req, actorEmail: user.email,
-        action: 'admin_login_failed',
-        details: { reason: 'invalid_totp' },
-      });
-      return err(401, 'invalid totp');
-    }
-  }
   // Connexion admin réussie — tracée avec l'IP par _auditLog.
   await _auditLog(env, {
     req, actorEmail: user.email,
@@ -10559,19 +10549,16 @@ async function handleAdminResetPassword(req: Request, env: Env): Promise<Respons
   // contrôle, le compte Supabase admin seul suffisait à réinitialiser le
   // mot de passe du dashboard — le second facteur ne servait à rien
   // puisqu'il était contournable par « Forgot password ».
-  const _resetTotpSecret = await _getAdminTotpSecret(env);
-  if (_resetTotpSecret) {
-    const code = String(body?.totp ?? '').trim();
-    if (!code) return err(401, 'totp_required');
-    if (!(await _totpVerify(_resetTotpSecret, code))) {
-      await _auditLog(env, {
-        req, actorEmail: user.email,
-        action: 'admin_password_reset_denied',
-        details: { reason: 'invalid_totp' },
-      });
-      return err(401, 'invalid totp');
-    }
-  }
+  // 2FA RETIREE ici aussi (meme decision). La rotation exige donc une session
+  // Supabase de compte admin, et rien de plus.
+  //
+  // CONSEQUENCE ASSUMEE, a connaitre : quiconque detient une session Supabase
+  // admin peut rotationner le mot de passe du dashboard, donc entrer. Le mot
+  // de passe protege contre un acces au dashboard SANS session admin, pas
+  // contre le detenteur d'une session admin. Si on veut refermer ca sans
+  // reintroduire de 2FA, il faut retirer cet ecran de rotation et ne rotationner
+  // que par `wrangler secret put ADMIN_PASSWORD`. Toute tentative reste tracee
+  // dans le journal ci-dessous.
   const newPassword = String(body?.newPassword ?? '');
   if (newPassword.length < 20) {
     return err(400, 'newPassword must be at least 20 characters');

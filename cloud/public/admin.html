@@ -329,6 +329,9 @@
       <!-- TOTP field shown only after the first login attempt returns
            "totp_required" — keeps the form clean for the initial
            (pre-enrolment) login. -->
+      <!-- 2FA retiree le 2026-07-27 : le worker ne renvoie plus jamais
+           'totp_required', donc cette ligne ne s'affiche plus. Conservee
+           masquee pour ne pas casser le JS qui la reference. -->
       <div id="totp-row" style="display:none; margin-bottom:12px;">
         <label style="display:block; font-size:12px; color:var(--text-2); margin-bottom:6px;">
           🔑 Microsoft Authenticator code (6 digits)
@@ -356,9 +359,9 @@
     <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; width:420px; max-width:92vw;">
       <h3 style="margin:0 0 8px 0;">🔑 Reset admin password</h3>
       <p style="color:var(--text-2); font-size:12px; margin-bottom:16px;">
-        You're already signed in as an admin Supabase account — that's
-        enough to rotate the dashboard password. New password must be
-        at least 20 characters.
+        You're signed in as an admin Supabase account — that's enough to
+        rotate the dashboard password. Every attempt is written to the
+        connection log. New password must be at least 20 characters.
       </p>
       <input id="forgot-pw-input" type="password" autocomplete="new-password"
              placeholder="New admin password (≥20 chars)"
