@@ -1094,6 +1094,16 @@
         const d = await r.json();
         login.style.display = 'none'; passwd.style.display = 'none';
         main.style.display = 'block';
+        // Session admin valide -> les onglets sensibles sont deverrouilles.
+        // Il y avait une SECONDE demande du mot de passe pour Finance/System
+        // alors que ce meme mot de passe venait d'etre saisi a l'entree : deux
+        // fois la meme preuve, aucune securite ajoutee, juste une friction.
+        // Retire a la demande du user le 2026-07-27, dans la meme logique que
+        // « juste un password + authentification a la connexion et c'est tout ».
+        // Le mot de passe reste exige la ou il protege VRAIMENT quelque chose
+        // de distinct : la modale d'ajustement de credits (action monetaire,
+        // #credits-password) le redemande toujours.
+        _sensitiveUnlocked = true;
         render(d);
       } catch (e) {
         main.style.display = 'none';
