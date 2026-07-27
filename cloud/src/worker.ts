@@ -661,6 +661,40 @@ async function handleSignedR2(req: Request, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * `fetch()` pour une URL d'asset, SANS aller-retour HTTP vers notre propre
+ * hostname.
+ *
+ * POURQUOI : depuis la migration vers les URLs signées, les URLs d'assets
+ * pointent sur NOTRE domaine (`<site>/r2/<clé>?exp&sig`) et non plus sur un
+ * bucket R2 public. Un `fetch()` depuis le Worker devient alors une
+ * sous-requête vers sa propre origine — fragile. Constaté en production le
+ * 2026-07-27 : `/api/generate` a renvoyé « cannot fetch imagePath (HTTP 404) »
+ * 387 ms après le clic, alors que l'objet EXISTAIT et que la même URL
+ * répondait 200 (1,6 Mo) depuis l'extérieur.
+ *
+ * handleProxyImage contournait déjà le piège (« avoids a self-subrequest »)
+ * mais le contournement n'avait jamais été généralisé aux autres endpoints.
+ *
+ * On sert donc l'objet directement depuis le binding R2. La SIGNATURE RESTE
+ * VÉRIFIÉE (handleSignedR2 fait foi) : c'est elle qui autorise l'accès, sinon
+ * un utilisateur authentifié pourrait lire la clé d'un autre compte en
+ * fabriquant une URL. Les hôtes externes (Replicate, r2.dev public…) passent
+ * par un `fetch()` normal.
+ */
+async function assetFetch(env: Env, rawUrl: string): Promise<Response> {
+  try {
+    const parsed = new URL(rawUrl);
+    const siteHost = new URL(siteUrl(env, 'http://localhost:3030')).host;
+    // Uniquement NOTRE hôte : un autre *.workers.dev n'a aucune raison
+    // d'être servi depuis notre bucket.
+    if (parsed.host === siteHost && parsed.pathname.startsWith('/r2/')) {
+      return await handleSignedR2(new Request(parsed.toString(), { method: 'GET' }), env);
+    }
+  } catch { /* URL invalide : on laisse fetch() échouer normalement */ }
+  return await fetch(rawUrl);
+}
+
 function parseCookies(req: Request): Record<string, string> {
   const out: Record<string, string> = {};
   const raw = req.headers.get('cookie') ?? '';
@@ -1438,7 +1472,7 @@ async function createReplicatePrediction(env: Env, input: GenerateInput) {
  */
 async function uploadGlbToR2(env: Env, sourceUrl: string, key: string): Promise<string> {
   if (!env.MESHES || !env.R2_PUBLIC_URL) return sourceUrl;
-  const res = await fetch(sourceUrl);
+  const res = await assetFetch(env, sourceUrl);
   if (!res.ok) throw new Error(`source fetch failed: ${res.status}`);
   const body = await res.arrayBuffer();
   await env.MESHES.put(key, body, { httpMetadata: { contentType: 'model/gltf-binary' } });
@@ -4198,7 +4232,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   const MAX_FETCH_BYTES = 20 * 1024 * 1024;
   if (!(image instanceof File) && imageHttpsUrl) {
     try {
-      const r = await fetch(imageHttpsUrl);
+      const r = await assetFetch(env, imageHttpsUrl);
       if (!r.ok) return err(400, `cannot fetch imagePath (HTTP ${r.status})`);
       const ct = r.headers.get('content-type') ?? '';
       if (!/^image\//i.test(ct)) {
