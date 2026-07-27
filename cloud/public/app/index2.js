@@ -9206,9 +9206,16 @@ function _jsDecimate(geom, targetFaces) {
   if (removeCount === 0) return geom.clone();
   // Live preview cap: SimplifyModifier is O(V·logV) and locks the
   // main thread; >20k vertex removals can freeze the tab for many
-  // seconds. Show the original on big drags — the slider value still
-  // updates, and Apply runs the full server-side decimation.
-  if (removeCount > DECIMATE_LIVE_MAX_REMOVE) return geom.clone();
+  // seconds.
+  //
+  // On renvoie null, PAS un clone. Un clone est une geometrie valide, donc
+  // l'appelant considerait la previsualisation comme reussie, laissait le
+  // bouton « Apply on device » ACTIF, et ce bouton enregistrait alors le
+  // maillage NON DECIME : l'utilisateur creait une nouvelle version avec
+  // exactement le meme nombre de triangles (« reduire le nombre de
+  // triangles ne marche pas »). null = « je n'ai pas su faire » -> bouton
+  // desactive, et seul « Apply on cloud » (decimation serveur) reste offert.
+  if (removeCount > DECIMATE_LIVE_MAX_REMOVE) return null;
   // SimplifyModifier only understands `position` — extra attributes
   // (uv, normal, color, multi-material groups) make it throw on some
   // builds. Feed it a stripped-down clone so it can't choke.
@@ -9219,7 +9226,10 @@ function _jsDecimate(geom, targetFaces) {
     return _decimator.modify(stripped, removeCount);
   } catch (e) {
     console.warn('[decimate] preview failed:', e);
-    return geom.clone();
+    // Meme raison que plus haut : renvoyer un clone ferait passer un echec
+    // pour une reussite et « Apply on device » enregistrerait le maillage
+    // intact. null laisse la decimation serveur prendre le relais.
+    return null;
   }
 }
 
@@ -9456,7 +9466,7 @@ const MESH_TOOL_SCHEMAS = {
       // V ≈ F/2 → removeCount ≈ totalVerts - targetVerts ≈ (total - target) / 2
       const removeApprox = Math.max(0, Math.ceil((total - target) / 2));
       if (removeApprox > DECIMATE_LIVE_MAX_REMOVE) {
-        return `Target: ${target.toLocaleString()} tris · reduction too large for live preview — click Apply to run.`;
+        return `Target: ${target.toLocaleString()} tris · too large to preview or apply on this device — use “Apply on cloud”.`;
       }
       return `Live preview · ${target.toLocaleString()} / ${total.toLocaleString()} triangles.`;
     },
@@ -9817,7 +9827,10 @@ function _mtRunPreview() {
         if (out.stats) mtState.lastStats = out.stats;
       }
       if (nextGeom) e.mesh.geometry = nextGeom;
-      else allOk = false;
+      // Pas de geometrie -> on REMET l'originale, sinon le viewport garde
+      // l'apercu precedent et laisse croire que le reglage courant a ete
+      // applique. allOk=false desactive « Apply on device ».
+      else { e.mesh.geometry = e.originalGeom; allOk = false; }
       // When the schema drives an interactive TransformControls gizmo,
       // skip the custom Object3D helpers — TC has its own overlay
       // (3 axes + center sphere) and a second gizmo on top looks
@@ -9888,7 +9901,7 @@ function _mtRunPreview() {
       devBtn.title = 'Apply on this device — no credits used.';
     } else {
       devBtn.disabled = true;
-      devBtn.title = 'Move a slider to compute a preview before applying on device.';
+      devBtn.title = 'No local preview was computed for these settings — use “Apply on cloud” to run it on the server.';
     }
   }
   const status = document.getElementById('mt-preview-status');
