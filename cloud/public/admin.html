@@ -707,7 +707,7 @@
     <!-- Tab: Services kill-switches (password-gated) -->
     <div class="tab-panel" data-panel="services">
       <!-- Password prompt — shown until the admin unlocks the panel. -->
-      <div id="services-lock" style="background:var(--bg-1); border:1px solid var(--err); border-radius:12px; padding:24px; max-width:480px;">
+      <!-- Masque PAR DEFAUT : le mot de passe n'est plus exige par l'API (le cookie admin fait foi). Le carton ne reapparait qu'en cas d'echec du deverrouillage automatique, sinon il clignotait ~1 s a chaque ouverture de l'onglet. --> <div id="services-lock" style="display:none; background:var(--bg-1); border:1px solid var(--err); border-radius:12px; padding:24px; max-width:480px;">
         <h3 style="margin:0 0 8px; color:var(--err);">🚨 Service kill switches</h3>
         <p style="color:var(--text-2); font-size:13px; margin:0 0 14px;">
           Cuts off Modal GPU calls or the entire site if something's on fire.
@@ -929,7 +929,7 @@
     <!-- Tab: Pricing — admin-tunable credit costs per operation
          (password-gated like Services to prevent fat-fingered edits) -->
     <div class="tab-panel" data-panel="pricing">
-      <div id="pricing-lock" style="background:var(--bg-1); border:1px solid var(--warn); border-radius:12px; padding:24px; max-width:480px;">
+      <!-- Masque PAR DEFAUT : le mot de passe n'est plus exige par l'API (le cookie admin fait foi). Le carton ne reapparait qu'en cas d'echec du deverrouillage automatique, sinon il clignotait ~1 s a chaque ouverture de l'onglet. --> <div id="pricing-lock" style="display:none; background:var(--bg-1); border:1px solid var(--warn); border-radius:12px; padding:24px; max-width:480px;">
         <h3 style="margin:0 0 8px; color:var(--warn);">💰 Pricing</h3>
         <p style="color:var(--text-2); font-size:13px; margin:0 0 14px;">
           Live credit costs for every operation. Saves propagate to all users within ~60s. Re-enter your admin password to unlock the editor.
@@ -2830,6 +2830,9 @@
       } catch (e) {
         errEl.textContent = 'Could not load services state: ' + (e?.message || e);
         errEl.style.display = '';
+      // le carton est masque par defaut : on le ramene pour que
+      // l'utilisateur puisse saisir le mot de passe manuellement.
+      document.getElementById('services-lock').style.display = '';
         return;
       }
       try {
@@ -2841,6 +2844,9 @@
         if (r.status === 401) {
           errEl.textContent = 'Wrong password.';
           errEl.style.display = '';
+      // le carton est masque par defaut : on le ramene pour que
+      // l'utilisateur puisse saisir le mot de passe manuellement.
+      document.getElementById('services-lock').style.display = '';
           input.select();
           return;
         }
@@ -2848,6 +2854,9 @@
       } catch (e) {
         errEl.textContent = 'Server error: ' + (e?.message || e);
         errEl.style.display = '';
+      // le carton est masque par defaut : on le ramene pour que
+      // l'utilisateur puisse saisir le mot de passe manuellement.
+      document.getElementById('services-lock').style.display = '';
         return;
       }
       // Success — store in memory and reveal the panel.
@@ -3275,6 +3284,9 @@
       } catch (e) {
         errEl.textContent = 'Could not fetch pricing: ' + (e?.message || e);
         errEl.style.display = '';
+      // le carton est masque par defaut : on le ramene pour que
+      // l'utilisateur puisse saisir le mot de passe manuellement.
+      document.getElementById('pricing-lock').style.display = '';
         return;
       }
       try {
@@ -3286,6 +3298,9 @@
         if (r.status === 401) {
           errEl.textContent = 'Wrong password.';
           errEl.style.display = '';
+      // le carton est masque par defaut : on le ramene pour que
+      // l'utilisateur puisse saisir le mot de passe manuellement.
+      document.getElementById('pricing-lock').style.display = '';
           input.select();
           return;
         }
@@ -3293,6 +3308,9 @@
       } catch (e) {
         errEl.textContent = 'Server error: ' + (e?.message || e);
         errEl.style.display = '';
+      // le carton est masque par defaut : on le ramene pour que
+      // l'utilisateur puisse saisir le mot de passe manuellement.
+      document.getElementById('pricing-lock').style.display = '';
         return;
       }
       _pricingPassword = pw;
