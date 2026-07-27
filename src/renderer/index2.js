@@ -45,6 +45,16 @@ function _webglNote(hostEl) {
   hostEl.appendChild(n);
 }
 function _mkRenderer(opts, hostEl) {
+  // Canvas OPAQUE par defaut. Toutes nos scenes 3D peignent leur propre fond,
+  // donc rien ne doit transparaitre de la page. Avec alpha:true, un materiau
+  // pourtant declare OPAQUE dans le glTF mais dont la texture baseColor porte
+  // un canal alpha (les WebP sortis de TRELLIS-2 en portent un) ecrit cet alpha
+  // dans le framebuffer : le melange WebGL est bien desactive, mais le
+  // NAVIGATEUR composite ensuite le canvas par-dessus la page avec cet alpha,
+  // et le maillage parait semi-transparent. Aucun reglage de materiau ne corrige
+  // ca, puisque le probleme est au niveau de la composition du canvas.
+  // Un appelant peut toujours redemander explicitement alpha:true.
+  opts = Object.assign({ alpha: false }, opts || {});
   try { return new THREE.WebGLRenderer(opts); }
   catch (e) {
     console.warn('[webgl] renderer creation failed:', (e && e.message) || e);
@@ -11161,7 +11171,7 @@ async function _mtInitViewport() {
   const canvas = document.getElementById('mt-canvas');
   const w = container.clientWidth || 800;
   const h = container.clientHeight || 600;
-  mtState.renderer = _mkRenderer({ canvas, antialias: true, alpha: true }, container);
+  mtState.renderer = _mkRenderer({ canvas, antialias: true, alpha: false /* canvas opaque : la scene peint son fond (cf. _mkRenderer) */ }, container);
   // Sans WebGL : l'aperçu est indisponible (encart posé dans le conteneur) mais
   // la modale et son bouton Apply restent utilisables — l'op tourne côté main.
   if (!mtState.renderer) { mtState.webglUnavailable = true; return; }
@@ -12079,7 +12089,7 @@ async function _peInitViewport() {
   const h = wrap.clientHeight || 560;
   // preserveDrawingBuffer:true so the magnifier loupe can drawImage() the
   // rendered canvas (needed by _peUpdateLoupe).
-  peState.renderer = _mkRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true }, wrap);
+  peState.renderer = _mkRenderer({ canvas, antialias: true, alpha: false /* canvas opaque : la scene peint son fond (cf. _mkRenderer) */, preserveDrawingBuffer: true }, wrap);
   if (!peState.renderer) { peState.webglUnavailable = true; return; }
   peState.renderer.setSize(w, h, false);
   peState.renderer.setPixelRatio(window.devicePixelRatio);
@@ -13506,7 +13516,7 @@ async function _meInitViewport() {
   // preserveDrawingBuffer: true so the magnifier loupe can drawImage() a
   // magnified crop of the rendered WebGL canvas (otherwise the buffer is
   // cleared after compositing and the loupe reads black).
-  meState.renderer = _mkRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true }, container);
+  meState.renderer = _mkRenderer({ canvas, antialias: true, alpha: false /* canvas opaque : la scene peint son fond (cf. _mkRenderer) */, preserveDrawingBuffer: true }, container);
   if (!meState.renderer) { meState.webglUnavailable = true; return; }
   meState.renderer.setSize(w, h, false);
   meState.renderer.setPixelRatio(window.devicePixelRatio);
@@ -21481,7 +21491,7 @@ function initLmFullscreen() {
   lmFsScene.add(back);
   lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.6));
   // Pane A (Front by default)
-  lmFsRenderer = _mkRenderer({ canvas: canvasA, antialias: true, alpha: true }, canvasA.parentElement);
+  lmFsRenderer = _mkRenderer({ canvas: canvasA, antialias: true, alpha: false /* canvas opaque : la scene peint son fond (cf. _mkRenderer) */ }, canvasA.parentElement);
   if (!lmFsRenderer) { lmFsScene = null; return; }
   lmFsRenderer.setPixelRatio(window.devicePixelRatio);
   lmFsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -21499,7 +21509,7 @@ function initLmFullscreen() {
   });
   // Pane B (Side by default) — only created if the second canvas exists
   if (canvasB) {
-    lmFsRendererB = _mkRenderer({ canvas: canvasB, antialias: true, alpha: true }, canvasB.parentElement);
+    lmFsRendererB = _mkRenderer({ canvas: canvasB, antialias: true, alpha: false /* canvas opaque : la scene peint son fond (cf. _mkRenderer) */ }, canvasB.parentElement);
   }
   if (lmFsRendererB) {
     lmFsRendererB.setPixelRatio(window.devicePixelRatio);

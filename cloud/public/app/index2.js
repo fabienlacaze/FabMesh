@@ -7572,7 +7572,7 @@ function initWsThree() {
   // same canvas with the flag on.)
   _wsV.renderer.dispose();
   _wsV.renderer = new THREE.WebGLRenderer({
-    canvas, antialias: true, alpha: true, preserveDrawingBuffer: true,
+    canvas, antialias: true, alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */, preserveDrawingBuffer: true,
   });
   _wsV.renderer.setSize(canvas.clientWidth || 320, canvas.clientHeight || 260, false);
   _wsV.renderer.setPixelRatio(window.devicePixelRatio);
@@ -9991,7 +9991,7 @@ async function _mtInitViewport() {
   const canvas = document.getElementById('mt-canvas');
   const w = container.clientWidth || 800;
   const h = container.clientHeight || 600;
-  mtState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  mtState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */ });
   mtState.renderer.setSize(w, h, false);
   mtState.renderer.setPixelRatio(window.devicePixelRatio);
   mtState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -11251,7 +11251,7 @@ function openResizeTool() {
   if (!modal || !canvas || !vp) return;
   modal.classList.remove('hidden');
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */, canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0b14);
   const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 5000);
@@ -11472,7 +11472,7 @@ async function _peInitViewport() {
   if (!canvas || !wrap) return;
   const w = wrap.clientWidth || 800;
   const h = wrap.clientHeight || 560;
-  peState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  peState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */ });
   peState.renderer.setSize(w, h, false);
   peState.renderer.setPixelRatio(window.devicePixelRatio);
   peState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -12266,7 +12266,7 @@ async function _pmInitViewport() {
   if (!canvas || !wrap) return;
   const w = wrap.clientWidth || 800;
   const h = wrap.clientHeight || 560;
-  pmState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  pmState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */ });
   pmState.renderer.setSize(w, h, false);
   pmState.renderer.setPixelRatio(window.devicePixelRatio);
   pmState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -13229,7 +13229,7 @@ async function _meInitViewport() {
   const w = container.clientWidth || 800;
   const h = container.clientHeight || 600;
 
-  meState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  meState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */ });
   meState.renderer.setSize(w, h, false);
   meState.renderer.setPixelRatio(window.devicePixelRatio);
   meState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -20969,7 +20969,7 @@ function initLmFullscreen() {
   lmFsScene.add(back);
   lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.6));
   // Pane A (Front by default)
-  lmFsRenderer = new THREE.WebGLRenderer({ canvas: canvasA, antialias: true, alpha: true });
+  lmFsRenderer = new THREE.WebGLRenderer({ canvas: canvasA, antialias: true, alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */ });
   lmFsRenderer.setPixelRatio(window.devicePixelRatio);
   lmFsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
   lmFsRenderer.toneMappingExposure = 1.4;
@@ -20985,7 +20985,7 @@ function initLmFullscreen() {
   });
   // Pane B (Side by default) — only created if the second canvas exists
   if (canvasB) {
-    lmFsRendererB = new THREE.WebGLRenderer({ canvas: canvasB, antialias: true, alpha: true });
+    lmFsRendererB = new THREE.WebGLRenderer({ canvas: canvasB, antialias: true, alpha: false  /* canvas OPAQUE : la scene peint deja son fond, rien ne doit transparaitre de la page. Avec alpha:true, un materiau pourtant declare OPAQUE dont la texture baseColor porte un canal alpha (WebP TRELLIS-2) ecrit cet alpha dans le framebuffer, et le navigateur compositait le maillage en semi-transparent par-dessus la page. */ });
     lmFsRendererB.setPixelRatio(window.devicePixelRatio);
     lmFsRendererB.toneMapping = THREE.ACESFilmicToneMapping;
     lmFsRendererB.toneMappingExposure = 1.0;
