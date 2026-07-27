@@ -1019,9 +1019,28 @@
     // mesh, replacing the span we'd otherwise cache here. Without this
     // lookup, the cost meter writes to a detached node and the user
     // sees a frozen "12 credits" no matter which option they toggle.
+    // Le prereglage « Ultra 8K » INCLUT deja l'option Ultra HD 8K (il pose
+    // forceUltraHd) et le worker ne la facture donc pas en plus :
+    //   worker.ts -> if (i.ultra_hd && i.preset !== 'ultra_8k') n += 3
+    // La case faisait donc double emploi a l'ecran (« deux fois le reglage
+    // Ultra ») et la pastille annoncait 3 credits de trop. On applique ici
+    // la MEME regle que le worker, et on masque la case tant que le
+    // prereglage la rend redondante.
+    const ultraHdEl = document.getElementById('ws-trellis2-ultra-hd');
+    const ultraHdRow = ultraHdEl?.closest('.form-row');
+
+    function ultraHdRedundant() {
+      return preset.value === 'ultra_8k';
+    }
+
     function recompute() {
+      const redundant = ultraHdRedundant();
+      if (ultraHdRow) ultraHdRow.style.display = redundant ? 'none' : '';
       let total = parseInt(preset.selectedOptions[0]?.dataset?.credits || '1', 10);
       for (const id of optionIds) {
+        // Meme exclusion que cote serveur : ne pas compter Ultra HD quand
+        // le prereglage le fournit deja.
+        if (id === 'ws-trellis2-ultra-hd' && redundant) continue;
         const el = document.getElementById(id);
         if (el?.checked) total += parseInt(el.dataset.credits || '0', 10);
       }
