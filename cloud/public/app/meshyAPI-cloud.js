@@ -620,8 +620,7 @@
       if (arg && arg.base64 && arg.path) {
         try {
           const normPath = String(arg.path).replace(/\\/g, '/');
-          const segs = normPath.split('/');
-          const filename = segs.pop() || ('mesh_' + Date.now() + '.glb');
+          const filename = _basename(normPath) || ('mesh_' + Date.now() + '.glb');
           const resp = await fetch('/api/upload-mesh', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -752,7 +751,14 @@
   // ── tiny helpers used by the impls below ────────────────────────────
   function _projectThumbKey(name) { return `myfm:thumb:${name}`; }
   function _versionsKey(projectName, base) { return `myfm:versions:${projectName}:${base}`; }
-  function _basename(p) { return String(p || '').split(/[/\\]/).pop() || ''; }
+  // Depouille la query AVANT d'extraire le nom : depuis la migration vers les
+  // URLs signees, un chemin d'asset finit par '?exp=<unix>&sig=<hex>'. Sans ce
+  // decoupage on obtient des noms de fichier du type 'mesh.glb?exp=...&sig=...'
+  // qui remontent dans l'UI, dans les noms de telechargement, et jusque dans des
+  // cles R2 construites par concatenation.
+  function _basename(p) {
+    return String(p || '').split('#')[0].split('?')[0].split(/[/\\]/).pop() || '';
+  }
   function _stripExt(name) { return name.replace(/\.[^.]+$/, ''); }
   function _imgFromBlobUrl(url) {
     // Two-stage load. For http(s) URLs we fetch the bytes ourselves
@@ -1826,7 +1832,7 @@
           // from /api/meshes (browser cache, stale state, etc.).
           try {
             if (window.state?.currentProject) {
-              const filename = glbUrl.split('/').pop() || 'rigged_puppeteer.glb';
+              const filename = _basename(glbUrl) || 'rigged_puppeteer.glb';
               window.state.currentProject.rigs = window.state.currentProject.rigs || [];
               const already = window.state.currentProject.rigs.some(r => r.url === glbUrl);
               if (!already) {
@@ -2111,7 +2117,7 @@
             if (window.state?.currentProject) {
               const p = window.state.currentProject;
               p.animations = p.animations || [];
-              const filename = animUrl.split('/').pop() || 'anim.glb';
+              const filename = _basename(animUrl) || 'anim.glb';
               const already = p.animations.some(a => a.url === animUrl);
               if (!already) {
                 p.animations.push({
@@ -2383,7 +2389,7 @@
           const newPath = r.path || r.newPath || r.mesh_url || r.url;
           // The mesh-op endpoint uploads the new GLB to R2; surface its
           // filename so the workspace UI can append it to the meshes list.
-          const filename = (newPath || '').split('/').pop() || `${(url.split('/').pop() || 'mesh').replace(/\.glb$/i, '')}_mat_${Date.now()}.glb`;
+          const filename = _basename(newPath) || `${_stripExt(_basename(url) || 'mesh')}_mat_${Date.now()}.glb`;
           return { success: true, ok: true, newPath, filename, mesh_url: newPath };
         }
         return { success: false, ok: false, error: r?.error || 'material_adjust failed' };

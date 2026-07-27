@@ -7497,7 +7497,12 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
     // 2. Version copy of the source mesh (same pattern as desktop:
     //    <stem>_chantier3d_<ts>.glb) — R2-internal copy, no Modal.
     const srcKey = r2PathFromPublicUrl(env, finalUrl);
-    const srcName = (finalUrl.split('/').pop() || 'mesh.glb').replace(/\.(glb|gltf)$/i, '');
+    // split('?') AVANT split('/') : finalUrl peut etre une de nos URLs signees
+    // (`...glb?exp=<unix>&sig=<hex>`). Sans ce decoupage le `$` de la regex
+    // d'extension ne matche pas, srcName garde la signature entiere, et le
+    // newStem construit plus bas — qui devient une CLE R2 — embarque
+    // '?exp=...&sig=...' dans son nom.
+    const srcName = (finalUrl.split('?')[0].split('/').pop() || 'mesh.glb').replace(/\.(glb|gltf)$/i, '');
     const stem = srcName.replace(/_chantier3d_\d+$/i, '');
     const ts = Date.now();
     const newStem = `${stem}_chantier3d_${ts}`;
