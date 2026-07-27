@@ -8,6 +8,122 @@
   <title>MyFabmesh.AI Cloud</title>
   <link rel="stylesheet" href="styles/main.css?v=mobile5">
   <link rel="stylesheet" href="styles/index2.css?v=mobile5">
+  <!-- ═══ Menu ⋮ des vignettes — port du desktop (2026-07-25) ═══
+       ADAPTATION CLOUD : côté desktop ces règles vivent dans
+       src/renderer/styles/index2.css. Ici elles sont inline dans le <head>,
+       APRÈS le <link> styles/index2.css, pour deux raisons :
+         1. le CSS cloud est un fichier partagé/porté qu'on ne veut pas
+            diverger du desktop au milieu ;
+         2. déclaré après le <link>, ce bloc gagne les égalités de cascade
+            (les règles de masquage utilisent de toute façon !important).
+       Les boutons d'action (supprimer / lignée / historique) n'apparaissent
+       PLUS par-dessus la vignette au survol — ils sont regroupés dans un
+       menu déroulant ouvert au survol du bouton ⋮. Les boutons originaux
+       restent dans le DOM (masqués) : le menu affiche des proxys qui
+       déclenchent leur .click(), donc tous les handlers existants (directs
+       ou délégués) marchent sans changement. Les badges de STATUT
+       (✂ segmenté, 💡 émissif, ✓ coche, vN, pastille marketplace) restent
+       visibles sur la vignette. -->
+  <style>
+    .version-thumb .version-delete-btn,
+    .version-thumb .version-source-btn,
+    .version-thumb .version-mesh-btn,
+    .version-thumb .version-rig-btn,
+    .version-thumb .version-history-btn,
+    .version-thumb .v-rail-mid > .version-source-btn,
+    .version-thumb .v-rail-mid > .version-mesh-btn,
+    .version-thumb .v-rail-mid > .version-rig-btn,
+    .version-thumb .v-rail-bot > .version-history-btn {
+      display: none !important;
+    }
+    .version-thumb .v-kebab {
+      position: absolute;
+      top: 4px; right: 4px;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.8);
+      border: 1px solid rgba(255,255,255,0.35);
+      color: #fff;
+      font-size: 14px; font-weight: 700;
+      cursor: pointer;
+      display: none;
+      align-items: center; justify-content: center;
+      padding: 0; line-height: 1;
+      z-index: 5;
+    }
+    .version-thumb:hover .v-kebab { display: inline-flex; }
+    .version-thumb .v-kebab:hover,
+    .version-thumb .v-kebab.menu-open {
+      background: #3b6fd4;
+      border-color: #8ab4ff;
+    }
+    /* ADAPTATION CLOUD : le web tourne aussi sur tablette/mobile où :hover
+       n'existe pas (le ⋮ resterait invisible et les actions inaccessibles,
+       puisque les boutons d'origine sont masqués). Sur pointeur grossier on
+       affiche donc le ⋮ en permanence. Pas d'équivalent desktop (Electron
+       est toujours souris). */
+    @media (hover: none) {
+      .version-thumb .v-kebab { display: inline-flex; }
+    }
+    #v-kebab-menu {
+      position: fixed;
+      z-index: 99999;
+      display: none;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 180px;
+      background: #15151f;
+      border: 1px solid #3a3a4a;
+      border-radius: 8px;
+      padding: 6px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.55);
+    }
+    #v-kebab-menu.open { display: flex; }
+    #v-kebab-menu .vkm-item {
+      display: flex; align-items: center; gap: 8px;
+      height: 28px;
+      background: transparent;
+      border: none; border-radius: 6px;
+      color: #ddd;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 0 8px;
+      line-height: 1;
+      text-align: left;
+      white-space: nowrap;
+    }
+    #v-kebab-menu .vkm-item:hover { background: #2a2a3a; }
+    #v-kebab-menu .vkm-item.vkm-delete:hover { background: var(--error); color: #fff; }
+    #v-kebab-menu .vkm-item .vkm-ico { width: 18px; text-align: center; flex: none; }
+    #v-kebab-menu .vkm-item .vkm-label { font-size: 12px; color: #ccc; }
+    #v-kebab-menu .vkm-item.vkm-delete:hover .vkm-label { color: #fff; }
+
+    /* Renfort de spécificité (port desktop 2026-07-25) : la règle historique
+       `.versions-strip .version-thumb:hover .v-rail-* > *` est en !important
+       avec une spécificité (0,4,0) qui battait notre masquage (0,3,0) — les
+       boutons d'action des rails réapparaissaient au survol sur certaines
+       vignettes. Ces sélecteurs (0,5,0) + !important, déclarés en dernier,
+       gagnent dans tous les cas. Les badges de statut (✂ 💡 ✓) restent
+       visibles. Idem pour `.versions-strip .version-thumb:hover
+       .version-delete-btn { display:inline-flex }` (styles/index2.css:1474). */
+    .versions-strip .version-thumb:hover .v-rail-mid > .version-source-btn,
+    .versions-strip .version-thumb:hover .v-rail-mid > .version-mesh-btn,
+    .versions-strip .version-thumb:hover .v-rail-mid > .version-rig-btn,
+    .versions-strip .version-thumb:hover .v-rail-mid > .version-delete-btn,
+    .versions-strip .version-thumb:hover .v-rail-mid > .version-history-btn,
+    .versions-strip .version-thumb:hover .v-rail-bot > .version-source-btn,
+    .versions-strip .version-thumb:hover .v-rail-bot > .version-mesh-btn,
+    .versions-strip .version-thumb:hover .v-rail-bot > .version-rig-btn,
+    .versions-strip .version-thumb:hover .v-rail-bot > .version-delete-btn,
+    .versions-strip .version-thumb:hover .v-rail-bot > .version-history-btn,
+    .versions-strip .version-thumb:hover .version-delete-btn,
+    .versions-strip .version-thumb:hover .version-source-btn,
+    .versions-strip .version-thumb:hover .version-mesh-btn,
+    .versions-strip .version-thumb:hover .version-rig-btn,
+    .versions-strip .version-thumb:hover .version-history-btn {
+      display: none !important;
+    }
+  </style>
   <!-- Console capture: patches console.* into a ring buffer that gets
        auto-flushed to /api/client-log at every Generate event. Loaded
        FIRST so it captures everything from boot. -->
@@ -3081,8 +3197,25 @@
           </div>
           <!-- Select options -->
           <div id="me-select-opts" style="display:none; flex-direction:column; gap:4px;">
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Selection</span>
-            <span style="font-size:9px; color:var(--text-muted);">Paint to select faces, then:</span>
+            <!-- 1 · Selection tool (how you pick faces) — ported from the
+                 desktop panel (src/renderer/index2.html). Same ids, styles
+                 adapted to the narrower 130px cloud tool column. -->
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Selection tool</span>
+            <div style="display:flex; gap:4px;">
+              <button id="me-sel-add" class="secondary-btn tool-btn tool-active" style="padding:5px 4px; font-size:10px; flex:1; min-width:0; white-space:nowrap;" title="Brush: paint faces to select (drag).">&#9998; Add</button>
+              <button id="me-sel-erase" class="secondary-btn tool-btn" style="padding:5px 4px; font-size:10px; flex:1; min-width:0; white-space:nowrap;" title="Brush: paint to deselect faces (drag).">&#129529; Erase</button>
+            </div>
+            <div style="display:flex; gap:4px;">
+              <button id="me-sel-wand" class="secondary-btn tool-btn" style="padding:5px 4px; font-size:10px; flex:1; min-width:0; white-space:nowrap;" title="Magic wand: click a face to select the whole connected flat region (within the Angle below). Ctrl = add.">&#10024; Wand</button>
+              <button id="me-sel-lasso" class="secondary-btn tool-btn" style="padding:5px 4px; font-size:10px; flex:1; min-width:0; white-space:nowrap;" title="Lasso: draw a freehand loop; every face inside is selected. Ctrl = add.">&#10057; Lasso</button>
+            </div>
+            <label id="me-sel-wand-angle-row" style="display:none; align-items:center; gap:4px; font-size:10px; color:var(--text-muted); padding:1px 2px;">
+              <span style="white-space:nowrap;">Angle</span>
+              <input type="range" id="me-sel-wand-angle" min="1" max="80" value="20" style="flex:1; min-width:30px;" />
+              <span id="me-sel-wand-angle-val" style="min-width:24px; text-align:right;">20&deg;</span>
+            </label>
+            <span style="font-size:9px; color:var(--text-muted);">Ctrl = add &middot; Del = delete</span>
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border, #333);">Modify selection</span>
             <div style="display:flex; gap:5px;">
               <button id="me-sel-grow" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#10133; Grow</button>
               <button id="me-sel-shrink" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;">&#10134; Shrink</button>
@@ -3096,6 +3229,14 @@
               <button id="me-sel-hide" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; flex:1; white-space:nowrap;" title="Hide the selected faces (toggle)">&#128065; Hide</button>
             </div>
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border, #333);">Edit</span>
+            <!-- Move gizmo (ported from desktop): TransformControls attached to
+                 a proxy at the selection centroid. T = move, R = rotate, Y = scale. -->
+            <button id="me-sel-move" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Show a gizmo to move / rotate / scale the selected faces. Click again to finish. (T=move, R=rotate, Y=scale)">&#10021; Move (gizmo)</button>
+            <div id="me-move-mode-row" style="display:none; gap:4px;">
+              <button id="me-move-translate" class="secondary-btn tool-btn" style="padding:5px 4px; font-size:10px; flex:1; min-width:0; white-space:nowrap;" title="Translate (T)">&#10021; Move</button>
+              <button id="me-move-rotate" class="secondary-btn tool-btn" style="padding:5px 4px; font-size:10px; flex:1; min-width:0; white-space:nowrap;" title="Rotate (R)">&#8635; Rot.</button>
+              <button id="me-move-scale" class="secondary-btn tool-btn" style="padding:5px 4px; font-size:10px; flex:1; min-width:0; white-space:nowrap;" title="Scale (Y)">&#8690; Scale</button>
+            </div>
             <button id="me-sel-duplicate" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Duplicate the selected faces">&#10697; Duplicate</button>
             <button id="me-sel-crop" class="secondary-btn tool-btn" style="padding:5px 8px; font-size:11px; width:100%;" title="Keep only the selection (or the rest)">&#9986; Crop</button>
             <label style="display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-2,#aab); padding:3px 4px 4px 6px; cursor:pointer;">
@@ -3124,6 +3265,9 @@
         <!-- Right: 3D viewport -->
         <div id="me-viewport" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
           <canvas id="me-canvas" style="width:100%; height:100%; display:block;"></canvas>
+          <!-- Lasso overlay (ported from desktop): the freehand stroke is drawn
+               here in 2D so it never disturbs the WebGL canvas. -->
+          <canvas id="me-lasso-canvas" style="position:absolute; left:0; top:0; width:100%; height:100%; display:none; pointer-events:none; z-index:900;"></canvas>
           <div id="me-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid rgba(255,200,50,0.8); border-radius:50%; display:none; z-index:1000;"></div>
         </div>
       </div>

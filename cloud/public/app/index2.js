@@ -1399,7 +1399,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,   // skin pores, hair detail
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // face detail matters
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     true,
   },
   creature: {
@@ -1408,7 +1408,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // creature faces too
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     true,
   },
   insect: {
@@ -1417,7 +1417,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      false,  // no human face to gain from 1536
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,   // insects have no human face
   },
   vehicle: {
@@ -1426,7 +1426,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // hallucinates wear on smooth surfaces
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,   // no face to gain from 1536
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   building: {
@@ -1435,7 +1435,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   weapon: {
@@ -1444,7 +1444,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   prop: {
@@ -1453,7 +1453,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   environment: {
@@ -1462,7 +1462,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   icon: {
@@ -1471,7 +1471,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // no pores/fur on a flat icon
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,   // overkill for a small icon
-    'ws-trellis2-ultra-hd':     null,   // overkill — icons stay small
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   avion: {
@@ -1480,7 +1480,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // hallucinates wear on smooth fuselage
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   bateau: {
@@ -1489,7 +1489,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       null,   // hallucinates wear on smooth hull
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      null,
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     null,
   },
   animal: {
@@ -1498,7 +1498,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       true,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      true,   // animal faces matter
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     true,
   },
   custom: {
@@ -1507,7 +1507,7 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-refine':       false,
     'ws-trellis2-quality-plus': true,
     'ws-trellis2-ultra-q':      false,
-    'ws-trellis2-ultra-hd':     true,
+'ws-trellis2-ultra-hd':     null,   // masque: doublon du prereglage Ultra 8K (qui pose forceUltraHd). La qualite de texture se choisit UNIQUEMENT dans QUALITY PRESET.
     'ws-trellis2-face-fix':     false,
   },
 };
@@ -13253,6 +13253,21 @@ const meState = {
   grabScreen: null,      // {x,y} screen coords captured on pointerdown
   grabMesh: null,        // mesh object the grab stroke is acting on
   grabLastDelta: null,   // last applied local-space translation (THREE.Vector3)
+  // --- Select mode sub-tools (ported from desktop src/renderer/index2.js) ---
+  selectErase: false,    // Select mode: brush removes instead of adds
+  selectWand: false,     // Select mode: click floods a connected flat region
+  wandAngle: 20,         // wand tolerance in degrees (normal vs seed face)
+  selectLasso: false,    // Select mode: draw a freehand screen polygon
+  lassoing: false,       // a lasso stroke is in progress
+  lassoPts: [],          // lasso path in canvas-pixel coords
+  lassoAdditive: false,  // stroke started with Ctrl/Shift → union
+  moveActive: false,     // Move gizmo shown to translate the selection
+  moveProxy: null,       // Object3D the TransformControls is attached to
+  moveGizmo: null,       // TransformControls instance
+  moveInitInv: null,     // proxy world matrix inverse captured at attach time
+  moveSnap: null,        // per-mesh snapshot of the moved vertices
+  moveMode: 'translate', // translate | rotate | scale
+  viewMode: 'none',      // none | isolate | hide (see _meApplyView)
 };
 
 function openMeshEdit(mode) {
@@ -13275,6 +13290,28 @@ function openMeshEdit(mode) {
   });
   document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
   document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
+  // Was missing on cloud — opening straight into Select mode left the
+  // Selection panel hidden until you clicked the Select button a second time
+  // (same bug already fixed on desktop).
+  document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
+  // Default the Select sub-mode to Add each time the panel opens.
+  if (meState.moveActive) _meEndMove();
+  meState.selectErase = false;
+  meState.selectWand = false;
+  meState.selectLasso = false;
+  meState.lassoing = false;
+  meState.viewMode = 'none';
+  document.getElementById('me-sel-add')?.classList.add('tool-active');
+  document.getElementById('me-sel-erase')?.classList.remove('tool-active');
+  document.getElementById('me-sel-wand')?.classList.remove('tool-active');
+  document.getElementById('me-sel-lasso')?.classList.remove('tool-active');
+  const _wandRow = document.getElementById('me-sel-wand-angle-row');
+  if (_wandRow) _wandRow.style.display = 'none';
+  // Reset the crosshair left over by Wand/Lasso from a previous session
+  // (the renderer/canvas is reused across openMeshEdit calls).
+  if (meState.renderer) meState.renderer.domElement.style.cursor = '';
+  document.getElementById('me-sel-isolate')?.classList.remove('tool-active');
+  document.getElementById('me-sel-hide')?.classList.remove('tool-active');
 
   // Wait for modal layout then init viewport
   requestAnimationFrame(async () => {
@@ -13357,6 +13394,9 @@ async function _meInitViewport() {
   canvas.addEventListener('mousemove', _meMouseMove);
   canvas.addEventListener('mouseup', _meMouseUp);
   canvas.addEventListener('mouseleave', () => { const c = document.getElementById('me-brush-cursor'); if (c) c.style.display = 'none'; });
+  // Lasso released outside the canvas must still close the loop (ported from
+  // desktop) — the canvas-level mouseup never fires in that case.
+  window.addEventListener('mouseup', () => { if (meState.lassoing) _meLassoFinish(); });
 }
 
 function _meLoadMesh(meshPath) {
@@ -13438,6 +13478,12 @@ function _meSnapshot() {
         mesh: c,
         positions: c.geometry.attributes.position.array.slice(),
         colors: c.geometry.attributes.color ? c.geometry.attributes.color.array.slice() : null,
+        // On cloud the SELECTION lives in the vertex-colour attribute, which the
+        // brush creates lazily on first touch. Without this flag, undoing the
+        // FIRST selection (or the first paint stroke) left the attribute behind
+        // and the selection survived Ctrl+Z. Remember it was absent so
+        // _meRestore can drop it again.
+        hadColor: !!c.geometry.attributes.color,
         // Capture the index too — Delete rewrites it, so without this undo
         // can't bring deleted faces back.
         index: c.geometry.index ? c.geometry.index.array.slice() : null,
@@ -13457,6 +13503,12 @@ function _meRestore(snapshot) {
     if (s.colors && geom.attributes.color) {
       geom.attributes.color.array.set(s.colors);
       geom.attributes.color.needsUpdate = true;
+    } else if (!s.hadColor && geom.attributes.color) {
+      // The attribute did NOT exist when the snapshot was taken (first
+      // selection / first paint stroke on this mesh) → remove it, otherwise
+      // Ctrl+Z left the orange selection painted on the mesh.
+      try { geom.deleteAttribute('color'); } catch (_) {}
+      if (s.mesh.material) { s.mesh.material.vertexColors = false; s.mesh.material.needsUpdate = true; }
     }
     if (s.index) geom.setIndex(new THREE.BufferAttribute(s.index, 1));
     // Restore the SELECTION captured in this snapshot (indices match the restored
@@ -13498,6 +13550,15 @@ function _meUpdateUndoBtns() {
 
 function _meMouseDown(e) {
   if (e.button !== 0 || e.altKey) return;
+  // Move gizmo owns all pointer interaction (TransformControls has its own
+  // listeners) — never start a brush stroke while it's up.
+  if (meState.moveActive) return;
+  // Lasso: start a freehand stroke even if the first click misses the mesh
+  // (so you can loop around the object from empty space).
+  if (meState.mode === 'select' && meState.selectLasso) {
+    _meLassoStart(e);
+    return;
+  }
   const hit = _meGetIntersection(e);
   if (!hit) return;
   // Eyedropper: sample the colour under the cursor instead of painting.
@@ -13513,6 +13574,14 @@ function _meMouseDown(e) {
     meState.pickMode = false;
     document.getElementById('me-paint-pick')?.classList.remove('tool-active');
     return;
+  }
+  // Magic wand: a single click floods the connected flat region — not a
+  // brush stroke. HOLD CTRL (or Cmd/Shift) to ADD the region to the current
+  // selection; a plain click starts a fresh selection.
+  if (meState.mode === 'select' && meState.selectWand) {
+    _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
+    _meWandSelect(hit, e.ctrlKey || e.metaKey || e.shiftKey);
+    return;  // keep orbit controls enabled; a click won't rotate the camera
   }
   meState.painting = true;
   _mePushUndo();
@@ -13532,6 +13601,10 @@ function _meMouseDown(e) {
 
 let _meLastBrushTime = 0;
 function _meMouseMove(e) {
+  // Move gizmo active: let TransformControls handle everything.
+  if (meState.moveActive) return;
+  // Lasso stroke in progress: append points, don't touch brush/orbit.
+  if (meState.lassoing) { _meLassoMove(e); return; }
   // Brush ring — only for the actual brush tools (paint/sculpt/select) and NOT
   // while the colour pipette is armed. Otherwise it lingered as a stuck orange
   // circle over the whole UI. Hidden on canvas leave (see mouseleave binding).
@@ -13562,6 +13635,8 @@ function _meMouseMove(e) {
 }
 
 function _meMouseUp() {
+  if (meState.moveActive) return;
+  if (meState.lassoing) { _meLassoFinish(); return; }
   if (meState.painting) {
     meState.painting = false;
     meState.controls.enabled = true;
@@ -13798,19 +13873,21 @@ function _meApplyBrush(hit) {
     const r = meState.brushRadius;
     const rSq = r * r;
     const px = point.x, py = point.y, pz = point.z;
-    if (!geom.attributes.color) {
-      const colors = new Float32Array(pos.count * 3).fill(0.7);
-      geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      hit.object.material.vertexColors = true;
-      hit.object.material.needsUpdate = true;
-    }
-    const colorAttr = geom.attributes.color;
+    // Use the shared helper instead of an inline "create if missing": Clear
+    // turns material.vertexColors back OFF while KEEPING the attribute, so the
+    // old inline guard never re-enabled it and everything painted after a
+    // Clear was invisible. _meEnsureSelColor re-arms vertexColors every time.
+    const colorAttr = _meEnsureSelColor(hit.object);
     const selVert = (i) => {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
       const dx = vx - px, dy = vy - py, dz = vz - pz;
       if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) return;
       if (dx * dx + dy * dy + dz * dz > rSq) return;
-      colorAttr.setXYZ(i, 1.0, 0.3, 0.1); // orange highlight
+      // Erase sub-tool (ported from desktop): paint back the neutral base
+      // instead of the orange highlight. 0.7 grey is the cloud's "unselected"
+      // value — see _meEnsureSelColor / _meOrange.
+      if (meState.selectErase) colorAttr.setXYZ(i, 0.7, 0.7, 0.7);
+      else colorAttr.setXYZ(i, 1.0, 0.3, 0.1); // orange highlight
     };
     const cand = _meVertsNearPoint(geom, px, py, pz, r);   // BVH: only in-radius verts
     if (cand) { for (const i of cand) selVert(i); }
@@ -13821,6 +13898,11 @@ function _meApplyBrush(hit) {
 
 // Close mesh edit
 function _closeMeshEdit() {
+  // Tear the Move gizmo down first: leaving a TransformControls attached to a
+  // proxy that stays in the scene leaks listeners and re-opens with a stale
+  // snapshot.
+  if (meState.moveActive) _meEndMove();
+  if (meState.lassoing) _meLassoFinish();
   if (typeof _meRestoreView === 'function') _meRestoreView();
   document.getElementById('modal-mesh-edit')?.classList.add('hidden');
 }
@@ -13842,6 +13924,14 @@ document.getElementById('me-redo')?.addEventListener('click', _meRedo);
     document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
     document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
     document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
+    // Leaving Select: drop the gizmo / lasso and go back to the plain brush,
+    // otherwise the sculpt brush would keep the crosshair cursor and the
+    // gizmo would still swallow every pointer event.
+    if (mode !== 'select') {
+      if (meState.moveActive) _meEndMove();
+      if (meState.lassoing) _meLassoFinish();
+      _meSetSelTool('add');
+    }
   });
 });
 // Sculpt sub-modes
@@ -13917,6 +14007,7 @@ document.getElementById('me-sel-delete')?.addEventListener('click', () => {
   showToast('Selected faces deleted', 'success', 1500);
 });
 document.getElementById('me-sel-invert')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
     const color = c.geometry.attributes.color;
@@ -13930,6 +14021,7 @@ document.getElementById('me-sel-invert')?.addEventListener('click', () => {
 });
 document.getElementById('me-sel-clear')?.addEventListener('click', () => {
   _meRestoreView();
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
     const color = c.geometry.attributes.color;
@@ -13948,7 +14040,9 @@ function _meEnsureSelColor(c) {
   if (!geom.attributes.color) {
     geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geom.attributes.position.count * 3).fill(0.7), 3));
   }
-  c.material.vertexColors = true; c.material.needsUpdate = true;
+  // Only flip the material when it actually changes: `needsUpdate = true` forces
+  // a shader re-acquisition, and the Add/Erase brush now calls this ~15x/s.
+  if (!c.material.vertexColors) { c.material.vertexColors = true; c.material.needsUpdate = true; }
   return geom.attributes.color;
 }
 function _meSelHas() {
@@ -14010,6 +14104,7 @@ function _meApplyView(mode) {
 document.getElementById('me-sel-isolate')?.addEventListener('click', () => _meApplyView('isolate'));
 document.getElementById('me-sel-hide')?.addEventListener('click', () => _meApplyView('hide'));
 document.getElementById('me-sel-all')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.position) return;
     const col = _meEnsureSelColor(c);
@@ -14018,6 +14113,7 @@ document.getElementById('me-sel-all')?.addEventListener('click', () => {
   });
 });
 document.getElementById('me-sel-grow')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
     const geom = c.geometry, col = geom.attributes.color, idx = geom.index.array;
@@ -14035,6 +14131,7 @@ document.getElementById('me-sel-grow')?.addEventListener('click', () => {
   });
 });
 document.getElementById('me-sel-shrink')?.addEventListener('click', () => {
+  _mePushUndo();   // la selection fait partie de l'historique (Ctrl+Z)
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
     const geom = c.geometry, col = geom.attributes.color, idx = geom.index.array;
@@ -14155,12 +14252,343 @@ document.getElementById('me-sel-duplicate')?.addEventListener('click', () => {
   });
   showToast('Duplicated selection', 'success', 1500);
 });
+
+// ════════════════════════════════════════════════════════════════════
+// SELECTION TOOLS — Add / Erase brush, Magic wand, Lasso, Move gizmo.
+// Ported from the desktop editor (src/renderer/index2.js, functions
+// _meSetSelTool / _meWandSelect / _meLasso* / _meStartMove).
+//
+// ADAPTATION (deliberate, do not "fix" back to the desktop version):
+// desktop stores the selection in a side Map `geometry._selSaved`
+// (index -> colour saved under the cyan highlight). The cloud editor
+// predates that and stores the selection IN the vertex-colour attribute
+// (orange 1.0/0.3/0.1 = selected, 0.7 grey = not), which every cloud
+// me-sel-* handler above already reads through `_meOrange`. Porting the
+// desktop Map model verbatim would have meant rewriting all of those
+// working handlers, so the tools below were rewritten against the cloud
+// model instead. Geometry/flood-fill/point-in-polygon maths is identical.
+// ════════════════════════════════════════════════════════════════════
+
+// Select sub-mode: paint to Add (orange) vs Erase (back to the grey base).
+function _meSetSelTool(tool) {
+  // tool: 'add' | 'erase' | 'wand' | 'lasso' — mutually exclusive.
+  meState.selectErase = (tool === 'erase');
+  meState.selectWand = (tool === 'wand');
+  meState.selectLasso = (tool === 'lasso');
+  document.getElementById('me-sel-add')?.classList.toggle('tool-active', tool === 'add');
+  document.getElementById('me-sel-erase')?.classList.toggle('tool-active', tool === 'erase');
+  document.getElementById('me-sel-wand')?.classList.toggle('tool-active', tool === 'wand');
+  document.getElementById('me-sel-lasso')?.classList.toggle('tool-active', tool === 'lasso');
+  const angleRow = document.getElementById('me-sel-wand-angle-row');
+  if (angleRow) angleRow.style.display = (tool === 'wand') ? 'flex' : 'none';
+  // Wand/Lasso are precise click/draw tools → hide the round brush ring and
+  // use a crosshair cursor instead of the big circle. Add/Erase keep the ring.
+  const precise = (tool === 'wand' || tool === 'lasso');
+  const cursor = document.getElementById('me-brush-cursor');
+  if (cursor && precise) cursor.style.display = 'none';
+  const dom = meState.renderer && meState.renderer.domElement;
+  if (dom) dom.style.cursor = precise ? 'crosshair' : '';
+}
+document.getElementById('me-sel-add')?.addEventListener('click', () => _meSetSelTool('add'));
+document.getElementById('me-sel-erase')?.addEventListener('click', () => _meSetSelTool('erase'));
+document.getElementById('me-sel-wand')?.addEventListener('click', () => _meSetSelTool('wand'));
+document.getElementById('me-sel-lasso')?.addEventListener('click', () => _meSetSelTool('lasso'));
+document.getElementById('me-sel-wand-angle')?.addEventListener('input', (e) => {
+  meState.wandAngle = parseInt(e.target.value) || 20;
+  const v = document.getElementById('me-sel-wand-angle-val');
+  if (v) v.textContent = meState.wandAngle + '°';
+});
+
+// Local face normal (unnormalized cross → normalized) for a triangle `f`.
+const _wandA = new THREE.Vector3(), _wandB = new THREE.Vector3(), _wandC = new THREE.Vector3(),
+      _wandAB = new THREE.Vector3(), _wandAC = new THREE.Vector3();
+function _meFaceNormal(pos, idx, f, out) {
+  const a = idx[f * 3], b = idx[f * 3 + 1], c = idx[f * 3 + 2];
+  _wandA.fromBufferAttribute(pos, a);
+  _wandB.fromBufferAttribute(pos, b);
+  _wandC.fromBufferAttribute(pos, c);
+  _wandAB.subVectors(_wandB, _wandA);
+  _wandAC.subVectors(_wandC, _wandA);
+  return out.crossVectors(_wandAB, _wandAC).normalize();
+}
+// Magic wand: from the clicked face, flood-fill across position-welded
+// adjacency and select every face whose normal stays within `wandAngle`
+// of the SEED face normal — i.e. the connected flat region (a floor, a
+// wall of a scan). Ctrl/Shift-click keeps the existing selection; plain click
+// starts fresh. Face adjacency is rebuilt each call (cheap, always correct
+// even after a Crop/Delete changed the index).
+function _meWandSelect(hit, additive) {
+  const obj = hit.object, geom = obj.geometry;
+  if (!geom.index || !geom.attributes.position) return;
+  const seedFace = hit.faceIndex;
+  if (seedFace == null) return;
+  _meBuildPosAdj(geom);
+  const pos = geom.attributes.position, idx = geom.index.array;
+  const keyOf = geom._posKeyByIndex, groups = geom._posGroups;
+  const nFaces = idx.length / 3;
+
+  // Face adjacency via shared welded positions (built fresh, not cached).
+  const facesByKey = new Map();
+  for (let f = 0; f < nFaces; f++) {
+    for (let j = 0; j < 3; j++) {
+      const k = keyOf[idx[f * 3 + j]];
+      let arr = facesByKey.get(k); if (!arr) { arr = []; facesByKey.set(k, arr); }
+      arr.push(f);
+    }
+  }
+
+  const seedN = _meFaceNormal(pos, idx, seedFace, new THREE.Vector3());
+  const nbN = new THREE.Vector3();
+  const tolCos = Math.cos(THREE.MathUtils.degToRad(meState.wandAngle || 20));
+  const visited = new Uint8Array(nFaces);
+  const stack = [seedFace];
+  const accepted = [];
+  visited[seedFace] = 1; accepted.push(seedFace);
+  while (stack.length) {
+    const f = stack.pop();
+    for (let j = 0; j < 3; j++) {
+      const neighbors = facesByKey.get(keyOf[idx[f * 3 + j]]);
+      if (!neighbors) continue;
+      for (const nb of neighbors) {
+        if (visited[nb]) continue;
+        visited[nb] = 1;  // mark once; a rejected face bounds the region
+        _meFaceNormal(pos, idx, nb, nbN);
+        if (seedN.dot(nbN) >= tolCos) { stack.push(nb); accepted.push(nb); }
+      }
+    }
+  }
+
+  const col = _meEnsureSelColor(obj);
+  // Fresh selection: reset this mesh back to the neutral base first (desktop
+  // clears the hit geometry only — same behaviour kept here).
+  if (!additive) {
+    for (let i = 0; i < col.count; i++) if (_meOrange(col, i)) col.setXYZ(i, 0.7, 0.7, 0.7);
+  }
+  const addKeys = new Set();
+  for (const f of accepted) {
+    addKeys.add(keyOf[idx[f * 3]]); addKeys.add(keyOf[idx[f * 3 + 1]]); addKeys.add(keyOf[idx[f * 3 + 2]]);
+  }
+  for (const k of addKeys) for (const v of groups.get(k)) col.setXYZ(v, 1.0, 0.3, 0.1);
+  col.needsUpdate = true;
+}
+
+// --- Lasso: freehand screen polygon → select every vertex whose projection
+// falls inside it (selects through the mesh). Ctrl/Shift adds to the current
+// selection. Points are kept in canvas-pixel space (same as the projection). ---
+function _meCanvasPt(e) {
+  const rect = meState.renderer.domElement.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+function _meLassoDraw() {
+  const cv = document.getElementById('me-lasso-canvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const p = meState.lassoPts;
+  if (p.length < 2) return;
+  ctx.save();
+  ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = '#22d3ee';
+  ctx.beginPath();
+  ctx.moveTo(p[0].x, p[0].y);
+  for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+  ctx.lineTo(p[0].x, p[0].y);   // hint the closing edge
+  ctx.stroke();
+  ctx.restore();
+}
+function _meLassoStart(e) {
+  meState.lassoing = true;
+  meState.lassoAdditive = e.ctrlKey || e.metaKey || e.shiftKey;
+  meState.lassoPts = [_meCanvasPt(e)];
+  if (meState.controls) meState.controls.enabled = false;
+  const cv = document.getElementById('me-lasso-canvas');
+  const src = meState.renderer.domElement;
+  if (cv) { cv.width = src.clientWidth; cv.height = src.clientHeight; cv.style.display = 'block'; }
+  _meLassoDraw();
+}
+function _meLassoMove(e) {
+  const pt = _meCanvasPt(e);
+  const last = meState.lassoPts[meState.lassoPts.length - 1];
+  if (last && Math.abs(pt.x - last.x) < 2 && Math.abs(pt.y - last.y) < 2) return;  // decimate
+  meState.lassoPts.push(pt);
+  _meLassoDraw();
+}
+function _meLassoFinish() {
+  if (!meState.lassoing) return;
+  meState.lassoing = false;
+  if (meState.controls) meState.controls.enabled = true;
+  const cv = document.getElementById('me-lasso-canvas');
+  if (cv) { cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); cv.style.display = 'none'; }
+  const poly = meState.lassoPts;
+  meState.lassoPts = [];
+  if (poly.length >= 3) { _mePushUndo(); _meLassoSelect(poly, meState.lassoAdditive); }
+}
+function _mePointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+const _lassoV = new THREE.Vector3();
+function _meLassoSelect(poly, additive) {
+  const cam = meState.camera, dom = meState.renderer.domElement;
+  const W = dom.clientWidth, H = dom.clientHeight;
+  meState.mesh?.traverse(obj => {
+    if (!obj.isMesh || !obj.geometry?.attributes?.position) return;
+    const pos = obj.geometry.attributes.position;
+    const col = _meEnsureSelColor(obj);
+    if (!additive) { for (let i = 0; i < col.count; i++) if (_meOrange(col, i)) col.setXYZ(i, 0.7, 0.7, 0.7); }
+    obj.updateWorldMatrix(true, false);
+    const mat = obj.matrixWorld;
+    for (let i = 0; i < pos.count; i++) {
+      _lassoV.fromBufferAttribute(pos, i).applyMatrix4(mat).project(cam);
+      if (_lassoV.z < -1 || _lassoV.z > 1) continue;   // behind camera / clipped
+      const sx = (_lassoV.x * 0.5 + 0.5) * W, sy = (-_lassoV.y * 0.5 + 0.5) * H;
+      if (_mePointInPoly(sx, sy, poly)) col.setXYZ(i, 1.0, 0.3, 0.1);
+    }
+    col.needsUpdate = true;
+  });
+}
+
+// --- Move gizmo: a TransformControls attached to a proxy at the selection
+// centroid, supporting TRANSLATE / ROTATE / SCALE. Each change re-derives the
+// selected vertices ABSOLUTELY from a snapshot taken at gizmo-attach time
+// (worldPos0 → proxyDelta → back to mesh-local), so rotation/scale pivot
+// cleanly around the centroid with no drift. ---
+const _moveDelta = new THREE.Matrix4(), _moveP = new THREE.Vector3();
+function _meMoveApply() {
+  const proxy = meState.moveProxy;
+  if (!proxy || !meState.moveInitInv || !meState.moveSnap) return;
+  proxy.updateMatrixWorld(true);
+  // Transform applied by the gizmo since attach: current * initial⁻¹ (world).
+  _moveDelta.multiplyMatrices(proxy.matrixWorld, meState.moveInitInv);
+  for (const s of meState.moveSnap) {
+    const pos = s.obj.geometry.attributes.position;
+    const w0 = s.w0, idxs = s.idxs;
+    for (let j = 0; j < idxs.length; j++) {
+      _moveP.set(w0[j * 3], w0[j * 3 + 1], w0[j * 3 + 2]).applyMatrix4(_moveDelta).applyMatrix4(s.invMesh);
+      pos.setXYZ(idxs[j], _moveP.x, _moveP.y, _moveP.z);
+    }
+    pos.needsUpdate = true;
+    s.obj.geometry._normsDirty = true;
+  }
+}
+function _meSetMoveMode(mode) {
+  // mode: 'translate' | 'rotate' | 'scale'
+  if (meState.moveGizmo && meState.moveGizmo.setMode) meState.moveGizmo.setMode(mode);
+  meState.moveMode = mode;
+  for (const m of ['translate', 'rotate', 'scale']) {
+    document.getElementById('me-move-' + m)?.classList.toggle('tool-active', m === mode);
+  }
+}
+function _meStartMove() {
+  if (meState.moveActive) { _meEndMove(); return; }   // toggle off
+  if (!meState.mesh) return;
+  if (!_meSelHas()) { showToast('Select faces first', 'info', 1400); return; }
+  _meRestoreView();   // never move vertices while an Isolate/Hide view is up
+  _mePushUndo();
+  // Centroid of the selected vertices in world space + per-mesh snapshots.
+  const c = new THREE.Vector3(), vv = new THREE.Vector3(); let n = 0;
+  const snap = [];
+  meState.mesh.traverse(o => {
+    if (!o.isMesh || !o.geometry?.attributes?.color || !o.geometry.attributes.position) return;
+    const col = o.geometry.attributes.color;
+    const idxs = [];
+    for (let i = 0; i < col.count; i++) if (_meOrange(col, i)) idxs.push(i);
+    if (!idxs.length) return;
+    const pos = o.geometry.attributes.position;
+    o.updateWorldMatrix(true, false);
+    const w0 = new Float32Array(idxs.length * 3);
+    for (let j = 0; j < idxs.length; j++) {
+      vv.fromBufferAttribute(pos, idxs[j]).applyMatrix4(o.matrixWorld);
+      w0[j * 3] = vv.x; w0[j * 3 + 1] = vv.y; w0[j * 3 + 2] = vv.z;
+      c.add(vv); n++;
+    }
+    snap.push({ obj: o, idxs, w0, invMesh: o.matrixWorld.clone().invert() });
+  });
+  if (!n) return;
+  c.multiplyScalar(1 / n);
+  const proxy = new THREE.Object3D();
+  proxy.position.copy(c);
+  meState.scene.add(proxy);
+  proxy.updateMatrixWorld(true);
+  meState.moveInitInv = proxy.matrixWorld.clone().invert();
+  meState.moveSnap = snap;
+  const tc = new TransformControls(meState.camera, meState.renderer.domElement);
+  tc.setSize(0.9);
+  tc.attach(proxy);
+  tc.addEventListener('dragging-changed', (ev) => { if (meState.controls) meState.controls.enabled = !ev.value; });
+  tc.addEventListener('objectChange', _meMoveApply);
+  // r170: add the gizmo's helper object to the scene (not the controls).
+  meState.scene.add(tc.getHelper ? tc.getHelper() : tc);
+  meState.moveProxy = proxy;
+  meState.moveGizmo = tc;
+  meState.moveActive = true;
+  const _bc = document.getElementById('me-brush-cursor'); if (_bc) _bc.style.display = 'none';
+  document.getElementById('me-sel-move')?.classList.add('tool-active');
+  const modeRow = document.getElementById('me-move-mode-row'); if (modeRow) modeRow.style.display = 'flex';
+  _meSetMoveMode('translate');
+  showToast('Gizmo: T=move · R=rotate · Y=scale. Click Move again to finish.', 'info', 3000);
+}
+function _meEndMove() {
+  const tc = meState.moveGizmo;
+  if (tc) {
+    try { tc.detach(); } catch (e) {}
+    try { meState.scene.remove(tc.getHelper ? tc.getHelper() : tc); } catch (e) {}
+    try { tc.dispose(); } catch (e) {}
+  }
+  if (meState.moveProxy) { try { meState.scene.remove(meState.moveProxy); } catch (e) {} }
+  meState.moveGizmo = null; meState.moveProxy = null;
+  meState.moveInitInv = null; meState.moveSnap = null;
+  meState.moveActive = false;
+  if (meState.controls) meState.controls.enabled = true;
+  // Recompute normals on the meshes we moved. Cloud-only extra: the three-mesh-bvh
+  // boundsTree caches vertex positions, so it must be refit or every later
+  // raycast/brush would still hit the OLD geometry.
+  meState.mesh?.traverse(c => {
+    if (c.isMesh && c.geometry?._normsDirty) {
+      c.geometry.computeVertexNormals();
+      c.geometry._normsDirty = false;
+      _meRefitBVH(c.geometry);
+    }
+  });
+  document.getElementById('me-sel-move')?.classList.remove('tool-active');
+  const modeRow = document.getElementById('me-move-mode-row'); if (modeRow) modeRow.style.display = 'none';
+}
+document.getElementById('me-sel-move')?.addEventListener('click', () => _meStartMove());
+document.getElementById('me-move-translate')?.addEventListener('click', () => _meSetMoveMode('translate'));
+document.getElementById('me-move-rotate')?.addEventListener('click', () => _meSetMoveMode('rotate'));
+document.getElementById('me-move-scale')?.addEventListener('click', () => _meSetMoveMode('scale'));
+
 // Keyboard
 document.addEventListener('keydown', (e) => {
   const modal = document.getElementById('modal-mesh-edit');
   if (!modal || modal.classList.contains('hidden')) return;
   if (e.key === 'Escape') _closeMeshEdit();
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); _meUndo(); }
+});
+// Mesh-edit modal: Delete / Backspace deletes the current face selection
+// (same as the Delete button), and T/R/Y switch the Move gizmo mode. Only in
+// Select mode, and never while typing in an input (angle slider, etc.).
+// Ported from desktop.
+document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('modal-mesh-edit');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+  // Move gizmo mode shortcuts (T=translate, R=rotate, Y=scale).
+  if (meState.moveActive) {
+    const k = e.key.toLowerCase();
+    if (k === 't') { e.preventDefault(); _meSetMoveMode('translate'); return; }
+    if (k === 'r') { e.preventDefault(); _meSetMoveMode('rotate'); return; }
+    if (k === 'y') { e.preventDefault(); _meSetMoveMode('scale'); return; }
+  }
+  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+  if (meState.mode !== 'select') return;
+  e.preventDefault();
+  const btn = document.getElementById('me-sel-delete');
+  if (btn && !btn.disabled) btn.click();
 });
 // Save
 document.getElementById('me-save')?.addEventListener('click', async () => {

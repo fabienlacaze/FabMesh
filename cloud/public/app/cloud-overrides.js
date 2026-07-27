@@ -620,7 +620,11 @@
   // Each remaining ID is kept hidden for its own reason below.
   const CLOUD_HIDE_BUTTONS = [
     'ws-mesh-paintvert-btn',   // vertex paint — still WIP UX-wise
-    'ws-mesh-selectface-btn',  // face selection is useless without delete-faces (not landed yet)
+    // 'ws-mesh-selectface-btn' — VISIBLE since 2026-07-27. The old comment
+    // ("useless without delete-faces") was stale: Delete/Crop/Duplicate/Flip/
+    // Smooth/Grow/Shrink/Isolate/Hide all shipped on cloud, and the missing
+    // piece — the ways to actually SELECT (Add/Erase brush, Magic wand,
+    // Lasso, Move gizmo) — was ported from the desktop editor in index2.js.
     'ws-mesh-trellis2-btn',    // desktop-only TRELLIS-2 retexture path
     // Part segmentation: cloud backend (Modal PartSAM) not deployed yet —
     // hide until the cloud PartSAM job is wired, else the button errors.
