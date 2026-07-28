@@ -344,6 +344,31 @@ async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
  *  counter is exhausted, which is exactly the bug the user hit on
  *  2026-05-25. The default cap is MORE generous than Replicate ($2 vs
  *  $0.50) because Modal is ~5-10× cheaper per image. */
+/** Why a spend guard refused, so the caller can say something TRUE.
+ *
+ *  Both caps used to surface the same sentence — "the service is
+ *  temporarily at capacity" — which is a lie when the account simply
+ *  reached ITS OWN daily limit: nothing is at capacity, and the user is
+ *  left thinking the product is broken while holding credits they paid
+ *  for. Read-only (no CAS, no increment) so it cannot disturb the
+ *  counters it inspects; called only on the refusal path. */
+async function _spendRefusalMessage(env: Env, userId?: string): Promise<string> {
+  const GENERIC = 'The service is temporarily at capacity — your credits are safe and you were not charged. Please try again shortly.';
+  if (!userId || !env.MESHES) return GENERIC;
+  try {
+    const maxUser = parseFloat(env.MAX_USER_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_USER_DAILY_SPEND_USD;
+    const cur = parseFloat((await r2GetText(env, `_meta/userspend/${userId}/${todayUTC()}`)) || '0') || 0;
+    // Within 20% of the personal cap => it is almost certainly the one
+    // that refused. Below that, the global cap is the culprit and the
+    // generic wording is the honest one.
+    if (cur >= maxUser * 0.8) {
+      return 'You have reached your daily generation limit for this account. '
+           + 'Your credits are safe and you were not charged — the limit resets at midnight UTC.';
+    }
+  } catch { /* counter unreadable -> fall back to the generic wording */ }
+  return GENERIC;
+}
+
 async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userId?: string): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
   const next = await _casIncrementCounter(env, `_meta/modal_spend/${todayUTC()}`, estimatedUsd, maxUsd);
@@ -4297,8 +4322,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     ? await checkAndIncrementModalSpend(env, ESTIMATED_USD_MESH, user.id)
     : await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH, user.id);
   if (remainingBudget == null) {
-    const provider = 'Cloud GPU';
-    return err(429, 'The service is temporarily at capacity — your credits are safe and you were not charged. Please try again shortly.');
+    return err(429, await _spendRefusalMessage(env, user.id));
   }
   const refundMeshSpend = async () => {
     if (useModalMesh) await refundModalSpend(env, ESTIMATED_USD_MESH);
@@ -6693,9 +6717,8 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     ? await checkAndIncrementModalSpend(env, estimatedTotal, user.id)
     : await checkAndIncrementDailySpend(env, estimatedTotal, user.id);
   if (remainingBudget == null) {
-    const provider = 'Cloud GPU';
     return json({ ok: false, success: false,
-      error: 'The service is temporarily at capacity — your credits are safe and you were not charged. Please try again shortly.' }, { status: 429 });
+      error: await _spendRefusalMessage(env, user.id) }, { status: 429 });
   }
   // Per-user daily call cap — refund on failure too.
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);

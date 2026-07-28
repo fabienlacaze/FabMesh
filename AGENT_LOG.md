@@ -16302,3 +16302,19 @@ byte-comparable files.
 Licence note: Blender is GPL-2.0-or-later, run server-side and never
 distributed — no source-disclosure obligation, unlike the Michelangelo
 / PartField code purged from the shipped package.
+
+## 2026-07-28 — Honest wording when a spend cap refuses
+
+"The service is temporarily at capacity" was returned for BOTH the
+global daily cap and the per-account one. For the second case that is a
+lie: nothing is at capacity, the account simply reached its own $2/day
+limit — while holding credits it paid for. Users conclude the product
+is broken. Added `_spendRefusalMessage` (read-only, no CAS, refusal path
+only): when the personal counter is within 20% of its cap the message
+says so and points at the UTC-midnight reset; otherwise the generic
+wording stays, which is then true.
+
+Measured on the owner's account: personal counter 1.846/2.00 while the
+global sat at 1.546/6.00 — the personal cap was indeed the blocker.
+Note the personal counter is NOT refunded on failure (deliberate,
+anti-DoS), so a day of timeouts burns the budget producing nothing.
