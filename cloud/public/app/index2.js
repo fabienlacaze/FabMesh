@@ -15302,6 +15302,15 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
     const outPath = r?.outputPath || r?.path;
     if (outPath) {
       completeJob(job.id, true);
+      // Etapes de construction : le navigateur ne pouvant pas creer de dossier,
+      // exportMesh livre une ARCHIVE portant l'arborescence (mesh final a la
+      // racine + « construction steps »). On le dit, sinon l'utilisateur qui
+      // attend un .glb recoit un .zip sans comprendre pourquoi.
+      if (r.stages) {
+        showToast(r.stages + ' construction stages included in the .zip'
+          + (r.stagesFailed ? ' — ' + r.stagesFailed + ' failed' : ''),
+          r.stagesFailed ? 'error' : 'success', 6000);
+      }
       // Drop a sibling LICENSE.txt next to the mesh so the licence
       // travels with the asset. On cloud this triggers a second
       // browser download; on desktop the IPC handler writes it on

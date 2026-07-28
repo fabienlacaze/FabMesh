@@ -756,6 +756,76 @@
   // decoupage on obtient des noms de fichier du type 'mesh.glb?exp=...&sig=...'
   // qui remontent dans l'UI, dans les noms de telechargement, et jusque dans des
   // cles R2 construites par concatenation.
+
+  // ---------------------------------------------------------------------------
+  // Generateur de ZIP minimal (methode « store », sans compression)
+  // ---------------------------------------------------------------------------
+  // POURQUOI maison : un navigateur ne peut pas ecrire de DOSSIER sur le disque,
+  // or le user veut « un dossier construction steps + le mesh final en dehors ».
+  // La traduction web correcte est donc une archive qui PORTE cette arborescence.
+  // Aucune bibliotheque n'est disponible (la CSP du site interdit les scripts
+  // externes, cf. index.html) et JSZip pese ~100 Ko pour un besoin qui tient en
+  // 50 lignes. « Store » et non « deflate » : les GLB embarquent deja des
+  // textures compressees (WebP/PNG), deflate n'y gagnerait quasi rien pour un
+  // cout CPU reel sur des fichiers de plusieurs dizaines de Mo.
+  const _CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[i] = c >>> 0;
+    }
+    return t;
+  })();
+  function _crc32(u8) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < u8.length; i++) c = _CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  /** entries: [{ name, data:Uint8Array }] -> Blob zip. `name` peut contenir des
+   *  '/' : c'est ainsi qu'un ZIP represente une arborescence. */
+  function _makeZip(entries) {
+    const enc = new TextEncoder();
+    const chunks = [], central = [];
+    let offset = 0;
+    for (const e of entries) {
+      const nameBytes = enc.encode(e.name);
+      const crc = _crc32(e.data);
+      const size = e.data.length;
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true);   // signature
+      local.setUint16(4, 20, true);           // version minimale
+      local.setUint16(6, 0x0800, true);       // drapeau : nom en UTF-8
+      local.setUint16(8, 0, true);            // methode 0 = store
+      local.setUint16(10, 0, true); local.setUint16(12, 0, true);   // heure/date
+      local.setUint32(14, crc, true);
+      local.setUint32(18, size, true); local.setUint32(22, size, true);
+      local.setUint16(26, nameBytes.length, true); local.setUint16(28, 0, true);
+      chunks.push(new Uint8Array(local.buffer), nameBytes, e.data);
+      const cen = new DataView(new ArrayBuffer(46));
+      cen.setUint32(0, 0x02014b50, true);
+      cen.setUint16(4, 20, true); cen.setUint16(6, 20, true);
+      cen.setUint16(8, 0x0800, true); cen.setUint16(10, 0, true);
+      cen.setUint16(12, 0, true); cen.setUint16(14, 0, true);
+      cen.setUint32(16, crc, true);
+      cen.setUint32(20, size, true); cen.setUint32(24, size, true);
+      cen.setUint16(28, nameBytes.length, true);
+      cen.setUint16(30, 0, true); cen.setUint16(32, 0, true);
+      cen.setUint16(34, 0, true); cen.setUint16(36, 0, true);
+      cen.setUint32(38, 0, true);
+      cen.setUint32(42, offset, true);
+      central.push(new Uint8Array(cen.buffer), nameBytes);
+      offset += 30 + nameBytes.length + size;
+    }
+    const centralSize = central.reduce((n, c) => n + c.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+    end.setUint32(12, centralSize, true); end.setUint32(16, offset, true);
+    return new Blob([...chunks, ...central, new Uint8Array(end.buffer)],
+                    { type: 'application/zip' });
+  }
+
   function _basename(p) {
     return String(p || '').split('#')[0].split('?')[0].split(/[/\\]/).pop() || '';
   }
@@ -1254,24 +1324,66 @@
     },
     exportMesh: async ({ sourcePath, targetFormat, outputPath } = {}) => {
       try {
+        const fmt = (targetFormat || 'glb').replace('fbx_unreal', 'fbx');
+        // HONNETETE SUR LE FORMAT. L'ancienne version telechargeait les octets
+        // GLB sous l'extension demandee : l'utilisateur obtenait un « .fbx »
+        // que Blender et Unreal refusent, avec un message d'explication que
+        // l'appelant ne lisait JAMAIS. Un echec clair vaut mieux qu'un fichier
+        // au nom mensonger. Le cloud n'a pas de transcodeur (le desktop passe
+        // par Blender) — quand il en aura un, rouvrir ici.
+        if (fmt !== 'glb') {
+          return { ok: false, success: false,
+            error: "Le cloud exporte uniquement en GLB — il n'a pas de transcodeur ("
+                 + fmt.toUpperCase()
+                 + " exige Blender, disponible dans l'application desktop). "
+                 + "Exporte en GLB, puis convertis-le si besoin." };
+        }
         const url = await impl.getMeshLocalUrl(sourcePath);
         if (!url) return { ok: false, error: 'mesh not found' };
-        // In cloud we only have whatever Replicate produced (GLB).
-        // For non-GLB targets we still hand the GLB bytes and let
-        // the user know we can't transcode without Blender. Better
-        // than failing silently.
         const r = await fetch(url);
         if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
         const blob = await r.blob();
         const baseName = _stripExt(_basename(outputPath || sourcePath || 'mesh'));
-        const fmt = (targetFormat || 'glb').replace('fbx_unreal', 'fbx');
-        const want = baseName + '.' + fmt;
-        const note = (fmt !== 'glb');
+
+        // ETAPES DE CONSTRUCTION : meme resultat que le desktop, traduit pour un
+        // navigateur — qui ne peut pas creer de dossier sur le disque. On livre
+        // donc une ARCHIVE qui porte l'arborescence : le mesh final a la racine,
+        // les etapes dans « construction steps ».
+        let stages = null;
+        try {
+          const info = await impl.checkStages3dDir?.(sourcePath);
+          if (info?.exists && (info.stages || []).length >= 2) stages = info.stages;
+        } catch (_) { /* pas d'etapes -> export simple */ }
+
+        if (stages) {
+          const entries = [{ name: baseName + '.glb',
+                             data: new Uint8Array(await blob.arrayBuffer()) }];
+          let failed = 0;
+          for (const st of stages) {
+            try {
+              const su = await impl.getMeshLocalUrl(st.path || st.url);
+              const sr = su ? await fetch(su) : null;
+              if (!sr || !sr.ok) { failed++; continue; }
+              const num = String(st.index).padStart(2, '0');
+              entries.push({
+                name: 'construction steps/' + baseName + '_stage_' + num + '.glb',
+                data: new Uint8Array(await (await sr.blob()).arrayBuffer()),
+              });
+            } catch (_) { failed++; }
+          }
+          // Une seule etape recuperee ne justifie pas une archive : on retombe
+          // sur le fichier simple plutot que de livrer un zip trompeur.
+          if (entries.length > 1) {
+            await _downloadBlobAs(_makeZip(entries), baseName + '.zip');
+            return { ok: true, success: true,
+                     outputPath: baseName + '.zip', path: baseName + '.zip',
+                     stages: entries.length - 1, stagesFailed: failed };
+          }
+        }
+
+        const want = baseName + '.glb';
         await _downloadBlobAs(blob, want);
-        return {
-          ok: true, success: true, outputPath: want, path: want,
-          message: note ? 'Downloaded as GLB (Cloud has no transcoder yet — open in Blender to re-export as ' + fmt + ').' : 'Downloaded.',
-        };
+        return { ok: true, success: true, outputPath: want, path: want };
       } catch (e) { return { ok: false, error: String(e) }; }
     },
     exportImage: async ({ srcPath, defaultName } = {}) => {
