@@ -6077,7 +6077,17 @@ async function translateUserPrompt(text) {
   try { lang = (localStorage.getItem('fabmesh.lang') || 'en').toLowerCase(); } catch (_) {}
   if (lang === 'en') return text;
   try {
-    const r = await window.meshyAPI?.translatePrompt?.({ text, from: lang });
+    // PLAFOND DUR de 8 s. La traduction est un CONFORT : le prompt enrichi
+    // fonctionne tres bien en francais, il sera juste moins bien compris par le
+    // modele. En revanche une interface figee est inacceptable — le user a
+    // signale un « Finalisation… » qui « ne finit jamais » (2026-07-28), cause
+    // par 12 s d'attente d'un serveur mort PLUS ~6 s de spawn a froid. La cause
+    // racine est corrigee cote main, ce plafond est la ceinture de securite :
+    // aucune regression future en dessous ne pourra plus bloquer l'ecran.
+    const r = await Promise.race([
+      window.meshyAPI?.translatePrompt?.({ text, from: lang }),
+      new Promise((res) => setTimeout(() => res(null), 8000)),
+    ]);
     return (r && r.text) ? r.text : text;
   } catch (_) { return text; }
 }

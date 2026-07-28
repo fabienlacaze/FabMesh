@@ -5641,13 +5641,27 @@ function startTranslateServer() {
   if (!_localPyLibsUsable()) return;
   const scriptT = path.join(SCRIPTS_DIR, 'translate_server.py');
   if (!fs.existsSync(scriptT)) return;
+  // INTERPRETE : surtout pas _aiPython() en aveugle. Le venv IA n'embarque PAS
+  // argostranslate (verifie le 2026-07-28), donc le serveur mourait a l'import,
+  // translateReady ne passait JAMAIS a true, et ensureTranslateServer brulait
+  // ses 12 s d'attente AVANT CHAQUE traduction non mise en cache — d'ou le
+  // « Finalisation… » interminable signale par le user au premier « Ameliorer »
+  // de chaque session. On prend donc l'interprete dont on sait qu'il traduit
+  // (_translateWorkingPy, appris par le chemin par spawn), sinon le python
+  // systeme, qui est celui qui porte argos sur cette machine.
+  const pyT = _translateWorkingPy || 'python';
   try {
-    translateProc = require('child_process').spawn(_aiPython(), [scriptT], {
+    translateProc = require('child_process').spawn(pyT, [scriptT], {
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, CUDA_VISIBLE_DEVICES: '', CT2_FORCE_CPU: '1', FABMESH_TRANSLATE_PORT: String(TRANSLATE_PORT) },
     });
     translateProc.stdout.on('data', d => { if (String(d).includes('TRANSLATE READY')) translateReady = true; });
     translateProc.stderr.on('data', () => {});
+    // MORT DETECTEE IMMEDIATEMENT : sans ces deux gardes, un serveur qui crashe
+    // a l'import laissait ensureTranslateServer sonder dans le vide pendant
+    // 12 s. On marque le process mort pour qu'il sorte tout de suite.
+    translateProc.on('error', () => { translateProc = null; translateReady = false; });
+    translateProc.on('exit', () => { translateProc = null; translateReady = false; });
     translateProc.on('exit', () => { translateProc = null; translateReady = false; });
   } catch (_) { translateProc = null; }
 }
@@ -5670,7 +5684,12 @@ async function ensureTranslateServer() {
   if (!_localPyLibsUsable()) return false;   // pas d'attente inutile de 12 s
   if (!translateProc) startTranslateServer();
   if (!translateProc) return false;          // spawn refusé/échoué → on sort
-  for (let i = 0; i < 60 && !translateReady; i++) await new Promise(r => setTimeout(r, 200));
+  // On sort DES QUE le process est mort (translateProc remis a null par les
+  // gardes 'error'/'exit' ci-dessus) au lieu d'attendre les 12 s completes.
+  for (let i = 0; i < 60 && !translateReady; i++) {
+    if (!translateProc) return false;
+    await new Promise(r => setTimeout(r, 200));
+  }
   return translateReady;
 }
 function translateServerCall(text, from, to) {
