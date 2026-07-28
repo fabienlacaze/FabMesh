@@ -849,7 +849,13 @@ async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags
   const t0 = Date.now();
   let polls = 0;
   let coldNoted = false;
-  while (Date.now() - t0 < 15 * 60 * 1000) {
+  // 30 min et non 15 : meme raison que cote web (cf. POLL_TIMEOUT_MS dans
+  // meshyAPI-cloud.js). La generation de maillage est l'operation la plus
+  // longue du produit ; un prereglage eleve annonce deja ~9-10 min, auxquelles
+  // s'ajoutent 2-3 min de demarrage a froid du conteneur Modal. Le job continue
+  // cote serveur au-dela du plafond et les credits sont deja debites : abandonner
+  // trop tot fait croire a une perte seche. Aligne sur le web le 2026-07-28.
+  while (Date.now() - t0 < 30 * 60 * 1000) {
     await new Promise((res) => setTimeout(res, 4000));
     polls++;
     const a = await _authedFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
@@ -882,7 +888,12 @@ async function generateMesh({ imagePath, imagePathBack, assetType, preset, flags
       return { success: false, error: js.error || js.detail || `job ${st}` };
     }
   }
-  return { success: false, error: 'cloud 3D generation timeout (15 min)' };
+  // Message honnete : le job n'est PAS annule, il continue cote serveur et les
+  // credits sont deja debites. Dire « timeout » tout court faisait croire a une
+  // perte seche.
+  return { success: false, error: 'La generation depasse 30 min de suivi. '
+    + 'Elle CONTINUE sur le serveur : le resultat apparaitra dans le projet '
+    + 'une fois termine. Aucun credit supplementaire ne sera debite.' };
 }
 
 async function listLibrary() {

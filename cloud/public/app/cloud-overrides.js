@@ -323,6 +323,10 @@
     // see the total credit cost change as they toggle options.
     installMeshCostMeter();
 
+    // Prechauffe le GPU distant + signale la presence au worker : sans ca
+    // le web payait un demarrage a froid a CHAQUE generation.
+    installPrewarm();
+
     // Pin a small yellow "N credits" badge on every action button that
     // actually spends credits, so users can read the cost without
     // hovering / clicking. Mirrors what Generate 3D and Smooth already
@@ -1015,6 +1019,73 @@
     if (imgVal && typeof prices.text2image === 'number') {
       imgVal.textContent = String(prices.text2image);
     }
+  }
+
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Prechauffage du GPU + battement de coeur
+   * ──────────────────────────────────────────────────────────────────
+   * Le conteneur Modal s'eteint apres 5 min d'inactivite
+   * (scaledown_window=300, modal_app/app.py) et le cron de maintenance ne
+   * passe que toutes les 15 min : il est donc MORT 10 minutes sur 15. La
+   * parade prevue par le worker — POST /api/prewarm — n'etait appelee QUE
+   * par le desktop (src/main/cloud_fallback.js:964). Le web ne l'appelait
+   * JAMAIS, et ne posait pas non plus de /api/heartbeat, lequel conditionne
+   * le preWarmTick du cron via isUserOnline(). Conclusion : depuis le
+   * navigateur, CHAQUE generation payait 2-3 min de demarrage a froid, sans
+   * exception. Constate le 2026-07-28 sur une generation de 10 min 33
+   * (trace client : {"warm":false}).
+   *
+   * Cout maitrise : PREWARM_FRESH_MS cote worker fait office de limiteur —
+   * rappeler alors que le conteneur est chaud ne coute RIEN (il repond
+   * warm:true sans rien demarrer). On ne prechauffe donc pas en boucle
+   * serree, seulement aux moments ou une generation devient probable.
+   */
+  const HEARTBEAT_MS = 2 * 60 * 1000;      // le worker considere en ligne < 5 min
+  let _lastPrewarm = 0;
+
+  async function pingHeartbeat() {
+    try { await fetch('/api/heartbeat', { method: 'POST', credentials: 'include' }); }
+    catch (_) { /* sans effet sur l'UI */ }
+  }
+
+  async function prewarmGpu(imageOp) {
+    // Garde locale : inutile de re-poster plus d'une fois par minute, le
+    // worker sait deja repondre sans rien faire mais autant s'en passer.
+    if (Date.now() - _lastPrewarm < 60_000) return;
+    _lastPrewarm = Date.now();
+    try {
+      await fetch('/api/prewarm', {
+        method: 'POST', credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ imageOp: !!imageOp }),
+      });
+    } catch (_) { /* best-effort */ }
+  }
+
+  function installPrewarm() {
+    // 1. Battement de coeur : debloque le preWarmTick du cron cote worker.
+    pingHeartbeat();
+    setInterval(() => { if (!document.hidden) pingHeartbeat(); }, HEARTBEAT_MS);
+
+    // 2. Prechauffage aux moments ou une generation devient probable, pour
+    //    que le conteneur boote PENDANT que l'utilisateur remplit son
+    //    formulaire plutot qu'apres son clic.
+    prewarmGpu(false);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { pingHeartbeat(); prewarmGpu(false); }
+    });
+    // Ouvrir le panneau d'options 3D ou saisir un prompt = intention de generer.
+    const armer = (id, imageOp) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('focus', () => prewarmGpu(imageOp), { passive: true });
+      el.addEventListener('click', () => prewarmGpu(imageOp), { passive: true });
+    };
+    armer('ws-prompt', true);
+    armer('np-prompt', true);
+    armer('ws-trellis2-preset', false);
+    armer('ws-asset-type', true);
   }
 
   function installMeshCostMeter() {
