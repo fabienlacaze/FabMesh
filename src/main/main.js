@@ -5655,7 +5655,18 @@ function startTranslateServer() {
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, CUDA_VISIBLE_DEVICES: '', CT2_FORCE_CPU: '1', FABMESH_TRANSLATE_PORT: String(TRANSLATE_PORT) },
     });
-    translateProc.stdout.on('data', d => { if (String(d).includes('TRANSLATE READY')) translateReady = true; });
+    translateProc.stdout.on('data', d => {
+      if (!String(d).includes('TRANSLATE READY')) return;
+      translateReady = true;
+      // ARME LE MINUTEUR D'INACTIVITE DES QUE LE SERVEUR EST PRET, et pas
+      // seulement au premier appel qui l'utilise. Sans ca : l'appel qui a
+      // demarre le serveur peut tres bien retomber sur le chemin par spawn
+      // (serveur pas encore pret dans son delai), le serveur devient pret
+      // 2 s plus tard, personne ne le rappelle... et ses ~770 Mo restent
+      // resident jusqu'a la fermeture de l'application. Constate le
+      // 2026-07-28 en repondant a « pourquoi ma RAM est si haute ? ».
+      _bumpTranslateIdle();
+    });
     translateProc.stderr.on('data', () => {});
     // MORT DETECTEE IMMEDIATEMENT : sans ces deux gardes, un serveur qui crashe
     // a l'import laissait ensureTranslateServer sonder dans le vide pendant
