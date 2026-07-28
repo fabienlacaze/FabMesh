@@ -13202,8 +13202,24 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
   // jobs × 200 chars would bloat a file the dashboard reads on every poll.
   const noteErr = (m: string) => { if (out.errors.length < 20) out.errors.push(m.slice(0, 200)); };
   const sb = supabaseAdmin(env);
-  const GRACE_MS = 30 * 60 * 1000;   // segmentation legitimately runs 8-10 min
-  const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  // Tightened 30 -> 20 min on 2026-07-28. NOT a cost control: the GPU
+  // functions carry their own Modal-side timeout (600s for the image
+  // classes, 900s for the TRELLIS-2 mesh class), so Modal has already
+  // stopped billing long before the reaper looks. What this actually
+  // buys is speed of REFUND and of clearing the UI — a user whose job
+  // died sat on spent credits for half an hour.
+  //
+  // Why not lower still: 900s of execution + container cold start
+  // (weight load) + queue wait means a perfectly healthy generation can
+  // legitimately be ~20 min old. Reaping at 15 min would mark LIVE jobs
+  // as failed — the false "Timeout on a generation that had not failed"
+  // regression fixed in 2389221. 20 min is the floor that stays above
+  // the longest legitimate run. Segmentation (8-10 min) is unaffected.
+  const GRACE_MS = 20 * 60 * 1000;
+  // Must stay <= GRACE_MS or the grace can never elapse: this is the
+  // pre-filter deciding which rows the reaper even looks at.
+  const GRACE_LABEL = `${Math.round(GRACE_MS / 60000)} min`;
+  const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const { data: stuck, error: selErr } = await sb.from('jobs')
     .select('id, user_id, credit_cost, created_at, status, options, asset_type')
     .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
@@ -13265,7 +13281,7 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
         let claimed = false;
         if (status.error) claimed = await _failAndRefundJob(env, job, status.error);
         else if (status.ready && status.glb_base64) { /* finished; a client/admin poll persists it */ }
-        else if (age > GRACE_MS) claimed = await _failAndRefundJob(env, job, 'reaped: no result after 30 min');
+        else if (age > GRACE_MS) claimed = await _failAndRefundJob(env, job, `reaped: no result after ${GRACE_LABEL}`);
         if (claimed) {
           out.reaped++; out.credits_refunded += creditCost;
           // Give the GPU budget back too — the old reaper never did.
@@ -13274,7 +13290,7 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
       } catch (e) {
         const m = e instanceof Error ? e.message : String(e);
         if (age > GRACE_MS) {
-          if (await _failAndRefundJob(env, job, 'reaped: unreachable after 30 min')) {
+          if (await _failAndRefundJob(env, job, `reaped: unreachable after ${GRACE_LABEL}`)) {
             out.reaped++; out.credits_refunded += creditCost;
             await refundMeshBudget();
           }
@@ -13309,11 +13325,11 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
       } else if (resp?.ready === true) {
         /* done — the asset is on the Modal volume, a poll will fetch it */
       } else if (age > GRACE_MS) {
-        await finalize(`reaped: ${opType} produced no result after 30 min`);
+        await finalize(`reaped: ${opType} produced no result after ${GRACE_LABEL}`);
       }
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      if (age > GRACE_MS) await finalize(`reaped: ${opType} unreachable after 30 min`);
+      if (age > GRACE_MS) await finalize(`reaped: ${opType} unreachable after ${GRACE_LABEL}`);
       else noteErr(`${id}: ${m}`);
     }
   }

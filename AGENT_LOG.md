@@ -16401,3 +16401,24 @@ STILL OPEN — cost levers, not priced around:
   starts (which also burn GPU) — needs measurement before touching.
 - Global $6/day fuse left as-is on user's instruction ("laisse-le au cas
   ou pour le moment"), but it now bites ~2.5x sooner in real terms.
+
+## 2026-07-28 — Reaper 30 -> 20 min (and a correction)
+
+User asked for 15 min "car ca peut vite me couter super cher". Two
+things had to be said first:
+
+1. It is NOT a cost control. The GPU functions carry Modal-side timeouts
+   (600s image classes, 900s TRELLIS-2 mesh), so Modal stops billing long
+   before the reaper looks. CORRECTION to what I reported earlier today:
+   the 6080s job could NOT have held a GPU for 101 min — that span is the
+   DB record's lifetime (created -> reaped), not GPU time, which was
+   capped at 900s ≈ $0.49. My "~$3.30, half the day's bill" was wrong.
+2. 15 min would have been a no-op anyway: the reaper's pre-filter only
+   selects rows older than 20 min, so a 15-min grace could never elapse.
+   And crossing below ~20 min reaps LIVE jobs (900s execution + cold
+   start + queue), resurrecting the false-Timeout bug fixed in 2389221.
+
+Set GRACE_MS to 20 min and the pre-filter to 15 min — the tightest pair
+that stays above the longest legitimate run. Real benefit is refund
+latency and clearing the UI, not the bill. The four "after 30 min"
+strings now derive from GRACE_MS so they cannot drift again.
