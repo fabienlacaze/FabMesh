@@ -106,10 +106,21 @@
    * Poll a Replicate prediction and emit progress events the desktop
    * renderer is already wired to listen for.
    * ────────────────────────────────────────────────────────────────── */
+  // Plafond de suivi d'un job. 30 min et non 10 : la generation de maillage est
+  // l'operation la PLUS LONGUE du produit, et l'ancien plafond de 600 000 ms
+  // etait intenable — pour un prereglage « High » l'application annonce
+  // elle-meme ~9 min 30 d'estimation, soit 30 SECONDES de marge, et un
+  // demarrage a froid du conteneur Modal (2-3 min) suffisait a la depasser.
+  // Constate le 2026-07-28 : « Timeout » affiche a 10 min 33 alors que le
+  // travail continuait cote serveur et que les credits etaient deja debites.
+  // Les autres suivis (rig, segmentation, animation) plafonnent deja a 15 min ;
+  // celui-ci, le plus long de tous, etait le plus court.
+  const POLL_TIMEOUT_MS = 30 * 60 * 1000;
+
   async function pollPrediction(jobId, { onProgress, channel = 'ai3d-progress' } = {}) {
     const start = Date.now();
     let consecutiveErrors = 0;
-    while (Date.now() - start < 600_000) {
+    while (Date.now() - start < POLL_TIMEOUT_MS) {
       await new Promise((r) => setTimeout(r, 2500));
       let j;
       try {
@@ -148,7 +159,15 @@
         throw new Error(msg);
       }
     }
-    throw new Error('Timeout');
+    // On ne dit plus « Timeout » tout court : le job n'est PAS annule pour
+    // autant, il continue cote serveur et son resultat sera rattache au projet
+    // (les jobs en cours sont persistes dans localStorage, cf. PENDING_JOBS_KEY,
+    // et resumePendingJobs les reprend au rechargement). Un message sec faisait
+    // croire a une perte seche alors que les credits etaient deja debites.
+    throw new Error(
+      'La generation depasse ' + Math.round(POLL_TIMEOUT_MS / 60000) + ' min de suivi. '
+      + 'Elle CONTINUE sur le serveur : recharge la page dans quelques minutes, '
+      + 'le resultat apparaitra dans le projet. Aucun credit supplementaire ne sera debite.');
   }
 
   /* ──────────────────────────────────────────────────────────────────
