@@ -15317,6 +15317,16 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
   // with the same base name and use that instead — textures are embedded in
   // GLBs, so re-exports always start from a clean source.
   let sourcePath = m.path;
+  // Si l'utilisateur regarde une ETAPE de construction (<stem>_stages3d/stage_N.glb),
+  // « Exporter » doit livrer le MESH FINAL, pas l'etape affichee — les etapes
+  // partent dans leur propre dossier, plus bas.
+  const _STAGE_RE = /_stages3d[\\/]stage_\d+\.glb$/i;
+  if (_STAGE_RE.test(sourcePath)) {
+    const parent = sourcePath.replace(_STAGE_RE, '.glb');
+    const pj = state.currentProject;
+    const parentObj = (pj?.meshes || []).find(x => _normPath(x.path) === _normPath(parent));
+    sourcePath = parentObj ? parentObj.path : parent;
+  }
   if (/\.fbx$/i.test(sourcePath)) {
     const p = state.currentProject;
     const baseName = m.filename.replace(/\.[^.]+$/, '');
@@ -15335,6 +15345,39 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
     const r = await API.exportMesh({ sourcePath, targetFormat: format, outputPath, customName });
     const outPath = r?.outputPath || r?.path;
     if (outPath) {
+      // ETAPES DE CONSTRUCTION : si ce mesh en possede, on les livre dans un
+      // sous-dossier « construction steps » A COTE du mesh final, au MEME format
+      // que celui choisi. Demande user du 2026-07-28 : le final doit rester HORS
+      // du dossier, pour qu'un import direct ne ramasse pas les etapes.
+      let stagesInfo = null;
+      try { stagesInfo = await API.checkStages3dDir?.(sourcePath); } catch (_) {}
+      if (stagesInfo?.exists && (stagesInfo.stages || []).length >= 2) {
+        // Separateur deduit du chemin rendu par le main : pas de litteral
+        // antislash, et on gere indifferemment les deux formes.
+        const cut = Math.max(outPath.lastIndexOf('/'), outPath.lastIndexOf(String.fromCharCode(92)));
+        const sep = cut >= 0 ? outPath.charAt(cut) : '/';
+        const outDir = cut >= 0 ? outPath.slice(0, cut) : '.';
+        const baseName = outPath.slice(cut + 1).replace(/\.[^.]+$/, '');
+        const ext = format === 'fbx_unreal' ? 'fbx' : format;
+        const stagesDir = outDir + sep + 'construction steps';
+        const total = stagesInfo.stages.length;
+        // SEQUENTIEL : le FBX passe par Blender ; dix instances simultanees
+        // satureraient la machine et le pre-vol RAM les refuserait.
+        let done = 0, failed = 0;
+        for (const st of stagesInfo.stages) {
+          const num = String(st.index).padStart(2, '0');
+          const dest = stagesDir + sep + baseName + '_stage_' + num + '.' + ext;
+          try {
+            const sr = await API.exportMesh({ sourcePath: st.path, targetFormat: format, outputPath: dest });
+            if (sr && (sr.outputPath || sr.path)) done++; else failed++;
+          } catch (_) { failed++; }
+          showToast('Construction stages ' + (done + failed) + '/' + total + '…', 'info', 1200);
+        }
+        showToast(failed
+          ? done + '/' + total + ' stages exported — ' + failed + ' failed'
+          : total + ' stages exported -> « construction steps »',
+          failed ? 'error' : 'success', 5000);
+      }
       completeJob(job.id, true);
       try { await API.showInExplorer(outPath); } catch (e) {}
       // For an Unreal FBX of an EXPLOSION mesh, show how to turn the shards into
