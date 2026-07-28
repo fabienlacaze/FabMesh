@@ -1343,25 +1343,47 @@
     },
     exportMesh: async ({ sourcePath, targetFormat, outputPath } = {}) => {
       try {
-        const fmt = (targetFormat || 'glb').replace('fbx_unreal', 'fbx');
-        // HONNETETE SUR LE FORMAT. L'ancienne version telechargeait les octets
-        // GLB sous l'extension demandee : l'utilisateur obtenait un « .fbx »
-        // que Blender et Unreal refusent, avec un message d'explication que
-        // l'appelant ne lisait JAMAIS. Un echec clair vaut mieux qu'un fichier
-        // au nom mensonger. Le cloud n'a pas de transcodeur (le desktop passe
-        // par Blender) — quand il en aura un, rouvrir ici.
-        if (fmt !== 'glb') {
-          return { ok: false, success: false,
-            error: "Le cloud exporte uniquement en GLB — il n'a pas de transcodeur ("
-                 + fmt.toUpperCase()
-                 + " exige Blender, disponible dans l'application desktop). "
-                 + "Exporte en GLB, puis convertis-le si besoin." };
-        }
+        // fbx_unreal est CONSERVE tel quel (avant : rabattu sur 'fbx') —
+        // c'est lui qui declenche cote serveur l'echelle en cm et l'axe
+        // Y-up attendus par Unreal. L'extension renvoyee reste .fbx.
+        const fmt = targetFormat || 'glb';
         const url = await impl.getMeshLocalUrl(sourcePath);
         if (!url) return { ok: false, error: 'mesh not found' };
-        const r = await fetch(url);
-        if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
-        const blob = await r.blob();
+
+        // Recupere UN mesh dans le format demande. GLB = telechargement
+        // direct, aucun aller-retour serveur. Tout autre format passe par
+        // Blender sur Modal (/api/mesh-convert), le meme moteur que le
+        // desktop — pas de renommage d'octets GLB, qui produisait avant un
+        // « .fbx » refuse par Blender et Unreal.
+        const _grab = async (meshUrl) => {
+          if (fmt === 'glb') {
+            const r = await fetch(meshUrl);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return { blob: await r.blob(), ext: 'glb' };
+          }
+          if (!/^https?:/i.test(meshUrl)) {
+            throw new Error('ce maillage n’est pas encore publie — '
+              + 'la conversion ' + fmt.toUpperCase() + ' se fait cote serveur');
+          }
+          const d = await postJSON('/api/mesh-convert', { meshUrl, format: fmt });
+          if (!d || d.ok === false || !d.url) {
+            throw new Error((d && d.error) || 'conversion indisponible');
+          }
+          const f = await fetch(d.url);
+          if (!f.ok) throw new Error('telechargement HTTP ' + f.status);
+          // `ext` fait foi : OBJ et glTF separe reviennent en .zip car ils
+          // ont besoin de fichiers annexes (.mtl, .bin, textures).
+          return { blob: await f.blob(), ext: (d.ext || fmt) };
+        };
+
+        let main;
+        try { main = await _grab(url); }
+        catch (e) {
+          return { ok: false, success: false,
+            error: 'Export ' + fmt.toUpperCase() + ' impossible : ' + (e.message || e) };
+        }
+        const blob = main.blob;
+        const ext = main.ext;
         const baseName = _stripExt(_basename(outputPath || sourcePath || 'mesh'));
 
         // ETAPES DE CONSTRUCTION : meme resultat que le desktop, traduit pour un
@@ -1375,18 +1397,20 @@
         } catch (_) { /* pas d'etapes -> export simple */ }
 
         if (stages) {
-          const entries = [{ name: baseName + '.glb',
+          const entries = [{ name: baseName + '.' + ext,
                              data: new Uint8Array(await blob.arrayBuffer()) }];
           let failed = 0;
           for (const st of stages) {
             try {
               const su = await impl.getMeshLocalUrl(st.path || st.url);
-              const sr = su ? await fetch(su) : null;
-              if (!sr || !sr.ok) { failed++; continue; }
+              if (!su) { failed++; continue; }
+              // Les etapes suivent le format du mesh final — comme sur
+              // desktop. Une etape qui echoue ne fait pas echouer l'export.
+              const got = await _grab(su);
               const num = String(st.index).padStart(2, '0');
               entries.push({
-                name: 'construction steps/' + baseName + '_stage_' + num + '.glb',
-                data: new Uint8Array(await (await sr.blob()).arrayBuffer()),
+                name: 'construction steps/' + baseName + '_stage_' + num + '.' + got.ext,
+                data: new Uint8Array(await got.blob.arrayBuffer()),
               });
             } catch (_) { failed++; }
           }
@@ -1400,9 +1424,10 @@
           }
         }
 
-        const want = baseName + '.glb';
+        const want = baseName + '.' + ext;
         await _downloadBlobAs(blob, want);
-        return { ok: true, success: true, outputPath: want, path: want };
+        return { ok: true, success: true, outputPath: want, path: want,
+                 format: fmt, ext };
       } catch (e) { return { ok: false, error: String(e) }; }
     },
     exportImage: async ({ srcPath, defaultName } = {}) => {
@@ -1804,10 +1829,11 @@
       } catch (e) { return { ok: false, error: String(e) }; }
     },
     exportToUnreal: async ({ sourcePath } = {}) => {
-      // Best-effort: just download the GLB so the user can manually
-      // drag-drop it into Unreal. Real FBX-for-Unreal export requires
-      // Blender (Desktop-only).
-      return impl.exportMesh({ sourcePath, targetFormat: 'glb' });
+      // Renvoyait un GLB en annoncant un export Unreal reussi. Depuis que
+      // le cloud a un transcodeur Blender (/api/mesh-convert), c'est un
+      // vrai FBX au format Unreal — cm, Y-up, textures embarquees — le
+      // meme que produit le desktop.
+      return impl.exportMesh({ sourcePath, targetFormat: 'fbx_unreal' });
     },
     // Auto-rig AI via Puppeteer on Modal — async spawn + poll.
     //

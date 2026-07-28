@@ -7592,6 +7592,92 @@ async function handleStages3dList(req: Request, env: Env): Promise<Response> {
  *
  *  Safeguards: auth required, glTF magic-byte check, hard size cap,
  *  per-user daily call quota (shared with paid ops). */
+/** Export-format conversion: GLB -> FBX / OBJ / STL / PLY / glTF / USD /
+ *  Alembic / Collada, via Blender on Modal.
+ *
+ *  Deliberately NOT an opType on handleMeshOp. That handler bills a
+ *  credit and files its output back into the project as a new mesh —
+ *  correct for an *edit*, wrong for an *export*: downloading your own
+ *  mesh in another format must not cost credits, and must not litter the
+ *  project's mesh list with .fbx entries.
+ *
+ *  The converted bytes are parked under <uid>/export/ and returned as a
+ *  signed URL. That prefix is outside <uid>/mesh-op/, which is what the
+ *  project listing scans, so exports stay invisible to the project view. */
+async function handleMeshConvert(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_MESH_START_URL) return err(503, 'export backend unavailable');
+
+  const { meshUrl, format } = await req.json() as {
+    meshUrl?: string; format?: string;
+  };
+  // Mirror of modal_app/_convert_op.FORMATS. Kept as a literal rather
+  // than fetched so a malformed request is rejected at the edge, before
+  // it can boot a Blender container.
+  const FORMATS = new Set([
+    'fbx', 'fbx_unreal',  // fbx_unreal = same .fbx, cm + Y-up for Unreal
+    'obj', 'stl', 'ply', 'gltf', 'usd', 'usdc', 'usda', 'usdz', 'abc', 'dae',
+  ]);
+  const fmt = (format ?? '').toLowerCase().replace(/^\./, '');
+  if (!FORMATS.has(fmt)) {
+    return err(400, `format must be one of ${Array.from(FORMATS).join(', ')}`);
+  }
+  const src = (meshUrl ?? '').trim();
+  if (!src) return err(400, 'meshUrl required');
+  // Same SSRF guard as handleMeshOp: meshUrl is user-controlled.
+  if (!isTrustedAssetHost(env, src)) return err(400, 'meshUrl host not allowed');
+
+  const started = Date.now();
+  try {
+    const r = await fetch(
+      env.MODAL_MESH_START_URL.replace(/\/mesh_start$/, '/mesh_convert'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          _auth: env.MODAL_SHARED_SECRET ?? '', mesh_url: src, format: fmt,
+        }),
+        // Generous: a cold Blender container is a ~356MB image pull on
+        // top of the conversion itself.
+        signal: AbortSignal.timeout(600_000),
+      });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      return err(502, `conversion failed (HTTP ${r.status}) ${detail}`.trim());
+    }
+    const data = await r.json() as {
+      data_base64?: string; ext?: string; bytes?: number;
+    };
+    if (!data.data_base64) return err(502, 'conversion returned no data');
+
+    const bin = atob(data.data_base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+    // `ext` from the converter wins over `fmt`: OBJ and GLTF_SEPARATE
+    // come back as a .zip because they need sidecar files, and naming
+    // that download .obj would hand the user a broken archive.
+    const ext = (data.ext || fmt).replace(/[^a-z0-9]/gi, '') || fmt;
+    const key = `${user.id}/export/${Date.now()}_export.${ext}`;
+    await env.MESHES.put(key, bytes, {
+      httpMetadata: {
+        contentType: ext === 'zip' ? 'application/zip' : 'application/octet-stream',
+      },
+    });
+    const url = await signedR2Url(env, key, 'export');
+
+    await logOperation(env, user.id, 'mesh-convert',
+                       0, started, Date.now(), 'succeeded',
+                       { format: fmt, ext, bytes: bytes.length });
+    return json({ ok: true, url, ext, format: fmt, bytes: bytes.length });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await logOperation(env, user.id, 'mesh-convert',
+                       0, started, Date.now(), 'failed', { format: fmt, error: msg });
+    return err(502, `conversion failed: ${msg}`);
+  }
+}
+
 async function handleMeshOpClientResult(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -13243,6 +13329,8 @@ export default {
         '/api/segment-preview',
         '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
+        // Boots a Blender container on Modal -> same kill switch.
+        '/api/mesh-convert',
         '/api/auto-rig', '/api/auto-rig-status',
         '/api/mesh-segment', '/api/mesh-segment-status',
         // /api/prewarm can BOOT a Modal GPU — it must obey the same kill
@@ -13426,6 +13514,7 @@ export default {
         if (pathname === '/api/heartbeat'             && (method === 'POST' || method === 'GET')) return await handleHeartbeat(req, env);
         if (pathname === '/api/prewarm'               && method === 'POST') return await handlePrewarm(req, env, _ctx as { waitUntil?: (p: Promise<unknown>) => void });
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
+        if (pathname === '/api/mesh-convert'          && method === 'POST') return await handleMeshConvert(req, env);
         if (pathname === '/api/construction-stages-3d' && method === 'POST') return await handleConstructionStages3d(req, env);
         if (pathname === '/api/stages3d-list'         && method === 'GET')  return await handleStages3dList(req, env);
         if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);

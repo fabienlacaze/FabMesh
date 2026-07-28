@@ -282,7 +282,45 @@ image = (
     )
 )
 
+# Blender image — export format conversion (GLB -> FBX/OBJ/STL/...).
+# Deliberately built on debian_slim and NOT on _base_image: bpy is a
+# ~356MB wheel and adding it to `image` would inflate the cold start of
+# the CPU front-end (mesh_router) that every mesh edit goes through, for
+# a dependency only the export path uses. Separate image = the existing
+# CUDA layers are untouched, so deploying this does NOT trigger the
+# 30-60min CuMesh/nvdiffrast/o-voxel rebuild.
+#
+# bpy 4.5.x is the last series with cp311 wheels (5.x is Python 3.13
+# only) — pinned so a future 3.13-only release can't silently break the
+# build. The apt list is what the manylinux wheel dlopen()s at import:
+# without them `import bpy` dies with an ImportError on libXi/libSM.
+#
+# Licence: Blender is GPL-2.0-or-later. It runs server-side and is never
+# distributed to customers, so no source-disclosure obligation attaches —
+# unlike the Michelangelo/PartField code purged from the shipped package.
+blender_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install(
+        "libgl1", "libglib2.0-0", "libsm6", "libxi6", "libxxf86vm1",
+        "libxfixes3", "libxrender1", "libxkbcommon0",
+    )
+    .pip_install("bpy==4.5.9")
+    .add_local_python_source("modal_app")
+)
+
 app = modal.App("myfabmesh-cloud", image=image)
+
+
+@app.function(image=blender_image, timeout=900, memory=8192)
+def blender_convert(glb_bytes: bytes, fmt: str):
+    """Convert a GLB to `fmt` with Blender. Called with .remote() from
+    mesh_router — a plain Modal function, NOT a web endpoint, so it costs
+    no web-function slot and its 356MB image never touches the router.
+
+    Returns (bytes, extension); extension is 'zip' when the format needs
+    sidecar files (OBJ + .mtl + textures)."""
+    from modal_app._convert_op import convert
+    return convert(glb_bytes, fmt)
 
 
 # ---------------------------------------------------------------------------
@@ -1820,6 +1858,59 @@ def mesh_router():
             glb = f.read()
         return {"ready": True, "glb_base64": base64.b64encode(glb).decode("ascii"),
                 "bytes": len(glb)}
+
+    @api.post("/mesh_convert")
+    async def mesh_convert(request: Request):
+        """Export-format conversion, separate from /mesh_start on purpose.
+
+        /mesh_start's ops are *edits*: the Worker bills a credit and files
+        the result back into the project as a new mesh. An export is
+        neither — it must not charge and must not add an .fbx entry to the
+        user's mesh list. Hence its own route.
+
+        Body: {"_auth": "...", "mesh_url": "https://.../mesh.glb",
+               "format": "fbx"|"obj"|"stl"|"ply"|"gltf"|"usd"|"abc"|"dae"}
+        Returns: {ok, data_base64, ext, bytes}. `ext` is authoritative —
+        it comes back as 'zip' when the format needed sidecar files, so
+        the caller must name the download from it rather than from the
+        requested format.
+        """
+        import base64
+        import urllib.request
+
+        payload = await _read_json(request)
+        _check_auth(payload)
+
+        from modal_app._convert_op import FORMATS
+        fmt = (payload.get("format") or "").strip().lower().lstrip(".")
+        if fmt not in FORMATS:
+            raise HTTPException(status_code=400,
+                detail=f"unsupported format '{fmt}' "
+                       f"(supported: {', '.join(sorted(FORMATS))})")
+
+        mesh_url = (payload.get("mesh_url") or "").strip()
+        if not mesh_url:
+            raise HTTPException(status_code=400, detail="mesh_url required")
+        try:
+            req = urllib.request.Request(mesh_url, headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                src = r.read()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"mesh download: {e}")
+
+        # Runs on blender_image in its own container; first call after an
+        # idle period pays a cold start (~30-60s) that the caller's
+        # timeout must accommodate.
+        try:
+            out, ext = blender_convert.remote(src, fmt)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"convert failed: {e}")
+
+        return {"ok": True, "format": fmt, "ext": ext, "bytes": len(out),
+                "data_base64": base64.b64encode(out).decode("ascii")}
 
     @api.get("/healthz")
     async def healthz():

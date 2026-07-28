@@ -16250,3 +16250,55 @@ modal-content divs (cloud + desktop). Added CanvasManager.recenter()
 (zoom=1 + pan=0 + re-apply transform) and a ⊚ button on each modal
 toolbar that calls it. canvas-utils.js + index2-edit-tools.js synced
 cloud→desktop so the helper is identical on both.
+
+## 2026-07-28 — Cloud: real export transcoding (FBX first)
+
+The cloud offered 7 export formats but could only produce GLB. Until
+this morning it renamed GLB bytes to the requested extension (a ".fbx"
+Blender and Unreal both reject); since the honesty fix it simply
+refused anything but GLB. Neither is an export feature.
+
+Added a Blender-on-Modal transcoder — the SAME engine the desktop
+drives through scripts/convert_glb.py, so both platforms now emit
+byte-comparable files.
+
+- `modal_app/_convert_op.py` (new): GLB -> fbx / fbx_unreal / obj /
+  stl / ply / gltf / usd(c|a|z) / abc / dae, via the `bpy` module
+  in-process. Same operators and flags as the desktop script.
+  `fbx_unreal` mirrors main.js's isUnreal branch (objects scaled x100,
+  apply_unit_scale, FBX_SCALE_NONE, axis_forward=-Z, axis_up=Y,
+  bake_space_transform, mesh_smooth_type=FACE).
+  Multi-file formats (OBJ + .mtl + textures, GLTF_SEPARATE) come back
+  as a .zip; the returned `ext` is authoritative so the caller can't
+  name a zip ".obj". FBX embeds its textures -> single file.
+
+- `modal_app/app.py`: `blender_image` built on debian_slim, NOT on
+  _base_image. bpy is a ~356MB wheel; adding it to `image` would slow
+  the cold start of the CPU front-end every mesh edit goes through,
+  and touching the shared image risks the 30-60min CuMesh/nvdiffrast/
+  o-voxel rebuild. `blender_convert` is a plain Modal function called
+  with .remote() from mesh_router -> costs no web-endpoint slot.
+  bpy pinned to 4.5.9: last series with cp311 wheels (5.x is 3.13-only).
+
+- New `/mesh_convert` route on the existing mesh_router ASGI app.
+  Deliberately NOT an op_type on /mesh_start: that path bills a credit
+  and files its output back into the project as a new mesh — correct
+  for an edit, wrong for an export (downloading your own mesh in
+  another format must not cost credits nor add .fbx entries to the
+  project's mesh list).
+
+- `cloud/src/worker.ts`: `handleMeshConvert` (auth, SSRF guard reused
+  from handleMeshOp, no credit charge). Result parked under
+  <uid>/export/ — outside <uid>/mesh-op/ which the project listing
+  scans, so exports stay invisible to the project view. Added to
+  MODAL_PATHS: it can boot a container, so it obeys the kill switch.
+
+- `cloud/public/app/meshyAPI-cloud.js`: exportMesh converts instead of
+  refusing; construction stages follow the target format (as on
+  desktop) and a failed stage no longer fails the export. exportToUnreal
+  now returns a genuine Unreal-flavoured FBX instead of a GLB announced
+  as a success.
+
+Licence note: Blender is GPL-2.0-or-later, run server-side and never
+distributed — no source-disclosure obligation, unlike the Michelangelo
+/ PartField code purged from the shipped package.

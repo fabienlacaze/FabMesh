@@ -15310,6 +15310,12 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
         showToast(r.stages + ' construction stages included in the .zip'
           + (r.stagesFailed ? ' — ' + r.stagesFailed + ' failed' : ''),
           r.stagesFailed ? 'error' : 'success', 6000);
+      } else if (r.ext === 'zip') {
+        // OBJ et glTF separe s'accompagnent de fichiers annexes (.mtl,
+        // .bin, textures). Livrer un « .obj » seul donnerait un maillage
+        // gris : on renvoie une archive, et on explique pourquoi.
+        showToast(format.toUpperCase() + ' needs its companion files '
+          + '(.mtl / .bin / textures) — delivered as a .zip', 'success', 6000);
       }
       // Drop a sibling LICENSE.txt next to the mesh so the licence
       // travels with the asset. On cloud this triggers a second
