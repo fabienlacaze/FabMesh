@@ -16318,3 +16318,42 @@ Measured on the owner's account: personal counter 1.846/2.00 while the
 global sat at 1.546/6.00 — the personal cap was indeed the blocker.
 Note the personal counter is NOT refunded on failure (deliberate,
 anti-DoS), so a day of timeouts burns the budget producing nothing.
+
+## 2026-07-28 — Paying accounts are no longer rationed
+
+User (owner) hit "The service is temporarily at capacity" mid-session.
+Root cause was the per-account $2/day cap (counter 1.846/2.00) while the
+global sat at 1.546/6.00 — so the block was self-inflicted, not a Modal
+outage. User's call: "si les gens payent ils peuvent tout consommer en
+1 j je m'en fiche".
+
+Why the cap existed at all (worth recording, the comment in
+wrangler.toml only half-explains it): a NEW account is granted 50 free
+credits by the Supabase signup trigger, and the cheapest preset costs 1
+credit. 50 x $0.16 = ~$8 of Modal compute per free signup — MORE than
+the entire $6/day global fuse. The per-account cap is what stops one
+free signup eating everyone's day. That rationale does not apply to a
+customer: their credit balance already bounds their spend, and every
+credit was sold at a positive margin (quality +141%, ultra +250%).
+
+- `_isPaidAccount(env, userId)`: R2 marker `_meta/paid/<uid>`, lazily
+  backfilled from the Supabase `payments` table, with a per-day negative
+  marker so an unpaid account costs at most ONE lookup per day instead
+  of one per generation. Fails closed (treats as unpaid) if Supabase or
+  R2 is unreachable — never toward spending more.
+- `checkAndIncrementModalSpend`: paid accounts skip BOTH caps. Their
+  spend still lands on the SAME daily counter, deliberately: refunds go
+  through refundModalSpend from ~50 call sites with no userId in scope,
+  and a refund crediting a different counter than the charge is exactly
+  how these figures start lying. Lifetime total + budget alert still fed,
+  so the "Modal workspace budget low" warning keeps working.
+
+The marker doubles as a manual exemption switch — set it for the owner's
+uid (dda6546a-…), who has no Stripe payment and would otherwise stay
+capped at $2/day.
+
+KNOWN TRADE-OFF: paid spend still inflates the shared daily counter, so
+a heavy paying day can trip the $6 global fuse and lock FREE trials out
+until UTC midnight. Fixing that properly means a separate free-tier
+counter, which needs the userId threaded through every refund call site.
+Not done — flagged rather than half-done.

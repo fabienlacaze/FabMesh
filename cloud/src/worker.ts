@@ -344,6 +344,44 @@ async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
  *  counter is exhausted, which is exactly the bug the user hit on
  *  2026-05-25. The default cap is MORE generous than Replicate ($2 vs
  *  $0.50) because Modal is ~5-10× cheaper per image. */
+/** Has this account ever completed a payment?
+ *
+ *  Paying accounts are NOT rationed by the daily $ caps. Those caps
+ *  exist to bound what WE spend on people who haven't paid us: a new
+ *  account is granted 50 free credits, and 50 credits spent on the
+ *  cheapest preset is ~$8 of Modal compute — more than the whole global
+ *  daily budget. A customer's credits were bought at a positive margin,
+ *  so there is nothing to protect against: their balance already bounds
+ *  their total spend. Rationing them to ~5-12 generations a day just
+ *  stops them using what they paid for.
+ *
+ *  Answer is cached in R2 both ways: a permanent marker once paid (the
+ *  status never reverts), and a per-day negative marker so an unpaid
+ *  account costs at most one Supabase lookup per day rather than one
+ *  per generation. */
+async function _isPaidAccount(env: Env, userId: string): Promise<boolean> {
+  if (!env.MESHES || !userId) return false;
+  const PAID = `_meta/paid/${userId}`;
+  try {
+    if (await r2GetText(env, PAID)) return true;
+    const negKey = `_meta/paidcheck/${userId}/${todayUTC()}`;
+    if (await r2GetText(env, negKey)) return false;
+
+    const sb = supabaseAdmin(env);
+    const { data } = await sb.from('payments')
+      .select('id').eq('user_id', userId).limit(1);
+    const paid = Array.isArray(data) && data.length > 0;
+    if (paid) await env.MESHES.put(PAID, '1');
+    else await env.MESHES.put(negKey, '0');
+    return paid;
+  } catch {
+    // Supabase or R2 unreachable: fall back to "not paid", i.e. the
+    // caps still apply. Fails toward protecting the bill, never toward
+    // spending more.
+    return false;
+  }
+}
+
 /** Why a spend guard refused, so the caller can say something TRUE.
  *
  *  Both caps used to surface the same sentence — "the service is
@@ -371,6 +409,26 @@ async function _spendRefusalMessage(env: Env, userId?: string): Promise<string> 
 
 async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userId?: string): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
+  // Paying customers are never refused. Their spend still lands on the
+  // SAME daily counter — deliberately, so refundModalSpend stays
+  // symmetric without having to thread a userId through ~50 call sites
+  // (a refund crediting a different counter than the charge is how
+  // these figures start lying). The cap simply doesn't apply to them:
+  // their credit balance already bounds what they can spend, and every
+  // credit was bought at a positive margin.
+  const paid = !!userId && await _isPaidAccount(env, userId);
+  if (paid) {
+    try {
+      const key = `_meta/modal_spend/${todayUTC()}`;
+      const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
+      await env.MESHES.put(key, String(cur + estimatedUsd));
+      const tk = '_meta/modal_spend_total.txt';
+      const total = (parseFloat((await r2GetText(env, tk)) || '0') || 0) + estimatedUsd;
+      await env.MESHES.put(tk, String(total));
+      await _maybeAlertModalBudget(env);
+    } catch { /* accounting only — never block a paid call on it */ }
+    return maxUsd;
+  }
   const next = await _casIncrementCounter(env, `_meta/modal_spend/${todayUTC()}`, estimatedUsd, maxUsd);
   if (next == null) return null;
   // Anti-DoS per-account daily $ cap. If the account is over its personal
