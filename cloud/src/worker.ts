@@ -1082,9 +1082,17 @@ const PRICING_DEFAULTS = {
   remove_background: 1,
   // Mesh ops
   mesh_op_simple:   1,
-  mesh_fast:        1,
-  mesh_balanced:    2,
-  mesh_quality:     4,
+  // Mesh generation ladder repriced 2026-07-28 from MEASURED Modal cost,
+  // not from the (wrong) _meshCostUsd estimate. 30 days of succeeded
+  // jobs: median 373s for the 1-credit preset, 420s for the 8-credit one
+  // — only 13% apart, because wall-clock is dominated by cold start +
+  // weight load + texture bake, NOT by the diffusion steps the presets
+  // vary. At $0.000542/s on L40S plus the 300s scaledown tail, one
+  // generation really costs ~$0.37; the old 1-credit price sold it for
+  // $0.154 on the Studio pack, i.e. at a 58% LOSS. Floor is now 3.
+  mesh_fast:        3,
+  mesh_balanced:    4,
+  mesh_quality:     6,
   mesh_ultra_8k:    8,
   mesh_multiref:    1,
   mesh_refine:      2,
@@ -4258,7 +4266,13 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
 function _meshCostUsd(input: GenerateInput, useModalMesh: boolean): number {
   // Replicate runs the full Cog pipeline; one flat, much higher price.
   if (!useModalMesh) return 0.50;
-  const BASE = 0.16;  // TRELLIS-2 ~5 min L40S × $0.000542 + R2 ops
+  // MEASURED 2026-07-28, not assumed: 30 days of succeeded jobs give a
+  // median wall-clock of 373-420s on L40S ($0.000542/s) = ~$0.21, plus
+  // the 300s scaledown tail every isolated generation drags behind it
+  // ($0.163). The old $0.16 counted the GPU seconds only and ignored the
+  // idle tail entirely, so the daily guard was reading ~2.5x low and the
+  // credit ladder was priced off a number that never matched the bill.
+  const BASE = 0.37;
   const mult = input.ultra_q            ? 2.2   // 1536_cascade
              : input.quality_plus       ? 1.6   // 1024_cascade
              : input.mode === 'full'    ? 1.6   // 1024_cascade

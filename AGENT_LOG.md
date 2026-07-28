@@ -16357,3 +16357,47 @@ a heavy paying day can trip the $6 global fuse and lock FREE trials out
 until UTC midnight. Fixing that properly means a separate free-tier
 counter, which needs the userId threaded through every refund call site.
 Not done — flagged rather than half-done.
+
+## 2026-07-28 — Mesh pricing repriced from MEASURED Modal cost
+
+User: "il faut etre en positif". Earlier in the session I reported the
+1-credit preset at roughly -4% margin; that was WRONG — it was derived
+from _meshCostUsd, which is itself wrong. Pulled the real numbers instead
+(`modal billing report --json` + job durations from Supabase):
+
+- Today: $6.23 real Modal spend vs $1.29 on the worker's estimate
+  counter. 26/07: $0.12 est / $1.71 real. 27/07: $2.09 / $7.29. The
+  estimate ran 3.5-14x low, so the daily fuse never guarded what it
+  claimed to.
+- 30 days of succeeded generations: median 373s for the 1-credit preset,
+  420s for the 8-credit one. Only 13% apart — wall-clock is dominated by
+  cold start + weight load + texture bake, NOT the diffusion steps the
+  presets actually vary. The 8x credit ladder was priced on an assumption
+  the data contradicts.
+- Real cost/generation on L40S ($0.000542/s) + the 300s scaledown tail
+  ($0.163): ~$0.37. Sold at 1 credit = $0.154 on the Studio pack (the
+  worst credit value) = a 58% LOSS, not 4%.
+
+Repriced mesh_fast 1->3, mesh_balanced 2->4, mesh_quality 4->6,
+mesh_ultra_8k unchanged at 8. Worst case (Studio pack, isolated
+generation carrying the full idle tail) is now +27%; back-to-back
+generations amortise the tail and reach +129%.
+
+TRAP worth remembering: PRICING_DEFAULTS in worker.ts is only a fallback.
+`_meta/pricing.json` in R2 overrides it and DID exist — editing the code
+alone would have changed nothing. Both were updated.
+
+_meshCostUsd BASE also corrected 0.16 -> 0.37 so the budget guard finally
+reads true. Side effect: free accounts now get ~5 generations/day out of
+the $2 cap instead of ~12, because the old figure was fiction. Paying
+accounts are exempt (see previous entry).
+
+STILL OPEN — cost levers, not priced around:
+- One job ran 6080s (101 min) today, "reaped: unreachable after 30 min",
+  and by itself accounts for ~$3.30 of the day's $6.23 if it held a GPU
+  throughout. The reaper's 30-min threshold did not stop the meter.
+- scaledown_window=300 on the L40S classes bills $0.163 of idle behind
+  every isolated generation. Shortening it trades idle cost for more cold
+  starts (which also burn GPU) — needs measurement before touching.
+- Global $6/day fuse left as-is on user's instruction ("laisse-le au cas
+  ou pour le moment"), but it now bites ~2.5x sooner in real terms.
