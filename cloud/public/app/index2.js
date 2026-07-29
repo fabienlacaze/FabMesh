@@ -15317,6 +15317,14 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
         showToast(format.toUpperCase() + ' needs its companion files '
           + '(.mtl / .bin / textures) — delivered as a .zip', 'success', 6000);
       }
+      // OU EST PASSE LE FICHIER. Sans ca, un utilisateur qui tape un nom
+      // de dossier dans le champ va l'y chercher et conclut que l'export
+      // a echoue — alors que le navigateur l'a mis dans ses
+      // telechargements. Seul « Browse... » fixe la destination.
+      if (r.saved === 'download') {
+        showToast('Saved to your browser’s downloads: ' + outPath
+          + ' — use “Browse…” to choose the folder next time', 'success', 7000);
+      }
       // Drop a sibling LICENSE.txt next to the mesh so the licence
       // travels with the asset. On cloud this triggers a second
       // browser download; on desktop the IPC handler writes it on

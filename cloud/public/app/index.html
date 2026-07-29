@@ -2295,10 +2295,18 @@
         <div style="font-size:11px; color:var(--text-2); margin-top:-4px; line-height:1.4;" id="exp-licence-hint">
           Embedded as metadata in the file and written to a sibling LICENSE.txt.
         </div>
-        <label>Output path</label>
+        <label>File name</label>
         <div style="display:flex; gap:8px;">
-          <input type="text" id="exp-path" placeholder="Downloads/my_mesh.glb" style="flex:1;" />
+          <input type="text" id="exp-path" placeholder="my_mesh" style="flex:1;" />
           <button id="exp-browse" class="ghost-btn" style="white-space:nowrap;">Browse...</button>
+        </div>
+        <!-- Ce champ s'appelait « Output path ». Dans un navigateur on ne
+             choisit PAS un dossier en tapant un chemin : le fichier part
+             dans les téléchargements. Un utilisateur a tapé « test », a
+             cherché son mesh dans Bureau\test, et l'a cru perdu — il était
+             dans Téléchargements. Seul « Browse... » fixe la destination. -->
+        <div style="font-size:11px; color:var(--text-2); margin-top:-4px; line-height:1.4;" id="exp-path-hint">
+          Saved to your browser’s downloads folder. Use <b>Browse…</b> to choose where the file goes.
         </div>
         <div class="modal-actions">
           <button class="ghost-btn" id="exp-cancel">Cancel</button>

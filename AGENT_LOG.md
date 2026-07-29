@@ -16467,3 +16467,24 @@ Also this round:
 - Reset-password page had no show/hide eye, while the login page did and
   admin auto-wires one on every password input. Added, same markup — it
   is the one screen with a NEW password and no confirm field.
+
+## 2026-07-28 — "pas de mesh exporté" : il l'était, ailleurs
+
+User exported FBX for Unreal, typed "test" in the OUTPUT PATH field,
+then found Desktop\test empty. The backend was fine — Supabase shows two
+mesh-convert rows, status succeeded, ext=fbx, 28 668 092 bytes each. The
+FBX was produced and delivered.
+
+The field was the lie. It was labelled "Output path" with a
+"Downloads/my_mesh.glb" placeholder, which reads as "type where you want
+it". A browser cannot honour that: without a File System Access handle
+the file goes to the browser's downloads folder, full stop. Only
+"Browse..." (showSaveFilePicker) can set a destination — and until this
+morning that button did nothing at all, so there was no way to choose.
+
+- Field relabelled "File name" + hint saying the file lands in the
+  browser's downloads unless Browse is used.
+- _downloadBlobAs now returns 'picker' | 'download'; exportMesh passes it
+  up as `saved`, and the UI toasts where the file actually went when it
+  fell back to a download. A success message that doesn't say WHERE is
+  how this looked like a failed export.

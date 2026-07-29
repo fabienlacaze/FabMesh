@@ -941,7 +941,7 @@
           const w = await handle.createWritable();
           await w.write(blobOrUrl);
           await w.close();
-          return;
+          return 'picker';
         } catch (_) { /* permission revoquee / disque plein -> telechargement */ }
       }
     }
@@ -954,6 +954,7 @@
     a.click();
     a.remove();
     if (blobOrUrl instanceof Blob) setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return 'download';
   }
 
   // ── C1: localStorage cache for generated images ─────────────────
@@ -1466,17 +1467,18 @@
           // Une seule etape recuperee ne justifie pas une archive : on retombe
           // sur le fichier simple plutot que de livrer un zip trompeur.
           if (entries.length > 1) {
-            await _downloadBlobAs(_makeZip(entries), baseName + '.zip');
+            const savedZip = await _downloadBlobAs(_makeZip(entries), baseName + '.zip');
             return { ok: true, success: true,
                      outputPath: baseName + '.zip', path: baseName + '.zip',
-                     stages: entries.length - 1, stagesFailed: failed };
+                     stages: entries.length - 1, stagesFailed: failed,
+                     saved: savedZip };
           }
         }
 
         const want = baseName + '.' + ext;
-        await _downloadBlobAs(blob, want);
+        const saved = await _downloadBlobAs(blob, want);
         return { ok: true, success: true, outputPath: want, path: want,
-                 format: fmt, ext };
+                 format: fmt, ext, saved };
       } catch (e) { return { ok: false, error: String(e) }; }
     },
     exportImage: async ({ srcPath, defaultName } = {}) => {
