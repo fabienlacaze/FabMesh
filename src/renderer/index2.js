@@ -23244,3 +23244,47 @@ window._applyRigAnimPills = function () {
   } catch (_) {}
 };
 window._applyRigAnimPills();
+
+/* ═══════════════════════════════════════════════════════════════════
+   PRÉCHAUFFAGE GPU — parité avec le web (cloud-overrides.installPrewarm)
+
+   Le refus de certification Microsoft du 28/07/2026 (« Image generation
+   failed - The cloud GPU took too long to start ») venait de là : le
+   desktop exposait bien `cloudPrewarm` dans le preload, mais AUCUN code
+   du renderer ne l'appelait. Le seul préchauffage était celui du main,
+   8 s après le lancement — donc avant toute connexion, et il sortait
+   immédiatement faute de session.
+
+   Ici on chauffe quand l'utilisateur montre son intention de générer :
+   il clique dans le champ de description, le GPU démarre pendant qu'il
+   tape. Le débounce de 4 min vit côté main (cloud_fallback.prewarm),
+   donc marteler le champ ne facture rien de plus.
+   ═══════════════════════════════════════════════════════════════════ */
+(() => {
+  const api = window.meshyAPI;
+  if (!api?.cloudPrewarm) return;   // build desktop pur : rien à chauffer
+
+  let last = 0;
+  const warm = () => {
+    // Garde-fou local en plus de celui du main : évite un aller-retour
+    // IPC à chaque frappe dans le champ.
+    if (Date.now() - last < 60_000) return;
+    last = Date.now();
+    try { api.cloudPrewarm({}).catch?.(() => {}); } catch (_) {}
+  };
+
+  const attach = () => {
+    for (const id of ['ws-prompt', 'np-prompt', 'ws-trellis2-preset', 'ws-asset-type']) {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.prewarmBound) continue;
+      el.dataset.prewarmBound = '1';
+      el.addEventListener('focus', warm);
+    }
+  };
+
+  attach();
+  // Les panneaux sont rendus à la demande : on re-tente à l'ouverture
+  // d'un projet plutôt que d'observer tout le DOM en permanence.
+  document.addEventListener('click', attach, { passive: true });
+  window.addEventListener('focus', warm);
+})();

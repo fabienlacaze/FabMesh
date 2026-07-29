@@ -621,6 +621,7 @@
 
     <!-- Tab: By type -->
     <div class="tab-panel" data-panel="bytype">
+      <div id="by-type-note" class="muted" style="font-size:12px; margin-bottom:10px; line-height:1.5;"></div>
       <table id="by-type-table">
         <thead>
           <tr>
@@ -629,6 +630,9 @@
             <th class="num">Revenue (€)</th>
             <th class="num">Cost (€)</th>
             <th class="num">Margin (€)</th>
+            <th class="num" title="Recette ÷ coût, par opération. &lt; 100 % = vendu à perte.">Marge %</th>
+            <th class="num" title="Recette moyenne par opération">€ / op</th>
+            <th class="num" title="Coût moyen par opération, calculé sur la durée réellement mesurée">Coût / op</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -638,7 +642,12 @@
     <!-- Tab: Active Jobs -->
     <div class="tab-panel" data-panel="active">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
-        <span style="color:var(--text-2); font-size:12px; flex:1; min-width:200px;">Running mesh generations. "Stop" refunds credits and marks the job canceled in Supabase.</span>
+        <span style="color:var(--text-2); font-size:12px; flex:1; min-width:200px;">
+          Générations de <b>maillages</b> en cours. « Stop » rembourse les crédits et marque le job annulé dans Supabase.<br>
+          <span style="color:var(--warn, #e0a030)">Les générations d'<b>images</b> n'apparaissent pas ici :</span> elles sont
+          synchrones et leur ligne n'est écrite qu'une fois terminées (logOperation), il n'existe donc aucun
+          enregistrement à afficher — ni à arrêter — pendant leur exécution. Ce compteur n'est pas le total de l'activité.
+        </span>
         <button class="btn" id="stop-all-btn" style="background:var(--err); border-color:var(--err);"
                 onclick="stopAllJobs()">🛑 Stop all</button>
         <button class="btn" onclick="loadActiveJobs()">🔄 Reload</button>
@@ -1666,19 +1675,45 @@
       // ── Tab: Par type
       const rows = Object.entries(d.by_type)
         .sort((a, b) => b[1].margin_eur - a[1].margin_eur)
-        .map(([type, m]) => `
+        .map(([type, m]) => {
+          // Marge en % du COÛT : < 100 % veut dire vendu sous le prix de
+          // revient. C'est la colonne qui a manqué pour reperer que la
+          // generation 3D partait a perte.
+          const ratio = m.cost_eur > 0 ? (m.revenue_eur / m.cost_eur) * 100 : null;
+          const perOpRev  = m.count ? m.revenue_eur / m.count : 0;
+          const perOpCost = m.count ? m.cost_eur / m.count : 0;
+          const col = m.margin_eur >= 0 ? 'var(--ok)' : 'var(--err)';
+          return `
           <tr>
             <td>${type}</td>
             <td class="num">${m.count}</td>
             <td class="num">${m.revenue_eur.toFixed(2)}</td>
             <td class="num">${m.cost_eur.toFixed(2)}</td>
-            <td class="num" style="color:${m.margin_eur >= 0 ? 'var(--ok)' : 'var(--err)'}">
-              ${m.margin_eur.toFixed(2)}
+            <td class="num" style="color:${col}">${m.margin_eur.toFixed(2)}</td>
+            <td class="num" style="color:${ratio === null ? 'var(--text-2)' : (ratio >= 100 ? 'var(--ok)' : 'var(--err)')}">
+              ${ratio === null ? '—' : Math.round(ratio) + '%'}
             </td>
-          </tr>
-        `).join('');
+            <td class="num">${perOpRev.toFixed(3)}</td>
+            <td class="num">${perOpCost.toFixed(3)}</td>
+          </tr>`;
+        }).join('');
       document.querySelector('#by-type-table tbody').innerHTML =
-        rows || '<tr><td colspan="5" class="muted">No data yet</td></tr>';
+        rows || '<tr><td colspan="8" class="muted">No data yet</td></tr>';
+
+      // D'ou viennent ces couts, et ce qu'ils ne couvrent PAS. Sans ca le
+      // tableau se lit comme une verite comptable alors que l'inactivite
+      // facturee par Modal n'y figure pas.
+      const cc = d.cost_confidence;
+      const noteEl = document.getElementById('by-type-note');
+      if (cc && noteEl) {
+        const tot = (cc.measured_rows || 0) + (cc.guessed_rows || 0);
+        const pct = tot ? Math.round((cc.measured_rows / tot) * 100) : 0;
+        noteEl.innerHTML =
+          `<b>${pct}%</b> des lignes sont chiffrées sur leur <b>durée réellement mesurée</b> `
+        + `(${cc.measured_rows} op., ${cc.measured_hours} h de conteneur) ; `
+        + `${cc.guessed_rows} retombent sur une estimation forfaitaire.<br>`
+        + `<span style="color:var(--err)">${cc.note}</span>`;
+      }
     }
 
     /* ═══════════════════════════════════════════════════════════════

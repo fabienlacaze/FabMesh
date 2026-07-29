@@ -16422,3 +16422,48 @@ Set GRACE_MS to 20 min and the pre-filter to 15 min — the tightest pair
 that stays above the longest legitimate run. Real benefit is refund
 latency and clearing the UI, not the bill. The four "after 30 min"
 strings now derive from GRACE_MS so they cannot drift again.
+
+## 2026-07-28 — Microsoft cert refusal: the pre-warm never fired on first run
+
+Third refusal, 10.1.2.10 Functionality: "Image generation failed - The
+cloud GPU took too long to start (cold start)".
+
+Root cause found, and it is not the retry schedule. The desktop DOES have
+a pre-warm, fired 8s after launch — but `prewarm()` starts with
+`getAccessToken()` and returns `{needsCloudLogin:true}` when there is no
+session. On a FIRST run the tester is not logged in at t=8s, so Modal is
+never pinged. `login()` did not trigger one either, and the renderer
+never called the `cloudPrewarm` bridge that preload had exposed all
+along. So the tester's very first click always paid a full cold start,
+and the ~6 min retry window (0s / +60s / +90s) did not always cover it.
+
+- `cloud_fallback.login()` now fires `prewarm({force:true})` (force
+  bypasses the 4-min debounce — we WANT it even if a session-less
+  attempt just ran) plus `_startHeartbeat()`, both fire-and-forget.
+- `src/renderer/index2.js`: pre-warm on focus of ws-prompt / np-prompt /
+  ws-trellis2-preset / ws-asset-type, mirroring the web's
+  cloud-overrides installPrewarm. 60s local guard on top of the main
+  process's 4-min debounce.
+
+Verified `prewarm` and `_startHeartbeat` are hoisted function
+declarations, so calling them from `login()` above their definitions is
+valid.
+
+Also this round:
+- Export dialog "Browse..." did nothing on cloud: pickExportPath returned
+  a filename WITHOUT opening any picker, so the click rewrote the same
+  value. Now uses showSaveFilePicker (Chrome/Edge) and writes straight to
+  the chosen file; AbortError is treated as a cancel rather than falling
+  back to a default name. If the produced extension differs from the one
+  picked (OBJ/glTF come back as .zip), it falls back to a normal download
+  rather than writing zip bytes into a ".obj" — the same lie as the old
+  GLB-renamed-to-.fbx.
+- Admin "Active" tab shows only mesh jobs: logOperation INSERTS the row
+  at the END with a terminal status and a backdated created_at, so a
+  running synchronous image generation has no row to display. Stated in
+  the panel instead of leaving the badge looking like total activity.
+  Proper fix (insert a 'processing' row up front) not done — it touches
+  every synchronous op's hot path.
+- Reset-password page had no show/hide eye, while the login page did and
+  admin auto-wires one on every password input. Added, same markup — it
+  is the one screen with a NEW password and no confirm field.

@@ -170,6 +170,20 @@ async function _supabaseToken(body, grant) {
 
 async function login(email, password) {
   await _supabaseToken({ email, password }, 'password');
+  // PRÉCHAUFFAGE APRÈS CONNEXION — cause du refus de certification
+  // Microsoft du 28/07/2026 (« Image generation failed - The cloud GPU
+  // took too long to start »). Le préchauffage du démarrage s'exécute
+  // 8 s après le lancement et exige un jeton de session : pour un
+  // PREMIER lancement il sort donc immédiatement sur needsCloudLogin,
+  // sans jamais toucher Modal. Le testeur se connectait ensuite et son
+  // premier clic payait les 2-3 min de démarrage à froid, que la
+  // fenêtre de rejeu (~6 min) ne rattrapait pas toujours.
+  //
+  // `force` contourne le débounce de 4 min : on VEUT chauffer ici même
+  // si un préchauffage a été tenté juste avant sans session.
+  // Fire-and-forget, jamais bloquant pour la connexion.
+  try { prewarm({ force: true }).catch(() => {}); } catch (_) {}
+  try { _startHeartbeat(); } catch (_) {}
   return { success: true, email: _mem.email };
 }
 

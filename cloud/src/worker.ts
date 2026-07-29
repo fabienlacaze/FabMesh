@@ -1410,6 +1410,49 @@ interface GenerateInput {
  *  GPU rate × elapsed time. Numbers come from the financial audit on
  *  2026-05-26 (warm-container amortised, including a fair share of the
  *  scaledown_window=300s idle). Tune as Modal pricing evolves. */
+/* Modal container rates, $/second. The dashboard used to price every
+ * operation from the static MODAL_COST_USD guesses below, which were
+ * badly wrong: 'mesh' claimed $0.060 while 30 days of measured job
+ * durations put a real generation at ~$0.37 — a 6x understatement that
+ * showed a fictional margin on every row. These rates let us price a job
+ * from its OWN duration instead of a guess.
+ *
+ * Caveat worth keeping in mind when reading the dashboard: duration x
+ * rate captures the container time attributable to a call, NOT the idle
+ * scaledown tail or a cold start amortised across calls. The reported
+ * total will therefore sit BELOW the real Modal invoice; the gap is
+ * surfaced explicitly rather than hidden (see `unattributed_usd`). */
+const GPU_USD_PER_SEC: Record<string, number> = {
+  L40S: 0.000542,
+  A10G: 0.000306,
+  CPU:  0.0000131,   // per core-second; our CPU functions run ~2 cores
+};
+
+/** Which container an op type runs on — decides the rate above. */
+const OP_HARDWARE: Record<string, keyof typeof GPU_USD_PER_SEC> = {
+  'mesh': 'L40S', 'mesh-face': 'L40S', 'construction3d': 'L40S',
+  'text2image': 'L40S', 'back-view': 'L40S', 'rectify': 'L40S',
+  'sheet': 'L40S', 'tpose': 'L40S', 'remove-bg': 'L40S',
+  'rig': 'A10G', 'segment': 'A10G', 'animate': 'A10G', 'animate_fbx': 'CPU',
+  'mesh-op': 'CPU', 'mesh-op-client': 'CPU', 'mesh-convert': 'CPU',
+};
+
+/** Cost of ONE job priced from how long it actually ran. Returns null
+ *  when the row has no usable duration (still running, or a legacy row
+ *  with no finished_at) so the caller can fall back knowingly. */
+function _measuredCostUsd(opType: string, createdAt?: string, finishedAt?: string): number | null {
+  if (!createdAt || !finishedAt) return null;
+  const a = Date.parse(createdAt), b = Date.parse(finishedAt);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const secs = (b - a) / 1000;
+  // Guard both ends: a negative span is a clock artefact, and anything
+  // past an hour is a stuck record, not container time — Modal's own
+  // function timeouts cap execution at 600-900s.
+  if (secs <= 0 || secs > 3600) return null;
+  const rate = GPU_USD_PER_SEC[OP_HARDWARE[opType] ?? 'L40S'] ?? GPU_USD_PER_SEC.L40S;
+  return +(secs * rate).toFixed(5);
+}
+
 const MODAL_COST_USD: Record<string, number> = {
   'text2image':  0.020,
   'back-view':   0.050,
@@ -11178,7 +11221,9 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   // simple for now).
   const { data: jobs, error: jobsErr } = await sb
     .from('jobs')
-    .select('user_id, status, credit_cost, options, created_at')
+    // finished_at added 2026-07-28: the dashboard now prices each job from
+    // its MEASURED duration instead of a static per-op guess.
+    .select('user_id, status, credit_cost, options, created_at, finished_at')
     .order('created_at', { ascending: false })
     .limit(20000);
   if (jobsErr) return err(500, jobsErr.message);
@@ -11204,7 +11249,12 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   type J = {
     user_id: string; status: string; credit_cost: number;
     options: Record<string, unknown> | null; created_at: string;
+    finished_at?: string | null;
   };
+  // How many rows we could price from their own duration vs how many
+  // fell back to a static guess — shown in the UI so the figures come
+  // with their own confidence rather than looking authoritative.
+  let measuredRows = 0, guessedRows = 0, measuredSecs = 0;
   for (const j of ((jobs ?? []) as J[])) {
     uniqueUsers.add(j.user_id);
     ops.total += 1;
@@ -11212,7 +11262,17 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     if (j.status === 'failed') ops.failed += 1;
 
     const opType = String(j.options?.operation_type ?? 'mesh');
-    const costUsd = Number(j.options?.cost_usd
+    // MEASURED duration wins over both the stored estimate and the
+    // static table. Those two were the reason the dashboard reported a
+    // 6x-too-low cost on mesh generation.
+    const measured = _measuredCostUsd(opType, j.created_at, j.finished_at ?? undefined);
+    if (measured != null) {
+      measuredRows += 1;
+      measuredSecs += (Date.parse(j.finished_at as string) - Date.parse(j.created_at)) / 1000;
+    } else if (j.status === 'succeeded' || j.status === 'failed') {
+      guessedRows += 1;
+    }
+    const costUsd = measured ?? Number(j.options?.cost_usd
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
                           ?? 0);
     const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
@@ -11393,6 +11453,18 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     burn,
     operations: ops,
     by_type: byType,
+    // Where the cost figures come from, so the dashboard can say it
+    // rather than presenting guesses with the same authority as
+    // measurements. `measured_rows` were priced from their own duration;
+    // `guessed_rows` fell back to the static MODAL_COST_USD table.
+    cost_confidence: {
+      measured_rows: measuredRows,
+      guessed_rows: guessedRows,
+      measured_hours: +(measuredSecs / 3600).toFixed(2),
+      note: 'Coût = durée mesurée × tarif conteneur. N’inclut PAS l’inactivité '
+          + 'facturée après chaque appel (scaledown) ni les démarrages à froid : '
+          + 'le total réel Modal est donc supérieur, l’écart est l’inactivité.',
+    },
     revenue: {
       total_gross_eur:  +grossRevenueEur.toFixed(2),
       total_net_eur:    +totalRevenueEur.toFixed(2),   // sum of credit revenue, net of Stripe

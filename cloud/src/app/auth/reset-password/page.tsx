@@ -24,6 +24,12 @@ export default function ResetPasswordPage() {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
+  // Œil « afficher le mot de passe », comme sur la page de connexion
+  // (LoginForm.tsx). Il manquait ici alors que c'est précisément l'écran
+  // où l'on tape un mot de passe NEUF, sans champ de confirmation : sans
+  // relecture possible, une faute de frappe ne se découvre qu'à la
+  // connexion suivante.
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -159,11 +165,25 @@ export default function ResetPasswordPage() {
         {mode === 'set-password' && (
           <form onSubmit={setNewPassword}>
             <label>New password</label>
-            <input type="password" required minLength={6}
-                   value={password} onChange={(e) => setPassword(e.target.value)}
-                   placeholder="At least 6 characters"
-                   autoComplete="new-password"
-                   style={{ marginBottom: 14 }} autoFocus />
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <input type={showPassword ? 'text' : 'password'} required minLength={6}
+                     value={password} onChange={(e) => setPassword(e.target.value)}
+                     placeholder="At least 6 characters"
+                     autoComplete="new-password"
+                     style={{ width: '100%', paddingRight: 44, boxSizing: 'border-box', margin: 0 }} autoFocus />
+              <button type="button" onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                      style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                               background: 'none', border: 'none', padding: 4, cursor: 'pointer',
+                               color: 'var(--text-2, #8a93b2)', display: 'flex', alignItems: 'center' }}>
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                )}
+              </button>
+            </div>
             <button type="submit" className="primary-btn" disabled={busy} style={{ width: '100%' }}>
               {busy ? '…' : 'Set new password'}
             </button>

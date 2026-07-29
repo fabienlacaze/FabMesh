@@ -915,7 +915,36 @@
       localStorage.setItem(k, JSON.stringify(arr.slice(-20))); // cap at 20 versions
     } catch (_) {}
   }
+  // Poignee de fichier choisie par « Browse... » (File System Access API).
+  // Consommee par le PREMIER _downloadBlobAs qui suit, puis remise a null :
+  // un export en produit parfois plusieurs (mesh + LICENSE.txt) et seul le
+  // fichier principal doit atterrir a l'emplacement choisi.
+  let _pendingSaveHandle = null;
+
   async function _downloadBlobAs(blobOrUrl, filename) {
+    // Ecriture directe a l'endroit choisi par l'utilisateur, quand il a
+    // reellement pu choisir. Avant, « Browse... » ne faisait RIEN en cloud :
+    // pickExportPath renvoyait le nom de fichier sans ouvrir de selecteur,
+    // donc le clic reecrivait la meme valeur dans le champ.
+    if (_pendingSaveHandle && blobOrUrl instanceof Blob) {
+      const handle = _pendingSaveHandle;
+      _pendingSaveHandle = null;
+      // L'extension REELLE peut differer de celle choisie (OBJ et glTF
+      // separe reviennent en .zip). Ecrire des octets zip dans un « .obj »
+      // choisi par l'utilisateur serait le meme mensonge que l'ancien
+      // renommage GLB -> .fbx : dans ce cas on retombe sur un
+      // telechargement classique, qui portera la bonne extension.
+      const want = String(filename || '').split('.').pop().toLowerCase();
+      const got  = String(handle.name || '').split('.').pop().toLowerCase();
+      if (want === got) {
+        try {
+          const w = await handle.createWritable();
+          await w.write(blobOrUrl);
+          await w.close();
+          return;
+        } catch (_) { /* permission revoquee / disque plein -> telechargement */ }
+      }
+    }
     let url;
     if (blobOrUrl instanceof Blob) url = URL.createObjectURL(blobOrUrl);
     else url = blobOrUrl;
@@ -1331,15 +1360,35 @@
       });
     },
     pickExportPath: async ({ defaultName, format } = {}) => {
-      // No filesystem in browser. Return a sentinel so the caller
-      // proceeds with the in-memory export and the actual save is
-      // triggered by exportMesh / exportImage via `<a download>`.
       const ext = (format || 'glb').replace('fbx_unreal', 'fbx');
-      return {
-        ok: true, canceled: false,
-        path: `${defaultName || 'mesh'}.${ext}`,
-        cloud: true,
-      };
+      const suggested = `${defaultName || 'mesh'}.${ext}`;
+      // Vrai selecteur de destination quand le navigateur le permet
+      // (Chrome/Edge). Le bouton « Browse... » ne faisait rien avant :
+      // on renvoyait juste un nom de fichier, donc le clic n'avait aucun
+      // effet visible. L'appel est declenche par un clic utilisateur,
+      // ce que l'API exige.
+      if (typeof window.showSaveFilePicker === 'function') {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: suggested,
+            types: [{
+              description: ext.toUpperCase() + ' file',
+              accept: { 'application/octet-stream': ['.' + ext] },
+            }],
+          });
+          _pendingSaveHandle = handle;
+          return { ok: true, canceled: false, path: handle.name, cloud: true, picked: true };
+        } catch (e) {
+          // Annulation explicite : ne PAS retomber sur un nom par defaut,
+          // sinon fermer le selecteur ressemblerait a une validation.
+          if (e && e.name === 'AbortError') return { ok: false, canceled: true };
+          /* API refusee (contexte non securise, permission) -> repli */
+        }
+      }
+      // Repli : pas de systeme de fichiers accessible, l'enregistrement
+      // passera par le telechargement du navigateur.
+      _pendingSaveHandle = null;
+      return { ok: true, canceled: false, path: suggested, cloud: true };
     },
     exportMesh: async ({ sourcePath, targetFormat, outputPath } = {}) => {
       try {
