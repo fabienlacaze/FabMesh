@@ -487,32 +487,28 @@
     generateFromPrompt: async ({ prompt, projectName, numImages = 1 } = {}) =>
       meshyAPI.generateImages({ prompt, projectName, numImages }),
 
-    /* img2img via Pollinations (the `image=` query param triggers their
-       img2img mode). Falls back to a plain prompt on failure. */
-    generateFromImage: async ({ prompt, imagePath, imageUrl, projectName, numImages = 1 } = {}) => {
-      const ref = imageUrl || imagePath;
-      const out = [];
-      const seedBase = Math.floor(Math.random() * 1e9);
-      for (let i = 0; i < numImages; i++) {
-        const seed = seedBase + i;
-        let url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt || '')}`
-          + `?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&private=true`;
-        if (ref && /^https?:/i.test(ref)) url += `&image=${encodeURIComponent(ref)}`;
-        try {
-          const r = await fetch(url);
-          if (!r.ok) throw new Error('http ' + r.status);
-          const blob = await r.blob();
-          out.push({
-            path: URL.createObjectURL(blob),
-            name: `${projectName || 'img2img'}_${i + 1}.png`,
-            seed, prompt,
-          });
-        } catch (e) {
-          log('generateFromImage fetch failed:', e);
-        }
-      }
-      return { ok: true, images: out };
-    },
+    /* image→image — REFUS HONNÊTE, comme generateMultiview.
+
+       Cette fonction est morte (aucun appelant), mais elle expédiait le
+       prompt de l'utilisateur à image.pollinations.ai. Trois défauts, à
+       ne pas réintroduire si quelqu'un la recâble un jour :
+
+       - La référence n'était jointe que si `/^https?:/` : dans cette
+         application les images sont souvent des URL `blob:`, la
+         référence était donc SILENCIEUSEMENT abandonnée et le résultat
+         devenait du texte-vers-image sans rapport avec l'entrée.
+       - `return { ok: true }` inconditionnel : `images` pouvait être
+         vide après trois échecs et l'appelant y lisait un succès.
+       - Prompt et URL de référence partaient chez un tiers, hors du
+         filtre NSFW, sans crédit débité.
+
+       Il n'existe pas d'équivalent réel côté worker : `generateImages`
+       (/api/generate-image) est du TEXTE vers image uniquement. */
+    generateFromImage: async () => ({
+      ok: false, success: false, images: [],
+      error: "La génération image→image n'est pas disponible dans la version web. "
+           + "Utilise « Créer une image » (texte→image) ou l'application desktop.",
+    }),
 
     /* Back view via Worker (Pollinations under the hood, R2-tunneled). */
     generateBackView: async ({ frontImage, frontImageUrl, prompt, promptHint, numImages = 1, assetType, projectName } = {}) => {
@@ -536,31 +532,37 @@
       }
     },
 
-    /* 4 views (front/back/left/right) generated client-side via 4×
-       Pollinations calls. Caller already has a "front" image; we only
-       generate the 3 missing ones. */
-    generateMultiview: async ({ imagePath, prompt, promptHint, projectName } = {}) => {
-      const base = (prompt || promptHint || '').toString().slice(0, 300);
-      const views = ['back view', 'left side view', 'right side view'];
-      const seedBase = Math.floor(Math.random() * 1e9);
-      const paths = [];
-      for (let i = 0; i < views.length; i++) {
-        const p = `${views[i]}, full body, T-pose, plain white background, ${base}`;
-        const seed = seedBase + i;
-        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}`
-          + `?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&private=true`;
-        try {
-          const r = await fetch(url);
-          if (!r.ok) throw new Error('http ' + r.status);
-          const blob = await r.blob();
-          paths.push(URL.createObjectURL(blob));
-        } catch (e) {
-          log('generateMultiview view failed:', views[i], e);
-        }
-      }
-      void imagePath; void projectName;
-      return { ok: true, success: true, outDir: null, paths };
-    },
+    /* Multi-vues — REFUS HONNÊTE tant que le cloud n'a pas de générateur.
+
+       L'ancienne version était un faux ami complet. Elle envoyait le
+       PROMPT TEXTE de l'utilisateur à image.pollinations.ai, un service
+       tiers, et renvoyait les images obtenues comme « multi-vues » :
+
+       - `void imagePath` : l'image de référence était explicitement
+         JETÉE. Les « vues » représentaient donc un personnage SANS AUCUN
+         RAPPORT avec le maillage de l'utilisateur. Une multi-vue qui
+         ignore la référence n'est pas une multi-vue.
+       - Le prompt partait chez un tiers, hors de notre filtre NSFW et
+         sans que l'utilisateur en soit informé.
+       - `return { ok: true, success: true }` était INCONDITIONNEL : même
+         avec les trois requêtes en échec, l'interface affichait un
+         succès vert et enregistrait `outDir: null`.
+       - Aucun crédit débité, contrairement au desktop.
+
+       Le vrai moteur existe côté worker (callModalMVAdapter, MV-Adapter
+       Apache 2.0, qui LUI part de l'image de face) mais n'est câblé que
+       dans la génération automatique de vue arrière, et
+       MODAL_MVADAPTER_URL n'est pas configuré en production. Son
+       exposition dans l'interface reste par ailleurs conditionnée à un
+       rectificateur de vue de face pour les non-humanoïdes.
+
+       Un échec clair vaut mieux qu'un résultat faux annoncé comme bon. */
+    generateMultiview: async () => ({
+      ok: false, success: false, outDir: null, paths: [],
+      error: "La génération multi-vues n'est pas disponible dans la version web — "
+           + "elle exige le moteur MV-Adapter, présent dans l'application desktop. "
+           + "Le maillage sera généré à partir de la vue de face seule.",
+    }),
 
     /* Desktop-only build-stage generator. */
     generateBuildStages: async () => ({ ok: true, stages: [] }),

@@ -16527,3 +16527,43 @@ blocked" popup seen in dev. Unavoidable; the only answer is to SAY it.
 Verified at real launch: app starts, no splash error in the logs, control
 API answers. Version bumped 1.0.13 -> 1.0.14 (Partner Center requires a
 number above the rejected one).
+
+## 2026-07-30 — Cloud: two Pollinations faux amis removed
+
+`generateMultiview` was the worst offender found in the parity analysis,
+and the code was worse than the analysis described:
+
+- `void imagePath;` — the reference image was EXPLICITLY discarded. The
+  "views" were generated from the text prompt alone, so they depicted a
+  character with no relation to the user's mesh. A multiview that ignores
+  the reference is not a multiview.
+- The user's prompt was sent to image.pollinations.ai, a third party,
+  outside our NSFW classifier and without telling the user.
+- `return { ok: true, success: true }` was UNCONDITIONAL: with all three
+  requests failing, the UI still showed a green success and stored
+  `outDir: null`.
+- No credit charged, unlike desktop. UI announced "6 multi-views" while
+  the cloud generated 3.
+
+Second lie in the same feature, in index2.js: `showToast('6 views ready',
+'success')` sat AFTER the loop, outside any check — every view could fail
+and the user still got a green success. Now counts successes and reports
+what actually happened.
+
+`generateFromImage` (img2img) had the same family of defects and was DEAD
+CODE (no callers), but still shipped a third-party call in the bundle:
+the reference was only attached when it matched `/^https?:/`, and this app
+routinely holds `blob:` URLs — so the reference was silently dropped and
+the result became unrelated text-to-image. Also an unconditional
+`ok: true`.
+
+Both now refuse honestly. The real engine (callModalMVAdapter, MV-Adapter
+Apache 2.0, which DOES start from the front image) exists in the worker
+but is only wired into the automatic back-view dispatch, and
+MODAL_MVADAPTER_URL is not among the deployed secrets. Exposing it in the
+UI also remains gated on a front-rectifier for non-humanoids
+(project_strict_front_requirement). No real img2img equivalent exists:
+/api/generate-image is text-to-image only.
+
+No real Pollinations call remains in the client — the two surviving string
+matches are the comments documenting this.

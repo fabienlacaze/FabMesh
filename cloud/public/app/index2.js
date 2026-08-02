@@ -5035,6 +5035,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
           }, 500);
           try {
             showToast('Generating 6 views...', 'info', 8000);
+            let mv6Ok = 0, mv6Err = '';
             for (const imgPath of r.images) {
               const mvRes = await API.generateMultiview({
                 imagePath: imgPath,
@@ -5043,13 +5044,25 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
                 engine: 'mvadapter',  // Zero123++ retired (CC-BY-NC 4.0 weights — non-commercial). MV-Adapter is Apache 2.0.
               });
               if (mvRes?.success) {
+                mv6Ok++;
                 if (!p._multiviews) p._multiviews = {};
                 p._multiviews[imgPath] = mvRes.outDir;
               } else {
+                mv6Err = mvRes?.error || mv6Err;
                 console.warn('[mv-6view] failed for', imgPath, mvRes?.error);
               }
             }
-            showToast('6 views ready', 'success');
+            // « 6 views ready » était affiché APRÈS la boucle, hors de
+            // toute vérification : même avec toutes les vues en échec,
+            // l'utilisateur voyait un succès vert. On ne l'annonce plus
+            // que si quelque chose a réellement été produit.
+            if (mv6Ok > 0) {
+              showToast(mv6Ok + ' multi-view set' + (mv6Ok > 1 ? 's' : '') + ' ready',
+                        'success');
+            } else {
+              showToast(mv6Err || 'Multi-view unavailable — continuing with the front view only',
+                        'warn', 7000);
+            }
           } catch (e) {
             console.warn('[mv-6view]', e);
             showToast('Multi-view generation failed (continuing with front-only)', 'warn');
