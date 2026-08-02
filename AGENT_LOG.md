@@ -16567,3 +16567,42 @@ UI also remains gated on a front-rectifier for non-humanoids
 
 No real Pollinations call remains in the client — the two surviving string
 matches are the comments documenting this.
+
+## 2026-07-30 — WACK run for the first time; two findings
+
+User asked whether I had used Microsoft's certification tool. I had NOT —
+a real gap: appcert.exe was installed all along and the certification
+report itself links to it, yet none of the four refusals had been preceded
+by a single run.
+
+It requires elevation ("The requested operation requires elevation").
+Launched via `Start-Process ... -Verb RunAs`; the UAC prompt is the ONE
+step that cannot be automated — the user validates it, everything else
+(launch, wait, parse) is scriptable.
+
+RESULT on 1.0.14: OVERALL_RESULT = PASS. 24 tests, 23 PASS, 1 FAIL.
+
+The failing test is "Blocked executables" (requirement 25, Package sanity),
+marked OPTIONAL="TRUE" — which is why the overall verdict stays PASS. 85
+messages. Reading them properly matters:
+- Most are FALSE POSITIVES from string-scanning binary blobs: icudtl.dat
+  (ICU data) "contains" Reg/cdb, libGLESv2.dll "contains" dNX, with
+  nonsense casing. Chromium data files, not code paths.
+- The genuine ones are inherent to the product: python311.dll and
+  MyFabmesh.AI.exe reference CreateProcessW / ShellExecuteW because the
+  app launches Python subprocesses. That is what `runFullTrust` is for,
+  and why the test is optional for packaged desktop apps.
+
+REAL FINDING, worth the run on its own: the message list named files that
+should never have shipped. Verified against the .appx (they are in
+app/resources/scripts/, OUTSIDE the asar — I first looked inside the asar
+and wrongly concluded they were absent):
+- scripts/auto_rig_bridge.backup_20260408_190959.py
+- scripts/auto_rig_bridge.backup_20260408_202851.py
+- scripts/unirig_bridge.backup_20260409_000552.py
+Timestamped backups, ~112 KB, shipped to customers. Excluded now via
+extraResources filters (!**/*.backup_*, !**/*.bak, !**/*_backup_*).
+
+ALSO SHIPPED, left for the user to decide: scripts/apovivor_export_skeletons.py
+(19 KB) — unrelated to the product. Not touched unilaterally given the
+standing prohibition on anything apovivor.
