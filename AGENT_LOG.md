@@ -16715,3 +16715,36 @@ STALE COMMENT SPOTTED (not changed, cost implications): the comment above
 `scaledown_window=300` argues at length for 30 s and quotes figures for
 30 s vs 180 s, while the value is 300. Someone tuned the number without
 touching the reasoning.
+
+## 2026-08-02 — Splash statique : logo muet -> message d'attente
+
+User: « on peut pas mettre un logo et une progress bar pour dire
+d'attendre ? ». Bonne intuition — et j'avais tranché trop vite en disant
+que rien n'était possible pendant l'activation du paquet.
+
+Mesure complémentaire : le 2e lancement démarre en **418 ms** contre
+5 154 ms le premier. Les ~5-6 s sont donc un coût de PREMIÈRE ouverture
+uniquement (Windows stage + analyse le paquet) — exactement ce que subit
+un testeur de certification, qui ne lance qu'une fois.
+
+Pendant cette fenêtre notre splash Electron ne peut rien (le process
+n'existe pas). Le SEUL visuel possible est `<uap:SplashScreen>` du
+manifeste, et l'image ne montrait qu'un LOGO MUET : un utilisateur qui
+attend devant un logo sans texte conclut que rien ne se passe. C'est
+littéralement le grief du 30/07.
+
+`build/appx/SplashScreen.png` refait (620x300, charte conservée, logo
+réutilisé depuis l'ancienne image) : titre, « Starting up — please wait »,
+barre de progression dessinée, et « First launch takes longer while
+Windows verifies the application ». Original sauvegardé en
+scratchpad/SplashScreen.orig.png.
+
+RÉSERVE ASSUMÉE : pas vérifié que Windows affiche cet élément pour une
+app runFullTrust (il est documenté pour l'UWP). Au pire c'est neutre, au
+mieux ça répond mot pour mot à la demande de Microsoft. Le vérifier
+demanderait d'observer visuellement un PREMIER lancement, donc de
+réinstaller après chaque essai.
+
+Note méthode : j'ai d'abord capturé l'écran entier pour observer le
+démarrage — mauvaise idée, ça expose tout le bureau de l'utilisateur.
+Captures supprimées, remplacées par une énumération de fenêtres.
