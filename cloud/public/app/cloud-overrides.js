@@ -1127,6 +1127,38 @@
       el.addEventListener('change', () => { if (el.checked) el.checked = false; });
     })();
 
+    // OPTIONS FACTUREES SANS AUCUN EFFET COTE CLOUD — audit de parite du
+    // 2026-08-02. Chacune envoie bien son drapeau a Modal, mais AUCUN code
+    // serveur ne le lit : ni generate_to_volume (modal_app/app.py), ni
+    // modal_app/_mesh.py, ni le repli cog/predict.py. L'utilisateur payait
+    // donc un supplement pour un travail qui n'a jamais lieu.
+    //
+    // Le cas le plus couteux est « Detail refine » : le tableau des valeurs
+    // par defaut par type d'asset le met a true pour character, creature,
+    // animal, building, weapon, prop, environment et insect — la case etait
+    // donc COCHEE D'OFFICE sur la quasi-totalite des generations, a 2
+    // credits chacune, sans que personne ne l'ait demande.
+    //
+    // On masque et on force a false, plutot que de laisser croire a une
+    // fonction. Le jour ou le backend saura le faire (le desktop, lui, a
+    // scripts/texture_refine.py), il suffira de retirer l'id de cette liste.
+    (function removeUnimplementedPaidOptions() {
+      const morts = [
+        ['ws-trellis2-refine',   'Detail refine (2 cr) — aucun code serveur ne lit ce drapeau'],
+        ['ws-trellis2-face-fix', 'Face fix — non porte cote cloud'],
+        ['ws-trellis2-smooth',   'Texture smooth — non porte cote cloud'],
+      ];
+      for (const [id, pourquoi] of morts) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const row = el.closest('.form-row');
+        if (row) row.style.display = 'none';
+        el.checked = false;
+        el.addEventListener('change', () => { if (el.checked) el.checked = false; });
+        try { console.log('[cloud] option masquee car sans effet :', id, '—', pourquoi); } catch (_) {}
+      }
+    })();
+
     function recompute() {
       let total = parseInt(preset.selectedOptions[0]?.dataset?.credits || '1', 10);
       for (const id of optionIds) {

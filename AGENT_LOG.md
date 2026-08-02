@@ -16821,3 +16821,36 @@ NON RESOLU, a savoir si ca revient
   telechargement a la demande. ~40 Mo de plus, mais vrai chantier.
 - Le prechauffage n'a JAMAIS ete teste de bout en bout (il faudrait
   basculer en mode Cloud, se deconnecter, se reconnecter, generer).
+
+## 2026-08-02 — Audit de parité : 68 faux amis. Lot 1 = options facturées sans effet
+
+Workflow d'audit exhaustif (79 agents, 342 éléments, vérification
+adversariale). Résultat : 143 en parité, 68 FAUX AMIS (16 critiques),
+53 manquants, 41 cloud-only, 37 desktop-only assumés.
+
+ERREUR DE MA PART dans le workflow : l'étape de synthèse tronquait le
+JSON à 90 000 caractères, donc le rapport final ne couvrait qu'1 zone
+sur 10 et annonçait 35 faux amis au lieu de 68. Données complètes
+récupérées depuis journal.jsonl.
+
+LOT 1 CORRIGÉ — options facturées pour un travail qui n'a jamais lieu :
+- `refine` (« Detail refine », 2 cr), `face_fix`, `smooth`. Les drapeaux
+  partaient vers Modal mais ni generate_to_volume (modal_app/app.py), ni
+  modal_app/_mesh.py, ni cog/predict.py ne les lisent.
+- Gravité de `refine` : le tableau des valeurs par défaut par type d'asset
+  le mettait à true pour character, creature, animal, building, weapon,
+  prop, environment et insect — COCHÉ D'OFFICE, 2 crédits, sur la
+  quasi-totalité des générations, sans action de l'utilisateur.
+
+Correction en deux couches :
+1. cloud-overrides.js masque et force à false les trois cases (même
+   mécanisme que removeUltraHdRow, déjà éprouvé).
+2. worker.ts `_neutraliserOptionsSansEffet()` les remet à false AVANT le
+   calcul du prix et avant l'appel Modal — un client en cache ou trafiqué
+   ne peut donc plus déclencher le débit. Le serveur ne facture jamais un
+   travail qu'il ne fera pas.
+
+RESTE 65 faux amis. Les prochains par gravité : preset de qualité 3D
+(preset/steps/texSize jamais envoyés à Modal, mais facturés 3/4/6/8),
+pastille de coût image (annonce 2 cr, débite jusqu'à 16), styles d'asset
+(28/33 sans effet), types d'asset (7/17 sans effet).

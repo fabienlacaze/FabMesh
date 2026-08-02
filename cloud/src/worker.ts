@@ -1525,7 +1525,37 @@ async function logOperation(
   }
 }
 
+/** Options facturees par le bareme mais qu'AUCUN code serveur n'execute.
+ *
+ *  Audit de parite du 2026-08-02 : ces drapeaux partent bien vers Modal,
+ *  mais ni `generate_to_volume` (modal_app/app.py), ni modal_app/_mesh.py,
+ *  ni le repli cog/predict.py ne les lisent. Le supplement etait donc
+ *  encaisse pour un travail qui n'a jamais lieu.
+ *
+ *  `refine` est le plus couteux : le tableau des valeurs par defaut par
+ *  type d'asset le mettait a true pour character, creature, animal,
+ *  building, weapon, prop, environment et insect — coche d'office, a
+ *  2 credits, sur la quasi-totalite des generations.
+ *
+ *  L'interface les masque desormais (cloud-overrides.js), mais un client
+ *  en cache ou trafique pourrait encore les envoyer : on les neutralise
+ *  ici, a la source, AVANT le calcul du prix ET avant l'appel a Modal.
+ *  Le jour ou le backend saura les faire, retirer la cle de cette liste. */
+const OPTIONS_SANS_EFFET_CLOUD = ['refine', 'face_fix', 'smooth'] as const;
+
+function _neutraliserOptionsSansEffet(i: GenerateInput): GenerateInput {
+  const rec = i as unknown as Record<string, unknown>;
+  for (const k of OPTIONS_SANS_EFFET_CLOUD) {
+    if (rec[k]) {
+      console.log(`[parite] option '${k}' ignoree et NON facturee : aucun code serveur ne l'execute`);
+      rec[k] = false;
+    }
+  }
+  return i;
+}
+
 async function creditCost(env: Env, i: GenerateInput): Promise<number> {
+  _neutraliserOptionsSansEffet(i);
   const p = await _getPricing(env);
   // Preset base cost — fast (default) / balanced / quality
   let n: number;
