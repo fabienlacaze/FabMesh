@@ -16606,3 +16606,35 @@ extraResources filters (!**/*.backup_*, !**/*.bak, !**/*_backup_*).
 ALSO SHIPPED, left for the user to decide: scripts/apovivor_export_skeletons.py
 (19 KB) — unrelated to the product. Not touched unilaterally given the
 standing prohibition on anything apovivor.
+
+## 2026-08-02 — Boot timing instrumented; startup is NOT the bottleneck
+
+Three refusals blamed on launch behaviour, three supposed causes fixed,
+zero measurements taken. Added `[boot]` milestones (process.uptime()) so
+we finally have numbers — and so a slow tester machine can be measured
+too.
+
+Dev run on the RTX 5080 box (repo, not the packaged app):
+  542ms  main module loaded
+  692ms  Electron ready (whenReady)
+  773ms  splash shown
+  804ms  loading index2.html
+  1837ms WINDOW READY (ready-to-show)
+
+1.8 s. Ten times slower on a 2017 Dell Inspiron would still be ~18 s —
+unpleasant, but not "unresponsive for a long time". The app's own startup
+path is therefore NOT the cause, which invalidates the framing of all
+three previous fixes (they were still worth doing, but none was measured
+against the real failure).
+
+What this measurement does NOT cover, and where the remaining suspicion
+sits: it is a DEV run. It skips MSIX activation, filesystem
+virtualisation, and Defender/SAC scanning 218 MB of never-seen binaries.
+That first-run cost is still unmeasured.
+
+Blocker for measuring it: the .appx is NotSigned (normal — Partner Center
+signs at ingestion), so it cannot be installed locally without signing a
+test copy with a locally-trusted certificate.
+
+Ruled out along the way: `wizard:install-deps` is user-initiated with a
+progress channel, not an automatic first-run hang.

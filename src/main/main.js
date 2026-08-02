@@ -762,6 +762,18 @@ process.on('unhandledRejection', (reason) => {
 });
 log.info('main', '======================================');
 log.info('main', `FabMesh started at ${new Date().toISOString()}`);
+
+/* CHRONOMÉTRAGE DU DÉMARRAGE.
+ *
+ * Trois refus de certification ont porté sur le comportement au
+ * lancement, et on a corrigé à chaque fois une cause SUPPOSÉE sans
+ * jamais chiffrer quoi que ce soit. `process.uptime()` compte depuis le
+ * démarrage du process Node : les jalons ci-dessous disent enfin OÙ part
+ * le temps, et le diront aussi sur la machine lente d'un testeur.
+ *
+ * À lire dans logs/fabmesh_start.log, lignes « [boot] ». */
+function bootMs() { return Math.round(process.uptime() * 1000); }
+log.info('boot', `t=${bootMs()}ms module principal chargé`);
 log.info('main', `Platform: ${process.platform} ${process.arch}, Node ${process.version}, Electron ${process.versions.electron}`);
 log.info('main', `Project root: ${path.join(__dirname, '..', '..')}`);
 log.info('main', '======================================');
@@ -1163,6 +1175,7 @@ function createWindow() {
   // Avant TOUTE autre chose : quelque chose de visible et d'animé à
   // l'écran, pour que l'app ne paraisse jamais figée au lancement.
   try { createSplash(); } catch (_) { /* jamais bloquant */ }
+  log.info('boot', `t=${bootMs()}ms splash affiche`);
 
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -1190,6 +1203,7 @@ function createWindow() {
   log.info('main', `loading ${startPage} (setup ${isSetupComplete() ? 'done' : 'pending'})`);
   // .catch : si le chargement de la page échoue (fichier manquant, renderer
   // mort), on bascule sur la fenêtre de secours au lieu d'un reject global muet.
+  log.info('boot', `t=${bootMs()}ms chargement de ${startPage}`);
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', startPage))
     .catch((e) => {
       log.error('main', `loadFile(${startPage}) failed: ${e && e.message}`);
@@ -1231,6 +1245,7 @@ function createWindow() {
     try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer failed to paint within 45s (ready-to-show never fired)')); } catch (_) {}
   }, 45000);
   mainWindow.once('ready-to-show', () => {
+    log.info('boot', `t=${bootMs()}ms FENETRE PRETE (ready-to-show) <- ce que voit le testeur`);
     _revealed = true;
     clearTimeout(_showWatchdog);
     clearTimeout(_revealWatchdog);
@@ -1855,6 +1870,7 @@ print("OK")
 const HEADLESS = process.argv.includes('--headless');
 
 app.whenReady().then(() => {
+  log.info('boot', `t=${bootMs()}ms Electron pret (whenReady)`);
   // ----------------------------------------------------------
   // STEP 1 — Create & paint the window FIRST, in isolation.
   // Everything else (job resume, MCP bridge, updater, control
