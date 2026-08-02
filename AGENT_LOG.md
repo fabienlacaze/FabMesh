@@ -16788,3 +16788,36 @@ restantes si besoin : les wheels (16,7 Mo) et python-embed (24,1 Mo) ne
 servent qu'au mode LOCAL, un testeur sans GPU NVIDIA ne les utilise
 jamais — mais les sortir du paquet demande un téléchargement à la
 demande, donc un vrai chantier.
+
+## 2026-08-02 — 1.0.14 SOUMIS au Store (5e tentative)
+
+Contenu exact de ce qui part, pour pouvoir raisonner si ca revient :
+
+CORRIGE ET VERIFIE DANS LE PAQUET
+- Prechauffage GPU a la connexion + au focus du champ de description.
+  Cause du refus « cloud GPU took too long » : prewarm() sortait sur
+  needsCloudLogin faute de session, 8 s apres le lancement donc avant
+  toute connexion. Le vrai mecanisme : cold start ~54 s (snapshots Modal
+  actifs) + 25-45 s de diffusion contre une coupure Cloudflare a 100 s =
+  79-99 s, pile a la limite. Le prechauffage sort les 54 s du budget.
+- Splash Electron des l'ouverture du process (ne couvre PAS l'activation).
+- Watchdog dissocie : 8 s affiche sans message, 45 s seulement declare
+  l'echec. Avant : 8 s -> fenetre d'ERREUR, ce qu'un testeur lent pouvait
+  recevoir alors que l'app demarrait normalement.
+- 53 Mo d'artefacts retires (3 677 source maps, TS, tests) + 3 sauvegardes
+  horodatees + apovivor_export_skeletons.py. 450 -> 397 Mo decompresse.
+  Demarrage packagé mesure 7 679 -> 6 527 ms.
+- WACK : PASS (24 tests, 1 echec OPTIONAL = faux positifs de scan de
+  chaines dans des blobs Chromium).
+
+NON RESOLU, a savoir si ca revient
+- Il reste ~5 s (machine rapide) / potentiellement 30-60 s (Dell Inspiron
+  2017) pendant lesquelles le testeur ne voit RIEN. Windows n'honore pas
+  <uap:SplashScreen> pour une app runFullTrust — VERIFIE empiriquement,
+  16 captures, 0 splash. Aucun code de notre cote ne peut s'executer
+  pendant cette fenetre.
+- Piste si 5e refus sur le meme motif : sortir wheels (16,7 Mo) et
+  python-embed (24,1 Mo) du paquet — inutiles en mode Cloud — via un
+  telechargement a la demande. ~40 Mo de plus, mais vrai chantier.
+- Le prechauffage n'a JAMAIS ete teste de bout en bout (il faudrait
+  basculer en mode Cloud, se deconnecter, se reconnecter, generer).
