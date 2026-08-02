@@ -242,3 +242,156 @@ modifiés non commités).
 - [ ] Soumission MANUELLE via Partner Center (l'API Azure AD de soumission est
       morte — compte MSA Graph, constaté en juillet).
 - [ ] Audit de release 7 dimensions (règle projet) si version publique.
+
+---
+
+# Resoumission 1.0.13 — rapport de certification du 28/07/2026
+
+## Le grief
+
+`10.1.2.10 Functionality` — un seul point :
+
+> Unusable Feature: Image generation failed - Error: The cloud GPU took too long
+> to start (cold start). Please try again in a minute your credits were refunded.
+> Observed On: Dell Inspiron 5379
+
+## La cause (trouvée le 28/07)
+
+Ce n'était pas le calendrier de rejeu, ni le message d'erreur. Le préchauffage
+GPU **ne se déclenchait jamais au premier lancement** :
+
+1. L'app démarre → 8 s plus tard `cloud_fallback.prewarm()` s'exécute.
+2. `prewarm()` commence par `getAccessToken()` et sort sur `needsCloudLogin`
+   quand aucune session n'existe. Au PREMIER lancement le testeur n'est pas
+   encore connecté : **Modal n'est jamais contacté**.
+3. `login()` ne déclenchait aucun préchauffage.
+4. Le renderer n'appelait jamais le pont `cloudPrewarm`, pourtant exposé dans
+   `preload.js` depuis le début.
+
+Le premier clic du testeur payait donc systématiquement un démarrage à froid
+complet (~3 min), que la fenêtre de rejeu (0 s / +60 s / +90 s) ne couvrait pas
+toujours.
+
+## Le correctif (1.0.13)
+
+- `cloud_fallback.login()` déclenche `prewarm({force:true})` + `_startHeartbeat()`
+  dès la connexion réussie. `force` contourne le débounce de 4 min qu'une
+  tentative sans session vient d'armer.
+- `src/renderer/index2.js` préchauffe au focus des champs `ws-prompt`,
+  `np-prompt`, `ws-trellis2-preset`, `ws-asset-type` — le GPU démarre pendant
+  que l'utilisateur tape sa description. Parité avec le web
+  (`cloud-overrides.installPrewarm`).
+
+⚠️ RISQUE RÉSIDUEL ASSUMÉ : si le testeur clique sur Generate dans les
+secondes qui suivent sa connexion, la première tentative tombera encore sur un
+conteneur en cours de démarrage. Les rejeux doivent alors la rattraper. D'où la
+mention explicite du délai dans les notes ci-dessous.
+
+## Notes for certification — texte prêt à coller (1.0.13)
+
+```
+This app works on machines WITHOUT an NVIDIA GPU. On such devices the setup
+wizard detects the absence of an NVIDIA GPU and the app runs in Cloud mode:
+image generation, 3D mesh generation, rigging and animation all run on the
+MyFabmesh cloud service. No local AI model is downloaded or used.
+
+IMPORTANT - PLEASE ALLOW TIME FOR THE FIRST GENERATION
+Our cloud GPUs are started on demand rather than kept running, to keep the
+service affordable. The FIRST image generation after a period of inactivity
+therefore takes up to 3 minutes while a GPU container boots. The app shows a
+progress bar and a "Warming up cloud AI" notice during this time - this is
+normal, not a failure. Subsequent generations complete in about 30 seconds.
+
+The previous submission was reported as failing with "The cloud GPU took too
+long to start". This build fixes the underlying cause: the app now begins
+warming a GPU as soon as you sign in, and again when you click into the
+description field, so the container is ready before you press Generate.
+
+Test account (already funded with credits):
+  email:    <A REMPLIR>
+  password: <A REMPLIR>
+
+Steps to test image generation:
+  1. Launch the app. The wizard shows "No NVIDIA GPU detected - Cloud mode will
+     be used". Click "Continue in Cloud mode".
+  2. Sign in with the test account above. (Signing in already starts warming a
+     cloud GPU in the background.)
+  3. Create a project, type any prompt, click "Generate".
+  4. Wait for the progress bar to complete - up to 3 minutes on the very first
+     generation, ~30 seconds afterwards.
+
+In-app purchases: credits are sold on our website
+(https://myfabmesh-cloud.fabien65400.workers.dev), never inside the app.
+```
+
+## À FAIRE AVANT DE SOUMETTRE
+
+- [ ] Renseigner les identifiants du compte de test dans les notes ci-dessus
+- [ ] Cocher la case 10.8.2 dans Partner Center (achats hors application)
+- [ ] TESTER LE SCÉNARIO DU TESTEUR : basculer en mode Cloud, se déconnecter,
+      se reconnecter, générer une image. C'est le seul moyen de valider le
+      correctif avant de brûler un nouveau cycle de plusieurs semaines.
+
+---
+
+# Resoumission 1.0.14 — rapport de certification du 30/07/2026
+
+## Le grief (NOUVEAU — différent de celui du 28/07)
+
+`10.1.2.10 Functionality` :
+
+> The app appeared to be unresponsive for a long time after launch. If the app
+> has time-intensive operations to perform at launch, include a progress
+> indicator in the splash screen.
+
+Ce n'est plus le démarrage à froid du GPU cloud. C'est l'application elle-même
+qui paraît figée au lancement.
+
+## La cause
+
+Au PREMIER lancement, Windows (Defender + Smart App Control) vérifie chaque
+binaire du paquet : ~218 Mo, un `app.asar` de 130 Mo, Python embarqué et des
+dizaines de `.pyd`. C'est long et on ne peut pas l'empêcher — c'est d'ailleurs
+le même mécanisme que le popup SAC « Une partie de cette application a été
+bloquée » observé en développement.
+
+Hypothèses écartées en cours de route, pour mémoire :
+- Le CSS bloquant du renderer : 193 Ko en local, négligeable.
+- Un travail lourd dans le processus principal : `app.whenReady` crée déjà la
+  fenêtre EN PREMIER, tout le reste est non bloquant et protégé.
+- La fenêtre absente : `show:true` est déjà en place depuis un refus antérieur.
+
+La fenêtre apparaît donc bien tout de suite… mais comme un rectangle sombre
+vide, tant que la page n'a pas peint. D'où la perception « unresponsive ».
+
+## Le correctif (1.0.14)
+
+`createSplash()` / `closeSplash()` dans `src/main/main.js` : une fenêtre de
+démarrage sans cadre, centrée, affichée AVANT tout le reste dans
+`createWindow()`, fermée sur `ready-to-show` ET sur le watchdog de 8 s.
+
+Choix de conception, tous délibérés :
+- AUCUNE ressource externe (pas de CSS, pas d'image, pas de police) : tout est
+  inline dans une `data:` URL, le même procédé que `showFallbackWindow` déjà
+  éprouvé ici. Un splash qui attendrait un fichier serait ralenti par ce qu'il
+  est censé masquer.
+- Barre de progression INDÉTERMINÉE : on ne peut pas connaître l'avancement
+  d'une analyse antivirus. Une barre chiffrée serait un mensonge de plus.
+- Texte explicite : « The first launch takes longer while Windows verifies the
+  application. This happens only once. »
+- Tout sous try/catch + minuterie de sécurité de 180 s : ce splash ne doit
+  JAMAIS pouvoir empêcher l'app de se lancer ni rester orphelin à l'écran.
+
+Vérifié au lancement réel : l'app démarre normalement, aucune erreur splash
+dans les logs, l'API de contrôle répond.
+
+## Notes for certification — à ajouter au texte 1.0.13
+
+```
+ADDITION FOR THIS BUILD:
+The previous review reported the app as unresponsive for a long time after
+launch. The app now shows a splash screen with an animated progress indicator
+immediately at startup, which stays until the main window has finished
+painting. It also explains that the first launch is slower because Windows
+verifies the application package (~218 MB) the first time it runs.
+```

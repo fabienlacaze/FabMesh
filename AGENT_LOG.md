@@ -16488,3 +16488,42 @@ morning that button did nothing at all, so there was no way to choose.
   up as `saved`, and the UI toasts where the file actually went when it
   fell back to a download. A success message that doesn't say WHERE is
   how this looked like a failed export.
+
+## 2026-07-30 — Store refusal #4: "unresponsive for a long time after launch"
+
+New certification report (30/07/2026), same policy code 10.1.2.10 but a
+DIFFERENT grievance from the 28/07 one:
+
+  "The app appeared to be unresponsive for a long time after launch. If
+   the app has time-intensive operations to perform at launch, include a
+   progress indicator in the splash screen."
+
+Two hypotheses investigated and DISCARDED (recorded so nobody re-walks
+them): the renderer's blocking CSS is only 193 KB from local disk, and
+app.whenReady already creates the window FIRST with every other subsystem
+guarded and non-blocking. The startup sequence was already correct.
+
+Actual cause: on first launch Windows (Defender + Smart App Control)
+verifies every binary of a ~218 MB package — a 130 MB app.asar, embedded
+Python, dozens of .pyd. Same mechanism as the SAC "part of this app was
+blocked" popup seen in dev. Unavoidable; the only answer is to SAY it.
+
+- `createSplash()` / `closeSplash()` in main.js: frameless centered window
+  shown BEFORE anything else in createWindow(), closed on 'ready-to-show'
+  and on the watchdog. No external resource at all (inline data: URL, the
+  same proven trick as showFallbackWindow) — a splash waiting on a file
+  would be slowed by the very thing it exists to cover. INDETERMINATE
+  bar: nobody can know how far an antivirus scan has got, and a fake
+  percentage would be one more lie. try/catch everywhere + a 180 s
+  failsafe close, so it can never block launch nor linger orphaned.
+
+- BUG FOUND WHILE INVESTIGATING, possibly the cause of this very refusal:
+  the reveal watchdog declared the renderer dead after 8 s and popped the
+  fallback ERROR window. Eight seconds is nothing on a first launch while
+  Windows scans a 218 MB package — the certification tester could be shown
+  an error while the app was merely slow. Split in two: 8 s forces show()
+  silently, 45 s is when we finally call it dead.
+
+Verified at real launch: app starts, no splash error in the logs, control
+API answers. Version bumped 1.0.13 -> 1.0.14 (Partner Center requires a
+number above the rejected one).

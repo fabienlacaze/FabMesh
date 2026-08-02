@@ -1079,7 +1079,91 @@ function isSetupComplete() {
   } catch (_) { return false; }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   SPLASH DE DÉMARRAGE — exigence de certification Store 10.1.2.10.
+
+   Rapport du 30/07/2026 : « The app appeared to be unresponsive for a
+   long time after launch. If the app has time-intensive operations to
+   perform at launch, include a progress indicator in the splash screen. »
+
+   Au PREMIER lancement, Windows (Defender + Smart App Control) vérifie
+   chaque binaire du paquet : ~218 Mo, un app.asar de 130 Mo, Python
+   embarqué et des dizaines de .pyd. C'est long, on ne peut pas
+   l'éviter — la seule réponse est de le DIRE à l'utilisateur.
+
+   La fenêtre principale a déjà show:true (correctif d'un refus
+   antérieur : avec show:false elle n'apparaissait jamais quand SAC
+   empêchait le renderer de peindre), mais elle reste un rectangle
+   sombre tant que la page n'a pas peint. D'où ce splash séparé.
+
+   Contraintes de conception, toutes délibérées :
+   - AUCUNE ressource externe (pas de CSS, pas d'image, pas de police) :
+     tout est inline dans une data: URL, le même procédé que
+     showFallbackWindow qui a déjà fait ses preuves ici. Un splash qui
+     attendrait un fichier serait ralenti par ce qu'il est censé masquer.
+   - Barre de progression INDÉTERMINÉE : on ne peut pas connaître
+     l'avancement d'une analyse antivirus. Une fausse barre chiffrée
+     serait un mensonge de plus.
+   - Tout est sous try/catch et une minuterie de sécurité le ferme quoi
+     qu'il arrive : ce splash ne doit JAMAIS pouvoir empêcher l'app de
+     se lancer, ni rester orphelin à l'écran.
+   ═══════════════════════════════════════════════════════════════════ */
+let _splashWindow = null;
+
+function closeSplash() {
+  try {
+    if (_splashWindow && !_splashWindow.isDestroyed()) _splashWindow.close();
+  } catch (_) { /* déjà fermé */ }
+  _splashWindow = null;
+}
+
+function createSplash() {
+  try {
+    _splashWindow = new BrowserWindow({
+      width: 460, height: 280,
+      frame: false, resizable: false, center: true,
+      alwaysOnTop: true, skipTaskbar: true, show: true,
+      backgroundColor: '#1a1a2e',
+      webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;height:100%;background:#1a1a2e;color:#e8e8f0;
+    font-family:'Segoe UI',system-ui,sans-serif;overflow:hidden;
+    display:flex;align-items:center;justify-content:center}
+  .w{text-align:center;padding:0 34px}
+  .b{font-size:26px;font-weight:700;letter-spacing:.3px}
+  .b i{font-style:normal;background:linear-gradient(90deg,#ff4d7e,#a855f7);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .s{margin-top:10px;font-size:13px;color:#9aa0b8}
+  .n{margin-top:8px;font-size:11px;color:#6f7590;line-height:1.5}
+  .t{margin-top:20px;height:4px;border-radius:2px;background:#2a2a44;overflow:hidden}
+  .t i{display:block;height:100%;width:38%;border-radius:2px;
+    background:linear-gradient(90deg,#ff4d7e,#a855f7);animation:m 1.25s ease-in-out infinite}
+  @keyframes m{0%{transform:translateX(-105%)}100%{transform:translateX(320%)}}
+</style></head><body><div class="w">
+  <div class="b">MyFabmesh<i>.AI</i></div>
+  <div class="s">Starting up&hellip;</div>
+  <div class="t"><i></i></div>
+  <div class="n">The first launch takes longer while Windows verifies the
+    application. This happens only once.</div>
+</div></body></html>`;
+    _splashWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    // Filet de sécurité : si 'ready-to-show' de la fenêtre principale ne
+    // fire jamais (le cas qui a déjà causé un refus), le splash ne doit
+    // pas rester seul à l'écran indéfiniment.
+    setTimeout(closeSplash, 180000);
+  } catch (e) {
+    try { log.warn('main', `splash failed (non bloquant): ${e && e.message}`); } catch (_) {}
+    _splashWindow = null;
+  }
+}
+
 function createWindow() {
+  // Avant TOUTE autre chose : quelque chose de visible et d'animé à
+  // l'écran, pour que l'app ne paraisse jamais figée au lancement.
+  try { createSplash(); } catch (_) { /* jamais bloquant */ }
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -1115,19 +1199,44 @@ function createWindow() {
   // n'a jamais peint — SAC/GPU bloqué), on force show() + fenêtre de secours,
   // et on loggue l'état pour diagnostiquer sur la machine de certif.
   let _revealed = false;
+  // WATCHDOG EN DEUX TEMPS.
+  //
+  // Il n'en faisait qu'un : à 8 s sans 'ready-to-show', il forçait show()
+  // ET affichait la fenêtre de secours — un message d'ERREUR. Or 8 s sont
+  // vite dépassées au premier lancement d'un paquet Store de 218 Mo, le
+  // temps que Windows en vérifie les binaires. Le testeur de certification
+  // pouvait donc recevoir une erreur alors que l'application démarrait
+  // simplement lentement (refus « unresponsive » du 30/07/2026).
+  //
+  // Désormais : 8 s = on force l'affichage (geste gratuit, aucun message) ;
+  // 45 s = seulement alors on considère que le renderer est vraiment mort
+  // et on affiche le diagnostic. Entre les deux, le splash tourne et dit
+  // à l'utilisateur que le premier lancement est plus long.
+  const _showWatchdog = setTimeout(() => {
+    if (_revealed || !mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      log.warn('main', `ready-to-show not fired in 8s — forcing show (visible=${mainWindow.isVisible()})`);
+    } catch (_) {}
+    try { mainWindow.show(); } catch (_) {}
+  }, 8000);
   const _revealWatchdog = setTimeout(() => {
     if (_revealed || !mainWindow || mainWindow.isDestroyed()) return;
     try {
-      log.error('main', `ready-to-show not fired in 8s — forcing show (visible=${mainWindow.isVisible()} url=${mainWindow.webContents.getURL()})`);
+      log.error('main', `ready-to-show not fired in 45s — renderer considered dead (visible=${mainWindow.isVisible()} url=${mainWindow.webContents.getURL()})`);
     } catch (_) {}
     try { mainWindow.show(); } catch (_) {}
-    try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer failed to paint within 8s (ready-to-show never fired)')); } catch (_) {}
-  }, 8000);
+    // Le splash doit disparaître AUSSI sur ce chemin : sinon il resterait
+    // au-dessus de la fenêtre de secours, en cachant le diagnostic.
+    try { closeSplash(); } catch (_) {}
+    try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer failed to paint within 45s (ready-to-show never fired)')); } catch (_) {}
+  }, 45000);
   mainWindow.once('ready-to-show', () => {
     _revealed = true;
+    clearTimeout(_showWatchdog);
     clearTimeout(_revealWatchdog);
     try { mainWindow.maximize(); } catch (_) {}
     try { mainWindow.show(); } catch (_) {}
+    try { closeSplash(); } catch (_) {}
   });
   mainWindow.setMenuBarVisibility(false);
 
