@@ -16679,3 +16679,39 @@ BEFORE -> AFTER:
 A 15-21% cut on the pre-code window, measured both times the same way.
 Not a cure — the remaining ~5 s is Windows itself — but it is the first
 change in this whole saga backed by a before/after number.
+
+## 2026-08-02 — Cold start understood; the $47/day option is unnecessary
+
+User delegated the three open decisions ("fais au mieux"). Checked facts
+before deciding rather than picking blind:
+
+1. `apovivor_export_skeletons.py` — grepped src/ and scripts/: NEVER
+   called by the app. Excluded from the package (stays in the repo; the
+   standing apovivor prohibition is about that project's files, not about
+   a packaging filter here).
+
+2. Keeping a GPU warm for the review window (~$47/day): NOT NEEDED, and
+   the reason matters. Modal memory snapshots are ALREADY enabled on the
+   text2image class and the documented cold start is ~54 s, not the 3 min
+   the UI announces. Cloudflare cuts any subrequest at 100 s. So
+   54 s snapshot restore + 25-45 s diffusion = 79-99 s against a hard
+   100 s ceiling — a coin flip, which is exactly why the tester saw an
+   intermittent failure. The login pre-warm fixes the cause by moving the
+   54 s OUT of the request budget, leaving only diffusion. Paying to keep
+   an L40S alive would treat the symptom at $47/day; their whole Modal
+   budget is $65/MONTH.
+
+3. Test account credentials + policy 10.8.2 checkbox: Partner Center
+   actions, cannot be done from here.
+
+Cleaned up afterwards: test package uninstalled from the machine, signed
+test copy deleted. The self-signed cert stays in CurrentUser\My and
+LocalMachine\TrustedPeople so the measurement is repeatable.
+
+FINAL PACKAGE — MyFabmesh.AI 1.0.14.appx, 197.0 MB, 570 entries:
+0 backups, 0 apovivor, 0 source maps. WACK PASS.
+
+STALE COMMENT SPOTTED (not changed, cost implications): the comment above
+`scaledown_window=300` argues at length for 30 s and quotes figures for
+30 s vs 180 s, while the value is 300. Someone tuned the number without
+touching the reasoning.

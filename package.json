@@ -80,7 +80,8 @@
           "!**/__pycache__/**",
           "!**/*.backup_*",
           "!**/*.bak",
-          "!**/*_backup_*"
+          "!**/*_backup_*",
+          "!**/apovivor_*.py"
         ]
       },
       {

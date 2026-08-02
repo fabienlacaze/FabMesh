@@ -395,3 +395,60 @@ immediately at startup, which stays until the main window has finished
 painting. It also explains that the first launch is slower because Windows
 verifies the application package (~218 MB) the first time it runs.
 ```
+
+---
+
+# Mesures réelles du 02/08/2026 — enfin des chiffres
+
+Méthode reproductible (à refaire à chaque release) : signer une COPIE du
+`.appx` avec un certificat auto-signé dont le sujet est **exactement** le
+`Publisher` du manifeste (`CN=3767FC33-F877-4481-9639-BC9CFF9D1371`),
+l'approuver dans `Cert:\LocalMachine\TrustedPeople`, l'installer avec
+`Add-AppxPackage`, puis chronométrer le lancement via `shell:AppsFolder\
+AyrosStudio.MyFabmesh.AI_0yg6dyfndpah4!MyFabmeshAI`.
+
+## Premier lancement du paquet installé
+
+|                  | Depuis le dépôt | Paquet AVANT | Paquet APRÈS |
+|------------------|-----------------|--------------|--------------|
+| Process démarré  | ~0,5 s          | 6 511 ms     | **5 154 ms** |
+| Fenêtre visible  | 1 837 ms        | 7 679 ms     | **6 527 ms** |
+
+**6,5 s sur 7,7 s s'écoulaient AVANT l'exécution de notre code** : c'est
+Windows qui active le paquet et Defender qui l'analyse.
+
+## Deux constats qui invalident des hypothèses antérieures
+
+1. **Le splash ajouté pour le refus du 30/07 ne peut rien pendant cette
+   fenêtre** — le processus n'existe pas encore. Il reste utile APRÈS.
+2. **`<uap:SplashScreen>` est déclaré mais IGNORÉ** : l'app est en
+   `runFullTrust` (Desktop Bridge), et Windows n'honore cet élément que
+   pour les vraies apps UWP. Le testeur ne voit donc **rien du tout**
+   pendant l'activation. Sur un Dell Inspiron de 2017, plausiblement
+   30-60 s d'écran vide = « appeared to be unresponsive ».
+
+## Le seul levier : la taille du paquet
+
+|                    | Avant   | Après   |
+|--------------------|---------|---------|
+| `.appx`            | 208,3 Mo| 197,0 Mo|
+| Décompressé        | 450,0 Mo| 397,2 Mo|
+| `app.asar`         | 122,5 Mo| 70,6 Mo |
+| Fichiers dans l'asar| 7 966  | 4 174   |
+
+Retirés : 3 677 source maps (51 Mo), sources TypeScript, tests de
+dépendances, 3 sauvegardes horodatées, `apovivor_export_skeletons.py`
+(vérifié : jamais appelé).
+
+## Pourquoi la génération échouait chez le testeur
+
+Les *memory snapshots* Modal sont DÉJÀ activés sur `text2image` ; le
+démarrage à froid documenté est de **~54 s**, pas 3 min. Or Cloudflare
+coupe toute sous-requête à **100 s**. Donc 54 s de restauration + 25-45 s
+de diffusion = **79 à 99 s**, pile à la limite : un tirage à pile ou face.
+
+C'est exactement ce que corrige le préchauffage à la connexion : il sort
+les 54 s du budget de la requête, ne laissant que la diffusion.
+
+**=> Garder un GPU chaud en permanence (~47 $/jour) est INUTILE.** Le
+préchauffage traite la cause.
