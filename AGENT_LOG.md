@@ -16638,3 +16638,44 @@ test copy with a locally-trusted certificate.
 
 Ruled out along the way: `wizard:install-deps` is user-initiated with a
 progress channel, not an automatic first-run hang.
+
+## 2026-08-02 — Packaged first launch MEASURED; 53 MB of debug artefacts cut
+
+Signed a TEST copy of the .appx with a self-signed cert whose Subject
+matches the manifest Publisher (CN=3767FC33-...), trusted it in
+LocalMachine\TrustedPeople, installed it — so the tester's scenario is
+finally reproducible instead of guessed at.
+
+MEASURED, packaged, on the RTX 5080 box:
+  process started : 6511 ms
+  window visible  : 7679 ms
+vs 1837 ms for a dev run from the repo. The packaged first launch is 4.3x
+slower, and 6.5 of the 7.7 s elapse BEFORE our code runs at all — that is
+Windows activating the package and Defender scanning it.
+
+Two consequences that invalidate earlier assumptions:
+- The splash added for the 30/07 refusal CANNOT help during those 6.5 s;
+  the process does not exist yet.
+- `<uap:SplashScreen>` IS declared in the manifest but is IGNORED: this is
+  a runFullTrust (Desktop Bridge) app, and Windows only honours it for
+  true UWP apps. So the tester sees NOTHING at all while the package
+  activates. On a 2017 Dell Inspiron that is plausibly 30-60 s of blank
+  screen — exactly "appeared to be unresponsive for a long time".
+
+The only lever on that window is package size/file count. Found 53 MB of
+pure debug artefacts shipping to customers, chief among them 3 677 source
+map files (51 MB) — never used at runtime, and they expose the source
+layout. Excluded via build.files.
+
+BEFORE -> AFTER:
+  .appx           208.3 -> 197.0 MB
+  uncompressed    450.0 -> 397.2 MB
+  app.asar        122.5 ->  70.6 MB  (-42%)
+  files in asar    7966 ->   4174    (-3792)
+  source maps      51.0 ->     0 MB
+  process started  6511 ->  5154 ms  (-21%)
+  window visible   7679 ->  6527 ms  (-15%)
+
+A 15-21% cut on the pre-code window, measured both times the same way.
+Not a cure — the remaining ~5 s is Windows itself — but it is the first
+change in this whole saga backed by a before/after number.

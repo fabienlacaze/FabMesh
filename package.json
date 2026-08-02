@@ -59,7 +59,13 @@
       "!**/*.backup",
       "!**/*.backup_*.js",
       "!**/*.backup_*.*",
-      "!**/*.bak"
+      "!**/*.bak",
+      "!**/*.map",
+      "!**/node_modules/**/*.ts",
+      "!**/node_modules/*/test/**",
+      "!**/node_modules/*/tests/**",
+      "!**/node_modules/**/*.spec.js",
+      "!**/node_modules/**/*.test.js"
     ],
     "extraResources": [
       {
