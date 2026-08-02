@@ -16854,3 +16854,50 @@ RESTE 65 faux amis. Les prochains par gravité : preset de qualité 3D
 (preset/steps/texSize jamais envoyés à Modal, mais facturés 3/4/6/8),
 pastille de coût image (annonce 2 cr, débite jusqu'à 16), styles d'asset
 (28/33 sans effet), types d'asset (7/17 sans effet).
+
+## 2026-08-02 — POINT DE REPRISE (arrêt propre demandé)
+
+### Où reprendre en priorité
+
+1. **Workflow d'audit admin/Stripe/Supabase/Modal — ARRÊTÉ EN COURS.**
+   63 agents terminés, **149 constats déjà produits et EN CACHE**.
+   Reprendre SANS tout refaire :
+   ```
+   Workflow({
+     scriptPath: 'C:\Users\Utilisateur\.claude\projects\C--Users-Utilisateur-Desktop-FabWare-MeshyMyself\95ccf16f-066f-400d-9a70-10619809c86d\workflows\scripts\audit-admin-billing-integrite-wf_791cf95e-246.js',
+     resumeFromRunId: 'wf_791cf95e-246'
+   })
+   ```
+   Journal : subagents/workflows/wf_791cf95e-246/journal.jsonl
+
+2. **65 faux amis restants** sur les 68 de l'audit de parité. Liste
+   complète extraite dans le scratchpad (faux_amis.json) et récupérable
+   à tout moment depuis subagents/workflows/wf_f56e94f1-d82/journal.jsonl
+   (342 éléments). Les 3 premiers sont corrigés.
+
+   Prochains par gravité — MAIS ILS EXIGENT UNE DÉCISION COMMERCIALE DU
+   USER, ne pas trancher seul :
+   - Preset qualité 3D : preset/steps/texSize jamais envoyés à Modal,
+     donc travail GPU identique, facturé 3/4/6/8 crédits. Soit on
+     implémente, soit on aligne le prix.
+   - Pastille de coût image : annonce 2 crédits figés, débite jusqu'à 16
+     (multiplie par ws-count + vue arrière + étapes).
+   - Styles d'asset : 28/33 sans effet (table Modal à 8 entrées, 3 clés
+     mal orthographiées ; piège : la clé Modal `concept-art` contient en
+     fait le texte du style desktop `painterly`).
+   - Types d'asset : 7/17 sans effet, garde-fous anatomiques perdus.
+
+3. **À FAIRE PAR LE USER** : vérifier dans Partner Center que le compte
+   de test et la case 10.8.2 sont renseignés. Sans identifiants, le
+   testeur Microsoft bloque à l'écran de connexion.
+
+### État à l'arrêt
+- Branche feat/r2-signed-urls, HEAD 13fff32, tout poussé.
+- Non commité (WIP user, sauvegardé sur branche) : scripts/outfit_repaint.py,
+  scripts/.gpu_limit.json
+- Backups poussés : backup-store-1.0.14-soumis-20260802-220530,
+  backup-avant-correction-faux-amis-20260802-222431 (+ leurs backup-wip-*)
+- Electron arrêté, wrangler tail arrêté, aucun processus en cours.
+- Cloud déployé (version a4204e1f) : refine/face_fix/smooth ne sont plus
+  facturés.
+- Store : 1.0.14 soumis, en attente de certification.
