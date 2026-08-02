@@ -16748,3 +16748,43 @@ réinstaller après chaque essai.
 Note méthode : j'ai d'abord capturé l'écran entier pour observer le
 démarrage — mauvaise idée, ça expose tout le bureau de l'utilisateur.
 Captures supprimées, remplacées par une énumération de fenêtres.
+
+## 2026-08-02 — VÉRIFIÉ : Windows n'affiche PAS le splash. Résultat négatif.
+
+User asked me to verify my own claim with a screenshot instead of
+asserting. Right call — and the answer contradicts my optimistic framing
+of the previous entry.
+
+Protocole : réinstallation du paquet (donc VRAI premier lancement), 16
+captures de la zone centrale 900x560 de l'écran PRINCIPAL entre 491 ms et
+7 017 ms. Zone centrale uniquement, pour ne pas exposer le bureau — une
+capture plein écran précédente montrait toutes les fenêtres de
+l'utilisateur, à ne pas refaire.
+
+Validité du test confirmée : la fenêtre de l'app s'ouvre bien sur l'écran
+principal (L=-8 T=-8 R=2568 B=1400), donc je regardais au bon endroit.
+
+Première méthode INVALIDE : comparer les hashes des captures. 16 images
+distinctes — mais parce qu'une autre application anime le fond en
+permanence, pas parce qu'un splash apparaissait.
+
+Méthode valide : chercher la signature du splash, son fond #0b0b14, dans
+la zone 620x300 qu'il occuperait. Résultat : 10,8 % à 31,9 % sur les 16
+captures, jamais plus. Un splash affiché donnerait 85-95 %. Les 25-30 %
+sont les pixels sombres des autres fenêtres.
+
+CONCLUSION : Windows n'honore PAS <uap:SplashScreen> pour une app
+runFullTrust (Desktop Bridge). La nouvelle image ne sera JAMAIS affichée.
+Mon « au pire neutre, au mieux ça répond au grief » était faux : c'est
+neutre, point.
+
+Ce que voit donc réellement le testeur pendant l'activation : RIEN. Les
+fenêtres précédentes restent à l'écran, le clic semble sans effet.
+
+Image conservée quand même (10 Ko, sans risque) mais elle ne doit pas
+être comptée comme un correctif. Le SEUL levier reste la taille du
+paquet : 450 -> 397 Mo déjà fait, -15 % sur la fenêtre aveugle. Pistes
+restantes si besoin : les wheels (16,7 Mo) et python-embed (24,1 Mo) ne
+servent qu'au mode LOCAL, un testeur sans GPU NVIDIA ne les utilise
+jamais — mais les sortir du paquet demande un téléchargement à la
+demande, donc un vrai chantier.
