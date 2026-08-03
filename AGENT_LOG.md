@@ -17171,3 +17171,45 @@ d'afficher « facture Modal » sur un chiffre vieux de plusieurs semaines.
 `real_usage_age_h` est désormais exposé ; au-delà de 48 h la carte passe
 en rouge et affiche « ⚠️ PÉRIMÉ — N j ». Un chiffre périmé présenté comme
 frais est pire qu'un chiffre absent.
+
+## 2026-08-03 — Faux amis, lot 4 : 28 styles et 7 types d'asset étaient MUETS
+
+Le worker jette le prompt enrichi construit par le client
+(`const rawPrompt = (userPrompt ?? prompt ?? '')`) et laisse Modal
+ré-enrichir depuis ses propres tables. Or celles-ci étaient largement
+incomplètes.
+
+STYLES : 8 entrées côté Modal contre 33 dans l'interface. Cyberpunk,
+Ghibli, Pixar, Pixel art, Aquarelle, Chrome, Marbre, Steampunk,
+Synthwave, Graffiti, Art déco, Claymation, Vitrail… ne produisaient
+RIEN. L'utilisateur payait 2 crédits pour une image sans le style choisi.
+Aggravant : 3 clés divergeaient d'orthographe entre l'UI et Modal
+(low-poly/lowpoly, pixel-art/pixelart, concept-art/painterly) et la clé
+Modal `concept-art` contenait en fait le texte du style desktop
+`painterly` — un simple renommage aurait donc envoyé deux styles sur la
+mauvaise description.
+→ 37 entrées maintenant (33 + 3 alias de compatibilité + 'none').
+VÉRIFIÉ : plus AUCUN style de l'interface n'est muet.
+
+TYPES : 10 entrées contre 17. Manquaient avion, bateau, insect et les
+quatre « other_* ». Ils perdaient avec eux les garde-fous anatomiques :
+insect impose « exactly six legs in total […] NOT eight legs, NOT a
+spider », animal impose « NEVER bipedal ». Sans eux, un insecte pouvait
+sortir en araignée.
+→ 17 entrées. VÉRIFIÉ : garde-fous insecte et animal présents, plus aucun
+type muet.
+
+MÉTHODE : les deux tables sont EXTRAITES du source desktop par script
+(scratchpad/port_styles.py, port_types.py), jamais recopiées à la main —
+une faute de frappe réintroduirait exactement le bug qu'on corrige.
+Assertion sur le nombre d'entrées extraites avant écriture.
+
+NON TOUCHÉ, volontairement : `_realvis._ANATOMY_NEG` n'a que 5 clés, mais
+c'est un mécanisme PROPRE au cloud (le desktop met ses garde-fous dans le
+prompt positif, désormais porté). Y ajouter des négatifs serait du
+réglage inventé, pas une correction de parité.
+
+RESTE le fond du problème, non corrigé : le worker JETTE le prompt
+enrichi du client au lieu de le transmettre. Tant que ce sera le cas,
+toute divergence entre les tables client et Modal recréera des options
+muettes. Le corriger demande de décider qui fait autorité.
