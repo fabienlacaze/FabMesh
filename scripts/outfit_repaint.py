@@ -17,9 +17,16 @@ Pipeline (V1, personnages humanoides d'abord) :
      FALLBACK (PartSAM/namer KO) : heuristique geometrique par hauteur
      (tout sauf tete/mains — voir fallback_face_mask()).
   3. Masque texels            : rasterisation des triangles UV des faces
-     vetement (convention x=u*R, y=(1-v)*R identique a texture_project),
-     dilate 6 texels, soustraction du masque visage atlas (pipeline
-     face_inpaint_atlas / texture_refine --protect-face).
+     vetement (convention x=u*R, y=(1-v)*R identique a texture_project).
+     DEUX masques distincts, ne jamais les confondre :
+       - mask_paint   = rasterisation NON dilatee = appartenance. Seul lui
+         autorise le fill et compte dans la couverture.
+       - mask_feather = version dilatee de 1-2 texels + flou = POIDS de
+         composite uniquement (anti-couture).
+     Le masque visage atlas (face_inpaint_atlas / texture_refine
+     --protect-face) est soustrait, mais seulement s'il couvre < 15 % de
+     l'atlas : au-dela il n'est pas discriminant (mesure : 65 % sur un
+     atlas TRELLIS-2) et amputerait le vetement.
   4. Rendus ortho multi-vues  : pyrender, contrat cameras MVAdapter de
      fabmesh_6views_runner.py (get_c2w / get_ortho_proj / mesh2std /
      rescale) — le SEUL contrat compatible avec le chemin orthographique
@@ -34,12 +41,27 @@ Pipeline (V1, personnages humanoides d'abord) :
   6. Reprojection vues→atlas  : kernel stack de texture_project
      (_raster_core_jit, V=1, prio=1.0, alpha = masque 2D d'inpaint),
      composite restreint au masque texels + feather.
-  7. Remplissage texels non vus (aisselles, entrejambe) : fill nearest
-     (EDT) depuis les texels peints + Telea rayon 3.
+  7. Remplissage texels non vus (aisselles, entrejambe, micro-triangles
+     rates par la rasterisation conservative) : fill nearest (EDT) depuis
+     les texels peints + Telea rayon 3, BORNE A 8 TEXELS. Au-dela, la
+     texture d'origine est conservee.
      COMPROMIS documente : le _push_pull_fill de texture_project est une
      closure locale non importable ; le fill EDT-nearest + Telea produit
      le meme comportement (couleur locale continue) sur les petites
      zones concernees.
+     Le composite final est gate par les texels REELLEMENT peints ou
+     remplis (`touched`), jamais par le masque vetement seul.
+
+LIMITES V1 connues (mesurees, pas supposees) :
+  - Seule la baseColor change. La metallicRoughnessTexture d'origine
+    reste : une armure d'acier peinte sur une MR de tissu rendra mate.
+  - Sortie JPEG (qualite 92) : un cutout en alphaMode MASK/BLEND serait
+    perdu. Le mesh de test est OPAQUE, sans effet.
+  - Couverture directe mesuree 55 % (4 vues, atlas 1024) / 73 % (6 vues,
+    atlas 2048) ; le reste est bouche par le fill borne. --tex-res 2048
+    est le meilleur levier qualite.
+  - Sans PartSAM, le mode degrade repeint « tout ce qui est sous 70 % de
+    la hauteur », armes et os compris (voir fallback_face_mask).
 
 CLI :
     python outfit_repaint.py --mesh in.glb --prompt "medieval armor"
@@ -61,12 +83,14 @@ Interpreteur cible : venv IA <repo>/external/TRELLIS2_win/.venv (torch cu128,
 diffusers, transformers, PIL, numpy, numba, trimesh, pyrender, scipy).
 
 Env :
-    FABMESH_SEGMENT_PYTHON      chemin python-segment (def <repo>/python-segment/python.exe)
+    FABMESH_SEGMENT_PYTHON      chemin python-segment (def <repo>/python-segment/python.exe).
+                                Pose sur un chemin inexistant = opt-out
+                                explicite de PartSAM (mode degrade).
     FABMESH_PARTSAM_DIR         repo PartSAM (def <repo>/PartSAM)
     FABMESH_VRAM_FRACTION       cap VRAM torch (def 0.95)
     FABMESH_OUTFIT_KEEP_SCRATCH =1 pour garder le dossier .outfit_scratch
-    FABMESH_OUTFIT_STACK_FLOOR / _FULL   feather stack (def 0.40 / 0.65)
-    FABMESH_OUTFIT_BAKE_EXP     exposant visibilite ortho (def 4.0)
+    FABMESH_OUTFIT_STACK_FLOOR / _FULL   feather stack (def 0.10 / 0.45)
+    FABMESH_OUTFIT_BAKE_EXP     exposant visibilite ortho (def 1.0)
     FABMESH_OUTFIT_DEPTH_EPS    epsilon depth-diff (def 2e-3, mesh normalise)
 
 Licences : pyrender (MIT), trimesh (MIT), OpenCV Haar (BSD), SDXL
@@ -143,10 +167,19 @@ def progress(pct):
 # ===========================================================================
 
 def resolve_segment_python():
-    """Python dedie PartSAM (PAS le venv IA) — meme resolution que main.js."""
+    """Python dedie PartSAM (PAS le venv IA) — meme resolution que main.js.
+
+    Si FABMESH_SEGMENT_PYTHON est pose EXPLICITEMENT mais ne pointe pas sur
+    un fichier, on renvoie None au lieu de retomber en douce sur un autre
+    interpreteur : c'est le levier d'opt-out (mode degrade) et une valeur
+    fausse doit se voir."""
     cand = os.environ.get('FABMESH_SEGMENT_PYTHON')
-    if cand and os.path.isfile(cand):
-        return cand
+    if cand:
+        if os.path.isfile(cand):
+            return cand
+        log(f'FABMESH_SEGMENT_PYTHON={cand} introuvable -> PartSAM desactive '
+            f'(mode degrade heuristique demande explicitement)')
+        return None
     cand = os.path.join(REPO, 'python-segment', 'python.exe')
     if os.path.isfile(cand):
         return cand
@@ -407,20 +440,40 @@ def fallback_face_mask(mesh):
     # Accessoires tenus (baton, arme) : composantes connexes petites ET
     # excentrees. L'heuristique « mains » ci-dessus suppose une T/A-pose ;
     # bras le long du corps elle n'exclut rien (mesure : 0 face).
+    #
+    # ATTENTION : ne s'applique QUE si le mesh est reellement structure en
+    # composantes. Les meshes TRELLIS-2 sont eclates en micro-coques (mesure
+    # sur le mesh de test : 46 868 composantes, la plus grosse = 0,44 % des
+    # faces) — dans ce cas « petite composante excentree » decrit la moitie
+    # du corps et l'heuristique ne veut plus rien dire. On la desactive.
     n_acc = 0
     try:
         labels = _face_components(mesh)
-        if labels is not None:
-            n_faces = len(mesh.faces)
-            for lab in np.unique(labels):
+        if labels is None:
+            raise RuntimeError('composantes indisponibles')
+        n_faces = len(mesh.faces)
+        uniq, counts = np.unique(labels, return_counts=True)
+        biggest = counts.max() / float(n_faces)
+        if biggest < 0.10:
+            log(f'fallback: {len(uniq)} composantes, la plus grosse ne fait '
+                f'que {biggest*100:.2f}% des faces -> mesh non structure en '
+                f'composantes, detection accessoires DESACTIVEE')
+        else:
+            cand = np.zeros(n_faces, dtype=bool)
+            for lab, cnt in zip(uniq, counts):
+                if cnt / float(n_faces) >= 0.01:
+                    continue  # trop gros pour un accessoire
                 sel = labels == lab
-                frac = sel.sum() / float(n_faces)
-                if frac >= 0.03:
-                    continue  # composante principale (corps)
-                off = float(np.abs(c[sel, 0] - x_mid).mean()) / half_w
-                if off > 0.35:
-                    mask &= ~sel
-                    n_acc += int(sel.sum())
+                if float(np.abs(c[sel, 0] - x_mid).mean()) / half_w > 0.50:
+                    cand |= sel
+            # Garde-fou : un accessoire ne represente jamais 15 % du perso.
+            if cand.sum() / float(n_faces) > 0.15:
+                log(f'fallback: candidats accessoires = '
+                    f'{100.0*cand.sum()/n_faces:.1f}% des faces (> 15%) '
+                    f'-> heuristique jugee non fiable, ignoree')
+            else:
+                mask &= ~cand
+                n_acc = int(cand.sum())
     except Exception as e:
         log(f'fallback: detection accessoires ignoree ({e})')
 
@@ -779,7 +832,12 @@ def ortho_project_vertices(v_std, n_std, w2c, proj):
     R_w2c = w2c[:3, :3]
     n_cs = (R_w2c @ n_std.T).T
     norms_n = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
-    bake_exp = float(os.environ.get('FABMESH_OUTFIT_BAKE_EXP', '4.0'))
+    # exp=1.0 et non 4.0 : avec 4.0 il fallait une normale a moins de ~37 deg
+    # de la camera pour passer le plancher du stack, et la couverture tombait
+    # a 35 %. Ici le rendu est flat (ambient 1.0) et l'ecriture est deja
+    # bornee par le masque 2D : accepter les angles rasants est sans risque
+    # et fait passer la couverture a ~55 % (mesure, 4 vues).
+    bake_exp = float(os.environ.get('FABMESH_OUTFIT_BAKE_EXP', '1.0'))
     vis = np.clip(norms_n[:, 2], 0, 1) ** bake_exp
     in_frame = (p_u >= 0) & (p_u <= 1) & (p_v >= 0) & (p_v <= 1)
     return p_u, p_v, vis * in_frame.astype(np.float64)
@@ -833,8 +891,9 @@ def reproject_view(atlas_f, view_img, alpha_mask2d, p_u, p_v, vis,
     face_uvs_c = np.ascontiguousarray(face_uvs, dtype=np.float64)
     face_ok_c = np.ascontiguousarray(face_ok)
 
-    stack_floor = float(os.environ.get('FABMESH_OUTFIT_STACK_FLOOR', '0.40'))
-    stack_full = float(os.environ.get('FABMESH_OUTFIT_STACK_FULL', '0.65'))
+    # floor 0.10 (et non 0.40) : meme raison que bake_exp ci-dessus.
+    stack_floor = float(os.environ.get('FABMESH_OUTFIT_STACK_FLOOR', '0.10'))
+    stack_full = float(os.environ.get('FABMESH_OUTFIT_STACK_FULL', '0.45'))
 
     proj_arr = atlas_f.copy()
     weight_arr = np.zeros((tex_res, tex_res), dtype=np.float64)
