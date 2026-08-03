@@ -1458,17 +1458,32 @@ interface GenerateInput {
  * total will therefore sit BELOW the real Modal invoice; the gap is
  * surfaced explicitly rather than hidden (see `unattributed_usd`). */
 const GPU_USD_PER_SEC: Record<string, number> = {
+  H100: 0.001267,
+  A100: 0.001097,    // A100 40 Go (valeur par defaut de gpu="A100")
   L40S: 0.000542,
   A10G: 0.000306,
-  CPU:  0.0000131,   // per core-second; our CPU functions run ~2 cores
+  L4:   0.000222,
+  CPU:  0.0000131,   // par cœur-seconde ; nos fonctions CPU tournent sur ~2 cœurs
 };
 
 /** Which container an op type runs on — decides the rate above. */
+/* Verifie le 2026-08-03 contre les declarations `gpu=` reelles des
+ * fonctions Modal, au lieu d'etre suppose :
+ *   _partsam.py:1279   gpu="A100"   -> segmentation (etait chiffree A10G,
+ *                                      soit 3,6x SOUS son cout reel)
+ *   _sampart3d.py      gpu="A100"
+ *   _puppeteer_rig.py  gpu="A10G"   -> rig
+ *   _anytop_anim.py    gpu="A10G"   -> animation
+ *   _mvadapter.py      gpu="A10G"
+ *   _animateanymesh.py gpu="L4"
+ *   app.py x3          gpu="L40S"   -> mesh, text2image, back-view */
 const OP_HARDWARE: Record<string, keyof typeof GPU_USD_PER_SEC> = {
   'mesh': 'L40S', 'mesh-face': 'L40S', 'construction3d': 'L40S',
   'text2image': 'L40S', 'back-view': 'L40S', 'rectify': 'L40S',
   'sheet': 'L40S', 'tpose': 'L40S', 'remove-bg': 'L40S',
-  'rig': 'A10G', 'segment': 'A10G', 'animate': 'A10G', 'animate_fbx': 'CPU',
+  'rig': 'A10G',
+  'segment': 'A100',          // CORRIGE : _partsam.py tourne sur A100
+  'animate': 'A10G', 'animate_fbx': 'CPU',
   'mesh-op': 'CPU', 'mesh-op-client': 'CPU', 'mesh-convert': 'CPU',
 };
 
@@ -7130,10 +7145,23 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   }
   // Success path — record each generation as a separate row so the
   // CSV totals match the actual GPU calls (e.g. count=3 logs 3 entries).
+  //
+  // DUREES DECOUPEES. Les n lignes recevaient toutes le MEME opStart et
+  // le MEME instant de fin : chacune portait donc la duree du LOT
+  // ENTIER. Depuis que le tableau de bord chiffre chaque operation sur
+  // sa propre duree (_measuredCostUsd), ce coût se retrouvait multiplie
+  // par n — un lot de 4 images etait compte 4 fois trop cher.
+  //
+  // On repartit la fenetre reelle en n tranches contigues : la somme des
+  // lignes redonne exactement la duree du lot, et chaque ligne porte une
+  // duree plausible pour UNE image.
+  const opEnd = Date.now();
+  const trancheMs = Math.max(1, Math.round((opEnd - opStart) / Math.max(1, n)));
   for (let i = 0; i < n; i++) {
+    const debut = opStart + i * trancheMs;
     await logOperation(env, user.id, opType,
-                       COST_PER_IMAGE, opStart, Date.now(), 'succeeded',
-                       { asset_type, asset_style });
+                       COST_PER_IMAGE, debut, debut + trancheMs, 'succeeded',
+                       { asset_type, asset_style, batch_index: i, batch_size: n });
   }
   // Persist in user_assets so /api/cloud-projects can list these
   // without the client needing to cache R2 paths in localStorage.
@@ -7241,10 +7269,15 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
                        'failed', { error: e instanceof Error ? e.message : String(e), n });
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
+  // Meme decoupage que la generation d'images : sans lui, les n lignes
+  // portent chacune la duree du lot entier et le cout est compte n fois.
+  const bvEnd = Date.now();
+  const bvTranche = Math.max(1, Math.round((bvEnd - opStart) / Math.max(1, n)));
   for (let i = 0; i < n; i++) {
+    const debut = opStart + i * bvTranche;
     await logOperation(env, user.id, 'back-view',
-                       COST_PER_BACK, opStart, Date.now(), 'succeeded',
-                       { asset_type });
+                       COST_PER_BACK, debut, debut + bvTranche, 'succeeded',
+                       { asset_type, batch_index: i, batch_size: n });
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }

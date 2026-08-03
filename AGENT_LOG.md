@@ -17398,3 +17398,28 @@ zéro.
 - Le flux d'usage réel Modal est toujours gelé — rendu VISIBLE (carte
   rouge « PÉRIMÉ ») mais le poller scripts/modal_usage_push.py ne tourne
   pas. C'est une tâche planifiée à mettre en place côté user.
+
+## 2026-08-03 — Coûts admin : mauvais GPU et durées de lot dupliquées
+
+### La segmentation était chiffrée 3,6x sous son coût réel
+`OP_HARDWARE` supposait A10G pour 'segment'. Vérifié contre les
+déclarations `gpu=` réelles : `_partsam.py:1279` tourne sur **A100**.
+Inventaire complet fait plutôt que corriger au cas par cas —
+_sampart3d A100, _puppeteer_rig A10G, _anytop_anim A10G, _mvadapter A10G,
+_animateanymesh L4, app.py x3 L40S. Table des tarifs complétée (H100,
+A100, L4) et le mapping documenté avec ses sources fichier par fichier.
+
+### Les lots d'images étaient comptés n fois trop cher
+`for (let i = 0; i < n; i++) logOperation(..., opStart, Date.now(), ...)`
+donnait à CHAQUE ligne le même début et la même fin, donc la durée du
+LOT ENTIER. Depuis que le dashboard chiffre chaque opération sur sa
+propre durée (_measuredCostUsd), un lot de 4 images était compté 4 fois
+trop cher.
+
+La fenêtre réelle est maintenant découpée en n tranches contiguës : la
+somme des lignes redonne exactement la durée du lot, et chaque ligne
+porte une durée plausible pour UNE image. `batch_index` / `batch_size`
+ajoutés aux métadonnées pour que ce soit traçable.
+
+Même défaut trouvé et corrigé sur la génération de vue arrière — il
+n'était pas dans le rapport d'audit, je l'ai vu en corrigeant le premier.
