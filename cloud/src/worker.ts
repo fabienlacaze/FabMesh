@@ -372,8 +372,12 @@ async function _isPaidAccount(env: Env, userId: string): Promise<boolean> {
     if (await r2GetText(env, negKey)) return false;
 
     const sb = supabaseAdmin(env);
+    // `.gt('credits', 0)` est ESSENTIEL : un remboursement remet la ligne
+    // a credits=0 sans la supprimer (on garde la trace comptable). Sans
+    // ce filtre, un compte rembourse retrouvait son exemption de
+    // plafonds des l'appel suivant, le marqueur R2 etant recree ici.
     const { data } = await sb.from('payments')
-      .select('id').eq('user_id', userId).limit(1);
+      .select('id').eq('user_id', userId).gt('credits', 0).limit(1);
     const paid = Array.isArray(data) && data.length > 0;
     if (paid) await env.MESHES.put(PAID, '1');
     else await env.MESHES.put(negKey, '0');
@@ -4330,6 +4334,91 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   // Subscriptions — Stripe fires invoice.paid every billing cycle
   // (including the first one). Idempotent on stripe_session_id which
   // we set to the invoice id here so a retried webhook doesn't double-credit.
+  // REMBOURSEMENTS ET LITIGES — ajoutes le 2026-08-03.
+  //
+  // Seuls 3 evenements etaient traites (checkout.session.completed,
+  // invoice.paid, account.updated) : AUCUN handler de remboursement.
+  // Consequence : un client rembourse par Stripe, ou qui obtenait gain de
+  // cause sur un litige bancaire, RECUPERAIT SON ARGENT ET GARDAIT SES
+  // CREDITS. Rien ne les reprenait.
+  //
+  // Aggravant introduit par mon propre correctif du 02/08 : le marqueur
+  // `_meta/paid/<uid>` exempte les comptes payants de TOUS les plafonds de
+  // depense GPU. Il n'etait jamais retire — un compte rembourse gardait
+  // donc A VIE un acces GPU illimite.
+  if (event.type === 'charge.refunded' || event.type === 'charge.dispute.created') {
+    const ch = event.data.object as {
+      payment_intent?: string; id?: string;
+      metadata?: Record<string, string>;
+      amount_refunded?: number; amount?: number;
+    };
+    const sb = supabaseAdmin(env);
+    const total = event.type === 'charge.dispute.created';
+    try {
+      // On retrouve le paiement par l'identifiant que Stripe nous renvoie.
+      // checkoutSessionId est stocke dans stripe_session_id ; selon le
+      // chemin, l'identifiant utile est le payment_intent ou la charge.
+      const refs = [ch.payment_intent, ch.id].filter(Boolean) as string[];
+      let paiement: { id: number; user_id: string; credits: number } | null = null;
+      for (const ref of refs) {
+        const { data } = await sb.from('payments')
+          .select('id, user_id, credits')
+          .eq('stripe_session_id', ref).maybeSingle();
+        if (data) { paiement = data as typeof paiement; break; }
+      }
+      // Repli : metadata.user_id pose a la creation de la session.
+      const uid = paiement?.user_id || ch.metadata?.user_id;
+      if (!uid) {
+        console.warn(`[stripe] ${event.type} sans paiement retrouvable — `
+                   + `refs=${refs.join(',')}. Credits NON repris, a traiter a la main.`);
+        return json({ received: true, unmatched: true });
+      }
+
+      // Reprise des credits. Proportionnelle sur un remboursement
+      // partiel, totale sur un litige.
+      let aReprendre = paiement?.credits ?? 0;
+      if (!total && ch.amount && ch.amount_refunded && ch.amount > 0) {
+        aReprendre = Math.ceil(aReprendre * (ch.amount_refunded / ch.amount));
+      }
+      if (aReprendre > 0) {
+        // BORNAGE A 0 COTE WORKER. La RPC `add_credits` fait un simple
+        // `credits = credits + p_amount` SANS plancher (verifie dans
+        // cloud/sql/schema.sql) : passer un negatif brut pouvait donc
+        // creer un solde NEGATIF, qui aurait bloque le compte meme apres
+        // un rachat. On ne reprend jamais plus que ce qui reste.
+        const { data: prof } = await sb.from('profiles')
+          .select('credits').eq('id', uid).maybeSingle();
+        const solde = Number((prof as { credits?: number } | null)?.credits ?? 0);
+        const repris = Math.min(aReprendre, Math.max(0, solde));
+        if (repris > 0) await addCredits(env, uid, -repris);
+        console.log(`[stripe] ${event.type}: ${repris} credits repris a ${uid} `
+                  + `(du: ${aReprendre}, solde: ${solde})`);
+      }
+
+      // Le compte n'est plus « payant » : on retire l'exemption de
+      // plafonds. S'il lui reste un AUTRE paiement valide, le marqueur
+      // sera recree paresseusement par _isPaidAccount.
+      try {
+        if (env.MESHES) {
+          await env.MESHES.delete(`_meta/paid/${uid}`);
+          console.log(`[stripe] exemption de plafonds retiree pour ${uid}`);
+        }
+      } catch { /* le marqueur sera de toute facon reevalue */ }
+
+      if (paiement) {
+        await sb.from('payments')
+          .update({ credits: 0, amount_eur: 0 })
+          .eq('id', paiement.id);
+      }
+    } catch (e) {
+      console.error('[stripe] traitement du remboursement echoue:', e);
+      // On demande a Stripe de rejouer : mieux vaut reessayer que de
+      // laisser des credits non repris.
+      return err(500, 'refund handling failed');
+    }
+    return json({ received: true });
+  }
+
   if (event.type === 'invoice.paid') {
     const inv = event.data.object;
     // Stripe renewal invoices don't carry the original line-item metadata.

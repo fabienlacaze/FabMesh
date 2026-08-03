@@ -17423,3 +17423,43 @@ ajoutés aux métadonnées pour que ce soit traçable.
 
 Même défaut trouvé et corrigé sur la génération de vue arrière — il
 n'était pas dans le rapport d'audit, je l'ai vu en corrigeant le premier.
+
+## 2026-08-03 — Un remboursement Stripe ne reprenait jamais les crédits
+
+Le webhook ne traitait que 3 événements : checkout.session.completed,
+invoice.paid, account.updated. AUCUN handler de remboursement ni de
+litige. Un client remboursé, ou gagnant un litige bancaire, RÉCUPÉRAIT
+SON ARGENT ET GARDAIT SES CRÉDITS.
+
+AGGRAVANT INTRODUIT PAR MOI le 02/08 : `_meta/paid/<uid>` exempte les
+comptes payants de TOUS les plafonds de dépense GPU, et rien ne le
+retirait. Un compte remboursé gardait donc À VIE un accès GPU illimité.
+J'avais traité le cas « devenir payant » sans penser au chemin inverse.
+
+`charge.refunded` et `charge.dispute.created` sont maintenant traités :
+- reprise des crédits, proportionnelle sur un remboursement partiel,
+  totale sur un litige ;
+- suppression du marqueur `_meta/paid/<uid>` ;
+- ligne `payments` remise à credits=0 / amount_eur=0, mais CONSERVÉE
+  (trace comptable) ;
+- 500 en cas d'échec pour que Stripe rejoue, plutôt que de laisser des
+  crédits non repris.
+
+DEUX PIÈGES CORRIGÉS EN COURS DE ROUTE :
+
+1. J'avais écrit dans mon propre commentaire que « la RPC Postgres borne
+   déjà à 0 ». C'ÉTAIT FAUX : `add_credits` fait un simple
+   `credits = credits + p_amount` sans plancher (vérifié dans
+   cloud/sql/schema.sql). Passer un négatif brut pouvait créer un solde
+   NÉGATIF, qui aurait bloqué le compte même après un rachat. Bornage
+   ajouté côté worker : on ne reprend jamais plus que le solde restant.
+
+2. `_isPaidAccount` cherchait N'IMPORTE QUELLE ligne de payments. Comme
+   on conserve la ligne remboursée (à credits=0), le marqueur aurait été
+   recréé à l'appel suivant et l'exemption serait revenue. Filtre
+   `.gt('credits', 0)` ajouté.
+
+NON TESTÉ : déclencher un vrai remboursement Stripe en test demanderait
+un paiement de test puis son remboursement depuis le tableau de bord
+Stripe. Le code compile et la logique est vérifiée par lecture, mais le
+chemin n'a pas été exercé.
