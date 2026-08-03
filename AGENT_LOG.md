@@ -17247,3 +17247,44 @@ build:all, à côté de `prebuild:licence-check`. Documenté dans
 VÉRIFIÉ : état propre → OK ; suppression de 'cyberpunk' de la table
 Modal → ÉCHEC détecté ; restauration → OK. Le garde-fou attrape donc une
 vraie régression, pas seulement une différence de mise en forme.
+
+## 2026-08-03 — Faux amis, lot 5 : les curseurs de Fill Holes étaient jetés
+
+L'interface propose deux curseurs (min/max arêtes) et colorie l'aperçu en
+vert/gris/rouge selon eux. Le client les JETAIT
+(« center/fix_normals/fill_holes/… take no params on the Modal side »),
+et Modal bouchait TOUT via `trimesh.repair.fill_holes`. L'aperçu
+contredisait donc le résultat. Le desktop, lui, les transmettait bien à
+son backend Python.
+
+Implémenté un vrai filtrage : `_boucles_de_bord()` reconstruit les cycles
+de bord, `_remplir_boucles_filtrees()` ne bouche que ceux dont le nombre
+d'arêtes est dans la plage, par éventail.
+
+DEUX PIÈGES TROUVÉS EN TESTANT — c'est le test qui les a révélés, pas la
+relecture :
+
+1. Quand le filtre écartait tout, les 4 passes de nettoyage continuaient
+   et DÉGRADAIENT le maillage : 27 → 62 arêtes de bord, faces supprimées
+   à chaque tour. Un outil qui abîme le maillage est pire qu'un curseur
+   ignoré. → arrêt immédiat de la boucle quand rien n'est bouché.
+
+2. Même avec l'arrêt, le nettoyage EN AMONT du remplissage (faces
+   dégénérées, fusion de sommets, T-jonctions, non-manifold) restait
+   appliqué sans réparation derrière : 1191 → 1164 faces, 27 → 46 arêtes
+   de bord. → garantie « si rien n'est bouché, RIEN ne change » : on
+   renvoie les octets d'origine.
+
+Puis, par cohérence avec decimate() : on LÈVE au lieu de renvoyer un
+maillage intact contre un crédit. Le worker débite avant l'appel ; une
+opération qui ne change rien ne doit pas être facturée. Le message porte
+le diagnostic (« aucun trou entre N et M arêtes — élargis la plage »).
+
+Repli conservateur : aux valeurs par défaut (min<=3, max très grand), on
+garde EXACTEMENT le chemin trimesh d'origine. Le filtrage maison ne
+s'active que si l'utilisateur a vraiment bougé un curseur.
+
+VÉRIFIÉ sur une sphère à 2 trous (3 et 24 arêtes) :
+  défaut          → réparé (27 → 0 arêtes de bord)
+  plage vide      → LÈVE, octets identiques à l'entrée
+  plage large     → 2 boucles remplies

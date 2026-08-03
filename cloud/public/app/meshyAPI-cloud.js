@@ -2514,7 +2514,17 @@
             finalParams = {};
             if (a[0]) finalParams.image_url = String(a[0]);
             break;
-          // center/fix_normals/fill_holes/align_texture/material take
+          // Fill Holes : les deux curseurs sont enfin TRANSMIS. Ils
+          // etaient jetes ici (« take no params on the Modal side »)
+          // alors que l'apercu colorie les trous en vert/gris/rouge selon
+          // eux — l'apercu contredisait donc le resultat, qui bouchait
+          // TOUT. Le desktop, lui, les passait bien a son backend.
+          case 'fill_holes':
+            finalParams = {};
+            if (a[0] != null) finalParams.min_hole_size = parseInt(a[0], 10) || 3;
+            if (a[1] != null) finalParams.max_hole_size = parseInt(a[1], 10) || 1000000;
+            break;
+          // center/fix_normals/align_texture/material take
           // no params on the Modal side — drop positional values.
           default:
             finalParams = {};

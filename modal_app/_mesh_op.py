@@ -194,6 +194,87 @@ def fix_normals(glb_bytes: bytes) -> bytes:
     return _export(scene)
 
 
+def _boucles_de_bord(m):
+    """Reconstruit les boucles de bord (trous) d'un maillage.
+
+    Renvoie une liste de listes d'indices de sommets, chaque liste etant
+    un cycle ferme. Les aretes de bord sont celles utilisees par UNE
+    SEULE face ; on les chaine par sommet partage.
+
+    Sert au filtrage min/max de fill_holes : trimesh.repair.fill_holes
+    bouche TOUT, sans notion de taille, alors que l'interface propose
+    deux curseurs et colorie l'apercu en vert/gris/rouge selon eux.
+    """
+    import numpy as np
+    if not hasattr(m, 'edges') or len(m.edges) == 0:
+        return []
+    e = np.sort(m.edges, axis=1)
+    uniq, counts = np.unique(e, axis=0, return_counts=True)
+    bords = uniq[counts == 1]
+    if len(bords) == 0:
+        return []
+
+    # Adjacence sommet -> sommets voisins par une arete de bord.
+    voisins = {}
+    for a, b in bords:
+        voisins.setdefault(int(a), []).append(int(b))
+        voisins.setdefault(int(b), []).append(int(a))
+
+    vus = set()
+    boucles = []
+    for depart in list(voisins):
+        if depart in vus:
+            continue
+        boucle = [depart]
+        vus.add(depart)
+        courant, precedent = depart, None
+        while True:
+            suivants = [v for v in voisins.get(courant, []) if v != precedent and v not in vus]
+            if not suivants:
+                # Boucle fermee si on peut revenir au depart.
+                if depart in voisins.get(courant, []) and len(boucle) >= 3:
+                    boucles.append(boucle)
+                break
+            precedent, courant = courant, suivants[0]
+            boucle.append(courant)
+            vus.add(courant)
+            if len(boucle) > 200_000:      # garde-fou anti-boucle infinie
+                break
+    return boucles
+
+
+def _remplir_boucles_filtrees(m, min_edges, max_edges):
+    """Bouche UNIQUEMENT les trous dont le nombre d'aretes est dans
+    [min_edges, max_edges], par eventail depuis le premier sommet.
+
+    Renvoie (remplis, trop_petits, trop_grands). Les UV ne sont pas
+    etendus : les faces ajoutees heritent du materiau mais pas d'une
+    coordonnee de texture propre — meme compromis que trimesh.
+    """
+    import numpy as np
+    boucles = _boucles_de_bord(m)
+    if not boucles:
+        return 0, 0, 0
+    remplis = petits = grands = 0
+    nouvelles = []
+    for b in boucles:
+        n = len(b)
+        if n < min_edges:
+            petits += 1
+            continue
+        if n > max_edges:
+            grands += 1
+            continue
+        for i in range(1, n - 1):
+            nouvelles.append([b[0], b[i], b[i + 1]])
+        remplis += 1
+    if nouvelles:
+        m.faces = np.vstack([np.asarray(m.faces), np.asarray(nouvelles, dtype=np.int64)])
+        try: m._cache.clear()
+        except Exception: pass
+    return remplis, petits, grands
+
+
 def _count_boundary_edges(m):
     """Return (boundary_edges, nonmanifold_edges) using a sorted-edges
     unique tally. boundary = edges used by exactly 1 triangle;
@@ -301,7 +382,7 @@ def _aggregate_diag(per_mesh):
     return 'CLOSED_OK'
 
 
-def fill_holes(glb_bytes: bytes):
+def fill_holes(glb_bytes: bytes, min_edges: int = 3, max_edges: int = 1_000_000):
     """Diagnostic-first hole filling. Returns (glb_bytes, stats_dict).
 
     Pipeline per mesh:
@@ -437,13 +518,47 @@ def fill_holes(glb_bytes: bytes):
             # legitimate boundaries instead of being blocked by the
             # double-skin/non-manifold mess.
             _clean_nonmanifold(m)
-            try:
-                trimesh.repair.fill_holes(m, use_fan=True)
-            except TypeError:
-                try: trimesh.repair.fill_holes(m)
-                except Exception as e: print(f'[mesh-op] fill_holes pass{pass_i} skipped: {e}', flush=True)
-            except Exception as e:
-                print(f'[mesh-op] fill_holes pass{pass_i} skipped: {e}', flush=True)
+            # FILTRAGE PAR TAILLE. L'interface propose deux curseurs
+            # (min/max aretes) et colorie l'apercu en vert/gris/rouge
+            # selon eux — mais le cloud les JETAIT et bouchait tout.
+            # L'apercu contredisait donc le resultat.
+            #
+            # Repli deliberement conservateur : aux valeurs par defaut
+            # (min<=3 et max tres grand), on garde EXACTEMENT le chemin
+            # trimesh d'origine. Le filtrage maison ne s'active que si
+            # l'utilisateur a vraiment bouge un curseur, pour ne pas
+            # risquer de regression sur le cas courant.
+            filtre_actif = (min_edges > 3) or (max_edges < 1_000_000)
+            fait = False
+            if filtre_actif:
+                try:
+                    r, p, g = _remplir_boucles_filtrees(m, min_edges, max_edges)
+                    diag['filled_loops'] = diag.get('filled_loops', 0) + r
+                    diag['skipped_too_small'] = diag.get('skipped_too_small', 0) + p
+                    diag['skipped_too_big'] = diag.get('skipped_too_big', 0) + g
+                    fait = True
+                    # ARRET IMMEDIAT si le filtre n'a RIEN a boucher.
+                    # Sans ca, les 4 passes continuaient a nettoyer un
+                    # maillage qu'on a decide de ne pas reparer : le
+                    # nettoyage non-manifold supprimait des faces a chaque
+                    # tour et le maillage ressortait PIRE qu'a l'entree
+                    # (27 -> 62 aretes de bord sur le test). Un outil qui
+                    # abime le maillage est pire qu'un curseur ignore.
+                    if r == 0:
+                        print(f'[mesh-op] fill_holes: aucun trou dans '
+                              f'[{min_edges},{max_edges}] — arret sans modifier',
+                              flush=True)
+                        break
+                except Exception as e:
+                    print(f'[mesh-op] filtrage min/max echoue ({e}) — repli trimesh', flush=True)
+            if not fait:
+                try:
+                    trimesh.repair.fill_holes(m, use_fan=True)
+                except TypeError:
+                    try: trimesh.repair.fill_holes(m)
+                    except Exception as e: print(f'[mesh-op] fill_holes pass{pass_i} skipped: {e}', flush=True)
+                except Exception as e:
+                    print(f'[mesh-op] fill_holes pass{pass_i} skipped: {e}', flush=True)
             try: m._cache.clear()
             except Exception: pass
             try:
@@ -492,6 +607,33 @@ def fill_holes(glb_bytes: bytes):
         'holes_filled_delta_faces': total_dfaces,
         'meshes': per_mesh,
     }
+
+    # GARANTIE : SI RIEN N'A ETE BOUCHE, RIEN NE CHANGE.
+    #
+    # Le pipeline nettoie AVANT de remplir (faces degenerees, fusion de
+    # sommets, decoupe des T-jonctions, non-manifold). Quand le filtre
+    # min/max ecarte tous les trous, ce nettoyage reste applique sans que
+    # le remplissage ne repare derriere : le maillage ressortait ABIME
+    # (mesure : 1191 -> 1164 faces, 27 -> 46 aretes de bord).
+    #
+    # On renvoie donc les octets d'ORIGINE. L'utilisateur qui restreint
+    # la plage obtient « aucun trou dans cet intervalle », pas un
+    # maillage degrade.
+    filtre_actif = (min_edges > 3) or (max_edges < 1_000_000)
+    if filtre_actif:
+        boucles_remplies = sum(int(d.get('filled_loops', 0) or 0) for d in per_mesh)
+        if boucles_remplies == 0:
+            # ON LEVE plutot que de renvoyer un maillage intact contre un
+            # credit, meme politique que decimate() : le worker debite
+            # AVANT l'appel, et une operation qui ne change rien ne doit
+            # pas etre facturee. L'utilisateur elargit la plage et
+            # relance. Le message porte le diagnostic.
+            print(f'[mesh-op] fill_holes: aucun trou entre {min_edges} et '
+                  f'{max_edges} aretes', flush=True)
+            raise RuntimeError(
+                f'aucun trou entre {min_edges} et {max_edges} aretes — '
+                'elargis la plage. Le maillage est inchange.')
+
     return _export(scene), stats
 
 
@@ -843,6 +985,14 @@ def run(op_type: str, glb_bytes: bytes, params: dict | None = None):
     if op_type == 'explode':
         return explode(glb_bytes, fragments=int(p.get('fragments', 24))), None
     if op_type == 'fill_holes':
-        # fill_holes already returns (bytes, stats_dict).
-        return fill_holes(glb_bytes)
+        # Les deux curseurs de l'interface sont enfin TRANSMIS. Ils
+        # etaient jetes cote client (« take no params on the Modal
+        # side ») alors que l'apercu coloriait les trous selon eux :
+        # l'utilisateur voyait du gris et du rouge, puis recevait un
+        # maillage ou TOUT avait ete bouche.
+        return fill_holes(
+            glb_bytes,
+            min_edges=int(p.get('min_hole_size', 3) or 3),
+            max_edges=int(p.get('max_hole_size', 1_000_000) or 1_000_000),
+        )
     return OPS[op_type](glb_bytes), None
