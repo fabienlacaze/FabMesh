@@ -17213,3 +17213,37 @@ RESTE le fond du problème, non corrigé : le worker JETTE le prompt
 enrichi du client au lieu de le transmettre. Tant que ce sera le cas,
 toute divergence entre les tables client et Modal recréera des options
 muettes. Le corriger demande de décider qui fait autorité.
+
+## 2026-08-03 — Les tables de prompts ne peuvent plus diverger
+
+Décision d'architecture prise avec le user : le desktop FAIT AUTORITÉ
+(c'est lui que voit l'utilisateur dans les menus), Modal garde le
+contrôle du prompt final, mais sa table est GÉNÉRÉE au lieu d'être
+recopiée.
+
+Les trois options examinées :
+  A. Le client fait autorité — le worker transmet son prompt enrichi.
+     Une seule table, mais on perd le contrôle serveur sur le cadrage.
+  B. Le serveur fait autorité (intention actuelle) — deux tables à tenir
+     synchronisées À LA MAIN. C'est exactement ce qui vient d'échouer.
+  C. Le serveur fait autorité, mais sa table est générée depuis celle du
+     desktop. Contrôle serveur CONSERVÉ, dérive impossible par
+     construction. ← retenue
+
+`build/sync_prompt_tables.py` :
+  - extrait ASSET_TYPE_PROMPTS et ASSET_STYLE_PROMPTS de index2.js
+  - régénère modal_app/_prompts.py, en-tête « NE PAS ÉDITER À LA MAIN »
+  - conserve les 3 alias d'orthographe pour les clients en cache
+  - REFUSE d'écrire si l'extraction rend moins de 10 entrées (un format
+    JS qui change ne doit pas produire une table tronquée en silence)
+  - `--verify` échoue avec un message qui dit la CONSÉQUENCE (« des
+    styles seraient silencieusement sans effet, et facturés »), pas juste
+    « fichiers différents »
+
+Branché en `prebuild:prompt-tables` sur build:installer / build:msix /
+build:all, à côté de `prebuild:licence-check`. Documenté dans
+`_releaseGuards.promptTablesInSync` pour que personne ne le retire.
+
+VÉRIFIÉ : état propre → OK ; suppression de 'cyberpunk' de la table
+Modal → ÉCHEC détecté ; restauration → OK. Le garde-fou attrape donc une
+vraie régression, pas seulement une différence de mise en forme.

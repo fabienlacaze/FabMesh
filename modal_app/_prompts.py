@@ -18,37 +18,34 @@ CUDA cost.
 # in modal_app/_realvis.py:build_prompts() where they belong. What
 # remains here: pure semantic guidance (pose, framing, background).
 ASSET_TYPE_PROMPTS = {
-    # PORTEE DU DESKTOP le 2026-08-03 (src/renderer/index2.js).
-    # Avant : 10 entrees, donc 7 des 17 types proposes dans l'interface
-    # retombaient sur une chaine VIDE — avion, bateau, insect et les
-    # quatre « other_* ». Ils perdaient aussi leurs garde-fous
-    # anatomiques : celui d'insect impose « exactement six pattes, PAS
-    # une araignee », celui d'animal « NEVER bipedal ». Sans eux le
-    # modele produisait n'importe quoi, et l'utilisateur payait.
-    'character'     : 'isolated 3D character, full body, fully clothed, wearing a complete outfit, dressed in appropriate clothing, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, centered, clean silhouette, no text, no UI',
-    'building'      : 'architectural building exterior, complete edifice, entire building visible from base to roof, wide establishing shot, long shot, distant camera, the whole structure fits inside the frame with clear margin on every side, building fills about 70 percent of frame, nothing cropped, not touching the frame edges, isolated, full structure, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI, not a village, not a town',
-    'vehicle'       : 'isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no rear view inset',
-    'weapon'        : 'isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI',
-    'prop'          : 'isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
-    'creature'      : '3D game asset reference sheet, full body character sheet, long shot, full figure shot, wide establishing shot, distant camera, entire creature visible from head to feet to tail, body fills 60 percent of frame, isolated, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, centered, clean silhouette, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot',
-    'environment'   : 'isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
-    'icon'          : 'flat icon, app icon, UI icon, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no extra elements',
-    'avion'         : 'complete passenger aircraft, isolated, 3/4 isometric view, full body visible from nose to tail, both wings visible, tail fin visible, plain white background, even studio lighting, no shadows, no clouds, no horizon, no contrail, centered, clean silhouette, no text, no UI',
-    'bateau'        : 'complete boat, isolated, 3/4 isometric view, full body visible from bow to stern, hull and superstructure visible, plain white background, even studio lighting, no shadows, no water, no wake, no horizon, centered, clean silhouette, no text, no UI',
-    'animal'        : '3D game asset reference sheet, full body character reference, long shot, full figure shot, wide establishing shot, distant camera, entire animal visible from nose to tail to feet, body fills 60 percent of frame, full body lateral profile, all four feet flat on the ground, body horizontal parallel to floor, belly close to ground, four legs supporting the body from below, plain white background, even studio lighting, no shadows, NEVER bipedal, NEVER upright, NEVER standing on hind legs, NEVER humanoid posture, NEVER T-pose, NEVER cartoon mascot stance, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot, NOT head and shoulders',
-    'insect'        : '3D game asset reference sheet, full body reference, long shot, full figure shot, distant camera, entire insect visible, body fills 60 percent of frame, isolated, exactly six legs in total, three legs on the left side and three legs on the right side, six legs and no more, anatomically correct insect leg count, segmented body with distinct head thorax and abdomen, hard exoskeleton, antennae, 3/4 isometric view, high three-quarter angle seen from above and to the side, all six legs clearly visible and separated, plain white background, even studio lighting, no shadows, NOT eight legs, NOT a spider, NOT an arachnid, no extra legs, no doubled legs, no duplicated legs, no overlapping duplicate limbs, no mirrored extra legs, NO tail, no fur, NOT a mammal, NOT a quadruped, no humanoid posture, NOT a front head-on view, NOT a portrait, NOT a close-up, NOT a headshot, no text, no UI',
-    'other_living'  : 'full body, isolated, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI',
-    'other_vehicle' : 'complete vehicle, isolated, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI',
-    'other_built'   : 'full structure, isolated, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
-    'other_item'    : 'ONE item only, single item, only one instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate, no second item',
-    'custom'        : '',
+    # GENERE PAR build/sync_prompt_tables.py — NE PAS EDITER A LA MAIN.
+    # Source de verite : src/renderer/index2.js (ce que voit
+    # l'utilisateur dans les menus). Toute modification faite ici
+    # sera ecrasee, et `--verify` fera echouer le build.
+    'character'         : 'isolated 3D character, full body, fully clothed, wearing a complete outfit, dressed in appropriate clothing, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, centered, clean silhouette, no text, no UI',
+    'building'          : 'architectural building exterior, complete edifice, entire building visible from base to roof, wide establishing shot, long shot, distant camera, the whole structure fits inside the frame with clear margin on every side, building fills about 70 percent of frame, nothing cropped, not touching the frame edges, isolated, full structure, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI, not a village, not a town',
+    'vehicle'           : 'isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no rear view inset',
+    'weapon'            : 'isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI',
+    'prop'              : 'isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
+    'creature'          : '3D game asset reference sheet, full body character sheet, long shot, full figure shot, wide establishing shot, distant camera, entire creature visible from head to feet to tail, body fills 60 percent of frame, isolated, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, centered, clean silhouette, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot',
+    'environment'       : 'isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
+    'icon'              : 'flat icon, app icon, UI icon, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no extra elements',
+    'avion'             : 'complete passenger aircraft, isolated, 3/4 isometric view, full body visible from nose to tail, both wings visible, tail fin visible, plain white background, even studio lighting, no shadows, no clouds, no horizon, no contrail, centered, clean silhouette, no text, no UI',
+    'bateau'            : 'complete boat, isolated, 3/4 isometric view, full body visible from bow to stern, hull and superstructure visible, plain white background, even studio lighting, no shadows, no water, no wake, no horizon, centered, clean silhouette, no text, no UI',
+    'animal'            : '3D game asset reference sheet, full body character reference, long shot, full figure shot, wide establishing shot, distant camera, entire animal visible from nose to tail to feet, body fills 60 percent of frame, full body lateral profile, all four feet flat on the ground, body horizontal parallel to floor, belly close to ground, four legs supporting the body from below, plain white background, even studio lighting, no shadows, NEVER bipedal, NEVER upright, NEVER standing on hind legs, NEVER humanoid posture, NEVER T-pose, NEVER cartoon mascot stance, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot, NOT head and shoulders',
+    'insect'            : '3D game asset reference sheet, full body reference, long shot, full figure shot, distant camera, entire insect visible, body fills 60 percent of frame, isolated, exactly six legs in total, three legs on the left side and three legs on the right side, six legs and no more, anatomically correct insect leg count, segmented body with distinct head thorax and abdomen, hard exoskeleton, antennae, 3/4 isometric view, high three-quarter angle seen from above and to the side, all six legs clearly visible and separated, plain white background, even studio lighting, no shadows, NOT eight legs, NOT a spider, NOT an arachnid, no extra legs, no doubled legs, no duplicated legs, no overlapping duplicate limbs, no mirrored extra legs, NO tail, no fur, NOT a mammal, NOT a quadruped, no humanoid posture, NOT a front head-on view, NOT a portrait, NOT a close-up, NOT a headshot, no text, no UI',
+    'other_living'      : 'full body, isolated, plain white background, even studio lighting, no shadows, centered, strict front view, facing camera, clean silhouette, no text, no UI',
+    'other_vehicle'     : 'complete vehicle, isolated, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI',
+    'other_built'       : 'full structure, isolated, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI',
+    'other_item'        : 'ONE item only, single item, only one instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate, no second item',
+    'custom'            : '',
 }
 
 ASSET_STYLE_PROMPTS = {
-    # PORTEE DU DESKTOP le 2026-08-03 (src/renderer/index2.js).
-    # Avant : 8 entrees seulement, donc 28 des 33 styles proposes
-    # dans l'interface ne produisaient RIEN. L'utilisateur payait
-    # 2 credits pour une image sans le style choisi.
+    # GENERE PAR build/sync_prompt_tables.py — NE PAS EDITER A LA MAIN.
+    # Source de verite : src/renderer/index2.js (ce que voit
+    # l'utilisateur dans les menus). Toute modification faite ici
+    # sera ecrasee, et `--verify` fera echouer le build.
     'realistic'         : 'realistic style, photorealistic, sharp details, detailed materials',
     'stylized'          : 'stylized art, mid-poly game asset, hand-painted textures, fantasy game style',
     'lowpoly'           : 'low-poly 3D art, flat-shaded, faceted geometry, minimalist, geometric shapes, vibrant colors',
@@ -82,9 +79,8 @@ ASSET_STYLE_PROMPTS = {
     'graffiti'          : 'graffiti street art, spray paint, vibrant urban colors, bold outlines',
     'art-deco'          : 'art deco, geometric gold ornament, elegant symmetrical 1920s luxury',
     'custom'            : '',
-    # Alias de compatibilite : le cloud utilisait ces 3 orthographes,
-    # differentes de celles de l'UI, d'ou des styles silencieusement muets.
-    # On garde les deux pour qu'un client en cache continue de marcher.
+    # Alias de compatibilite : orthographes utilisees
+    # historiquement cote cloud, gardees pour les clients en cache.
     'low-poly'          : 'low-poly 3D art, flat-shaded, faceted geometry, minimalist, geometric shapes, vibrant colors',
     'pixel-art'         : 'pixel art style, 16-bit retro game aesthetic, limited palette, sharp pixel edges',
     'concept-art'       : 'painterly style, brushstroke textures, hand-painted concept art look',
