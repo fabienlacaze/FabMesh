@@ -720,6 +720,19 @@ async function handleSignedR2(req: Request, env: Env): Promise<Response> {
   // Path-traversal / spoofing guard (defense-in-depth; the MAC already
   // binds the exact key so a key can't be forged without a signature).
   if (!key || key.includes('..') || key.startsWith('/')) return err(403, 'forbidden');
+  // DERNIER REMPART sur les cles INTERNES. Le prefixe `_` est reserve a
+  // l'exploitation : _meta/admin_password.json, _meta/pricing.json,
+  // _meta/banned-users.json, _meta/modal_spend/*, _logs/*, _market/*.
+  //
+  // La signature ne couvre que (cle + expiration), JAMAIS le user_id : il
+  // suffisait donc qu'une cle interne obtienne une signature quelque part
+  // dans le code pour devenir lisible par n'importe qui. C'est ce que
+  // permettait /api/user-assets/record (corrige plus bas). On refuse ici
+  // aussi, pour que la meme faute ailleurs reste sans consequence.
+  if (key.startsWith('_')) {
+    console.warn(`[r2] tentative de lecture d'une cle interne refusee : ${key.slice(0, 80)}`);
+    return err(403, 'forbidden');
+  }
 
   // Route is only meaningful when signing is enabled.
   if (!env.R2_URL_SIGNING_SECRET) return err(404, 'not found');
@@ -5785,7 +5798,18 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
       .eq('user_id', user.id)
       .eq('project', projectName);
     if (env.MESHES && assets && assets.length) {
-      await Promise.allSettled(assets.map(a =>
+      // DEFENSE EN PROFONDEUR — la route d'enregistrement filtre desormais
+      // les cles hors prefixe, mais des lignes plantees AVANT ce correctif
+      // peuvent subsister en base. Sans ce filtre, supprimer un projet
+      // effacerait des objets appartenant a d'autres comptes, ou pire les
+      // compteurs _meta/* dont depend le fusible anti-emballement.
+      const aNous = assets.filter(a =>
+        typeof a.r2_path === 'string' && a.r2_path.startsWith(`${user.id}/`));
+      const horsPrefixe = assets.length - aNous.length;
+      if (horsPrefixe > 0) {
+        console.warn(`[cloud-projects/delete] ${horsPrefixe} cle(s) hors prefixe NON supprimee(s) pour ${user.id}`);
+      }
+      await Promise.allSettled(aNous.map(a =>
         env.MESHES.delete(a.r2_path as string).then(() => { r2Deleted++; }).catch(() => {})
       ));
     }
@@ -9457,15 +9481,40 @@ async function handleUserAssetsRecord(req: Request, env: Env): Promise<Response>
                        : (typeof rawPaths === 'string' ? [rawPaths] : []);
   if (!paths.length) return err(400, 'paths required');
   let inserted = 0;
+  let rejected = 0;
   for (const url of paths) {
     if (!url || typeof url !== 'string') continue;
     // Accept either a full public URL or a raw R2 key.
     const r2_path = r2PathFromPublicUrl(env, url) ?? url;
     if (!r2_path || r2_path.startsWith('http')) continue;
+    // ACCES INTER-COMPTES — corrige le 2026-08-03.
+    //
+    // Cette route acceptait N'IMPORTE QUELLE cle R2 et l'enregistrait au
+    // nom de l'appelant. Deux exploitations en decoulaient, avec un
+    // simple compte gratuit :
+    //   - /api/cloud-projects signait ensuite la cle telle quelle, et la
+    //     signature ne couvre que (cle + expiration), jamais le user_id :
+    //     lecture de _meta/admin_password.json, _meta/pricing.json,
+    //     _meta/banned-users.json, des logs, et des meshes d'autres
+    //     clients.
+    //   - la suppression de projet effacait ces memes objets : remise a
+    //     zero des compteurs _meta/modal_spend/* et _meta/userspend/*,
+    //     donc neutralisation des deux fusibles anti-emballement.
+    //
+    // L'invariant « une cle appartient au prefixe de son proprietaire »
+    // etait deja verifie ailleurs dans le fichier (suppression d'actif) ;
+    // il manquait ici, a l'entree. On refuse silencieusement plutot que
+    // d'echouer la requete entiere : les lots legitimes passent, les
+    // cles etrangeres sont ignorees.
+    if (!r2_path.startsWith(`${user.id}/`)) {
+      console.warn(`[user-assets/record] cle hors prefixe refusee pour ${user.id}: ${r2_path.slice(0, 80)}`);
+      rejected++;
+      continue;
+    }
     await insertUserAsset(env, user.id, project, kind, r2_path, parent, meta);
     inserted++;
   }
-  return json({ ok: true, inserted });
+  return json({ ok: true, inserted, rejected });
 }
 
 /** GET /api/admin/logs/list — lists client logs in R2, optionally

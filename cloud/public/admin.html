@@ -3424,7 +3424,18 @@
         }
         list.innerHTML = msgs.map((m) => {
           const dt = new Date(m.created_at).toLocaleString('fr');
-          const who = m.name || (m.user_email ? '<i>signed-in</i>' : '<i>anonymous</i>');
+          // XSS STOCKEE — corrigee le 2026-08-03. `m.name` vient du
+          // formulaire de contact PUBLIC (worker.ts, simple trim+slice, ni
+          // compte ni captcha) et etait interpole BRUT dans innerHTML,
+          // alors que tous les champs voisins passaient par escapeHtml.
+          // N'importe qui sur Internet pouvait donc executer du JS dans la
+          // session admin des l'ouverture de l'onglet Messages : couper le
+          // service, mettre les tarifs a 0, exfiltrer les emails clients.
+          // Les deux replis restent du HTML volontaire, on n'echappe QUE
+          // la valeur qui vient de l'exterieur.
+          const who = m.name
+            ? escapeHtml(m.name)
+            : (m.user_email ? '<i>signed-in</i>' : '<i>anonymous</i>');
           // Reply path: no more mailto: (would expose the admin's perso
           // email in From). Instead an inline Reply button writes the
           // response to R2; the user reads it on /account. We surface

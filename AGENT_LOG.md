@@ -16973,3 +16973,63 @@ demandés -> 10 914 obtenus). `fast_simplification.target_reduction` est
 approximatif et s'arrête sur des contraintes de qualité. Le desktop a
 EXACTEMENT le même comportement, donc c'est de la parité — mais ça
 explique la plainte « si je fais triangle count ça ne change pas assez ».
+
+## 2026-08-03 — AUDIT SÉCURITÉ : 3 failles critiques fermées en urgence
+
+Workflow d'audit intégrité terminé (96 agents, 149 constats : 22
+critiques, 53 majeurs, 36 vérifiés corrects). Trois failles étaient
+exploitables SANS privilège. Corrigées et déployées immédiatement.
+
+### C1 — XSS stockée → prise de contrôle du dashboard admin
+`cloud/public/admin.html` : le champ `name` du formulaire de contact
+PUBLIC (pas de compte, pas de captcha) était interpolé BRUT dans un
+innerHTML, alors que `m.subject`, `m.email`, `m.user_email`, `m.ip` et
+`m.id` passaient tous par `escapeHtml`. Oubli isolé sur une seule ligne.
+Avec `'unsafe-inline'` dans la CSP, l'exécution était triviale.
+Impact : n'importe qui sur Internet exécutait du JS dans la session admin
+dès l'ouverture de l'onglet Messages → couper le service, mettre les
+tarifs à 0, exfiltrer les emails clients (violation CNIL notifiable).
+Correctif : `escapeHtml(m.name)`, en conservant les deux replis HTML
+volontaires (`<i>signed-in</i>` / `<i>anonymous</i>`).
+
+### C2 — Accès inter-comptes via /api/user-assets/record
+La route acceptait N'IMPORTE QUELLE clé R2 et l'enregistrait au nom de
+l'appelant (seul filtre : `startsWith('http')`). Ensuite
+`/api/cloud-projects` la signait telle quelle — et la signature ne couvre
+que (clé + expiration), JAMAIS le user_id. Un compte gratuit obtenait
+donc une URL signée pour `_meta/admin_password.json`, `_meta/pricing.json`,
+`_meta/banned-users.json`, les logs, et les meshes d'autres clients.
+Correctif : refus des clés hors `${user.id}/`, avec compteur `rejected`
+dans la réponse.
+
+### C3 — Suppression arbitraire d'objets R2
+Même vecteur : supprimer un projet effaçait les clés enregistrées sans
+contrôle de préfixe. Permettait d'effacer `_meta/modal_spend/*` et
+`_meta/userspend/*` — or `_casIncrementCounter` traite un objet absent
+comme compteur = 0, donc les DEUX fusibles anti-emballement (posés après
+l'incident de coûts du 2026-05-24) ne bornaient plus rien. Également :
+débannissement général, destruction des livrables d'autres clients.
+Correctif : filtre de préfixe sur la liste à supprimer (défense en
+profondeur : des lignes plantées avant le correctif peuvent subsister).
+
+### Verrou transversal ajouté
+`handleSignedR2` refuse désormais toute clé commençant par `_`, préfixe
+réservé à l'exploitation. Ainsi la même faute commise ailleurs dans le
+code reste sans conséquence.
+VÉRIFIÉ EN PRODUCTION : `_meta/admin_password.json`, `_meta/pricing.json`
+et `_logs/latest/_any.log` renvoient tous les trois HTTP 403.
+
+### ⚠ ACTION REQUISE DU USER, non automatisable
+Le mot de passe admin a pu être lu pendant la fenêtre de vulnérabilité.
+`_hashAdminPassword` est un SHA-256 à UN tour, et si `ADMIN_PASSWORD` fait
+moins de 20 caractères la clé HMAC du cookie admin EST ce hash.
+→ ROTATION DU MOT DE PASSE ADMIN recommandée.
+→ Auditer `user_assets` à la recherche de lignes dont `r2_path` ne
+  commence pas par le `user_id` de la ligne.
+
+### Reste à traiter (non fait)
+C4 remboursement-puis-livraison (rig/segment/anim obtenus gratuitement :
+4 UPDATE sans `.in('status', …)`), C5 double remboursement sur
+/api/jobs/cancel, `/api/heartbeat` anonyme qui maintient un L40S allumé
+hors kill switch (~470 $/mois), et les KPI du dashboard (crédits offerts
+comptés comme CA, coût GPU faux dans les deux sens).
