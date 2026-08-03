@@ -3506,17 +3506,24 @@ async function _stripeRest(
   url: string,
   body: Record<string, unknown> | null,
   method: 'POST' | 'GET' = 'POST',
+  idempotencyKey?: string,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown>; raw: string }> {
   if (!env.STRIPE_SECRET_KEY) {
     return { ok: false, status: 500, data: { error: 'no_stripe_key' }, raw: '' };
   }
-  const init: RequestInit = {
-    method,
-    headers: {
-      'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
   };
+  // Clé d'idempotence Stripe : sur un appel qui DÉPLACE DE L'ARGENT, c'est
+  // la seule protection qui tienne face à une livraison en double du même
+  // webhook. Nos verrous R2 sont posés APRÈS le virement : deux livraisons
+  // simultanées passent toutes deux le HEAD avant que l'une n'écrive. Avec
+  // cette clé, Stripe renvoie le virement déjà créé au lieu d'en créer un
+  // second. La clé doit être DÉTERMINISTE — surtout pas dérivée d'un
+  // Date.now()/Math.random(), qui différerait à chaque rejeu.
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  const init: RequestInit = { method, headers };
   if (body && method === 'POST') {
     init.body = _stripeForm(body).toString();
   }
@@ -3778,6 +3785,27 @@ async function _processMarketPurchase(env: Env, sess: {
   const seen = await env.MESHES.head(seenKey);
   if (seen) return;
 
+  // Montant de référence : ce que Stripe a encaissé, pas ce que les fiches
+  // affichent aujourd'hui. Si la somme des prix courants dépasse la somme
+  // réellement perçue (prix relevé après la création du paiement), on
+  // ramène tous les reversements au prorata plutôt que de payer la
+  // différence sur nos fonds.
+  let ratioEncaisse = 1;
+  const encaisse = typeof sess.amount_total === 'number' ? sess.amount_total : null;
+  if (encaisse != null && encaisse > 0) {
+    let attendu = 0;
+    for (const listingId of ids) {
+      const t = await r2GetText(env, `_market/listings/${listingId}.json`);
+      if (!t) continue;
+      try { attendu += Number((JSON.parse(t) as MarketListing).price_cents) || 0; } catch {}
+    }
+    if (attendu > encaisse) {
+      ratioEncaisse = encaisse / attendu;
+      console.warn(`[market] prix des fiches ${attendu} > encaissé Stripe ${encaisse}`
+                   + ` — reversements ramenés à ${(ratioEncaisse * 100).toFixed(1)} %`);
+    }
+  }
+
   for (const listingId of ids) {
     const lTxt = await r2GetText(env, `_market/listings/${listingId}.json`);
     if (!lTxt) continue;
@@ -3792,15 +3820,41 @@ async function _processMarketPurchase(env: Env, sess: {
     const ownerKey = `_market/owners/${listingId}/${userId}.json`;
     if (await env.MESHES.head(ownerKey)) continue;
 
-    const platformFee = Math.round(listing.price_cents * MARKET_COMMISSION_PCT / 100);
-    const sellerNet   = listing.price_cents - platformFee;
-    const saleId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // RÉSERVATION ATOMIQUE, posée AVANT tout mouvement d'argent.
+    // Le HEAD ci-dessus ne suffit pas : Stripe livre ses webhooks
+    // « au moins une fois », et deux livraisons simultanées passent
+    // toutes deux le HEAD avant que l'une n'ait écrit quoi que ce soit.
+    // Comme les verrous étaient posés en toute fin de fonction, la
+    // fenêtre couvrait le virement lui-même. `etagDoesNotMatch: '*'`
+    // n'écrit que si la clé n'existe pas encore : le perdant reçoit
+    // null et s'arrête sans payer. Si le runtime ignore l'option, on
+    // retombe exactement sur le comportement actuel — jamais pire.
+    let reserve = true;
+    try {
+      const pose = await env.MESHES.put(ownerKey, JSON.stringify({ claiming: true, at: _isoNow() }),
+                                        { httpMetadata: { contentType: 'application/json' },
+                                          onlyIf: { etagDoesNotMatch: '*' } });
+      reserve = pose !== null;
+    } catch { /* option non supportée : on continue comme avant */ }
+    if (!reserve) continue;
+
+    // Ce que Stripe a RÉELLEMENT encaissé fait foi. Un vendeur peut avoir
+    // relevé le prix de sa fiche entre la création du paiement et la
+    // livraison du webhook : reverser sur le prix courant ferait sortir la
+    // différence de la poche de la plateforme.
+    const prixPaye  = Math.min(listing.price_cents, Math.floor(listing.price_cents * ratioEncaisse));
+    const platformFee = Math.round(prixPaye * MARKET_COMMISSION_PCT / 100);
+    const sellerNet   = prixPaye - platformFee;
+    // Identifiant DÉTERMINISTE : un rejeu doit produire la même vente (sinon
+    // on empile des doublons dans la comptabilité) et surtout le même corps
+    // de requête, faute de quoi Stripe rejette la clé d'idempotence.
+    const saleId = `${sess.id}_${listingId}`.replace(/[^A-Za-z0-9_-]/g, '');
     const sale = {
       id: saleId,
       listing_id: listingId,
       buyer_user_id: userId,
       seller_user_id: listing.user_id,
-      amount_cents: listing.price_cents,
+      amount_cents: prixPaye,
       platform_fee_cents: platformFee,
       seller_amount_cents: sellerNet,
       currency: listing.currency,
@@ -3832,7 +3886,7 @@ async function _processMarketPurchase(env: Env, sess: {
               seller_user_id: listing.user_id,
               sale_id: saleId,
             },
-          });
+          }, 'POST', `payout_${sess.id}_${listingId}`);
           if (transfer.ok) {
             const saleAny = sale as Record<string, unknown>;
             saleAny.payout_status = 'paid_cash';

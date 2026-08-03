@@ -17573,3 +17573,47 @@ un simple 2xx d'écriture.
 `scripts/check_rls.py` ajouté pour rejouer ce contrôle après toute
 migration SQL ou changement de politique. Sortie 1 en cas de faille, et
 le piège du 204 est documenté dans son en-tête.
+
+## 2026-08-03 — Marketplace : le versement aux vendeurs pouvait payer deux fois
+
+Audit marketplace. Deux constats sur onze se confirment ; les deux
+touchent de l'argent réel qui sort du compte Stripe de la plateforme.
+
+**1. Virement en double possible.** `_processMarketPurchase` posait ses
+verrous R2 (`sales_by_session`, `owners/<fiche>/<acheteur>`) à la toute
+fin de la fonction, APRÈS le `POST /v1/transfers`. Or Stripe livre ses
+webhooks « au moins une fois » : deux livraisons simultanées passaient
+toutes deux les `HEAD` avant que l'une n'écrive, et le virement partait
+deux fois. Le commentaire du code affirmait pourtant l'inverse
+(« Idempotence: outer seenKey HEAD blocks retries »).
+
+Correctifs, en défense superposée :
+- clé d'idempotence Stripe `payout_<session>_<fiche>` sur le virement —
+  Stripe renvoie alors le virement déjà créé au lieu d'en créer un second ;
+- réservation ATOMIQUE de la clé propriétaire (`onlyIf:
+  {etagDoesNotMatch:'*'}`) posée AVANT tout mouvement d'argent : le
+  perdant de la course reçoit `null` et s'arrête. Si le runtime ignore
+  l'option, on retombe sur le comportement actuel — jamais pire ;
+- `saleId` rendu DÉTERMINISTE (`<session>_<fiche>` au lieu de
+  `Date.now()_random`). Sans ça la clé d'idempotence partait avec des
+  paramètres différents à chaque rejeu, Stripe rejetait l'appel, et le
+  code retombait sur le versement **en crédits** — le double paiement
+  revenait par la fenêtre. Effet de bord bienvenu : plus de doublons de
+  ventes dans la comptabilité.
+
+**2. Le montant reversé n'était jamais confronté à l'encaissé.** Le
+reversement se calculait sur `listing.price_cents` LU AU MOMENT DU
+WEBHOOK. Un vendeur qui relève son prix entre la création du paiement et
+la livraison du webhook se faisait donc reverser plus que ce que
+l'acheteur avait payé, la différence sortant de nos fonds. On compare
+désormais la somme des prix courants à `session.amount_total` et on
+ramène les reversements au prorata, avec une alerte en journal.
+
+**Constat NON reproduit, écarté :** « e-mail et chiffre d'affaires des
+vendeurs publiés sans authentification ». Vérifié en production :
+`/api/market/list` ne renvoie ni e-mail ni revenu (le mapper les retire
+explicitement) ; `/api/market/owned`, `/seller/earnings` et
+`/seller/status` répondent 401 sans session. Seul `user_id` est public —
+il est NÉCESSAIRE (pages auteur, détection de ses propres fiches) et le
+chemin qui le rendait exploitable, la fabrication de clés R2, est fermé
+depuis ce matin. Rien à corriger.
