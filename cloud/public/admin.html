@@ -1607,7 +1607,24 @@
       const _net = Number(_rev.total_net_eur) || 0;
       const _realCost = _rev.real_cost_eur, _realMargin = _rev.real_margin_eur;
       const _hasReal = _realCost != null;
-      const _realPct = (_hasReal && _net > 0) ? Math.round((_realMargin / _net) * 100) + '% réel' : '⚠️ poller off';
+      // FRAÎCHEUR. Le chiffre vient d'un poller externe
+      // (scripts/modal_usage_push.py) ; s'il s'arrête, l'écran affichait
+      // « facture Modal » sur une valeur vieille de plusieurs semaines
+      // sans le moindre signe. Un chiffre périmé présenté comme frais est
+      // pire qu'un chiffre absent.
+      const _ageH = _rev.real_usage_age_h;
+      const _perime = _ageH != null && _ageH > 48;
+      const _fraicheur = !_hasReal ? 'poller non lancé'
+        : _ageH == null ? 'facture Modal (date inconnue)'
+        : _perime ? `⚠️ PÉRIMÉ — ${Math.round(_ageH / 24)} j`
+        : `facture Modal (${_ageH} h)`;
+      // La marge est désormais calculée sur le MOIS EN COURS des deux
+      // côtés : avant, un revenu depuis-toujours était divisé par un coût
+      // du-mois, et le ratio s'améliorait mécaniquement chaque 1er du mois.
+      const _revMois = _rev.real_revenue_mois_eur ?? 0;
+      const _realPct = (_hasReal && _revMois > 0)
+        ? Math.round((_realMargin / _revMois) * 100) + '% (mois en cours)'
+        : (_hasReal ? 'aucun revenu ce mois' : '⚠️ poller off');
       const _fmtv = (v) => (v == null ? '—' : Number(v).toFixed(2));
 
       // ── Honest user counts. The old single "Users (total)" tile showed
@@ -1637,7 +1654,7 @@
         card('Crédits consommés (€)',  (d.revenue.credits_revenue_payeurs_eur ?? 0).toFixed(2),
              `+ ${(d.revenue.credits_revenue_offerts_eur ?? 0).toFixed(2)} € offerts (hors CA)`, 'accent'),
         card('Marge RÉELLE (€)',       _fmtv(_realMargin),                     _realPct, 'margin'),
-        card('Coût Modal RÉEL (€)',    _fmtv(_realCost),                       _hasReal ? 'facture Modal' : 'poller non lancé', 'cost'),
+        card('Coût Modal RÉEL (€)',    _fmtv(_realCost),                       _fraicheur, _perime ? 'err' : 'cost'),
         card('Marge estimée (€)',      d.revenue.total_margin_eur.toFixed(2),  marginPct + ' (est.)', 'ok'),
         card('Coût Modal estimé (€)',  d.revenue.total_cost_eur.toFixed(2),    'estimation', 'cost'),
         card('Paid orders',            d.revenue.payments_count,               `${d.revenue.total_gross_eur.toFixed(2)}€ gross`),
@@ -1682,7 +1699,7 @@
         card('Crédits consommés (€)',  (d.revenue.credits_revenue_payeurs_eur ?? 0).toFixed(2),
              `+ ${(d.revenue.credits_revenue_offerts_eur ?? 0).toFixed(2)} € offerts (hors CA)`, 'accent'),
         card('Marge RÉELLE (€)',       _fmtv(_realMargin),                     _realPct, 'margin'),
-        card('Coût Modal RÉEL (€)',    _fmtv(_realCost),                       _hasReal ? 'facture Modal' : 'poller non lancé', 'cost'),
+        card('Coût Modal RÉEL (€)',    _fmtv(_realCost),                       _fraicheur, _perime ? 'err' : 'cost'),
         card('Marge estimée (€)',      d.revenue.total_margin_eur.toFixed(2),  marginPct + ' (est.)', 'ok'),
         card('Coût Modal estimé (€)',  d.revenue.total_cost_eur.toFixed(2),    'estimation', 'cost'),
         card('Last 7d margin (€)',     d.last_7d.margin_eur.toFixed(2),        '', 'ok'),

@@ -17133,3 +17133,41 @@ depuis-toujours par un coût du-mois-en-cours ; MODAL_COST_USD est faux
 dans les deux sens (×41 sur construction3d, ÷4 sur segment, ÷3 à ÷8 sur
 les ops image) ; le flux de facturation Modal réelle est gelé depuis
 46 jours sans que l'écran le signale.
+
+## 2026-08-03 — KPI, lot 2 : table des coûts recalée + marge sur périodes alignées
+
+### MODAL_COST_USD était faux DANS LES DEUX SENS
+Confronté aux jobs réussis depuis le 20/06 (durée × tarif conteneur) :
+
+  operation      n   médiane   mesuré    ancienne   écart
+  text2image    44       6 s   0.0030     0.020     6.6x trop HAUT
+  mesh          17     373 s   0.2022     0.060     3.3x trop BAS
+  mesh-op        4      13 s   0.0002     0.005      30x trop HAUT
+  rig            3     234 s   0.0717     0.050     acceptable
+
+Corrigé UNIQUEMENT ce qui est mesuré. 'mesh' porté à 0.370 (mesure +
+traîne scaledown de 300 s établie séparément). Les non mesurés
+(back-view, rectify, sheet, tpose, mesh-face, remove-bg, segment,
+animate, construction3d) sont laissés en l'état et ANNOTÉS « suspect » :
+l'audit les annonce très décalés (×41 sur construction3d, ÷4 sur segment)
+mais je n'avais pas l'échantillon pour trancher. Je ne remplace pas une
+valeur devinée par une autre valeur devinée.
+
+Portée réelle : cette table n'est plus qu'un REPLI depuis que le
+dashboard chiffre chaque job sur sa propre durée (`_measuredCostUsd`) ;
+elle ne sert plus que pour les lignes sans finished_at.
+
+### « Marge RÉELLE » comparait deux périodes différentes
+`realMargin = totalRevenueEur (DEPUIS TOUJOURS) − realCost (MOIS EN
+COURS)`. Le poller interroge Modal avec `--for "this month"`. La marge
+n'avait donc aucun sens, et s'améliorait mécaniquement chaque 1er du
+mois. Désormais `revenuDuMoisEur` est calculé sur la même fenêtre, et le
+pourcentage est étiqueté « (mois en cours) ».
+
+### La facture Modal pouvait être périmée sans le dire
+`_meta/modal_real_usage.json` est écrit par un poller externe
+(scripts/modal_usage_push.py). S'il s'arrête, l'écran continuait
+d'afficher « facture Modal » sur un chiffre vieux de plusieurs semaines.
+`real_usage_age_h` est désormais exposé ; au-delà de 48 h la carte passe
+en rouge et affiche « ⚠️ PÉRIMÉ — N j ». Un chiffre périmé présenté comme
+frais est pire qu'un chiffre absent.

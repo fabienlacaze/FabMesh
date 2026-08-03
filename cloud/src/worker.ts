@@ -1466,15 +1466,43 @@ function _measuredCostUsd(opType: string, createdAt?: string, finishedAt?: strin
   return +(secs * rate).toFixed(5);
 }
 
+/* RECALE SUR MESURE le 2026-08-03. Les valeurs precedentes etaient fausses
+ * DANS LES DEUX SENS, verifie sur les jobs reussis depuis le 20/06 :
+ *
+ *   operation      n   mediane   cout mesure   ancienne valeur   ecart
+ *   text2image    44       6 s      0.0030          0.020        6.6x trop HAUT
+ *   mesh          17     373 s      0.2022          0.060        3.3x trop BAS
+ *   mesh-op        4      13 s      0.0002          0.005         30x trop HAUT
+ *   rig            3     234 s      0.0717          0.050        acceptable
+ *
+ * Methode : mediane de (finished_at - created_at) x tarif du conteneur
+ * (L40S 0.000542 $/s, A10G 0.000306, CPU 0.0000131).
+ *
+ * IMPORTANT — CE QUE CES CHIFFRES NE COUVRENT PAS : la duree mesuree
+ * exclut la fenetre `scaledown_window` facturee APRES chaque appel
+ * (300 s sur les classes L40S, soit 0.163 $ derriere une generation
+ * isolee). Pour 'mesh' on retient donc 0.37, valeur etablie separement
+ * en incluant cette traine ; pour les autres on reste sur la mesure
+ * brute, la traine etant amortie sur des appels rapproches.
+ *
+ * NON MESURES faute d'echantillon suffisant, laisses en l'etat et donc
+ * TOUJOURS SUSPECTS : back-view, rectify, sheet, tpose, mesh-face,
+ * remove-bg, segment, animate, construction3d. L'audit du 02/08 les
+ * annonce eux aussi tres decales (x41 sur construction3d, /4 sur
+ * segment) — a confirmer quand il y aura assez de jobs.
+ *
+ * Cette table n'est plus qu'un REPLI : le dashboard chiffre desormais
+ * chaque job depuis sa propre duree (_measuredCostUsd) et ne retombe
+ * ici que pour les lignes sans finished_at. */
 const MODAL_COST_USD: Record<string, number> = {
-  'text2image':  0.020,
-  'back-view':   0.050,
-  'rectify':     0.070,
-  'sheet':       0.050,
-  'tpose':       0.040,
-  'mesh':        0.060,   // base mesh (no face_fix, warm container)
-  'mesh-face':   0.110,   // mesh + face_fix lazy SDXL inpaint
-  'remove-bg':   0.005,
+  'text2image':  0.003,   // MESURE (n=44, mediane 6 s)
+  'back-view':   0.050,   // non mesure — suspect
+  'rectify':     0.070,   // non mesure — suspect
+  'sheet':       0.050,   // non mesure — suspect
+  'tpose':       0.040,   // non mesure — suspect
+  'mesh':        0.370,   // MESURE (n=17, 373 s) + traine scaledown 300 s
+  'mesh-face':   0.420,   // 'mesh' + le delta face_fix de l'ancienne table
+  'remove-bg':   0.005,   // non mesure
   // 2026-07-26 — the four async Modal op types had NO entry here AND no
   // cost_usd on their jobs row, so the admin dashboard reported a 100%
   // margin on every rig / segmentation / animation. Values MUST stay in
@@ -1492,7 +1520,7 @@ const MODAL_COST_USD: Record<string, number> = {
   'segment':        0.60,
   'animate':        0.06,
   'animate_fbx':    0.06,
-  'mesh-op':        0.005,
+  'mesh-op':        0.001,   // MESURE (n=4, mediane 13 s sur CPU)
   'construction3d': 0.01,
   'mesh-op-client': 0,
 };
@@ -11615,7 +11643,36 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     }
   } catch {}
   const realCostEur = realUsageUsd == null ? null : +(realUsageUsd * USD_TO_EUR).toFixed(2);
-  const realMarginEur = realCostEur == null ? null : +(totalRevenueEur - realCostEur).toFixed(2);
+
+  // PERIODES ALIGNEES. `realCostEur` vient du poller qui interroge Modal
+  // avec --for "this month" : c'est un cout DU MOIS EN COURS. Il etait
+  // soustrait de `totalRevenueEur`, un revenu DEPUIS TOUJOURS — une marge
+  // calculee sur deux fenetres differentes ne veut rien dire, et elle
+  // s'ameliorait mecaniquement a chaque debut de mois.
+  const debutDuMois = new Date();
+  debutDuMois.setUTCDate(1);
+  debutDuMois.setUTCHours(0, 0, 0, 0);
+  let revenuDuMoisEur = 0;
+  try {
+    for (const j of ((jobs ?? []) as Array<{ status: string; credit_cost: number; created_at: string }>)) {
+      if (j.status !== 'succeeded') continue;
+      if (new Date(j.created_at).getTime() < debutDuMois.getTime()) continue;
+      revenuDuMoisEur += (j.credit_cost ?? 0) * EUR_PER_CREDIT_NET;
+    }
+  } catch { /* on retombe sur 0, la marge sera simplement negative */ }
+  const realMarginEur = realCostEur == null ? null
+    : +(revenuDuMoisEur - realCostEur).toFixed(2);
+
+  // FRAICHEUR DE LA FACTURE MODAL. Le poller (scripts/modal_usage_push.py)
+  // doit tourner regulierement ; s'il s'arrete, l'ecran continuait
+  // d'afficher « facture Modal » sur un chiffre vieux de plusieurs
+  // semaines, sans le moindre signe. Un chiffre perime presente comme
+  // frais est pire qu'un chiffre absent.
+  let realUsageAgeH: number | null = null;
+  if (realUsageTs) {
+    const t = Date.parse(realUsageTs);
+    if (Number.isFinite(t)) realUsageAgeH = Math.round((Date.now() - t) / 3600_000);
+  }
 
   // ── Cron liveness receipt (written by scheduled(), see _meta/cron/last_run.json).
   // One extra tiny R2 GET on an endpoint that already issues ~32 of them, so no
@@ -11714,7 +11771,12 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
       total_margin_eur: +(totalRevenueEur - totalCostEur).toFixed(2),   // estimate-based
       // REAL Modal bill (via the `modal billing report` poller) — honest KPIs.
       real_cost_eur:    realCostEur,
+      // Marge DU MOIS EN COURS, alignee sur la periode du cout Modal.
       real_margin_eur:  realMarginEur,
+      real_revenue_mois_eur: +revenuDuMoisEur.toFixed(2),
+      // Age de la facture Modal, en heures. Au-dela de ~48 h le poller
+      // ne tourne plus et le chiffre ne doit PAS etre presente comme frais.
+      real_usage_age_h: realUsageAgeH,
       real_usage_usd:   realUsageUsd,
       real_usage_ts:    realUsageTs,
       real_usage_by_app: realByApp,
