@@ -17524,3 +17524,26 @@ LIMITE : la tâche ne tourne que quand la machine est allumée. Sur une
 journée où le poste reste éteint, le chiffre vieillit — d'où l'intérêt de
 l'indicateur de péremption ajouté ce matin, qui le dira au lieu de
 présenter une valeur périmée comme fraîche.
+
+## 2026-08-03 — Derniers doubles remboursements : sondage de statut et annulation admin
+
+Même défaut que /api/jobs/cancel, à deux autres endroits.
+
+`/api/jobs/:id` (branche Replicate) : `if (job && job.status !==
+prediction.status) { addCredits(); update() }`. Deux onglets ouverts sur
+le même job passaient tous les deux le test et créditaient tous les deux
+— de la monnaie créée en laissant simplement deux onglets ouverts.
+Réclamation atomique + garde de statut sur la branche succès de la même
+route (un job déjà remboursé ne peut plus repasser en 'succeeded').
+
+`handleAdminCancelJob` : statut terminal testé en mémoire, puis
+remboursement, puis écriture. Deux clics sur « Stop », ou un clic pendant
+que le reaper finalise le même job, créditaient deux fois.
+
+AUDIT SYSTÉMATIQUE fait plutôt que du cas par cas : passage en revue de
+CHAQUE `addCredits` positif du fichier avec son garde le plus proche.
+Résultat — les autres sont tous sur le chemin de CRÉATION (un échec juste
+après le débit, une seule fois par requête) : handleUpscaleImage,
+handleRectifyImage, les ANIM_COST, l'insertion de job. Aucun n'est
+rejouable, aucun ne nécessite de réclamation. Vérifié fonction par
+fonction plutôt que supposé.

@@ -5100,9 +5100,14 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
         stableUrl = replicateUrl;
         persisted = replicateUrl;
       }
+      // Meme garde de statut que les quatre routes de statut corrigees
+      // plus tot : un job DEJA rembourse ne doit pas pouvoir etre repasse
+      // en 'succeeded' par un simple sondage, sans quoi l'utilisateur
+      // garde l'actif ET ses credits.
       await sb.from('jobs')
         .update({ status: 'succeeded', mesh_url: persisted, finished_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[]);
     }
     const start = job?.created_at ? new Date(job.created_at as string).getTime() : Date.now();
     // Re-sign on read: stableUrl may be a raw KEY persisted on a prior poll;
@@ -5115,11 +5120,24 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
   }
 
   if (prediction.status === 'failed' || prediction.status === 'canceled') {
-    if (job && job.status !== prediction.status) {
-      await addCredits(env, job.user_id as string, job.credit_cost as number);
-      await sb.from('jobs')
-        .update({ status: prediction.status, error: prediction.error || null, finished_at: new Date().toISOString() })
-        .eq('id', id);
+    if (job) {
+      // RECLAMATION ATOMIQUE. Avant : lecture, test `job.status !==
+      // prediction.status` EN MEMOIRE, puis remboursement et ecriture.
+      // Deux onglets qui sondent le meme job passaient tous les deux le
+      // test et creditaient tous les deux — de la monnaie creee en
+      // laissant simplement deux onglets ouverts.
+      //
+      // Meme motif que _failAndRefundJob : seule la requete qui change
+      // reellement la ligne obtient un retour, et donc rembourse.
+      const { data: claimed } = await sb.from('jobs')
+        .update({ status: prediction.status, error: prediction.error || null,
+                  finished_at: new Date().toISOString() })
+        .eq('id', id)
+        .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
+        .select('id');
+      if (claimed && claimed.length > 0) {
+        await addCredits(env, job.user_id as string, job.credit_cost as number);
+      }
     }
     return json({ status: prediction.status, error: prediction.error || 'unknown error' });
   }
@@ -12416,14 +12434,21 @@ async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
   const _mc = await _cancelModalJob(env, jobId);
   const modalCancelled = _mc.cancelled;
   const modalError = _mc.error;
-  if (refund) {
-    await addCredits(env, j.user_id, j.credit_cost);
-  }
-  await sb.from('jobs').update({
+  // RECLAMATION AVANT REMBOURSEMENT, meme motif que les autres routes.
+  // Avant : le statut terminal etait teste EN MEMOIRE plus haut, puis on
+  // creditait, puis on ecrivait. Deux clics sur « Stop », ou un clic
+  // pendant que le reaper finalise le meme job, creditaient deux fois.
+  const { data: reclame } = await sb.from('jobs').update({
     status: 'canceled',
     error: refund ? 'admin canceled' : 'admin canceled (no refund)',
     finished_at: new Date().toISOString(),
-  }).eq('id', jobId);
+  }).eq('id', jobId)
+    .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
+    .select('id');
+  const aReclame = !!(reclame && reclame.length > 0);
+  if (refund && aReclame) {
+    await addCredits(env, j.user_id, j.credit_cost);
+  }
   await _auditLog(env, {
     req, actorEmail: guard.email,
     action: 'cancel_job', target: jobId,
