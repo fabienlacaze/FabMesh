@@ -1015,9 +1015,40 @@
     if (preset) preset.dispatchEvent(new Event('change'));
     // Update the image cost pill — refreshButtonLabelsAndHiding reads
     // #ws-image-cost-value, so just bumping its text is enough.
+    // PASTILLE DE COUT DES IMAGES — corrigee le 2026-08-03.
+    //
+    // Elle affichait le prix UNITAIRE fige (2 credits) alors que le clic
+    // debite bien davantage :
+    //   - n * text2image  (worker.ts : `const cost = n * COST_PER_IMAGE`)
+    //   - + n * back_view : la vue arriere est generee POUR CHAQUE image
+    //     des que ws-mv-scope != 'front_only', et sa valeur par defaut
+    //     est 'auto' — elle part donc TOUJOURS.
+    // Au reglage par defaut le clic coutait 4 credits pour 2 annonces ;
+    // avec Count=4, 16 pour 2. La pastille du bouton 3D, elle, calculait
+    // deja un vrai total : c'est ce comportement qu'on aligne ici.
     const imgVal = document.getElementById('ws-image-cost-value');
     if (imgVal && typeof prices.text2image === 'number') {
-      imgVal.textContent = String(prices.text2image);
+      const recalcImage = () => {
+        const n = Math.max(1, parseInt(
+          document.getElementById('ws-count')?.value, 10) || 1);
+        const scope = document.getElementById('ws-mv-scope')?.value || 'auto';
+        const avecDos = scope !== 'front_only';
+        const pBack = typeof prices.back_view === 'number' ? prices.back_view : 0;
+        const total = n * prices.text2image + (avecDos ? n * pBack : 0);
+        imgVal.textContent = String(total);
+        // Le detail evite la question « pourquoi 16 alors que l'image
+        // est a 2 ? » : on montre la composition.
+        const pill = imgVal.closest('[class*="cost"]') || imgVal.parentElement;
+        if (pill) {
+          pill.title = avecDos
+            ? `${n} image(s) x ${prices.text2image} + ${n} vue(s) arriere x ${pBack} = ${total} credits`
+            : `${n} image(s) x ${prices.text2image} = ${total} credits`;
+        }
+      };
+      recalcImage();
+      document.getElementById('ws-count')?.addEventListener('change', recalcImage);
+      document.getElementById('ws-count')?.addEventListener('input', recalcImage);
+      document.getElementById('ws-mv-scope')?.addEventListener('change', recalcImage);
     }
   }
 

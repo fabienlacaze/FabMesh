@@ -17316,3 +17316,46 @@ Correctif :
   des projets ET la liste des maillages. Sans le second, les maillages
   seraient réapparus et le client en aurait reformé une carte.
 - `meshes_deleted` remonté dans la réponse.
+
+## 2026-08-03 — Les deux décisions tarifaires, tranchées par le user : 1(a) et 2(a)
+
+### 1. Le preset de qualité 3D produit enfin un travail différent
+Le menu Fast/Balanced/Quality/Ultra 8K est facturé 3/4/6/8 crédits, mais
+son nombre de steps (12/24/32) n'arrivait JAMAIS jusqu'au GPU. Le client
+le calculait dans `trellis2Steps`, le shim le transmettait bien au worker
+— qui le RECEVAIT SANS LE FORWARDER. Et `_mesh.py` lisait ses steps
+depuis `FABMESH_TEX_STEPS`, une variable d'environnement identique pour
+TOUS les jobs.
+
+Quatre paliers, quatre prix, un seul travail. Corroboré par la mesure :
+373 s contre 420 s entre le palier bas et celui à 8 crédits, soit 13 %
+d'écart pour un prix ×2,7.
+
+Chaîne complète rétablie : `trellis2Steps` (client) → `tex_steps`
+(worker, borné à [0,48] pour qu'un client trafiqué ne commande pas une
+génération interminable) → `payload["tex_steps"]` (app.py) →
+`generate(tex_steps=…)` → `_tex_params['steps']`.
+
+`tex_steps=0` conserve EXACTEMENT l'ancien comportement (défaut
+d'environnement) : aucune régression si un maillon ne transmet rien.
+
+⚠ CONSÉQUENCE ASSUMÉE, à surveiller : les paliers hauts vont maintenant
+coûter PLUS CHER en GPU, puisqu'ils font enfin plus de travail. C'était
+le but — mais le budget Modal est à 65 $/mois, donc à surveiller sur la
+prochaine facture.
+
+⚠ NON TESTÉ DE BOUT EN BOUT : valider le plumbing demande une vraie
+génération GPU. Le repli à 0 limite le risque, mais l'effet réel des
+steps sur la qualité et la durée n'a pas été mesuré ici.
+
+### 2. La pastille de coût des images dit la vérité
+Elle affichait le prix UNITAIRE figé (2 crédits) alors que le clic débite
+`n × text2image + n × back_view` — la vue arrière est générée POUR CHAQUE
+image dès que `ws-mv-scope != 'front_only'`, et sa valeur par défaut est
+'auto' : elle part donc TOUJOURS. Au réglage par défaut, 4 crédits pour 2
+annoncés ; avec Count=4, 16 pour 2.
+
+La pastille recalcule maintenant le vrai total et se met à jour sur
+`ws-count` et `ws-mv-scope`. Une infobulle montre la composition
+(« 4 images × 2 + 4 vues arrière × 2 = 16 crédits ») pour éviter la
+question « pourquoi 16 alors que l'image est à 2 ? ».

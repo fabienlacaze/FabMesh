@@ -4772,6 +4772,14 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         texture_size: input.ultra_hd ? 4096
                     : input.mode === 'full' ? 2048
                     : 1024,
+        // STEPS DU PALIER DE QUALITE. Le client calcule 12/24/32 selon
+        // Fast/Balanced/Quality/Ultra et l'envoie dans `trellis2Steps`,
+        // mais le worker le RECEVAIT SANS JAMAIS LE TRANSMETTRE : les
+        // quatre paliers, factures 3/4/6/8 credits, produisaient le meme
+        // travail GPU. Borne a [8, 48] pour qu'un client trafique ne
+        // puisse pas commander une generation interminable.
+        tex_steps: Math.max(0, Math.min(48,
+          parseInt(String((input as unknown as Record<string, unknown>).trellis2Steps ?? 0), 10) || 0)),
         rectify: input.rectify,
         face_fix: input.face_fix,
         // Forward all the advanced flags so Modal can act on them.
@@ -6748,6 +6756,7 @@ async function callModalMeshStart(env: Env, input: {
   seed?: number;
   decimation_target?: number;
   texture_size?: number;
+  tex_steps?: number;
   rectify?: boolean;
   face_fix?: boolean;
   refine?: boolean;
@@ -6772,6 +6781,12 @@ async function callModalMeshStart(env: Env, input: {
       seed: input.seed,
       decimation_target: input.decimation_target,
       texture_size: input.texture_size,
+      // PALIER DE QUALITE. Le menu Fast/Balanced/Quality/Ultra est
+      // facture 3/4/6/8 credits, mais son nombre de steps n'arrivait
+      // jamais jusqu'a Modal : les quatre paliers produisaient le meme
+      // travail GPU a quatre prix differents. 0 = defaut d'environnement,
+      // donc comportement inchange si le client ne precise rien.
+      tex_steps: input.tex_steps ?? 0,
       rectify: !!input.rectify,
       face_fix: !!input.face_fix,
       refine:   !!input.refine,

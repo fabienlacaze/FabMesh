@@ -1553,6 +1553,10 @@ class MyFabmeshMesh:
                 seed=int(payload.get("seed") or 42),
                 decimation_target=int(payload.get("decimation_target") or 500_000),
                 texture_size=int(payload.get("texture_size") or 2048),
+                # steps du palier de qualite (12/24/32). 0 = defaut
+                # d'environnement, donc comportement inchange si le
+                # worker ne le transmet pas.
+                tex_steps=int(payload.get("tex_steps") or 0),
             )
 
             # Optional face polish — SDXL inpaint on the atlas face region.

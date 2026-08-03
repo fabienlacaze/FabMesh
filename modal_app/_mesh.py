@@ -66,6 +66,7 @@ def generate(
     seed: int = 42,
     decimation_target: int = 500_000,
     texture_size: int = 2048,
+    tex_steps: int = 0,           # 0 = garder le defaut d'environnement
 ) -> bytes:
     """Run TRELLIS-2 inference + GLB export. Returns the GLB bytes
     (caller pushes to R2). When `back_img` is provided, runs the
@@ -88,8 +89,19 @@ def generate(
     # native path sampled tex_slat with {} -> pipeline.json defaults (steps=12,
     # guidance_strength=1.0, near-unconditional vs 7.5 for shape), giving a soft
     # bake. Raise steps + guidance (env-overridable). Validated A/B on desktop.
+    # PALIERS DE QUALITE ENFIN REELS. Le menu Fast/Balanced/Quality/
+    # Ultra 8K est facture 3/4/6/8 credits, mais son nombre de steps
+    # (12/24/32) n'arrivait JAMAIS jusqu'ici : la valeur venait d'une
+    # variable d'environnement, identique pour TOUS les jobs. Les quatre
+    # paliers produisaient donc le meme travail GPU a quatre prix
+    # differents (mesure : 373 s contre 420 s entre le palier bas et
+    # celui a 8 credits, 13 % d'ecart pour un prix x2,7).
+    #
+    # tex_steps=0 conserve EXACTEMENT l'ancien comportement : aucune
+    # regression si l'appelant ne precise rien.
     _tex_params = {
-        'steps': int(os.environ.get('FABMESH_TEX_STEPS', '24')),
+        'steps': int(tex_steps) if tex_steps and tex_steps > 0
+                 else int(os.environ.get('FABMESH_TEX_STEPS', '24')),
         'guidance_strength': float(os.environ.get('FABMESH_TEX_GUIDANCE', '3.0')),
         'guidance_interval': [0.5, 1.0],
         # Audit fixes — see scripts/trellis2_native_full_pipeline.py for the rationale:
