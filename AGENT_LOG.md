@@ -17103,3 +17103,33 @@ l'actif.
 user_id durablement) quand le record a disparu, et REFUSE si aucune des
 deux sources ne confirme la propriété. Base injoignable = refus, jamais
 livraison.
+
+## 2026-08-03 — KPI : les crédits OFFERTS étaient comptés comme du chiffre d'affaires
+
+Premier constat de l'axe « fiabilité des chiffres » de l'audit. Le
+dashboard calculait `revenueEur = credits * EUR_PER_CREDIT_NET` (0,162 €)
+sur CHAQUE crédit consommé — sans distinguer un crédit ACHETÉ d'un des
+50 crédits OFFERTS à l'inscription.
+
+Sur un produit qui offre ~8 $ de calcul Modal à chaque nouveau compte, ce
+n'est pas un écart marginal : tant que peu de gens paient, la carte
+« Revenue net » affichait essentiellement du vide présenté comme du CA.
+
+Correctif :
+- La requête `payments` remonte désormais `user_id` → ensemble des
+  comptes ayant RÉELLEMENT payé.
+- Second passage sur `jobs` (la variable reste en portée) : décomposition
+  entre `credits_revenue_payeurs_eur` et `credits_revenue_offerts_eur`.
+- Le total historique n'est PAS réécrit (il alimente d'autres cartes) ;
+  on expose la décomposition pour que l'interface puisse dire la vérité.
+- Dashboard : « Revenue net » remplacée par deux cartes — « Encaissé
+  RÉEL » (somme Stripe, seul argent effectivement reçu, avec le nombre de
+  comptes payeurs) et « Crédits consommés » qui affiche à part le montant
+  offert, explicitement marqué hors CA. Corrigé aux DEUX endroits
+  (Overview et Finance).
+
+RESTE SUR CET AXE (non fait) : « Marge RÉELLE » divise un revenu
+depuis-toujours par un coût du-mois-en-cours ; MODAL_COST_USD est faux
+dans les deux sens (×41 sur construction3d, ÷4 sur segment, ÷3 à ÷8 sur
+les ops image) ; le flux de facturation Modal réelle est gelé depuis
+46 jours sans que l'écran le signale.

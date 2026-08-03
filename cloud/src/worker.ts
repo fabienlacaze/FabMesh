@@ -11510,17 +11510,48 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   // total_gross_eur was permanently 0 in the admin dashboard.
   let grossRevenueEur = 0;
   let paymentsCount = 0;
+  // Qui a REELLEMENT paye au moins une fois. Sert a distinguer le chiffre
+  // d'affaires du revenu fictif : `revenueEur = credits * 0.162` comptait
+  // CHAQUE credit consomme comme du CA, y compris les 50 credits OFFERTS
+  // a l'inscription. Un compte qui n'a jamais rien paye generait donc du
+  // « revenu » qui n'a jamais existe.
+  const payeurs = new Set<string>();
   try {
     const { data: pays } = await sb
       .from('payments')
-      .select('amount_eur, created_at')
+      .select('amount_eur, created_at, user_id')
       .order('created_at', { ascending: false })
       .limit(5000);
-    for (const p of (pays ?? []) as { amount_eur: number }[]) {
+    for (const p of (pays ?? []) as { amount_eur: number; user_id?: string }[]) {
       grossRevenueEur += p.amount_eur ?? 0;
       paymentsCount += 1;
+      if (p.user_id) payeurs.add(p.user_id);
     }
   } catch { /* payments table optional */ }
+
+  // REVENU REEL vs REVENU FICTIF.
+  //
+  // Tout ce qui precede valorise chaque credit consomme a
+  // EUR_PER_CREDIT_NET, sans distinguer un credit ACHETE d'un des 50
+  // credits OFFERTS a l'inscription. Sur un produit qui offre 50 credits
+  // (~8 $ de calcul Modal) a chaque nouveau compte, l'ecart n'est pas
+  // marginal : tant que peu de gens paient, la carte « Revenue net » du
+  // dashboard affiche essentiellement du vide.
+  //
+  // On ne CORRIGE pas le total historique ici (il alimente d'autres
+  // cartes), on expose la decomposition pour que l'interface puisse dire
+  // la verite : combien de ce « revenu » provient de comptes qui n'ont
+  // jamais rien paye.
+  let revenusComptesPayeurs = 0;
+  let revenusComptesGratuits = 0;
+  try {
+    for (const j of ((jobs ?? []) as Array<{ user_id: string; status: string; credit_cost: number }>)) {
+      if (j.status !== 'succeeded') continue;
+      const eur = (j.credit_cost ?? 0) * EUR_PER_CREDIT_NET;
+      if (payeurs.has(j.user_id)) revenusComptesPayeurs += eur;
+      else revenusComptesGratuits += eur;
+    }
+  } catch { /* decomposition indisponible : les totaux restent affiches */ }
 
   // EXACT signup count. `uniqueUsers` above only holds user_ids that appear in
   // `jobs`, i.e. users who ran at least one operation — every signed-up user
@@ -11667,7 +11698,17 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
           + 'le total réel Modal est donc supérieur, l’écart est l’inactivité.',
     },
     revenue: {
+      // ENCAISSEMENT REEL (Stripe) — la seule ligne qui corresponde a de
+      // l'argent recu. Les trois suivantes valorisent des CREDITS, ce qui
+      // n'est pas la meme chose.
       total_gross_eur:  +grossRevenueEur.toFixed(2),
+      // Decomposition du « revenu » calcule sur les credits consommes :
+      // seule la part des comptes AYANT DEJA PAYE correspond a quelque
+      // chose de vendu. Le reste vient des 50 credits offerts a
+      // l'inscription et n'a jamais existe en tresorerie.
+      credits_revenue_payeurs_eur: +revenusComptesPayeurs.toFixed(2),
+      credits_revenue_offerts_eur: +revenusComptesGratuits.toFixed(2),
+      payeurs_count: payeurs.size,
       total_net_eur:    +totalRevenueEur.toFixed(2),   // sum of credit revenue, net of Stripe
       total_cost_eur:   +totalCostEur.toFixed(2),                       // worker per-op ESTIMATE
       total_margin_eur: +(totalRevenueEur - totalCostEur).toFixed(2),   // estimate-based

@@ -1626,7 +1626,16 @@
       document.getElementById('cards-overview').innerHTML = [
         card('Signups (total)',        _signups == null ? '—' : _signups,       `${_withOps} with ops`, 'accent'),
         card('Ops total',              d.operations.total,                     successRate + ' success'),
-        card('Revenue net (€)',        d.revenue.total_net_eur.toFixed(2),     '', 'revenue'),
+        // ENCAISSÉ = la seule ligne qui soit de l'argent reçu (somme des
+        // paiements Stripe). « Revenue net » valorisait les CRÉDITS
+        // consommés sans distinguer un crédit acheté d'un des 50 crédits
+        // OFFERTS à l'inscription : sur un produit qui offre ~8 $ de calcul
+        // à chaque nouveau compte, cette carte affichait essentiellement du
+        // vide présenté comme du chiffre d'affaires.
+        card('Encaissé RÉEL (€)',      (d.revenue.total_gross_eur ?? 0).toFixed(2),
+             `${d.revenue.payeurs_count ?? 0} compte(s) ayant payé`, 'revenue'),
+        card('Crédits consommés (€)',  (d.revenue.credits_revenue_payeurs_eur ?? 0).toFixed(2),
+             `+ ${(d.revenue.credits_revenue_offerts_eur ?? 0).toFixed(2)} € offerts (hors CA)`, 'accent'),
         card('Marge RÉELLE (€)',       _fmtv(_realMargin),                     _realPct, 'margin'),
         card('Coût Modal RÉEL (€)',    _fmtv(_realCost),                       _hasReal ? 'facture Modal' : 'poller non lancé', 'cost'),
         card('Marge estimée (€)',      d.revenue.total_margin_eur.toFixed(2),  marginPct + ' (est.)', 'ok'),
@@ -1662,7 +1671,16 @@
 
       // ── Tab: Finances
       document.getElementById('cards-finance').innerHTML = [
-        card('Revenue net (€)',        d.revenue.total_net_eur.toFixed(2),     '', 'revenue'),
+        // ENCAISSÉ = la seule ligne qui soit de l'argent reçu (somme des
+        // paiements Stripe). « Revenue net » valorisait les CRÉDITS
+        // consommés sans distinguer un crédit acheté d'un des 50 crédits
+        // OFFERTS à l'inscription : sur un produit qui offre ~8 $ de calcul
+        // à chaque nouveau compte, cette carte affichait essentiellement du
+        // vide présenté comme du chiffre d'affaires.
+        card('Encaissé RÉEL (€)',      (d.revenue.total_gross_eur ?? 0).toFixed(2),
+             `${d.revenue.payeurs_count ?? 0} compte(s) ayant payé`, 'revenue'),
+        card('Crédits consommés (€)',  (d.revenue.credits_revenue_payeurs_eur ?? 0).toFixed(2),
+             `+ ${(d.revenue.credits_revenue_offerts_eur ?? 0).toFixed(2)} € offerts (hors CA)`, 'accent'),
         card('Marge RÉELLE (€)',       _fmtv(_realMargin),                     _realPct, 'margin'),
         card('Coût Modal RÉEL (€)',    _fmtv(_realCost),                       _hasReal ? 'facture Modal' : 'poller non lancé', 'cost'),
         card('Marge estimée (€)',      d.revenue.total_margin_eur.toFixed(2),  marginPct + ' (est.)', 'ok'),
