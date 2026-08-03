@@ -5915,9 +5915,26 @@ async function handleJobCancel(req: Request, env: Env): Promise<Response> {
     console.warn(`[jobs/cancel] arret Modal non confirme pour ${id}: ${modal.error || 'inconnu'}`);
   }
 
-  await sb.from('jobs')
+  // RECLAMATION ATOMIQUE, meme motif que _failAndRefundJob. Avant :
+  // SELECT, test du statut EN MEMOIRE, puis UPDATE sans garde et
+  // remboursement. Deux requetes simultanees passaient toutes les deux le
+  // test et creditaient toutes les deux — de la monnaie creee a volonte
+  // en appuyant deux fois sur Annuler.
+  //
+  // `.in('status', …)` + `.select('id')` : seule la requete qui a
+  // reellement change la ligne obtient une ligne en retour, et donc
+  // rembourse.
+  const { data: claimed, error: claimErr } = await sb.from('jobs')
     .update({ status: 'canceled', finished_at: new Date().toISOString() })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
+    .select('id');
+  if (claimErr || !claimed || claimed.length === 0) {
+    // Quelqu'un d'autre (le reaper, un second clic, la route admin) a
+    // deja finalise ce job : ne PAS rembourser une seconde fois.
+    return json({ ok: true, alreadyDone: true, modalStopped: modal.cancelled });
+  }
   if (typeof job.credit_cost === 'number') {
     await addCredits(env, user.id as string, job.credit_cost);
   }
@@ -13207,6 +13224,19 @@ async function preWarmModal(env: Env, opts: { imageOp?: boolean } = {}): Promise
  *  best-effort top-up only; the real coverage comes from the
  *  desktop-triggered POST /api/prewarm and from the 524 retries. */
 async function preWarmTick(env: Env): Promise<void> {
+  // LE COUPE-CIRCUIT S'APPLIQUE AUSSI AU CRON. Il n'etait verifie que sur
+  // les requetes HTTP (MODAL_PATHS dans le routeur) : un administrateur
+  // qui coupait le backend GPU voyait donc le cron continuer a allumer un
+  // conteneur toutes les 15 min. Un kill switch qui ne coupe pas tout
+  // n'est pas un kill switch.
+  try {
+    const flags = await _getServiceFlags(env);
+    if (!flags.modal_enabled) {
+      console.log('[pre-warm] ignore — backend GPU coupe par l\'administrateur');
+      return;
+    }
+  } catch { /* drapeaux illisibles : on continue, le garde suivant borne deja */ }
+
   if (!(await isUserOnline(env))) {
     console.log('[pre-warm] skipped — no recent heartbeat (nobody online)');
     return;
@@ -13216,10 +13246,19 @@ async function preWarmTick(env: Env): Promise<void> {
 }
 
 async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
-  // No auth — heartbeat is cheap and unauthenticated.
-  // (We don't want to fail the heartbeat if the user's cookie has
-  // expired; we just want to know "is the tab still open".)
-  void req;
+  // AUTHENTIFICATION EXIGEE depuis le 2026-08-03.
+  //
+  // La route etait anonyme, au motif qu'un cookie expire ne devait pas
+  // faire echouer le battement. Consequence reelle : n'importe qui sur
+  // Internet pouvait marquer « un utilisateur est en ligne », ce que lit
+  // preWarmTick pour allumer un L40S toutes les 15 min — soit ~470 $/mois
+  // declenchables par un inconnu avec une boucle curl.
+  //
+  // Le motif d'origine ne tient pas : le prechauffage sert a preparer une
+  // generation, et une generation exige une session. Chauffer un GPU pour
+  // quelqu'un qui ne peut rien lancer n'a aucun sens.
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
   await markHeartbeat(env);
   return json({ ok: true });
 }

@@ -1002,9 +1002,22 @@ function _startHeartbeat() {
   const ping = async () => {
     try {
       if (_deps?.isCloudMode && !_deps.isCloudMode()) return;   // mode local : rien à chauffer
-      if (!(await getAccessToken())) return;                    // pas de session : rien à chauffer
+      const tok = await getAccessToken();
+      if (!tok) return;                                         // pas de session : rien à chauffer
+      // LE JETON EST DÉSORMAIS TRANSMIS. /api/heartbeat exige une session
+      // depuis le 2026-08-03 : la route était anonyme et n'importe qui
+      // pouvait, avec une boucle curl, faire croire qu'un utilisateur
+      // était en ligne — ce que lit le cron pour allumer un L40S toutes
+      // les 15 min (~470 $/mois).
+      //
+      // Le desktop vérifiait déjà la présence d'une session mais ne
+      // l'envoyait PAS : sans ce Cookie, le battement serait tombé en 401
+      // et le préchauffage desktop se serait éteint — précisément le
+      // correctif attendu par la certification Microsoft.
       await fetch(`${WORKER_URL}/api/heartbeat`, {
-        method: 'POST', signal: AbortSignal.timeout(5000),
+        method: 'POST',
+        headers: { Cookie: `mfm-session=${tok}` },
+        signal: AbortSignal.timeout(5000),
       }).catch(() => {});
     } catch (_) {}
   };

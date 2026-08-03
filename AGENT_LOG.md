@@ -17033,3 +17033,41 @@ C4 remboursement-puis-livraison (rig/segment/anim obtenus gratuitement :
 /api/jobs/cancel, `/api/heartbeat` anonyme qui maintient un L40S allumé
 hors kill switch (~470 $/mois), et les KPI du dashboard (crédits offerts
 comptés comme CA, coût GPU faux dans les deux sens).
+
+## 2026-08-03 — Lot sécurité 2 : GPU allumable par un inconnu, double remboursement
+
+### /api/heartbeat était ANONYME (~470 $/mois exposés)
+La route ne demandait aucune session, au motif qu'un cookie expiré ne
+devait pas faire échouer le battement. Or elle marque « un utilisateur est
+en ligne », ce que lit `preWarmTick` pour allumer un L40S toutes les
+15 min. N'importe qui, avec une boucle curl, maintenait donc un GPU
+allumé aux frais de l'exploitant.
+
+Le motif d'origine ne tenait pas : le préchauffage prépare une
+génération, et une génération exige une session. Chauffer pour quelqu'un
+qui ne peut rien lancer n'a aucun sens.
+
+⚠ PIÈGE ÉVITÉ DE JUSTESSE : le desktop VÉRIFIAIT la présence d'une
+session mais ne l'ENVOYAIT PAS. Exiger l'auth sans corriger le client
+aurait fait tomber son battement en 401 et éteint le préchauffage
+desktop — précisément le correctif attendu par la certification
+Microsoft. `cloud_fallback._startHeartbeat()` transmet désormais le
+Cookie, comme le fait déjà `prewarm()`. Le web envoyait déjà
+`credentials: 'include'`.
+
+VÉRIFIÉ EN PRODUCTION : POST /api/heartbeat sans session → HTTP 401.
+
+### Le cron ignorait le kill switch
+`preWarmTick` ne vérifiait que le battement. Un administrateur qui
+coupait le backend GPU voyait le cron continuer à allumer un conteneur
+toutes les 15 min — le coupe-circuit n'était vérifié que sur les requêtes
+HTTP (MODAL_PATHS). Un kill switch qui ne coupe pas tout n'en est pas un.
+`_getServiceFlags()` est désormais consulté en tête de `preWarmTick`.
+
+### Double remboursement sur /api/jobs/cancel
+SELECT → test du statut EN MÉMOIRE → UPDATE sans garde → addCredits. Deux
+requêtes simultanées passaient toutes les deux le test et créditaient
+toutes les deux : de la monnaie créée en double-cliquant sur Annuler.
+Corrigé par le motif de réclamation atomique DÉJÀ présent dans le fichier
+(`_failAndRefundJob`) : `.in('status', NON_TERMINAL_JOB_STATUSES)` +
+`.select('id')`, et remboursement UNIQUEMENT si une ligne a été réclamée.
