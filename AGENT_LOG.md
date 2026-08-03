@@ -17071,3 +17071,35 @@ toutes les deux : de la monnaie créée en double-cliquant sur Annuler.
 Corrigé par le motif de réclamation atomique DÉJÀ présent dans le fichier
 (`_failAndRefundJob`) : `.in('status', NON_TERMINAL_JOB_STATUSES)` +
 `.select('id')`, et remboursement UNIQUEMENT si une ligne a été réclamée.
+
+## 2026-08-03 — Lot sécurité 3 : « remboursé puis livré quand même »
+
+Constat C4 de l'audit : le chemin d'ÉCHEC était protégé (réclamation
+exactly-once dans `_failAndRefundJob`), le chemin de SUCCÈS ne l'était
+pas. Quatre routes de statut (rig, segmentation, animation, retarget FBX)
+faisaient `update({status:'succeeded', mesh_url:key}).eq('id', jobId)`
+SANS garde de statut.
+
+Scénario réel : un `put` R2 échoue une fois → crédits rendus, job marqué
+`failed`. Un simple **GET** sur la route de statut refaisait le fetch,
+réussissait, et repassait la ligne en `succeeded`. L'utilisateur gardait
+l'actif ET ses crédits (15 cr de segmentation ≈ 2,14 €). Le fichier reste
+sur Modal sans purge, donc la fenêtre n'était pas bornée. Pire :
+index2.js rejoue les rigs en attente pendant 30 min — le déclenchement
+pouvait être NON DÉLIBÉRÉ.
+
+Correctif 1 : `.in('status', NON_TERMINAL_JOB_STATUSES)` sur les 4 UPDATE.
+Seul un job encore non terminal peut devenir `succeeded`. Les 4 sites
+étaient rigoureusement identiques — remplacement scripté avec assertion
+sur le compte (4 attendus, 4 trouvés) plutôt qu'à la main.
+
+Correctif 2, aggravant du même constat : le contrôle de propriété était
+FAIL-OPEN — `if (record && record.user_id !== user.id)` saute la
+vérification quand le record est absent. Or `refundOnFailure` SUPPRIME
+justement le record. Après un échec remboursé, n'importe quel compte
+pouvait donc interroger la route avec le job_id d'autrui et récupérer
+l'actif.
+`_estProprietaireDuJob()` se rabat sur la table `jobs` (qui porte le
+user_id durablement) quand le record a disparu, et REFUSE si aucune des
+deux sources ne confirme la propriété. Base injoignable = refus, jamais
+livraison.

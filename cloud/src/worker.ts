@@ -8294,6 +8294,37 @@ async function putRigJobRecord(
   );
 }
 
+/** Le demandeur est-il bien le proprietaire de ce job ?
+ *
+ *  Les routes de statut testaient `if (record && record.user_id !== user.id)`
+ *  — un controle FAIL-OPEN : quand le record est absent, la verification
+ *  est simplement sautee. Or `refundOnFailure` SUPPRIME justement le
+ *  record. Apres un echec rembourse, n'importe quel compte pouvait donc
+ *  interroger la route avec le job_id d'autrui et recuperer l'actif.
+ *
+ *  Quand le record a disparu, on se rabat sur la table `jobs`, qui porte
+ *  le user_id de facon durable. Si aucune des deux sources ne peut
+ *  confirmer la propriete, on REFUSE — c'est la seule reponse sure. */
+async function _estProprietaireDuJob(
+  env: Env,
+  jobId: string,
+  userId: string,
+  record: { user_id?: string } | null,
+): Promise<boolean> {
+  if (record && record.user_id) return record.user_id === userId;
+  try {
+    const { data } = await supabaseAdmin(env).from('jobs')
+      .select('user_id').eq('id', jobId).maybeSingle();
+    const owner = (data as { user_id?: string } | null)?.user_id;
+    // Pas de ligne du tout : le job n'a jamais existe ou a ete purge.
+    // On refuse plutot que de livrer sur la foi d'un identifiant devine.
+    if (!owner) return false;
+    return owner === userId;
+  } catch {
+    return false;   // base injoignable : on refuse, on ne livre pas
+  }
+}
+
 async function getRigJobRecord(
   env: Env, jobId: string,
 ): Promise<RigJobRecord | null> {
@@ -8587,7 +8618,7 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   // R2 lost it (TTL purge, eventual consistency) we proceed but skip
   // the refund + ownership steps — the rig still produces a public URL.
   const record = await getRigJobRecord(env, jobId);
-  if (record && record.user_id !== user.id) {
+  if (!(await _estProprietaireDuJob(env, jobId, user.id, record))) {
     return err(403, 'forbidden');
   }
 
@@ -8734,9 +8765,16 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     // Mark the jobs row succeeded so it shows up correctly in history.
     // Persist the raw KEY (not the expiring signed URL); reads re-sign.
     try {
+      // GARDE DE STATUT — sans elle, un job DEJA rembourse pouvait etre
+      // repasse en 'succeeded' par un simple GET sur cette route de
+      // statut : l'utilisateur gardait l'actif ET ses credits. Le chemin
+      // d'echec, lui, etait deja protege (_failAndRefundJob reclame la
+      // ligne). On aligne le chemin de succes sur le meme invariant :
+      // seul un job encore NON TERMINAL peut devenir 'succeeded'.
       await supabaseAdmin(env).from('jobs')
         .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
-        .eq('id', jobId).eq('user_id', user.id);
+        .eq('id', jobId).eq('user_id', user.id)
+        .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[]);
     } catch (e) { console.warn('[auto-rig-status] jobs.update failed', e); }
     return json({
       status: 'done',
@@ -8916,7 +8954,7 @@ async function handleMeshSegmentStatus(req: Request, env: Env): Promise<Response
   if (!jobId) return err(400, 'job_id required');
 
   const record = await getSegmentJobRecord(env, jobId);
-  if (record && record.user_id !== user.id) {
+  if (!(await _estProprietaireDuJob(env, jobId, user.id, record))) {
     return err(403, 'forbidden');
   }
 
@@ -9022,9 +9060,16 @@ async function handleMeshSegmentStatus(req: Request, env: Env): Promise<Response
     const publicUrl = await signedR2Url(env, key, 'mesh');
     console.log(`[mesh-segment-status] job_id=${jobId} DONE expected_bytes=${expectedBytes} url=${publicUrl}`);
     try {
+      // GARDE DE STATUT — sans elle, un job DEJA rembourse pouvait etre
+      // repasse en 'succeeded' par un simple GET sur cette route de
+      // statut : l'utilisateur gardait l'actif ET ses credits. Le chemin
+      // d'echec, lui, etait deja protege (_failAndRefundJob reclame la
+      // ligne). On aligne le chemin de succes sur le meme invariant :
+      // seul un job encore NON TERMINAL peut devenir 'succeeded'.
       await supabaseAdmin(env).from('jobs')
         .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
-        .eq('id', jobId).eq('user_id', user.id);
+        .eq('id', jobId).eq('user_id', user.id)
+        .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[]);
     } catch (e) { console.warn('[mesh-segment-status] jobs.update failed', e); }
     return json({
       status: 'done',
@@ -9985,7 +10030,7 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
   if (!jobId) return err(400, 'job_id required');
 
   const record = await getAnimJobRecord(env, jobId);
-  if (record && record.user_id !== user.id) return err(403, 'forbidden');
+  if (!(await _estProprietaireDuJob(env, jobId, user.id, record))) return err(403, 'forbidden');
 
   // Refund échoué → on GARDE le record pour retry au prochain poll
   // (le delete inconditionnel rendait la perte de crédits définitive).
@@ -10098,9 +10143,16 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
     // Mark the jobs row succeeded so history shows the right state. Persist
     // the raw KEY (not the expiring signed URL) so reads re-sign with TTL.
     try {
+      // GARDE DE STATUT — sans elle, un job DEJA rembourse pouvait etre
+      // repasse en 'succeeded' par un simple GET sur cette route de
+      // statut : l'utilisateur gardait l'actif ET ses credits. Le chemin
+      // d'echec, lui, etait deja protege (_failAndRefundJob reclame la
+      // ligne). On aligne le chemin de succes sur le meme invariant :
+      // seul un job encore NON TERMINAL peut devenir 'succeeded'.
       await supabaseAdmin(env).from('jobs')
         .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
-        .eq('id', jobId).eq('user_id', user.id);
+        .eq('id', jobId).eq('user_id', user.id)
+        .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[]);
     } catch (e) { console.warn('[animate-status] jobs.update failed', e); }
     return json({
       status: 'done',
@@ -10271,7 +10323,7 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
   if (!jobId) return err(400, 'job_id required');
 
   const record = await getAnimJobRecord(env, jobId);
-  if (record && record.user_id !== user.id) return err(403, 'forbidden');
+  if (!(await _estProprietaireDuJob(env, jobId, user.id, record))) return err(403, 'forbidden');
 
   // Refund échoué → on GARDE le record pour retry au prochain poll
   // (le delete inconditionnel rendait la perte de crédits définitive).
@@ -10380,9 +10432,16 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
     console.log(`[animate-from-reference-status] job_id=${jobId} DONE url=${publicUrl}`);
     // Persist the raw KEY (not the expiring signed URL); reads re-sign.
     try {
+      // GARDE DE STATUT — sans elle, un job DEJA rembourse pouvait etre
+      // repasse en 'succeeded' par un simple GET sur cette route de
+      // statut : l'utilisateur gardait l'actif ET ses credits. Le chemin
+      // d'echec, lui, etait deja protege (_failAndRefundJob reclame la
+      // ligne). On aligne le chemin de succes sur le meme invariant :
+      // seul un job encore NON TERMINAL peut devenir 'succeeded'.
       await supabaseAdmin(env).from('jobs')
         .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
-        .eq('id', jobId).eq('user_id', user.id);
+        .eq('id', jobId).eq('user_id', user.id)
+        .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[]);
     } catch (e) { console.warn('[animate-from-reference-status] jobs.update failed', e); }
     return json({
       status: 'done',
