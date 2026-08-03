@@ -17617,3 +17617,46 @@ explicitement) ; `/api/market/owned`, `/seller/earnings` et
 il est NÉCESSAIRE (pages auteur, détection de ses propres fiches) et le
 chemin qui le rendait exploitable, la fabrication de clés R2, est fermé
 depuis ce matin. Rien à corriger.
+
+## 2026-08-03 — Appels GPU auto : le constat était juste, sa conclusion fausse
+
+Constat d'audit : « `/api/generate` déclenche des appels GPU comptés nulle
+part ». Structurellement exact — le handler lance, en plus du maillage, une
+rectification de l'image et une vue arrière automatique (feuille /
+MV-Adapter / RealVis selon le type), et une seule charge `ESTIMATED_USD_MESH`
+couvrait le tout. Ni le fusible journalier ni le plafond par compte ne les
+voyaient.
+
+Mais la conclusion « on sous-compte de ~30 % » ne tenait pas. Vérifié sur la
+facture Modal du 2026-07-28 : l'app `myfabmesh-cloud` a coûté **9,7748 $ pour
+26 générations réussies, soit 0,376 $ tout compris**, auxiliaires inclus. Or
+l'estimation en place valait déjà 0,370 $. Le résidu pour les DEUX appels
+auxiliaires réunis n'est donc que ~0,006 $ — pas 0,120 $.
+
+Le vrai défaut était ailleurs : `rectify` 0,070 $, `back-view` 0,050 $,
+`sheet` 0,050 $ et `tpose` 0,040 $ étaient des SUPPOSITIONS, marquées
+« non mesuré — suspect » dans le code même, trop hautes d'un facteur ~15.
+Recalées sur la mesure (0,003 / 0,004 / 0,005 / 0,004), cohérentes avec
+`text2image` MESURÉ à 0,003 $ pour une passe de diffusion de ~6 s.
+
+Ces constantes ne servent qu'à RAPPORTER un coût (repli quand le job n'a pas
+son `cost_usd`) — jamais à facturer des crédits. Aucun impact sur le chiffre
+d'affaires ; uniquement sur la justesse du tableau de bord.
+
+Correctifs :
+- `_auxGpuCostUsd()` : les appels auxiliaires entrent enfin dans la charge du
+  fusible et du plafond, aux tarifs recalés. Estimation d'un personnage :
+  0,370 + 0,003 + 0,004 = **0,377 $** contre 0,376 $ mesuré ;
+- prédicats d'aiguillage (`AUTO_BACKVIEW_SKIP`, `HARD_SURFACE_TYPES`,
+  `MVA_TYPES`) sortis au niveau module. Ils étaient dupliqués entre
+  l'estimation et l'exécution : toute retouche d'un côté faisait dériver la
+  facturation en silence.
+
+À RETENIR : si j'avais appliqué le constat d'audit tel quel, j'aurais chargé
+0,49 $ par génération au lieu de 0,377 $ — soit rationné les comptes gratuits
+d'un tiers pour une dépense inexistante. Un constat d'agent décrit une
+structure ; seule la facture tranche le montant.
+
+CONSÉQUENCE RASSURANTE pour la tarification : le 0,37 $ ayant servi à fixer
+les prix est confirmé par la facture (0,376 $ réel, tout compris). Les marges
+calculées tiennent.

@@ -1537,10 +1537,21 @@ function _measuredCostUsd(opType: string, createdAt?: string, finishedAt?: strin
  * ici que pour les lignes sans finished_at. */
 const MODAL_COST_USD: Record<string, number> = {
   'text2image':  0.003,   // MESURE (n=44, mediane 6 s)
-  'back-view':   0.050,   // non mesure — suspect
-  'rectify':     0.070,   // non mesure — suspect
-  'sheet':       0.050,   // non mesure — suspect
-  'tpose':       0.040,   // non mesure — suspect
+  // 2026-08-03 — RECALES SUR LA FACTURE REELLE. Ces cinq valeurs etaient des
+  // suppositions (marquees « suspect ») trop hautes d'un facteur ~15.
+  // Mesure : le 2026-07-28, l'app myfabmesh-cloud a coute 9,7748 $ pour 26
+  // generations reussies, soit 0,376 $ tout compris — rectification et vue
+  // arriere INCLUSES. Le maillage seul valant 0,37 $ (673 s x tarif L40S), il
+  // ne reste que ~0,006 $ par generation pour les DEUX appels auxiliaires
+  // reunis. Coherent avec 'text2image', MESURE a 0,003 $ pour une passe de
+  // diffusion de ~6 s : rectify, back-view et sheet sont de la meme classe.
+  // Les anciennes valeurs auraient surestime chaque generation de ~30 %, donc
+  // rationne les comptes gratuits pour une depense qui n'existe pas.
+  'back-view':   0.004,
+  'rectify':     0.003,
+  'sheet':       0.005,
+  'mvadapter':   0.012,   // 6 vues orthographiques (endpoint pas encore deploye)
+  'tpose':       0.004,
   'mesh':        0.370,   // MESURE (n=17, 373 s) + traine scaledown 300 s
   'mesh-face':   0.420,   // 'mesh' + le delta face_fix de l'ancienne table
   'remove-bg':   0.005,   // non mesure
@@ -4557,6 +4568,42 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
  *
  *  The multiplier ladder mirrors the trellisMode ladder in handleGenerate
  *  1:1 (ultra_q → quality_plus → mode) — keep them in sync. */
+/* Prédicats d'aiguillage des vues auto. DÉFINIS ICI, AU NIVEAU MODULE, et
+ * pas dans le corps de handleGenerate : l'estimation de coût et l'exécution
+ * doivent trancher exactement pareil. Tant qu'ils étaient dupliqués, toute
+ * retouche d'un côté faisait silencieusement dériver la facturation. */
+const AUTO_BACKVIEW_SKIP: ReadonlySet<string> = new Set(['avion', 'bateau']);
+const HARD_SURFACE_TYPES: ReadonlySet<string> = new Set(
+  ['vehicle', 'building', 'weapon', 'prop', 'avion', 'bateau']);
+const MVA_TYPES: ReadonlySet<string> = new Set(['creature', 'animal']);
+
+/** Coût des appels GPU que `/api/generate` déclenche DE LUI-MÊME, en plus
+ *  de la génération de maillage : la rectification de l'image d'entrée, et
+ *  la vue arrière automatique (feuille, MV-Adapter ou RealVis selon le type).
+ *
+ *  Ils n'étaient comptés NULLE PART. Le fusible journalier et le plafond par
+ *  compte ne voyaient donc que les 0,37 $ du maillage, alors que la facture
+ *  Modal encaissait jusqu'à ~0,12 $ de plus par génération — près d'un tiers
+ *  de la dépense réelle invisible pour les garde-fous. */
+function _auxGpuCostUsd(input: GenerateInput, env: Env, hasBackImage: boolean): number {
+  let usd = 0;
+  if (env.MODAL_RECTIFY_URL && input.rectify !== false) {
+    usd += MODAL_COST_USD['rectify'];
+  }
+  if (input.back_view !== false && !hasBackImage
+      && input.asset_type !== 'icon'
+      && !AUTO_BACKVIEW_SKIP.has(input.asset_type)) {
+    if (HARD_SURFACE_TYPES.has(input.asset_type) && env.MODAL_SHEET_URL) {
+      usd += MODAL_COST_USD['sheet'];
+    } else if (MVA_TYPES.has(input.asset_type) && env.MODAL_MVADAPTER_URL) {
+      usd += MODAL_COST_USD['mvadapter'];
+    } else if (env.MODAL_BACKVIEW_URL) {
+      usd += MODAL_COST_USD['back-view'];
+    }
+  }
+  return usd;
+}
+
 function _meshCostUsd(input: GenerateInput, useModalMesh: boolean): number {
   // Replicate runs the full Cog pipeline; one flat, much higher price.
   if (!useModalMesh) return 0.50;
@@ -4682,7 +4729,12 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   // scaled by the resolution preset — see _meshCostUsd. The SAME number is
   // written to jobs.options.cost_usd below so the budget guard and the
   // reported margin always agree.
-  const ESTIMATED_USD_MESH = _meshCostUsd(input, useModalMesh);
+  // Maillage + les appels GPU auxiliaires que ce handler déclenche seul.
+  // Ces derniers échappaient totalement aux garde-fous (voir _auxGpuCostUsd).
+  const ESTIMATED_USD_MESH = +(
+    _meshCostUsd(input, useModalMesh)
+    + (useModalMesh ? _auxGpuCostUsd(input, env, !!backImageHttpsUrl) : 0)
+  ).toFixed(4);
 
   const remainingBudget = useModalMesh
     ? await checkAndIncrementModalSpend(env, ESTIMATED_USD_MESH, user.id)
@@ -4811,12 +4863,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     //   - back_view is explicitly false in the request
     //   - the caller already provided a back image (don't re-bill)
     //   - asset is icon (2D flat, no back to generate)
-    const isHardSurface = input.asset_type === 'vehicle'
-                       || input.asset_type === 'building'
-                       || input.asset_type === 'weapon'
-                       || input.asset_type === 'prop'
-                       || input.asset_type === 'avion'
-                       || input.asset_type === 'bateau';
+    const isHardSurface = HARD_SURFACE_TYPES.has(input.asset_type);
     // Per-asset_type back-view prompt hints. Empty string = generic
     // "back view, same subject" fallback baked into the Modal endpoint.
     // Avion/Bateau need explicit rear-geometry tokens because the sheet
@@ -4833,7 +4880,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     // training distribution. Re-enable when a per-shape back-view model
     // (or pose-conditioned diffusion) replaces the sheet pipeline.
     // Hard-surface aircraft + boats: explicit. Icon: already excluded.
-    const AUTO_BACKVIEW_SKIP: Set<string> = new Set(['avion', 'bateau']);
+    // (La liste elle-même vit au niveau module — voir AUTO_BACKVIEW_SKIP.)
     if (input.back_view !== false && !backImageHttpsUrl
         && input.asset_type !== 'icon'
         && !AUTO_BACKVIEW_SKIP.has(input.asset_type)) {
@@ -4841,7 +4888,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         let autoBackUrl: string | null = null;
         let autoMVViews: string[] = [];
         const backHint = BACK_VIEW_PROMPT_HINTS[input.asset_type] ?? '';
-        const isMVACandidate = input.asset_type === 'creature' || input.asset_type === 'animal';
+        const isMVACandidate = MVA_TYPES.has(input.asset_type);
         if (isHardSurface && env.MODAL_SHEET_URL) {
           // Wave 2.3 — sheet dispatch.
           autoBackUrl = await callModalSheet(env, user.id, {
