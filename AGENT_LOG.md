@@ -17547,3 +17547,29 @@ après le débit, une seule fois par requête) : handleUpscaleImage,
 handleRectifyImage, les ANIM_COST, l'insertion de job. Aucun n'est
 rejouable, aucun ne nécessite de réclamation. Vérifié fonction par
 fonction plutôt que supposé.
+
+## 2026-08-03 — RLS Supabase : VÉRIFIÉ SAIN (et une fausse alerte évitée)
+
+Contrôle empirique plutôt que lecture du schéma. Les 4 tables (profiles,
+jobs, payments, user_assets) ont RLS activé avec des politiques SELECT
+seules, scopées sur `auth.uid()`. Aucune politique INSERT/UPDATE n'étant
+définie, les écritures sont refusées — le worker passe par la clé
+service_role, qui contourne RLS.
+
+Testé avec la clé ANON, celle qui est PUBLIQUE et servie dans le bundle :
+  lecture profiles / jobs / payments / user_assets → 0 ligne
+  auto-crédit (UPDATE profiles)                    → 0 ligne modifiée
+  RPC add_credits / spend_credits                  → HTTP 401
+  INSERT payments                                  → HTTP 401
+
+FAUSSE ALERTE ÉVITÉE, à retenir : une écriture PostgREST avec
+`Prefer: return=minimal` renvoie **204 même quand RLS a bloqué et que
+ZÉRO ligne a été modifiée**. Mon premier test concluait donc à une faille
+d'auto-crédit inexistante. Il a fallu demander `return=representation`,
+compter les lignes réellement touchées, et recouper avec une lecture à la
+clé service avant/après pour trancher. Ne jamais conclure « ACCEPTÉ » sur
+un simple 2xx d'écriture.
+
+`scripts/check_rls.py` ajouté pour rejouer ce contrôle après toute
+migration SQL ou changement de politique. Sortie 1 en cas de faille, et
+le piège du 204 est documenté dans son en-tête.
