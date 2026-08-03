@@ -56,13 +56,25 @@ def decimate(glb_bytes: bytes, target_faces: int = 50_000) -> bytes:
     """Quadric edge collapse decimation. target_faces is the desired
     face count for the LARGEST mesh; smaller meshes get proportional
     decimation. Same defaults as the desktop preset 'medium'."""
+    # Imports locaux, comme partout ailleurs dans ce module : le haut du
+    # fichier ne garde volontairement aucun alias (le trimesh importe la
+    # est supprime apres la verification de version).
+    import numpy as np
+    import trimesh
     scene = _load_scene(glb_bytes)
     meshes = _meshes(scene)
     if not meshes:
         return glb_bytes
     max_faces = max(len(m.faces) for m in meshes if hasattr(m, 'faces'))
     if max_faces <= target_faces:
-        return glb_bytes  # already at or below the target
+        # NE PLUS RENVOYER LE MAILLAGE INTACT EN SILENCE. Le worker a deja
+        # debite le credit avant d'arriver ici : l'utilisateur payait, se
+        # voyait empiler une « nouvelle version » aux octets identiques, et
+        # n'avait aucun moyen de comprendre. On leve, l'operation est marquee
+        # en echec et le credit rembourse — meme politique que plus bas.
+        raise RuntimeError(
+            f'cible {target_faces} deja atteinte : le maillage compte '
+            f'{max_faces} triangles, rien a reduire')
     # PLUS DE PLANCHER A 0.05 : il bornait silencieusement la reduction a 5 %
     # du maillage d'origine. Viser 4 500 triangles sur un maillage de 489 000
     # donnait en fait ~24 000 — l'utilisateur ne pouvait pas comprendre
@@ -77,16 +89,53 @@ def decimate(glb_bytes: bytes, target_faces: int = 50_000) -> bytes:
         avant = len(m.faces)
         try:
             n = max(50, int(avant * ratio))
-            # face_count= OBLIGATOIRE : le 1er argument positionnel de trimesh 4.x
-            # est `percent` (0..1), pas un nombre de faces. Passer n=24464 en
-            # positionnel levait 'target_reduction must be between 0 and 1',
-            # exception avalee plus bas -> maillage renvoye INTACT.
-            m_new = m.simplify_quadric_decimation(face_count=n)
-            m.vertices = m_new.vertices
-            m.faces = m_new.faces
-            # visual (uv/texture) is dropped by simplify — that's a
-            # known trimesh limitation; the desktop accepts the same
-            # trade-off (texture re-bake is a separate Re-Texture op).
+            # PRESERVATION DE LA TEXTURE — portage du desktop
+            # (scripts/mesh_tools.py:143-176). L'ancien commentaire ici
+            # affirmait « the desktop accepts the same trade-off » : c'etait
+            # FAUX. Le desktop transfere les UV et reconstruit un
+            # TextureVisuals ; seul le cloud renvoyait un maillage nu. Or la
+            # correspondance de texture est l'exigence n°1 du produit, et
+            # l'utilisateur payait pour recevoir un modele gris.
+            #
+            # fast_simplification et scipy sont tous deux presents dans
+            # l'image Modal (voir app.py, .pip_install).
+            is_tex = isinstance(getattr(m, 'visual', None), trimesh.visual.TextureVisuals)
+            old_uv = (np.asarray(m.visual.uv, dtype=np.float32).copy()
+                      if (is_tex and getattr(m.visual, 'uv', None) is not None) else None)
+            old_mat = getattr(m.visual, 'material', None) if is_tex else None
+
+            new_uv = None
+            points = faces_out = None
+            if old_uv is not None:
+                verts = np.asarray(m.vertices, dtype=np.float32)
+                faces = np.asarray(m.faces, dtype=np.int32)
+                try:
+                    import fast_simplification
+                    from scipy.spatial import cKDTree
+                    points, faces_out = fast_simplification.simplify(
+                        verts, faces, target_reduction=1.0 - ratio)
+                    if old_uv.shape[0] == verts.shape[0]:
+                        # Transfert par plus proche voisin ORIGINAL :
+                        # replay_simplification plante (IndexError) sur
+                        # certains maillages reels, le KD-tree est robuste.
+                        _, nn = cKDTree(verts).query(np.asarray(points, dtype=np.float64))
+                        new_uv = old_uv[nn]
+                except Exception as e:
+                    print(f'[mesh-op] transfert UV impossible ({e}) — repli sans texture', flush=True)
+                    new_uv = None
+
+            if new_uv is not None:
+                m_new = trimesh.Trimesh(vertices=points, faces=faces_out, process=False)
+                m_new.visual = trimesh.visual.TextureVisuals(uv=new_uv, material=old_mat)
+                m.vertices = m_new.vertices
+                m.faces = m_new.faces
+                m.visual = m_new.visual
+            else:
+                # Pas d'UV exploitable : decimation simple. Le maillage
+                # n'avait de toute facon pas de texture a preserver.
+                m_new = m.simplify_quadric_decimation(face_count=n)
+                m.vertices = m_new.vertices
+                m.faces = m_new.faces
             if len(m.faces) < avant:
                 reduits += 1
         except Exception as e:

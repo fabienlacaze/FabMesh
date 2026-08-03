@@ -16936,3 +16936,40 @@ Note : pour les generations d'images, l'annulation cote serveur est
 STRUCTURELLEMENT impossible — elles sont synchrones et n'ont pas de ligne
 jobs pendant leur execution (meme cause que l'onglet Active vide). Le
 message le reflete au lieu de promettre un arret.
+
+## 2026-08-03 — Faux amis, lot 3 : la décimation cloud rendait un maillage GRIS
+
+Constat le plus grave de l'audit sur le plan produit : la décimation
+cloud DÉTRUISAIT la texture, alors que c'est l'exigence n°1 de FabMesh.
+
+Le commentaire en place affirmait « visual (uv/texture) is dropped by
+simplify — that's a known trimesh limitation; the desktop accepts the
+same trade-off ». C'était FAUX. Le desktop
+(scripts/mesh_tools.py:143-176) transfère les UV par cKDTree et
+reconstruit un TextureVisuals, avec un commentaire explicite disant que
+sans ça « the reduced mesh reloads untextured — a violation of FabMesh's
+#1 texture-match requirement ». Seul le cloud renvoyait un modèle nu, et
+l'utilisateur payait pour ça.
+
+Porté à l'identique dans modal_app/_mesh_op.decimate(). Les deux
+dépendances nécessaires étaient DÉJÀ dans l'image Modal
+(fast_simplification + scipy) : aucun rebuild d'image, aucune nouvelle
+dépendance.
+
+Second défaut de la même fonction : `if max_faces <= target_faces:
+return glb_bytes` renvoyait le maillage INTACT alors que le worker avait
+déjà débité le crédit (spendCredits, worker.ts:7496) et publiait les
+octets identiques comme « nouvelle version ». Lève désormais — même
+politique que le `if reduits == 0` déjà en place : l'opération est
+marquée en échec et le crédit remboursé.
+
+VÉRIFIÉ sur un vrai GLB texturé (97 411 triangles) :
+  avant  97411 triangles | 1 TextureVisuals | 1 avec UV
+  après  10914 triangles | 1 TextureVisuals | 1 avec UV
+  cible déjà atteinte -> lève bien au lieu de renvoyer intact
+
+À NOTER, non corrigé : la cible n'est pas atteinte exactement (5 000
+demandés -> 10 914 obtenus). `fast_simplification.target_reduction` est
+approximatif et s'arrête sur des contraintes de qualité. Le desktop a
+EXACTEMENT le même comportement, donc c'est de la parité — mais ça
+explique la plainte « si je fais triangle count ça ne change pas assez ».
