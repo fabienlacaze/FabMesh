@@ -17359,3 +17359,42 @@ La pastille recalcule maintenant le vrai total et se met à jour sur
 `ws-count` et `ws-mv-scope`. Une infobulle montre la composition
 (« 4 images × 2 + 4 vues arrière × 2 = 16 crédits ») pour éviter la
 question « pourquoi 16 alors que l'image est à 2 ? ».
+
+## 2026-08-03 — L'alarme de budget était désarmée, et /api/mesh-convert sans quota
+
+### L'alerte « budget Modal bientôt épuisé » ne pouvait JAMAIS se déclencher
+`_maybeAlertModalBudget` lisait le budget UNIQUEMENT depuis
+`_meta/modal_budget_total.txt`. VÉRIFIÉ : ce fichier n'existe pas. Donc
+`budget = 0`, et la fonction sortait à la deuxième ligne. Une sécurité
+désactivée par un fichier absent est pire qu'une sécurité absente : on se
+croit couvert.
+
+Correctif : repli sur `MODAL_BUDGET_USD` (wrangler.toml, réglé à 65.00 —
+le budget réel du workspace Modal vu dans la console), et trace explicite
+`ALARME INACTIVE` quand les deux sources sont vides. Un fichier manquant
+ne peut plus désarmer l'alerte en silence.
+
+### /api/mesh-convert n'avait AUCUN quota — lacune que J'AI introduite
+Relevée par l'audit (3 constats critiques sur cette seule route). En
+créant l'endpoint le 02/08 j'ai choisi de ne PAS facturer l'export —
+retélécharger son propre maillage dans un autre format ne doit rien
+coûter, et ça reste vrai. Mais j'en avais déduit à tort qu'aucun
+garde-fou n'était nécessaire.
+
+Or chaque appel démarre un conteneur Blender. Sans plafond, une boucle
+suffisait à faire tourner du calcul indéfiniment aux frais de
+l'exploitant. GRATUIT NE VEUT PAS DIRE ILLIMITÉ.
+
+Correctif : `checkAndIncrementUserCalls` — le même compteur quotidien que
+les opérations payantes. Réponse 429 explicite avec l'heure de remise à
+zéro.
+
+### Reste sur l'axe admin (non corrigé)
+- Segmentation chiffrée au tarif A10G alors que le GPU est un A100.
+- Les appels GPU automatiques de /api/generate (vue arrière, rectify,
+  MV-Adapter) ne sont comptés dans aucun compteur.
+- Génération d'images en lot : chaque ligne porte la durée du LOT entier,
+  donc le coût est multiplié par le nombre d'images.
+- Le flux d'usage réel Modal est toujours gelé — rendu VISIBLE (carte
+  rouge « PÉRIMÉ ») mais le poller scripts/modal_usage_push.py ne tourne
+  pas. C'est une tâche planifiée à mettre en place côté user.

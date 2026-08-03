@@ -154,6 +154,11 @@ MAX_DAILY_SPEND_USD = "4.00"
 # heavy dev/test; LOWERED to $10/day for commercial launch so a single bad day
 # can't run away. Raise again for heavy dev sessions if needed.
 MAX_DAILY_MODAL_SPEND_USD = "6.00"
+# Budget Modal du workspace (USD/mois). Sert de repli a l'alerte
+# « budget bientot epuise » quand _meta/modal_budget_total.txt est
+# absent — c'etait le cas, et l'alerte ne pouvait donc JAMAIS se
+# declencher. Valeur alignee sur le budget reel du workspace Modal.
+MODAL_BUDGET_USD = "65.00"
 # Per-user daily CALL cap. Was 1000 for heavy dev/test; LOWERED to 100 for
 # commercial launch to blunt abuse (a single account can't fire 1000 GPU jobs/
 # day). Combined with MAX_USER_DAILY_SPEND_USD below this bounds per-account

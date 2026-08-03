@@ -114,6 +114,10 @@ export interface Env {
   // Budget safeguards (override the defaults if set).
   MAX_DAILY_SPEND_USD?: string;       // Replicate-side cap (default $0.50)
   MAX_DAILY_MODAL_SPEND_USD?: string; // Modal-side cap   (default $2.00)
+  // Budget Modal du workspace, en USD. Repli quand
+  // _meta/modal_budget_total.txt est absent — sans lui l'alerte de
+  // budget etait desarmee en silence.
+  MODAL_BUDGET_USD?: string;
   RESEND_API_KEY?: string;            // Resend key for admin alert emails (optional; no-op if unset)
   ALERT_FROM_EMAIL?: string;          // From: for alert emails (Resend-verified domain; default onboarding@resend.dev)
   MODAL_USAGE_SECRET?: string;        // shared secret the modal-billing poller uses to push REAL usage
@@ -465,8 +469,26 @@ async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
  *  when severity worsens; cleared when the admin tops up (handleAdminModalSetBudget). */
 async function _maybeAlertModalBudget(env: Env): Promise<void> {
   if (!env.MESHES) return;
-  const budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
-  if (budget <= 0) return;
+  // ALARME DESARMEE EN SILENCE — corrigee le 2026-08-03.
+  //
+  // Le budget etait lu UNIQUEMENT depuis R2. Le fichier n'ayant jamais
+  // ete ecrit, budget valait 0 et la fonction sortait ici : l'alerte
+  // « budget Modal bientot epuise » ne pouvait STRUCTURELLEMENT jamais
+  // se declencher. Une sécurité desactivee par un fichier absent est
+  // pire qu'une securite absente : on croit etre couvert.
+  //
+  // Repli sur MODAL_BUDGET_USD (wrangler.toml) pour qu'un fichier
+  // manquant ne desarme plus rien, et trace explicite si les deux
+  // sources sont vides.
+  let budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
+  if (budget <= 0) {
+    budget = parseFloat(env.MODAL_BUDGET_USD ?? '') || 0;
+  }
+  if (budget <= 0) {
+    console.warn('[budget] ALARME INACTIVE : ni _meta/modal_budget_total.txt '
+               + 'ni MODAL_BUDGET_USD ne sont definis — aucune alerte ne sera envoyee');
+    return;
+  }
   // Prefer the REAL Modal workspace usage pushed by the billing poller (fresh
   // < 26h); otherwise fall back to the worker's own cost estimate.
   let usage = 0; let source: 'real' | 'estimate' = 'estimate';
@@ -7978,6 +8000,22 @@ async function handleMeshConvert(req: Request, env: Env): Promise<Response> {
   if (!src) return err(400, 'meshUrl required');
   // Same SSRF guard as handleMeshOp: meshUrl is user-controlled.
   if (!isTrustedAssetHost(env, src)) return err(400, 'meshUrl host not allowed');
+
+  // QUOTA — lacune introduite AVEC cette route le 2026-08-02, relevee par
+  // l'audit du 2026-08-03. J'avais deliberement choisi de ne PAS facturer
+  // l'export (retelecharger son propre maillage dans un autre format ne
+  // doit rien couter), mais j'en avais deduit a tort qu'aucun garde-fou
+  // n'etait necessaire. Chaque appel demarre un conteneur Blender : sans
+  // plafond, une boucle suffisait a faire tourner du calcul indefiniment
+  // aux frais de l'exploitant.
+  //
+  // On reutilise le compteur d'appels quotidiens partage (le meme que les
+  // operations payantes) : gratuit ne veut pas dire illimite.
+  const quota = await checkAndIncrementUserCalls(env, user.id);
+  if (quota == null) {
+    return err(429, 'Daily conversion limit reached for this account. '
+                  + 'It resets at midnight UTC.');
+  }
 
   const started = Date.now();
   try {
