@@ -17491,3 +17491,36 @@ n'est incrémenté qu'en cas de succès, le compteur journalier est bien
 remboursé sur le chemin de refus, et `_casIncrementCounter` sort AVANT
 d'écrire quand le plafond est atteint. Mes modifications du 02/08 ont
 déjà corrigé ce point. Noté pour ne pas le rechercher une troisième fois.
+
+## 2026-08-03 — Le poller de facturation Modal tourne enfin (tâche horaire)
+
+`_meta/modal_real_usage.json` était gelé depuis 46 jours : le dashboard
+retombait sur ses ESTIMATIONS et l'alerte de budget n'avait aucune donnée
+fraîche à comparer. Le script existait (scripts/modal_usage_push.py),
+personne ne l'avait planifié.
+
+`MODAL_USAGE_SECRET` était bien configuré côté worker mais Cloudflare ne
+permet pas de relire un secret. Plutôt que de le demander au user, je
+l'ai FAIT TOURNER : seul ce script l'utilise, donc la rotation est sans
+effet de bord. Nouveau secret (43 caractères) déployé sur le worker et
+stocké dans `%USERPROFILE%\.fabmesh\modal_usage_secret.txt` — jamais dans
+le dépôt, même emplacement que le jeton de l'API de contrôle.
+
+`scripts/push_modal_usage.cmd` : lit le secret depuis le profil, lance le
+script, journalise dans `~/.fabmesh/modal_usage.log`, et fait tourner le
+journal au-delà de 1 Mo pour qu'il ne grossisse pas indéfiniment.
+
+Tâche « MyFabmesh - Modal usage », horaire, créée sans élévation (elle
+tourne sous le compte utilisateur).
+
+VÉRIFIÉ DE BOUT EN BOUT — pas seulement « la tâche est créée » :
+  - exécution manuelle du script : HTTP 200
+  - exécution du .cmd : exit=0, journal écrit
+  - déclenchement de la TÂCHE PLANIFIÉE : deuxième ligne dans le journal
+  - relecture de _meta/modal_real_usage.json depuis R2 : 2,3454 $,
+    âge 0,2 min → la carte admin repasse au vert.
+
+LIMITE : la tâche ne tourne que quand la machine est allumée. Sur une
+journée où le poste reste éteint, le chiffre vieillit — d'où l'intérêt de
+l'indicateur de péremption ajouté ce matin, qui le dira au lieu de
+présenter une valeur périmée comme fraîche.
