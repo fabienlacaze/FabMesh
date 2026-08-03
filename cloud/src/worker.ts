@@ -5821,9 +5821,46 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
   return json({ ok: true, user_assets_deleted: aDel ?? 0, r2_deleted: r2Deleted });
 }
 
+/** Arrete REELLEMENT le conteneur Modal d'un job.
+ *
+ *  mesh_start avec op_type='cancel' relit le function_call ID persiste
+ *  dans /data/<job_id>.call_id et appelle FunctionCall.cancel().
+ *
+ *  Extrait de handleAdminCancelJob (audit du 2026-08-02) : ce vrai arret
+ *  n'existait QUE dans la route admin. L'annulation UTILISATEUR, elle,
+ *  appelait `replicateClient(env).predictions.cancel(id)` alors que les
+ *  travaux portent un id `modal_<uuid>` et tournent sur Modal — l'appel
+ *  echouait, etait avale par un catch, et le GPU continuait de tourner
+ *  aux frais de l'exploitant pendant que l'utilisateur voyait « annule ».
+ *
+ *  Ne leve jamais : la comptabilite Supabase doit se faire meme si Modal
+ *  est injoignable. Retourne l'issue pour que l'appelant puisse le dire. */
+async function _cancelModalJob(env: Env, jobId: string): Promise<{ cancelled: boolean; error: string | null }> {
+  if (!env.MODAL_MESH_START_URL || !env.MODAL_SHARED_SECRET) {
+    return { cancelled: false, error: 'Modal non configure' };
+  }
+  try {
+    const mr = await fetch(env.MODAL_MESH_START_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: env.MODAL_SHARED_SECRET,
+        op_type: 'cancel',
+        job_id: jobId,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!mr.ok) return { cancelled: false, error: `HTTP ${mr.status}` };
+    const mj = await mr.json() as { cancelled?: boolean; error?: string };
+    return { cancelled: !!mj.cancelled, error: mj.error || null };
+  } catch (e) {
+    return { cancelled: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /**
- * Cancel an in-flight Replicate prediction and mark the job canceled.
- * Refunds the credits spent at job creation.
+ * Annule un job en cours : arrete le conteneur Modal, marque le job
+ * annule, rembourse les credits.
  */
 async function handleJobCancel(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
@@ -5844,16 +5881,25 @@ async function handleJobCancel(req: Request, env: Env): Promise<Response> {
     return json({ ok: true, alreadyDone: true });
   }
 
-  // Best-effort Replicate cancellation. Continue even if it fails — the
-  // local status update is the source of truth for the UI.
-  try { await replicateClient(env).predictions.cancel(id); } catch (_) { /* ignore */ }
+  // Arret REEL du conteneur, cote Modal. Avant, on appelait Replicate —
+  // qui n'heberge plus rien depuis la migration : l'appel echouait en
+  // silence et le GPU continuait de tourner alors que l'utilisateur
+  // voyait « annule » et que le credit lui etait rendu. On payait donc
+  // le calcul ET le remboursement.
+  const modal = await _cancelModalJob(env, id);
+  if (!modal.cancelled) {
+    console.warn(`[jobs/cancel] arret Modal non confirme pour ${id}: ${modal.error || 'inconnu'}`);
+  }
+
   await sb.from('jobs')
     .update({ status: 'canceled', finished_at: new Date().toISOString() })
     .eq('id', id);
   if (typeof job.credit_cost === 'number') {
     await addCredits(env, user.id as string, job.credit_cost);
   }
-  return json({ ok: true });
+  // `modalStopped` remonte l'issue REELLE : l'interface ne doit plus
+  // affirmer que tout est arrete quand seul le registre a change.
+  return json({ ok: true, modalStopped: modal.cancelled, modalError: modal.error });
 }
 
 /**
@@ -11881,33 +11927,13 @@ async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
   // ID we saved in /data/<job_id>.call_id and runs FunctionCall.cancel().
   // Falls through silently if Modal is unreachable so the Supabase
   // bookkeeping still happens.
-  let modalCancelled = false;
-  let modalError: string | null = null;
-  if (env.MODAL_MESH_START_URL && env.MODAL_SHARED_SECRET) {
-    try {
-      const mr = await fetch(env.MODAL_MESH_START_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          _auth: env.MODAL_SHARED_SECRET,
-          op_type: 'cancel',
-          // Modal mesh_start persisted call_id under the same job_id it
-          // received from the worker — full `modal_<uuid>` prefix.
-          job_id: jobId,
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (mr.ok) {
-        const mj = await mr.json() as { cancelled?: boolean; error?: string };
-        modalCancelled = !!mj.cancelled;
-        modalError = mj.error || null;
-      } else {
-        modalError = `HTTP ${mr.status}`;
-      }
-    } catch (e) {
-      modalError = e instanceof Error ? e.message : String(e);
-    }
-  }
+  // Meme helper que l'annulation utilisateur : une seule implementation
+  // de l'arret Modal, pour qu'elles ne puissent plus diverger comme
+  // elles l'avaient fait (admin = vrai arret, utilisateur = appel
+  // Replicate mort).
+  const _mc = await _cancelModalJob(env, jobId);
+  const modalCancelled = _mc.cancelled;
+  const modalError = _mc.error;
   if (refund) {
     await addCredits(env, j.user_id, j.credit_cost);
   }

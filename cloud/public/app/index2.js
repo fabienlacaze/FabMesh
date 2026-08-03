@@ -17535,13 +17535,38 @@ async function cancelJob(id) {
   j.progress = 100;
   j.name += ' (cancelled)';
   renderJobs();
-  // If the IPC supports cancellation, fire it.
-  // Forward the REAL worker job id (captured when /api/generate
-  // returned), not the local UI counter `id` — the Worker indexes
-  // jobs by its own id, not ours.
+  // Annulation cote serveur. On EXPLOITE desormais la reponse : avant,
+  // l'interface affichait « annule » quoi qu'il arrive, alors que
+  // `workerJobId` n'est renseigne QUE pour la generation de maillage.
+  // Pour tous les autres travaux on envoyait le compteur local `id`, que
+  // le serveur ne connait pas : rien n'etait annule, rien n'etait
+  // rembourse, et l'utilisateur croyait que si.
   try {
-    if (API.cancelJob) await API.cancelJob(j.workerJobId || id);
-  } catch (e) { console.warn('cancelJob IPC failed:', e); }
+    if (API.cancelJob) {
+      if (!j.workerJobId) {
+        // Aucune poignee serveur : le travail est synchrone (images) ou
+        // n'a jamais renvoye d'identifiant. Il n'y a rien a arreter a
+        // distance — on le dit plutot que de le laisser croire.
+        showToast('Arrêté dans l’interface. Le traitement déjà lancé '
+          + 'côté serveur ira à son terme et reste facturé.', 'warn', 7000);
+      } else {
+        const r = await API.cancelJob(j.workerJobId);
+        if (r && r.ok === false) {
+          showToast('Annulation refusée par le serveur : '
+            + (r.error || 'raison inconnue'), 'error', 7000);
+        } else if (r && r.modalStopped === false) {
+          // Le registre est a jour et le credit rendu, mais le conteneur
+          // GPU n'a pas confirme son arret : autant le dire.
+          showToast('Travail annulé et crédits rendus, mais l’arrêt du GPU '
+            + 'n’a pas été confirmé — le résultat peut encore arriver.',
+            'warn', 7000);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('cancelJob failed:', e);
+    showToast('L’annulation n’a pas pu être transmise au serveur.', 'error', 6000);
+  }
   if (j.onCancel) {
     try { j.onCancel(); } catch (e) {}
   }

@@ -16901,3 +16901,38 @@ pastille de coût image (annonce 2 cr, débite jusqu'à 16), styles d'asset
 - Cloud déployé (version a4204e1f) : refine/face_fix/smooth ne sont plus
   facturés.
 - Store : 1.0.14 soumis, en attente de certification.
+
+## 2026-08-03 — Faux amis, lot 2 : l'annulation n'annulait rien
+
+Deux bugs distincts sur le meme bouton, tous deux confirmes par l'audit.
+
+SERVEUR — `handleJobCancel` appelait
+`replicateClient(env).predictions.cancel(id)`. Or les travaux portent un
+id `modal_<uuid>` et tournent sur Modal depuis la migration : l'appel
+echouait, etait avale par un `catch (_)`, puis le handler marquait
+`canceled` et REMBOURSAIT les credits. Consequence : l'exploitant payait
+le GPU jusqu'au bout ET remboursait le client. Le vrai arret
+(op_type='cancel' -> FunctionCall.cancel via /data/<job_id>.call_id)
+n'existait QUE dans la route admin.
+
+Correction : `_cancelModalJob()` extrait de handleAdminCancelJob, utilise
+par les DEUX routes — une seule implementation, elles ne peuvent plus
+diverger. La reponse expose `modalStopped` pour que l'interface arrete
+d'affirmer ce qu'elle ne sait pas.
+
+CLIENT — `cancelJob()` marquait le travail « (cancelled) » AVANT l'appel
+et ignorait la reponse. Surtout, `j.workerJobId` n'est renseigne QUE pour
+la generation de maillage (un seul site dans tout le depot,
+index2.js:8648). Pour les images, l'auto-rig et l'animation on envoyait
+donc le compteur d'interface local, inconnu du serveur : rien d'annule,
+rien de rembourse, et l'utilisateur convaincu du contraire.
+
+Correction : la reponse est exploitee. Sans poignee serveur, on dit que
+le traitement ira a son terme et reste facture. Si `modalStopped` est
+faux, on dit que les credits sont rendus mais que le resultat peut encore
+arriver. Plus aucune affirmation non verifiee.
+
+Note : pour les generations d'images, l'annulation cote serveur est
+STRUCTURELLEMENT impossible — elles sont synchrones et n'ont pas de ligne
+jobs pendant leur execution (meme cause que l'onglet Active vide). Le
+message le reflete au lieu de promettre un arret.
