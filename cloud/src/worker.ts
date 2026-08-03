@@ -6075,26 +6075,52 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
  *  Ne leve jamais : la comptabilite Supabase doit se faire meme si Modal
  *  est injoignable. Retourne l'issue pour que l'appelant puisse le dire. */
 async function _cancelModalJob(env: Env, jobId: string): Promise<{ cancelled: boolean; error: string | null }> {
-  if (!env.MODAL_MESH_START_URL || !env.MODAL_SHARED_SECRET) {
+  if (!env.MODAL_SHARED_SECRET) {
     return { cancelled: false, error: 'Modal non configure' };
   }
-  try {
-    const mr = await fetch(env.MODAL_MESH_START_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        _auth: env.MODAL_SHARED_SECRET,
-        op_type: 'cancel',
-        job_id: jobId,
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!mr.ok) return { cancelled: false, error: `HTTP ${mr.status}` };
-    const mj = await mr.json() as { cancelled?: boolean; error?: string };
-    return { cancelled: !!mj.cancelled, error: mj.error || null };
-  } catch (e) {
-    return { cancelled: false, error: e instanceof Error ? e.message : String(e) };
+  // DISPATCH VERS LA BONNE APP MODAL.
+  //
+  // Cette fonction n'interrogeait que mesh_start, qui relit
+  // /data/<job_id>.call_id — le volume de l'app MAILLAGE. Un job de rig,
+  // de segmentation ou d'animation tourne sur une AUTRE app, avec son
+  // propre volume : l'annulation ne pouvait donc pas les atteindre, et
+  // seuls les maillages s'arretaient vraiment.
+  //
+  // Chacune de ces apps accepte le meme contrat `op_type: 'cancel'` (voir
+  // _puppeteer_rig.py: /rig_data/<job_id>.call_id). On essaie donc les
+  // endpoints configures jusqu'a ce que l'un reconnaisse le job.
+  const cibles = [
+    env.MODAL_MESH_START_URL,
+    env.MODAL_PUPPETEER_RIG_URL,
+    env.MODAL_SEGMENT_URL,
+    env.MODAL_ANYTOP_ANIM_URL,
+  ].filter(Boolean) as string[];
+  if (!cibles.length) return { cancelled: false, error: 'aucun endpoint Modal configure' };
+
+  let derniereErreur: string | null = null;
+  for (const url of cibles) {
+    try {
+      const mr = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          _auth: env.MODAL_SHARED_SECRET,
+          op_type: 'cancel',
+          job_id: jobId,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!mr.ok) { derniereErreur = `HTTP ${mr.status}`; continue; }
+      const mj = await mr.json() as { cancelled?: boolean; error?: string; reason?: string };
+      // Seule une confirmation compte : les autres apps repondent
+      // « no call_id on file » pour un job qui ne leur appartient pas.
+      if (mj.cancelled) return { cancelled: true, error: null };
+      derniereErreur = mj.error || mj.reason || null;
+    } catch (e) {
+      derniereErreur = e instanceof Error ? e.message : String(e);
+    }
   }
+  return { cancelled: false, error: derniereErreur };
 }
 
 /**

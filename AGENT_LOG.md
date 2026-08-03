@@ -17463,3 +17463,31 @@ NON TESTÉ : déclencher un vrai remboursement Stripe en test demanderait
 un paiement de test puis son remboursement depuis le tableau de bord
 Stripe. Le code compile et la logique est vérifiée par lecture, mais le
 chemin n'a pas été exercé.
+
+## 2026-08-03 — L'annulation n'atteignait que les maillages
+
+Suite du correctif de ce matin. `_cancelModalJob` n'interrogeait que
+`mesh_start`, qui relit `/data/<job_id>.call_id` — le volume de l'app
+MAILLAGE. Or un rig, une segmentation ou une animation tourne sur une
+AUTRE app Modal, avec son propre volume. Mon correctif ne couvrait donc
+que les maillages : pour les trois autres, le GPU continuait de tourner
+pendant que les crédits étaient rendus.
+
+Vérifié que ces apps savent s'annuler : `_puppeteer_rig.py:996-1024`
+accepte le même contrat `op_type: 'cancel'` et relit
+`/rig_data/<job_id>.call_id`. Le mécanisme existait, il n'était
+simplement pas appelé.
+
+`_cancelModalJob` essaie maintenant les quatre endpoints configurés
+jusqu'à ce que l'un CONFIRME l'annulation — les autres répondent « no
+call_id on file » pour un job qui ne leur appartient pas, ce qui n'est
+pas traité comme un succès.
+
+### Constat d'audit qui NE SE REPRODUIT PAS
+« Le refus par cap personnel débite le compteur cumulé global d'une somme
+jamais créditée » : vérifié ligne à ligne dans
+`checkAndIncrementModalSpend`. L'ordre est correct — le total cumulé
+n'est incrémenté qu'en cas de succès, le compteur journalier est bien
+remboursé sur le chemin de refus, et `_casIncrementCounter` sort AVANT
+d'écrire quand le plafond est atteint. Mes modifications du 02/08 ont
+déjà corrigé ce point. Noté pour ne pas le rechercher une troisième fois.
