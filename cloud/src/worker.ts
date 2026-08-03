@@ -5210,6 +5210,13 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
   const rows = (jobsRes.data ?? []) as CloudJobRow[];
   const map = new Map<string, ProjEntry>();
   for (const j of rows) {
+    // Projet supprime par l'utilisateur : la ligne est conservee pour la
+    // comptabilite (credits, cout, statistiques) mais ne doit plus
+    // reformer de projet visible. Avant, la suppression mettait
+    // project_name a null, ce qui etait reinterprete plus bas en
+    // '_orphans' cote client : la carte revenait au rechargement suivant,
+    // avec tous ses maillages.
+    if (j.project_name === '_deleted') continue;
     const name = j.project_name
       || (j.options?.project_name as string | undefined)
       || `Project ${j.id.slice(-6)}`;
@@ -5326,7 +5333,12 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     .limit(500);
   if (error) return err(500, error.message);
 
-  const meshes = await Promise.all(((data ?? []) as CloudJobRow[]).map(async j => {
+  const meshes = await Promise.all(((data ?? []) as CloudJobRow[])
+    // Meme filtre que la reconstruction des projets : sans lui, les
+    // maillages d'un projet supprime reapparaissaient dans la liste et
+    // le client en reformait une carte '_orphans'.
+    .filter(j => j.project_name !== '_deleted')
+    .map(async j => {
     // C7: name meshes like the desktop convention so meshProject()
     // strips down to the project name. Format:
     //   <safe_project>_trellis2_<timestamp_10digits>.glb
@@ -5810,8 +5822,48 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
 
   const sb = supabaseAdmin(env);
   // Detach mesh jobs from the project.
+  // SUPPRIMER VRAIMENT LES MAILLAGES. La confirmation dit « Delete
+  // project "X" and all its files? » — le desktop fait bien un rmSync du
+  // dossier images + unlink de TOUS les maillages. Le cloud, lui, se
+  // contentait de mettre project_name a null : les GLB restaient en R2
+  // (stockage facture, et donnee NON EFFACEE alors que l'utilisateur a
+  // demande sa suppression — enjeu RGPD), et le projet RESSUSCITAIT au
+  // rechargement suivant, `project_name: null` etant reinterprete en
+  // '_orphans' cote client.
+  let meshesSupprimes = 0;
+  try {
+    const { data: jobsDuProjet } = await sb.from('jobs')
+      .select('id, mesh_url')
+      .eq('user_id', user.id)
+      .eq('project_name', projectName);
+    if (env.MESHES && jobsDuProjet && jobsDuProjet.length) {
+      const cles = new Set<string>();
+      for (const j of jobsDuProjet as Array<{ id: string; mesh_url?: string | null }>) {
+        // Emplacement canonique du GLB d'un job (voir handleJobStatus).
+        cles.add(`${user.id}/${j.id}.glb`);
+        // mesh_url peut etre une cle R2 ou une URL signee : on n'accepte
+        // que ce qui appartient au prefixe de l'utilisateur, jamais une
+        // cle arbitraire (meme garde que la suppression d'actifs).
+        const u = j.mesh_url;
+        if (typeof u === 'string' && u && !/^https?:/i.test(u)
+            && u.startsWith(`${user.id}/`)) {
+          cles.add(u);
+        }
+      }
+      await Promise.allSettled([...cles].map(k =>
+        env.MESHES.delete(k).then(() => { meshesSupprimes++; }).catch(() => {})
+      ));
+    }
+  } catch (e) {
+    console.warn('[cloud-projects/delete] purge des maillages echouee:', e);
+  }
+
+  // Marqueur explicite plutot que null : une valeur nulle etait
+  // reinterpretee en projet '_orphans' et la carte revenait. On conserve
+  // la ligne (elle porte la comptabilite : credits, cout, statistiques)
+  // mais elle ne peut plus reformer un projet visible.
   const { error } = await sb.from('jobs')
-    .update({ project_name: null })
+    .update({ project_name: '_deleted' })
     .eq('user_id', user.id)
     .eq('project_name', projectName);
   if (error) return err(500, error.message);
@@ -5870,7 +5922,8 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
       } while (cursor);
     }
   }
-  return json({ ok: true, user_assets_deleted: aDel ?? 0, r2_deleted: r2Deleted });
+  return json({ ok: true, user_assets_deleted: aDel ?? 0, r2_deleted: r2Deleted,
+                meshes_deleted: meshesSupprimes });
 }
 
 /** Arrete REELLEMENT le conteneur Modal d'un job.

@@ -17288,3 +17288,31 @@ VÉRIFIÉ sur une sphère à 2 trous (3 et 24 arêtes) :
   défaut          → réparé (27 → 0 arêtes de bord)
   plage vide      → LÈVE, octets identiques à l'entrée
   plage large     → 2 boucles remplies
+
+## 2026-08-03 — Faux amis, lot 6 : « supprimer un projet » ne supprimait rien
+
+La confirmation dit « Delete project "X" and all its files? » des DEUX
+côtés. Le desktop fait bien un rmSync du dossier images + unlink de TOUS
+les maillages. Le cloud se contentait de mettre `project_name` à null.
+
+Trois conséquences :
+- Les GLB des jobs (`${user_id}/${job_id}.glb`) restaient en R2 :
+  stockage facturé, et surtout DONNÉE NON EFFACÉE alors que
+  l'utilisateur a explicitement demandé sa suppression — enjeu RGPD.
+- Le projet RESSUSCITAIT : `project_name: null` était réinterprété en
+  '_orphans' côté client, la carte revenait au rechargement suivant avec
+  tous ses maillages.
+- Supprimer la carte '_orphans' ne réglait rien : la branche spéciale ne
+  purge que <uid>/mesh-op/, <uid>/rigged/ et <uid>/animations/.
+
+Correctif :
+- Purge R2 des GLB de chaque job du projet (emplacement canonique +
+  mesh_url quand c'est une clé), avec la MÊME garde de préfixe que la
+  suppression d'actifs : jamais une clé hors `${user.id}/`.
+- `project_name` passe à '_deleted' au lieu de null. La ligne est
+  CONSERVÉE (elle porte crédits, coût, statistiques — la supprimer
+  fausserait la comptabilité) mais ne peut plus reformer un projet.
+- Filtre `!== '_deleted'` aux DEUX points de reconstruction : la liste
+  des projets ET la liste des maillages. Sans le second, les maillages
+  seraient réapparus et le client en aurait reformé une carte.
+- `meshes_deleted` remonté dans la réponse.
