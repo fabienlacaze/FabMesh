@@ -1787,14 +1787,42 @@ function timingSafeEqualHex(a: string, b: string): boolean {
  *  profile, jobs, payments, R2 keys (just the names, not the bytes).
  *  Stream a JSON blob the user can download and feed to another
  *  provider if they want. */
+/** Volet marketplace de l'export RGPD : ce que la boutique détient sur un
+ *  compte, en dehors de son préfixe R2. Le vendeur doit pouvoir constater
+ *  que son e-mail y est stocké et que son compte Stripe y est rattaché. */
+async function _exportMarketplaceDuCompte(env: Env, userId: string): Promise<{
+  fiches_en_vente: unknown[]; achats: string[]; vendeur: unknown;
+}> {
+  const vide = { fiches_en_vente: [], achats: [], vendeur: null };
+  if (!env.MESHES) return vide;
+  try {
+    const toutes = await _loadAllListings(env);
+    const fiches = toutes.filter((f) => f.user_id === userId);
+    const achats: string[] = [];
+    for (const f of toutes) {
+      if (await env.MESHES.head(`_market/owners/${f.id}/${userId}.json`)) achats.push(f.id);
+    }
+    const vTxt = await r2GetText(env, `_market/sellers/${userId}.json`);
+    return {
+      fiches_en_vente: fiches,
+      achats,
+      vendeur: vTxt ? JSON.parse(vTxt) as unknown : null,
+    };
+  } catch {
+    return vide;
+  }
+}
+
 async function handleMeExport(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   const sb = supabaseAdmin(env);
-  const [profile, jobs, payments] = await Promise.all([
+  const [profile, jobs, payments, assets] = await Promise.all([
     sb.from('profiles').select('*').eq('id', user.id).maybeSingle(),
     sb.from('jobs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5000),
     sb.from('payments').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5000),
+    // Manquait à l'appel : l'arborescence nominative des projets.
+    sb.from('user_assets').select('*').eq('user_id', user.id).limit(5000),
   ]);
   const r2Keys: Array<{ key: string; size: number; uploaded: string; download_url: string }> = [];
   if (env.MESHES) {
@@ -1821,6 +1849,11 @@ async function handleMeExport(req: Request, env: Env): Promise<Response> {
     profile: profile.data ?? null,
     jobs: jobs.data ?? [],
     payments: payments.data ?? [],
+    user_assets: assets.data ?? [],
+    // La marketplace était absente de l'export alors qu'elle détient des
+    // données du compte : fiches mises en vente (avec l'e-mail en clair),
+    // achats effectués, et le rattachement Stripe Connect du vendeur.
+    marketplace: await _exportMarketplaceDuCompte(env, user.id),
     r2_keys: r2Keys,
   };
   return new Response(JSON.stringify(body, null, 2), {
@@ -1867,11 +1900,43 @@ async function handleMeDelete(req: Request, env: Env): Promise<Response> {
       pages++;
     } while (cursor && pages < 50);
   }
+  // RGPD — les traces qui vivent HORS du préfixe `<uid>/`. La boucle
+  // ci-dessus ne balaie que les objets du compte : tout ce qui suit
+  // survivait intégralement à une demande de suppression.
+  if (env.MESHES) {
+    for (const cle of [`_logs/latest/${user.id}.log`,      // journaux console
+                       `_meta/paid/${user.id}`,            // drapeau compte payant
+                       `_market/sellers/${user.id}.json`]) { // lien Stripe Connect
+      await env.MESHES.delete(cle).catch(() => {});
+    }
+    // Les fiches marketplace stockent `author_email` EN CLAIR — il n'est
+    // masqué qu'à la lecture publique, donc l'e-mail restait sur disque après
+    // la fermeture du compte. Elles resteraient en plus en vente au nom d'un
+    // compte disparu, avec un reversement voué à l'échec. On les dépublie et
+    // on les anonymise SANS les supprimer : les acheteurs doivent garder
+    // l'accès à ce qu'ils ont déjà payé.
+    try {
+      for (const fiche of await _loadAllListings(env)) {
+        if (fiche.user_id !== user.id) continue;
+        fiche.author_email = null;
+        fiche.author_display = 'Compte supprimé';
+        fiche.status = 'rejected';
+        fiche.rejection_reason = 'compte supprimé par son titulaire';
+        await env.MESHES.put(`_market/listings/${fiche.id}.json`, JSON.stringify(fiche),
+                             { httpMetadata: { contentType: 'application/json' } });
+      }
+    } catch (e) {
+      console.warn('[rgpd] anonymisation des fiches:', (e as Error).message);
+    }
+  }
   // Drop rows. payments + jobs cascade via FK on auth.users when we
   // delete the auth.users row, but doing them explicitly here ensures
   // a partial-failure state still leaves an empty account.
   await sb.from('payments').delete().eq('user_id', user.id);
   await sb.from('jobs').delete().eq('user_id', user.id);
+  // user_assets n'était PAS effacée : elle garde r2_path, project et meta,
+  // soit l'arborescence nominative des projets du compte.
+  await sb.from('user_assets').delete().eq('user_id', user.id);
   await sb.from('profiles').delete().eq('id', user.id);
   // Finally delete the Supabase auth user — admin API endpoint.
   const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? '';

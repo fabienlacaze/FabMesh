@@ -17660,3 +17660,22 @@ structure ; seule la facture tranche le montant.
 CONSÉQUENCE RASSURANTE pour la tarification : le 0,37 $ ayant servi à fixer
 les prix est confirmé par la facture (0,376 $ réel, tout compris). Les marges
 calculées tiennent.
+
+## 2026-08-03 — RGPD : suppression et export étaient tous deux incomplets
+
+`/api/me/delete` ne balayait que le préfixe R2 `<uid>/`. Survivaient à une
+demande de suppression : les journaux console (`_logs/latest/<uid>.log`), le
+drapeau compte payant (`_meta/paid/<uid>`), le rattachement Stripe Connect
+(`_market/sellers/<uid>.json`), la table `user_assets` (r2_path, project,
+meta — l'arborescence nominative), et surtout les fiches marketplace, qui
+stockent `author_email` EN CLAIR : l'e-mail n'est masqué qu'à la lecture
+publique, pas sur disque.
+
+Les fiches sont désormais dépubliées et anonymisées, PAS supprimées : les
+acheteurs doivent garder l'accès à ce qu'ils ont payé. Sans ça elles
+seraient restées en vente au nom d'un compte disparu, avec un reversement
+voué à l'échec.
+
+`/api/me/export` avait le même angle mort, en miroir. Il exporte maintenant
+`user_assets` et le volet marketplace (fiches en vente, achats, vendeur) —
+le titulaire doit pouvoir constater que son e-mail y est stocké.
