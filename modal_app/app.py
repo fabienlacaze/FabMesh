@@ -1413,7 +1413,28 @@ mesh_output_volume = modal.Volume.from_name(
     gpu="L40S",
     timeout=900,           # full TRELLIS-2 pipeline can run ~5-10 min cold
     scaledown_window=300,  # keep warm 5 min after last call so back-to-back gens stay fast
-    enable_memory_snapshot=False,  # flex_gemm's @triton_autotune needs GPU at import
+    # SNAPSHOT GPU ACTIVE LE 2026-08-04, apres mesure sur une app isolee.
+    #
+    # C'etait `enable_memory_snapshot=False`, au motif — exact a l'epoque —
+    # que l'import de flex_gemm/cumesh declenche des `@triton_autotune` qui
+    # exigent un GPU, alors qu'un snapshot memoire classique se prend SANS
+    # GPU. Consequence : 211,6 s de rechargement complet a CHAQUE demarrage
+    # a froid, pour 130 s de calcul utile.
+    #
+    # `enable_gpu_snapshot` (modal 1.4.3) prend la photo AVEC un GPU attache,
+    # ce qui leve exactement ce blocage. Verifie sur l'app separee
+    # `myfabmesh-gpusnap-test` (voir modal_app/test_gpusnap.py), trois
+    # preuves distinctes :
+    #   1. journal Modal « Creating GPU memory snapshot » puis « Restoring
+    #      Function from memory snapshot » ;
+    #   2. temps mur 253,8 s a la creation, puis 16,8 s et 17,4 s aux appels
+    #      suivants — le dernier apres 3 min d'attente, conteneur eteint a
+    #      coup sur ;
+    #   3. inference reelle sur le snapshot restaure : GLB de 1,52 Mo,
+    #      en-tete « glTF » valide. Charger sans erreur ne prouve pas que le
+    #      contexte CUDA ressuscite calcule juste — il fallait le verifier.
+    enable_memory_snapshot=True,
+    experimental_options={"enable_gpu_snapshot": True},
     volumes={"/data": mesh_output_volume},
     secrets=[
         modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
@@ -1421,15 +1442,20 @@ mesh_output_volume = modal.Volume.from_name(
     ],
 )
 class MyFabmeshMesh:
-    @modal.enter()
+    @modal.enter(snap=True)
     def load_everything(self):
         """All TRELLIS-2 loading happens here (GPU attached).
 
         Mirror of scripts/trellis2_native_full_pipeline.py:main().
-        We CANNOT use @modal.enter(snap=True) because flex_gemm /
-        cumesh chain decorate module-level kernels with @triton_autotune
-        which calls driver.active.get_benchmarker() at IMPORT time.
-        Without a GPU that fails with "0 active drivers"."""
+
+        HISTORIQUE — le commentaire d'origine disait : « We CANNOT use
+        @modal.enter(snap=True) because flex_gemm / cumesh chain decorate
+        module-level kernels with @triton_autotune which calls
+        driver.active.get_benchmarker() at IMPORT time. Without a GPU that
+        fails with "0 active drivers". » C'etait vrai des snapshots CPU.
+        Le snapshot GPU active sur la classe attache un GPU pendant la prise
+        de la photo : `snap=True` fonctionne desormais. Verifie, voir le
+        commentaire du decorateur ci-dessus."""
         t0 = time.time()
         print("[mesh/ready] importing trellis2 + loading TRELLIS.2-4B…", flush=True)
         import sys

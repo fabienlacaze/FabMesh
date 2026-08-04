@@ -34,8 +34,17 @@ import modal
 
 # On reutilise TELLE QUELLE l'image de production : tester sur une image
 # differente ne prouverait rien sur le cas reel.
+#
+# DOUBLE CHEMIN D'IMPORT, indispensable : en local le fichier est dans
+# modal_app/ et `from app import` suffit ; dans le conteneur Modal il est
+# depose a /root/ tandis que le paquet est monte sous `modal_app`. Le
+# premier jet n'avait que la forme locale et echouait a l'execution sur
+# « No module named 'app' ».
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from app import mesh_image  # noqa: E402
+try:
+    from modal_app.app import mesh_image  # dans le conteneur
+except ImportError:
+    from app import mesh_image            # en local
 
 app = modal.App("myfabmesh-gpusnap-test")
 
@@ -93,6 +102,42 @@ class SnapshotGpuTest:
         self.pipeline.cuda()
         self.duree = time.time() - t0
         print(f"[test] chargement + passage GPU en {self.duree:.1f}s", flush=True)
+
+    @modal.method()
+    def generer(self) -> dict:
+        """PREUVE MANQUANTE : le modele RESTAURE genere-t-il vraiment ?
+
+        Le test de chargement ne prouve que la restauration. Un contexte CUDA
+        ressuscite peut tres bien charger sans erreur puis produire n'importe
+        quoi a l'inference (handles cuBLAS, caches d'autotune triton...).
+        Tant que ce point n'est pas verifie, on ne touche pas a la production
+        — la lecon du jour, c'est que les regressions se trouvent en TESTANT,
+        pas en relisant."""
+        from PIL import Image, ImageDraw
+
+        sys.path.insert(0, "/opt/trellis2_local")
+        import o_voxel
+        from modal_app import _mesh
+
+        # Image SYNTHETIQUE, dessinee sur place. Un telechargement introduirait
+        # une dependance reseau qui peut echouer pour des raisons etrangeres au
+        # test (premier jet : Wikimedia a renvoye un 400 sur la taille de
+        # vignette). Ce qu'on veut prouver ici, c'est que l'inference tourne et
+        # rend un GLB valide — une forme simple suffit.
+        img = Image.new("RGB", (512, 512), (255, 255, 255))
+        d = ImageDraw.Draw(img)
+        d.ellipse([140, 120, 372, 352], fill=(200, 60, 50))
+        d.rectangle([206, 340, 306, 430], fill=(90, 70, 50))
+
+        t0 = time.time()
+        glb = _mesh.generate(self.pipeline, o_voxel, img, mode="512", seed=7,
+                             decimation_target=50_000, texture_size=512)
+        return {
+            "inference_s": round(time.time() - t0, 1),
+            "glb_octets": len(glb),
+            # Un GLB valide commence par la signature « glTF ».
+            "entete_glb_valide": glb[:4] == b"glTF",
+        }
 
     @modal.method()
     def mesurer(self) -> dict:

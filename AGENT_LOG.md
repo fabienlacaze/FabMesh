@@ -17875,3 +17875,48 @@ LEÇON : un commentaire qui documente une décision passée mérite d'être lu
 AVANT de l'écraser — mais il doit aussi être relu à la lumière de ce qui a
 changé depuis. Ici les deux étaient vrais : la raison était bonne, et elle
 avait cessé de s'appliquer.
+
+## 2026-08-04 — Snapshot GPU activé sur le maillage : 211 s → ~17 s
+
+Le code de production portait `enable_memory_snapshot=False` avec un motif
+documenté et exact À L'ÉPOQUE : l'import de flex_gemm/cumesh déclenche des
+`@triton_autotune` qui exigent un GPU, or un snapshot mémoire classique se
+prend SANS GPU. D'où 211,6 s de rechargement complet à chaque démarrage à
+froid, pour 130 s de calcul utile.
+
+`experimental_options={"enable_gpu_snapshot": True}` (présent dans modal
+1.4.3) prend la photo AVEC un GPU attaché — exactement la levée de ce
+blocage.
+
+VALIDÉ SUR UNE APP SÉPARÉE (`myfabmesh-gpusnap-test`, fichier
+`modal_app/test_gpusnap.py`), jamais sur la production, avec trois preuves
+distinctes :
+1. journal Modal : « Creating GPU memory snapshot » puis « Restoring
+   Function from memory snapshot » ;
+2. temps mur : 253,8 s à la création, puis **16,8 s** et **17,4 s** — le
+   dernier après 3 min d'attente, conteneur éteint à coup sûr (fenêtre
+   d'inactivité du test à 60 s) ;
+3. **inférence réelle** sur le snapshot restauré : GLB de 1,52 Mo, en-tête
+   « glTF » valide.
+
+La preuve n°3 était indispensable : un contexte CUDA ressuscité peut très
+bien charger sans erreur puis calculer faux (handles cuBLAS, caches
+d'autotune). Charger n'est pas générer.
+
+DEUX PIÈGES RENCONTRÉS, à retenir :
+- `modal run` crée une app ÉPHÉMÈRE, où Modal désactive les snapshots
+  (« Memory snapshots are disabled for ephemeral apps »). Le premier test
+  ne pouvait rien prouver. Il faut `modal deploy` puis appeler la classe
+  déployée via `modal.Cls.from_name`.
+- l'indicateur que j'avais choisi (`self.duree`, mesuré au chargement) est
+  LUI-MÊME dans le snapshot : il rejouait 172,5 s à chaque appel. Seul le
+  temps mur dit la vérité. Une mesure prise avant la photo ne mesure plus
+  rien après.
+
+Gain attendu : ~195 s de GPU par génération à froid (~0,11 $) et surtout
+~3 minutes d'attente en moins pour l'utilisateur.
+
+SUITE POSSIBLE : maintenant qu'un redémarrage coûte ~17 s au lieu de 211 s,
+la traîne de 300 s du maillage n'a plus la même justification — une longue
+traîne n'est qu'une assurance contre un démarrage lent. À revoir après
+confirmation en production.
