@@ -2856,10 +2856,53 @@ async function handleAdminModalCredits(req: Request, env: Env): Promise<Response
     let alert: unknown = null;
     try { const a = await r2GetText(env, '_meta/modal_alert.json'); alert = a ? JSON.parse(a) : null; } catch {}
     const round = (n: number) => Math.round(n * 10000) / 10000;
+
+    // RÉCONCILIATION : ce que la facture dit, contre ce que le système sait
+    // rattacher à une opération.
+    //
+    // Un commentaire de ce fichier promettait depuis longtemps que « l'écart
+    // est exposé explicitement (voir `unattributed_usd`) ». Ce champ n'a
+    // JAMAIS existé : ni calculé, ni affiché. Une garantie écrite mais
+    // absente est pire qu'une absence de garantie, parce qu'on croit être
+    // couvert.
+    //
+    // Mesuré le 2026-08-04 : 11,79 $ facturés pour 3,68 $ rattachés — 69 %
+    // dans le vide. L'essentiel venait du développement (constructions
+    // d'images, snapshots recréés, préchauffages), mais rien ne permettait
+    // de le SAVOIR depuis le tableau de bord. Désormais si.
+    let attribue = 0;
+    let nbOps = 0;
+    try {
+      const debutMois = new Date();
+      debutMois.setUTCDate(1);
+      debutMois.setUTCHours(0, 0, 0, 0);
+      const { data } = await supabaseAdmin(env)
+        .from('jobs')
+        .select('cost_usd')
+        .gte('created_at', debutMois.toISOString())
+        .limit(5000);
+      for (const r of (data ?? []) as Array<{ cost_usd: number | null }>) {
+        if (typeof r.cost_usd === 'number') { attribue += r.cost_usd; nbOps++; }
+      }
+    } catch (e) {
+      console.warn('[recon] somme des couts attribues indisponible:', (e as Error).message);
+    }
+    // La réconciliation n'a de sens que face à la facture RÉELLE : la
+    // comparer à une estimation reviendrait à comparer une estimation à
+    // elle-même.
+    const factureReelle = (fresh && realUsage != null) ? realUsage : null;
+    const nonAttribue = factureReelle == null ? null : Math.max(0, factureReelle - attribue);
+
     return json({
       ok: true,
       total_budget: round(budget),
       total_spent: round(usage),
+      // Réconciliation du mois en cours.
+      attributed_usd: round(attribue),
+      attributed_ops: nbOps,
+      unattributed_usd: nonAttribue == null ? null : round(nonAttribue),
+      unattributed_pct: (factureReelle && factureReelle > 0 && nonAttribue != null)
+        ? Math.round((nonAttribue / factureReelle) * 100) : null,
       usage_source: (fresh && realUsage != null) ? 'real' : 'estimate',
       real_usage: realUsage == null ? null : round(realUsage),
       real_usage_ts: realTs,

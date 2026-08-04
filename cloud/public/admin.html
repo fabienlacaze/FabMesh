@@ -3910,6 +3910,25 @@
               if (apps.length) note.innerHTML += '<br><span style="opacity:.85">Par app : '
                 + apps.map(([a, c]) => `<b>${a}</b> $${Number(c).toFixed(2)}`).join(' · ') + '</span>';
             }
+            // RÉCONCILIATION — ce que la facture dit contre ce que le
+            // système sait rattacher. Sans cette ligne, le tableau de bord
+            // laissait croire que la somme des coûts par opération EST la
+            // facture. Mesuré le 2026-08-04 : 11,79 $ facturés pour 3,68 $
+            // rattachés, soit 69 % dans le vide. Un écart élevé n'est pas
+            // forcément anormal (constructions d'images, snapshots,
+            // préchauffages), mais il doit être VISIBLE.
+            if (typeof j.unattributed_usd === 'number') {
+              const pct = Number(j.unattributed_pct) || 0;
+              const couleur = pct >= 50 ? 'var(--err)' : (pct >= 25 ? 'var(--warn)' : 'var(--text-2)');
+              note.innerHTML += `<br><span style="color:${couleur}">`
+                + `Rattaché aux opérations : <b>$${(Number(j.attributed_usd) || 0).toFixed(2)}</b>`
+                + ` sur ${Number(j.attributed_ops) || 0} opérations`
+                + ` · <b>non rattaché : $${Number(j.unattributed_usd).toFixed(2)} (${pct} %)</b>`
+                + `</span><br><span style="opacity:.7; font-size:11px;">`
+                + `Le non rattaché couvre les constructions d'images Modal, les snapshots recréés `
+                + `après chaque déploiement et les préchauffages. Élevé pendant le développement, `
+                + `il doit retomber sur une période sans déploiement.</span>`;
+            }
             note.style.color = j.real_usage_fresh ? 'var(--text-2)' : 'var(--warn)';
           } else {
             note.innerHTML = '⚠️ Conso = <b>estimation worker</b> (imprécise). Lancez <code>scripts/modal_usage_push.py</code> pour la vraie conso Modal.';

@@ -18375,3 +18375,36 @@ pas été observée, ce n'est qu'une conviction.
 ACTION FUTURE : rejouer `scripts/audit_marges.py` après une journée SANS
 aucun déploiement, dès qu'il y aura du trafic. C'est la seule chose qui
 transformera cette conviction en certitude.
+
+## 2026-08-04 — `unattributed_usd` : la garantie promise qui n'existait pas
+
+Un commentaire de `worker.ts` affirmait depuis longtemps que l'écart entre
+la facture Modal et la somme des coûts par opération « est exposé
+explicitement (voir `unattributed_usd`) ».
+
+**Ce champ n'a jamais existé.** Ni calculé, ni renvoyé, ni affiché. Une
+garantie écrite mais absente est pire qu'une absence de garantie : on croit
+être couvert. C'est exactement ce qui a nourri la méfiance du user envers
+les chiffres du tableau de bord — à raison.
+
+Mesuré le jour même : **11,79 $ facturés pour 3,68 $ rattachés à une
+opération, soit 69 % dans le vide.** L'essentiel venait du développement,
+mais rien ne permettait de le SAVOIR depuis l'admin.
+
+Implémenté pour de vrai :
+- `/api/admin/modal-credits` renvoie désormais `attributed_usd`,
+  `attributed_ops`, `unattributed_usd` et `unattributed_pct`, calculés sur
+  le mois en cours ;
+- la comparaison se fait UNIQUEMENT face à la facture réelle et fraîche —
+  la confronter à une estimation reviendrait à comparer une estimation à
+  elle-même, donc à afficher zéro écart par construction ;
+- l'admin l'affiche sous la carte de consommation, coloré selon l'ampleur
+  (vert < 25 %, orange < 50 %, rouge au-delà), avec une phrase expliquant
+  ce que le non-rattaché contient et pourquoi il doit retomber sur une
+  période sans déploiement.
+
+DÉCOMPOSITION HONNÊTE des 11,79 $ du 2026-08-04, pour mémoire :
+  travail utile réel (couts mesures) ......... 6,55 $  (56 %)
+  surcout de developpement .................. 5,24 $  (44 %)
+  dont ecart d attribution (le systeme note
+  l estimation 0,377 \$ la ou le reel est 0,707) 2,87 $
