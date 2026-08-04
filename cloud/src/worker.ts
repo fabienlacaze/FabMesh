@@ -1611,6 +1611,14 @@ async function logOperation(
       id: 'op_' + crypto.randomUUID().replace(/-/g, ''),
       user_id: userId,
       asset_type: opType,
+      // ÉCRITURE EN DOUBLE, colonnes ET `options`, le temps que tous les
+      // lecteurs basculent. `asset_type` ne pouvait pas servir de filtre :
+      // il vaut 'character' pour un maillage (le type d'objet) et
+      // 'text2image' pour une opération (le type d'appel) — polysémique,
+      // donc inexploitable. Voir la migration
+      // 20260804120000_jobs_type_cost.sql.
+      type: opType,
+      cost_usd: cost,
       mode: 'op',
       seed: 0,
       credit_cost: credits,
@@ -5203,6 +5211,8 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       id: jobId, user_id: user.id,
       asset_type: input.asset_type, mode: input.mode, seed: input.seed,
       credit_cost: cost, status: 'queued',
+      type: 'mesh',
+      cost_usd: ESTIMATED_USD_MESH,
       project_name: projectName,
       options: {
         rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
@@ -5300,6 +5310,8 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     id: prediction.id, user_id: user.id,
     asset_type: input.asset_type, mode: input.mode, seed: input.seed,
     credit_cost: cost, status: prediction.status,
+    type: 'mesh',
+    cost_usd: ESTIMATED_USD_MESH,
     project_name: projectName,
     options: {
       rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
@@ -9278,6 +9290,8 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
       id: jobId, user_id: user.id,
       asset_type: 'rig', mode: 'rig', seed: 0,
       credit_cost: RIG_COST, status: 'processing',
+      type: 'rig',
+      cost_usd: ESTIMATED_USD_RIG,
       options: {
         operation_type: 'rig', sourceMesh: meshUrl, backend: 'modal', skeleton,
         // Without cost_usd the admin stats fell back to 0 → 100% margin.
@@ -9616,6 +9630,8 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
       id: jobId, user_id: user.id,
       asset_type: 'segment', mode: 'segment', seed: 0,
       credit_cost: SEGMENT_COST, status: 'processing',
+      type: 'segment',
+      cost_usd: ESTIMATED_USD_SEGMENT,
       options: {
         operation_type: 'segment', sourceMesh: meshUrl, backend: 'modal',
         // 2026-07-26 CRITICAL FIX: this used to read a bare `scale`, which
@@ -10709,6 +10725,8 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
       id: jobId, user_id: user.id,
       asset_type: 'animation', mode: animType, seed: 0,
       credit_cost: ANIM_COST, status: 'processing',
+      type: 'animate',
+      cost_usd: ESTIMATED_USD_ANIM,
       project_name: projectName || null,
       options: {
         operation_type: 'animate', sourceRig: rigUrl, anim_type: animType,
@@ -10998,6 +11016,8 @@ async function handleAnimateFromReference(req: Request, env: Env): Promise<Respo
       id: jobId, user_id: user.id,
       asset_type: 'animation', mode: 'fbx_ref', seed: 0,
       credit_cost: ANIM_COST, status: 'processing',
+      type: 'animate_fbx',
+      cost_usd: ESTIMATED_USD_ANIM,
       project_name: projectName || null,
       options: {
         operation_type: 'animate_fbx', sourceRig: rigUrl,
@@ -11346,6 +11366,7 @@ async function handleCopyMeshToProject(req: Request, env: Env): Promise<Response
     id: newId, user_id: user.id,
     asset_type: assetType, mode, seed: 0,
     credit_cost: 0, status: 'succeeded',
+    type: 'mesh-op-client',
     mesh_url: finalUrl,
     project_name: projectName,
     options: { operation_type: 'mesh', cost_usd: 0, copied_from: meshId ?? null },

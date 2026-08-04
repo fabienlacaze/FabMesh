@@ -17989,3 +17989,36 @@ opération), donc inutilisable comme filtre. C'est une migration de schéma
 avec un choix de reprise des anciennes lignes (backfill `type` depuis
 `options->>'operation_type'`, `cost_usd` laissé à NULL si absent — jamais
 0, qui mentirait sur la marge). En attente du feu vert du user.
+
+## 2026-08-04 — Migration `jobs` : colonnes `type` et `cost_usd`
+
+Dernier point de l'audit de traçabilité, le structurel. `asset_type` ne
+pouvait pas servir de filtre : POLYSÉMIQUE — 'character' pour un maillage
+(type d'objet) et 'text2image' pour une opération (type d'appel).
+
+Appliquée en direct via pg8000 (aucun client Postgres n'était installé,
+et PostgREST n'exécute pas de DDL). Migration versionnée dans
+`cloud/supabase/migrations/20260804120000_jobs_type_cost.sql`.
+
+Reprise des 286 lignes existantes : type déduit de
+`options->>'operation_type'`, sinon 'mesh' si l'identifiant commence par
+`modal_`, sinon 'legacy'. **Aucune ligne n'est tombée en 'legacy'** — la
+convention tenait. `cost_usd` repris depuis `options`, laissé à NULL quand
+absent : jamais 0, qui afficherait une marge de 100 % et mentirait.
+
+Écriture en DOUBLE (colonnes + `options`) sur les 8 points d'insertion, le
+temps que les lecteurs basculent.
+
+DEUX PIÈGES, à retenir :
+1. `;` DANS UN COMMENTAIRE. Mon découpeur de SQL coupait sur le point-virgule
+   de « quand il existe ; sinon » et produisait un fragment invalide. On
+   retire les lignes de commentaire AVANT de découper.
+2. **PostgREST met le schéma en CACHE.** Après l'ajout des colonnes, les
+   écritures continuaient de passer SANS elles — silencieusement. Il faut
+   `notify pgrst, 'reload schema'`. Une ligne écrite dans cette fenêtre est
+   restée à NULL ; rattrapée depuis. Vérifié ensuite sur une écriture réelle :
+   `type=text2image, cost_usd=0.003`.
+
+RESTE : basculer les LECTEURS (tableau de bord, export CSV/XLSX) des
+`options->>` vers les colonnes. Les données sont correctes dès maintenant,
+mais la valeur ne se concrétise qu'une fois les agrégats branchés dessus.
