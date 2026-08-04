@@ -381,6 +381,10 @@
                       <div class="step-tools-grid">
                         <button id="ws-export-img-btn" class="ghost-btn tool-btn">&#128190; Export image</button>
                         <button id="ws-cloud-share-img-btn" class="ghost-btn tool-btn" title="Send this image to your MyFabmesh web library">&#9729; Send to cloud</button>
+                        <!-- Signalement de contenu IA — exige par la politique 11.16
+                             du Microsoft Store (refus du 2026-08-04). Doit rester
+                             visible a cote du contenu genere, pas cache dans un menu. -->
+                        <button id="ws-report-img-btn" class="ghost-btn tool-btn" title="Report inappropriate AI-generated content">&#9873; Report content</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -692,6 +696,8 @@
                         <button id="ws-mesh-blender-btn" class="ghost-btn tool-btn">&#129704; Open in Blender</button>
                         <button id="ws-mesh-folder-btn" class="ghost-btn tool-btn">&#128193; Show in folder</button>
                         <button id="ws-cloud-share-mesh-btn" class="ghost-btn tool-btn" title="Send this mesh (GLB ≤50 MB) to your MyFabmesh web library">&#9729; Send to cloud</button>
+                        <!-- Voir le commentaire du bouton image : politique 11.16. -->
+                        <button id="ws-report-mesh-btn" class="ghost-btn tool-btn" title="Report inappropriate AI-generated content">&#9873; Report content</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -1600,6 +1606,47 @@
         </div>
       </div>
     </div>
+    <!-- ================= Signalement de contenu genere par l'IA =================
+         EXIGE PAR LA CERTIFICATION MICROSOFT STORE, politique 11.16 « Live
+         Generative AI Content ». Son absence a motive le refus du 2026-08-04.
+         Le dispositif doit etre ATTEIGNABLE depuis le contenu lui-meme et
+         fonctionner meme hors connexion — d'ou le repli par courriel. -->
+    <div id="modal-report" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width:560px; width:92vw;">
+        <button class="about-close" id="rp-close" aria-label="Close" style="position:absolute; top:12px; right:14px;">&times;</button>
+        <h2>&#9873; Report content</h2>
+        <p class="modal-subtitle">Tell us what is wrong with this AI-generated result. Reports are reviewed by a human. You do not need an account to report.</p>
+        <div style="display:flex; flex-direction:column; gap:14px; margin-top:14px;">
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; display:block; margin-bottom:6px;">Reason</label>
+            <select id="rp-reason" class="modal-select" style="width:100%;">
+              <option value="sexual">Sexual or adult content</option>
+              <option value="violence">Violent or graphic content</option>
+              <option value="hate">Hateful or discriminatory content</option>
+              <option value="harassment">Harassment or bullying</option>
+              <option value="minor">Content that appears to involve a minor</option>
+              <option value="illegal">Illegal or dangerous content</option>
+              <option value="misinformation">Misleading or deceptive content</option>
+              <option value="copyright">Copyright or trademark concern</option>
+              <option value="other" selected>Something else</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600; display:block; margin-bottom:6px;">Details (optional)</label>
+            <textarea id="rp-details" rows="4" class="modal-select" style="width:100%; resize:vertical;" placeholder="What is wrong with this result?"></textarea>
+          </div>
+          <p id="rp-note" style="font-size:11px; color:var(--text-2); margin:0;">
+            The prompt used and a link to the generated file are attached so we can review the report.
+          </p>
+          <div id="rp-status" style="font-size:12px; min-height:16px;"></div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
+          <button id="rp-cancel" class="ghost-btn">Cancel</button>
+          <button id="rp-send" class="primary-btn">Send report</button>
+        </div>
+      </div>
+    </div>
+
     <div id="modal-resize" class="modal-overlay hidden">
       <div class="modal-card" style="max-width:1100px; width:94vw;">
         <button class="about-close" id="rz-close" aria-label="Close" style="position:absolute; top:12px; right:14px;">&times;</button>
@@ -3191,6 +3238,17 @@
         <div class="about-label">Updates</div>
         <p id="about-update-status">Click below to check the latest release on GitHub.</p>
         <button id="about-check-update" class="ghost-btn" style="margin-top:8px;">Check for updates</button>
+      </div>
+
+      <!-- Point d'entree TOUJOURS accessible du dispositif de signalement.
+           Les boutons places pres du contenu genere ne s'affichent qu'apres
+           avoir selectionne une image ou un maillage ; un examinateur de la
+           certification, lui, cherche ce dispositif dans « A propos ». Les
+           deux chemins ouvrent la meme fenetre. Politique 11.16. -->
+      <div class="about-section">
+        <div class="about-label">AI content &amp; safety</div>
+        <p>Results are generated by AI models and may occasionally be inappropriate or inaccurate. If you see a generated result that should not have been produced, please tell us — reports are reviewed by a human.</p>
+        <button id="about-report-btn" class="ghost-btn" style="margin-top:8px;">&#9873; Report AI content</button>
       </div>
 
       <div class="about-section">

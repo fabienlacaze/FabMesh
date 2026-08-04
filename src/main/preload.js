@@ -109,6 +109,9 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   // Préchauffage du GPU cloud (anti cold start 524) — fire-and-forget.
   cloudPrewarm: (opts) => ipcRenderer.invoke('cloud-prewarm', opts),
   cloudShareAsset: (opts) => ipcRenderer.invoke('cloud-share-asset', opts),
+  // Signalement de contenu IA — passe par le processus principal pour
+  // echapper a CORS (voir cloud_fallback.js).
+  cloudReportContent: (opts) => ipcRenderer.invoke('cloud-report-content', opts),
   cloudListLibrary: () => ipcRenderer.invoke('cloud-list-library'),
   cloudListMarket: () => ipcRenderer.invoke('cloud-list-market'),
   cloudDownloadItem: (opts) => ipcRenderer.invoke('cloud-download-item', opts),

@@ -22567,3 +22567,107 @@ showPage('projects');
   mo.observe(document.body, { childList: true, subtree: true });
   enhanceAll();
 })();
+
+// ===================== Signalement de contenu genere par l'IA =====================
+// EXIGE PAR LA CERTIFICATION MICROSOFT STORE, politique 11.16 « Live Generative
+// AI Content » : tout produit presentant du contenu cree par un modele generatif
+// doit offrir un moyen de signaler un contenu inapproprie. Son absence a motive
+// le refus du 2026-08-04 (rapport 83ac9ac1, produit 9PH6GT8XKQDW).
+//
+// Le signalement remonte dans l'onglet « Messages » de l'admin, deja consulte,
+// avec son badge de non-lus et son bouton de reponse.
+(function wireReportContent() {
+  const overlay = document.getElementById('modal-report');
+  if (!overlay) return;
+  const selReason = document.getElementById('rp-reason');
+  const txtDetails = document.getElementById('rp-details');
+  const elStatus = document.getElementById('rp-status');
+  const btnSend = document.getElementById('rp-send');
+  let contexte = {};
+
+  const fermer = () => overlay.classList.add('hidden');
+
+  function ouvrir(ctx) {
+    contexte = ctx || {};
+    if (txtDetails) txtDetails.value = '';
+    if (elStatus) { elStatus.textContent = ''; elStatus.style.color = ''; }
+    if (btnSend) { btnSend.disabled = false; btnSend.textContent = 'Send report'; }
+    overlay.classList.remove('hidden');
+  }
+
+  document.getElementById('rp-close')?.addEventListener('click', fermer);
+  document.getElementById('rp-cancel')?.addEventListener('click', fermer);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) fermer(); });
+
+  function promptCourant() {
+    try { return document.getElementById('ws-prompt')?.value || ''; } catch (_) { return ''; }
+  }
+
+  document.getElementById('ws-report-img-btn')?.addEventListener('click', () => {
+    let cible = '';
+    try { cible = editTarget(state.currentProject) || ''; } catch (_) {}
+    ouvrir({ kind: 'image', asset_url: cible, prompt: promptCourant() });
+  });
+
+  document.getElementById('ws-report-mesh-btn')?.addEventListener('click', () => {
+    let cible = '';
+    try { cible = getCurrentMeshObj()?.path || ''; } catch (_) {}
+    ouvrir({ kind: 'mesh', asset_url: cible, prompt: promptCourant() });
+  });
+
+  // Entree depuis la fenetre « A propos ». Les boutons places pres du
+  // contenu n'existent qu'une fois une image ou un maillage selectionne ;
+  // celui-ci est disponible A TOUT MOMENT, y compris au tout premier
+  // lancement. C'est le chemin qu'un examinateur de certification suit.
+  document.getElementById('about-report-btn')?.addEventListener('click', () => {
+    let cible = '';
+    try { cible = editTarget(state.currentProject) || ''; } catch (_) {}
+    if (!cible) { try { cible = getCurrentMeshObj()?.path || ''; } catch (_) {} }
+    try { document.getElementById('about-modal')?.classList.add('hidden'); } catch (_) {}
+    ouvrir({ kind: 'unspecified', asset_url: cible, prompt: promptCourant() });
+  });
+
+  btnSend?.addEventListener('click', async () => {
+    const charge = {
+      reason: selReason?.value || 'other',
+      details: txtDetails?.value || '',
+      asset_url: contexte.asset_url || '',
+      prompt: contexte.prompt || '',
+      kind: contexte.kind || '',
+      surface: 'web',
+    };
+    btnSend.disabled = true;
+    btnSend.textContent = 'Sending…';
+    if (elStatus) { elStatus.style.color = ''; elStatus.textContent = 'Sending your report…'; }
+    try {
+      const r = await fetch('/api/report-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(charge),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Report sent. Thank you — a human will review it.'; }
+      btnSend.textContent = 'Sent';
+      setTimeout(fermer, 1800);
+    } catch (e) {
+      // REPLI PAR COURRIEL si le worker est injoignable : un dispositif de
+      // signalement qui echoue en cas de panne ne remplirait pas l'exigence.
+      const corps = encodeURIComponent(
+        'Reason: ' + charge.reason + '\n' +
+        'Type: ' + charge.kind + '\n' +
+        'Prompt: ' + charge.prompt + '\n' +
+        'File: ' + charge.asset_url + '\n\n' +
+        'Details:\n' + charge.details + '\n');
+      const lien = 'mailto:report@myfabmesh.ai'
+                 + '?subject=' + encodeURIComponent('AI content report — ' + charge.reason)
+                 + '&body=' + corps;
+      try { window.open(lien); } catch (_) {}
+      if (elStatus) {
+        elStatus.style.color = '#ffcf6b';
+        elStatus.textContent = 'Could not reach the server — your e-mail app has been opened instead.';
+      }
+      btnSend.disabled = false;
+      btnSend.textContent = 'Send report';
+    }
+  });
+})();

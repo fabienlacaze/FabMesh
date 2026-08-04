@@ -1048,6 +1048,39 @@ function register(deps) {
     try { return await shareAsset(opts); }
     catch (e) { return { success: false, error: String(e.message || e) }; }
   });
+  // Signalement de contenu genere par l'IA (politique 11.16 du Microsoft Store).
+  //
+  // POURQUOI PASSER PAR LE PROCESSUS PRINCIPAL plutot que par un fetch depuis
+  // le renderer : le worker ne renvoie AUCUN en-tete CORS, et l'origine du
+  // renderer Electron n'est pas celle du worker. Un appel direct echouait donc
+  // systematiquement et retombait sur le repli courriel — exactement ce qu'on
+  // ne veut pas, puisque le signalement doit atterrir dans la messagerie de
+  // l'admin. Le processus principal, lui, n'est pas soumis a CORS ; c'est
+  // deja la voie qu'empruntent tous les autres appels cloud.
+  //
+  // La session est jointe SI elle existe : un signalement reste possible sans
+  // compte (le point d'entree serveur l'accepte volontairement).
+  ipcMain.handle('cloud-report-content', async (_e, opts = {}) => {
+    try {
+      const entetes = { 'Content-Type': 'application/json' };
+      try {
+        const tok = await getAccessToken();
+        if (tok) entetes.Cookie = `mfm-session=${tok}`;
+      } catch (_) { /* pas de session : signalement anonyme, c'est prevu */ }
+      const r = await fetch(`${WORKER_URL}/api/report-content`, {
+        method: 'POST',
+        headers: entetes,
+        body: JSON.stringify(opts || {}),
+      });
+      const txt = await r.text().catch(() => '');
+      if (!r.ok) return { success: false, error: `HTTP ${r.status} ${txt.slice(0, 200)}` };
+      let j = {};
+      try { j = txt ? JSON.parse(txt) : {}; } catch (_) {}
+      return { success: true, id: j.id || null };
+    } catch (e) {
+      return { success: false, error: String(e.message || e) };
+    }
+  });
   ipcMain.handle('cloud-list-library', async () => {
     try { return await listLibrary(); }
     catch (e) { return { success: false, error: String(e.message || e) }; }

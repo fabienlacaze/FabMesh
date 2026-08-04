@@ -17701,3 +17701,44 @@ chargement CPU de RealVisXL) et en traîne de scaledown. Le coût MARGINAL d'une
 image à chaud est de ~0,003 $ (6,2 s), mais la première image sur une app
 froide coûte deux ordres de grandeur de plus. Mesure de contrôle lancée à
 07:23 UTC : 117,2 s bout en bout à froid, comptée 0,06 $ par l'estimateur.
+
+## 2026-08-04 — Refus Store n°5 : politique 11.16, signalement de contenu IA
+
+Rapport 83ac9ac1, produit 9PH6GT8XKQDW. UN SEUL point bloquant, et son
+libellé dit vrai pour une fois : l'app génère du contenu par IA, elle doit
+offrir un moyen de signaler un contenu inapproprié. Aucun problème de
+packaging ni de lancement — le testeur a fait fonctionner l'app.
+
+Le contrôle parental NE SUFFIT PAS et ne répond pas à la même exigence :
+c'est de la prévention en amont, là où 11.16 réclame un RECOURS, un chemin
+vers un examen humain pour ce qui est passé au travers.
+
+Dispositif ajouté, bureau ET cloud :
+- bouton « Signaler le contenu » dans les barres FICHIER image et maillage,
+  à côté d'Exporter ;
+- section « Contenu IA et sécurité » dans la fenêtre À propos — les boutons
+  près du contenu n'existent qu'une fois une image sélectionnée, alors qu'un
+  examinateur cherche le dispositif dans À propos ;
+- `POST /api/report-content`, ouvert SANS session (un signalement qu'il faut
+  s'authentifier pour émettre n'en est pas un), borné à 20/jour/IP.
+
+LE SIGNALEMENT DEVIENT UN MESSAGE ADMIN, pas un silo parallèle : il s'écrit
+dans `_meta/contact/<id>.json` et arrive dans l'onglet Messages existant,
+avec badge de non-lus, marquage comme lu et bouton de réponse. L'identifiant
+suit exactement le format des messages de contact, sinon la route
+admin `[A-Za-z0-9_]+` rend le message intraitable.
+
+DEUX DÉFAUTS TROUVÉS EN TESTANT, pas en relisant :
+1. Le repli courriel se déclenchait à CHAQUE fois. Cause : le worker n'envoie
+   aucun en-tête CORS et l'origine du renderer Electron n'est pas la sienne,
+   donc un `fetch` direct depuis le renderer échouait toujours. Corrigé en
+   passant par le processus principal (`cloud-report-content`), la voie
+   qu'empruntent déjà tous les autres appels cloud. Le courriel ne reste
+   qu'en dernier recours, utile hors ligne.
+2. Le repli automatique de traduction rendait « Report content » par
+   « Contenu du rapport » — il lisait « report » comme un nom. Bouton
+   incompréhensible en français. 25 entrées explicites ajoutées aux deux
+   dictionnaires.
+
+À FAIRE AVANT DE RESOUMETTRE : reconstruire le paquet MSIX, passer le WACK,
+puis soumettre.

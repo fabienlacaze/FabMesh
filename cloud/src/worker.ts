@@ -1787,6 +1787,120 @@ function timingSafeEqualHex(a: string, b: string): boolean {
  *  profile, jobs, payments, R2 keys (just the names, not the bytes).
  *  Stream a JSON blob the user can download and feed to another
  *  provider if they want. */
+/** Motifs de signalement proposés. Volontairement courts et explicites :
+ *  le testeur de certification doit comprendre l'écran en trois secondes. */
+const MOTIFS_SIGNALEMENT = new Set([
+  'sexual', 'violence', 'hate', 'harassment', 'minor',
+  'illegal', 'misinformation', 'copyright', 'other',
+]);
+
+/** POST /api/report-content — signalement d'un contenu généré par l'IA.
+ *
+ *  EXIGÉ PAR LA CERTIFICATION MICROSOFT STORE, politique 11.16 « Live
+ *  Generative AI Content » : tout produit qui présente à l'utilisateur du
+ *  contenu créé par un modèle génératif doit lui offrir un moyen de
+ *  signaler un contenu inapproprié. Son absence a motivé le refus du
+ *  2026-08-04 (rapport 83ac9ac1, produit 9PH6GT8XKQDW).
+ *
+ *  DÉLIBÉRÉMENT OUVERT AUX VISITEURS NON CONNECTÉS. Un mécanisme de
+ *  signalement que l'on ne peut atteindre qu'après s'être authentifié
+ *  n'en est pas un : la personne la mieux placée pour signaler un contenu
+ *  peut très bien être celle qui le découvre sans compte. Le débit est
+ *  donc borné par IP, pas par session. */
+async function handleReportContent(req: Request, env: Env): Promise<Response> {
+  let corps: {
+    reason?: string; details?: string; asset_url?: string;
+    job_id?: string; prompt?: string; surface?: string; kind?: string;
+  };
+  try { corps = await req.json() as typeof corps; } catch { return err(400, 'bad json'); }
+
+  const motif = String(corps.reason ?? '').trim().toLowerCase();
+  if (!MOTIFS_SIGNALEMENT.has(motif)) return err(400, 'reason invalide');
+
+  // Bornage par IP : 20 signalements par jour et par adresse. Assez large
+  // pour un usage sincère, assez serré pour qu'un script n'inonde pas R2.
+  const ip = req.headers.get('cf-connecting-ip') || 'inconnue';
+  if (env.MESHES) {
+    const compteur = await _casIncrementCounter(
+      env, `_meta/report_rate/${todayUTC()}/${ip}`, 1, 20);
+    if (compteur == null) return err(429, 'trop de signalements depuis cette adresse');
+  }
+
+  // La session est FACULTATIVE : elle enrichit le signalement quand elle
+  // existe, elle ne le conditionne jamais.
+  const user = await getSessionUser(req, env).catch(() => null);
+
+  if (!env.MESHES) return err(503, 'stockage indisponible');
+
+  // UN SIGNALEMENT DEVIENT UN MESSAGE ADMIN, pas une pile parallèle.
+  // Il atterrit dans l'onglet « Messages » déjà consulté, avec son badge
+  // de non-lus, son marquage comme lu et son bouton de réponse. Un silo
+  // `_reports/` séparé aurait exigé une deuxième interface — et un
+  // dispositif de signalement que personne n'ouvre ne vaut rien, ni pour
+  // les utilisateurs ni devant la certification.
+  //
+  // L'identifiant suit EXACTEMENT le format des messages de contact : la
+  // route admin de lecture/réponse n'accepte que [A-Za-z0-9_], un
+  // horodatage ISO avec ses tirets aurait rendu le message impossible à
+  // traiter depuis le tableau de bord.
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const details = String(corps.details ?? '').slice(0, 4000);
+  const assetUrl = String(corps.asset_url ?? '').slice(0, 2000);
+  const prompt = String(corps.prompt ?? '').slice(0, 4000);
+  const kind = String(corps.kind ?? '').slice(0, 40);
+  const surface = String(corps.surface ?? '').slice(0, 40);   // desktop | web
+  const jobId = String(corps.job_id ?? '').slice(0, 200);
+
+  // Corps lisible tel quel dans l'onglet Messages, sans avoir à déplier
+  // une structure. Le PROMPT est déterminant pour instruire un
+  // signalement : c'est lui qui dit si le modèle a dérapé seul ou s'il a
+  // été poussé à le faire.
+  const message = [
+    `SIGNALEMENT DE CONTENU GÉNÉRÉ PAR L'IA`,
+    ``,
+    `Motif      : ${motif}`,
+    `Type       : ${kind || 'non précisé'}`,
+    `Provenance : ${surface || 'non précisée'}`,
+    jobId ? `Job        : ${jobId}` : '',
+    ``,
+    `Prompt utilisé :`,
+    prompt || '(non transmis)',
+    ``,
+    `Fichier concerné :`,
+    assetUrl || '(non transmis)',
+    ``,
+    `Précisions du signalant :`,
+    details || '(aucune)',
+  ].filter((l) => l !== '').join('\n');
+
+  const payload = {
+    id,
+    name: user?.email ? `Signalement — ${user.email}` : 'Signalement anonyme',
+    email: user?.email ?? '',
+    subject: `⚑ Contenu IA signalé — ${motif}`,
+    message,
+    user_id: user?.id ?? null,
+    user_email: user?.email ?? null,
+    ip,
+    user_agent: req.headers.get('user-agent') ?? null,
+    created_at: new Date().toISOString(),
+    read: false,          // fait s'allumer le badge de l'onglet Messages
+    attachments: [] as unknown[],
+    // Doublon structuré du corps ci-dessus : le texte sert à l'humain,
+    // cet objet sert à un futur tri/export sans avoir à ré-analyser la
+    // prose. Les deux sont écrits d'un seul tenant, ils ne peuvent pas
+    // diverger.
+    report: { reason: motif, details, asset_url: assetUrl, prompt, kind, surface, job_id: jobId },
+  };
+
+  await env.MESHES.put(`_meta/contact/${id}.json`, JSON.stringify(payload),
+                       { httpMetadata: { contentType: 'application/json' } });
+  console.warn(`[signalement] ${id} motif=${motif} type=${kind} provenance=${surface}`);
+
+  return json({ ok: true, id });
+}
+
 /** Volet marketplace de l'export RGPD : ce que la boutique détient sur un
  *  compte, en dehors de son préfixe R2. Le vendeur doit pouvoir constater
  *  que son e-mail y est stocké et que son compte Stripe y est rattaché. */
@@ -14398,6 +14512,9 @@ export default {
         if (pathname === '/api/me/published-assets'   && method === 'GET')  return await handleMePublishedAssets(req, env);
         if (pathname === '/api/me/earnings'           && method === 'GET')  return await handleMeEarnings(req, env);
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
+        // Signalement de contenu généré par l'IA — exigé par la politique
+        // 11.16 du Microsoft Store. Volontairement ouvert sans session.
+        if (pathname === '/api/report-content'        && method === 'POST') return await handleReportContent(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);
         if (pathname === '/api/pricing/availability'  && method === 'GET')  return await handlePricingAvailability(req, env);
