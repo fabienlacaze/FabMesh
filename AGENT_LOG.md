@@ -18248,3 +18248,26 @@ d'exécuter les applications.
 
 S'applique aussi aux comptes payants : une fois le budget du workspace
 épuisé, mieux vaut un message clair qu'un échec technique côté GPU.
+
+## 2026-08-04 — PartSAM : la construction d'image échouait sur libc10.so
+
+Première tentative de déploiement de `modal_app/_partsam.py` (l'app de
+segmentation, écrite depuis longtemps mais JAMAIS mise en ligne — ce que
+les notes de reprise appelaient « debug 1er déploiement restent »).
+
+ÉCHEC : `ImportError: libc10.so: cannot open shared object file`, sur
+l'étape de vérification `python -c "import torkit3d, torkit3d._C"`.
+
+CAUSE : `torkit3d._C` est une extension CUDA liée à libtorch, mais les
+bibliothèques de torch ne sont pas sur le chemin du chargeur dynamique.
+Importer `torch` d'abord charge `libc10.so` dans le processus et résout les
+symboles. La ligne de vérification ne l'importait pas.
+
+Correctif appliqué aux DEUX vérifications — `pointops` est compilé
+exactement de la même façon et portait le même piège, il n'avait simplement
+pas encore été atteint puisque la construction s'arrêtait avant.
+
+À RETENIR : une étape de vérification dans une image Modal fait tomber TOUTE
+la construction. Ici elle a bien joué son rôle — mieux vaut échouer au build
+qu'au premier appel utilisateur — mais elle doit s'exécuter dans les mêmes
+conditions que le code réel, qui lui importe torch en premier.

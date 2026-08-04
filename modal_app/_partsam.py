@@ -218,13 +218,22 @@ image = (
     .run_commands(
         f"git clone --depth 1 {TORKIT3D_REPO} /tmp/torkit3d",
         "cd /tmp/torkit3d && FORCE_CUDA=1 pip install --no-build-isolation .",
-        "python -c \"import torkit3d, torkit3d._C; print('torkit3d ok')\"",
+        # `import torch` D'ABORD, et ce n'est pas cosmetique : l'extension
+        # torkit3d._C est liee a libtorch, mais ses bibliotheques ne sont pas
+        # sur le chemin du chargeur dynamique. Sans cet import prealable, la
+        # verification echouait sur « ImportError: libc10.so: cannot open
+        # shared object file » et faisait tomber toute la construction
+        # d'image. Importer torch charge libc10 dans le processus, ce qui
+        # resout les symboles pour l'extension.
+        "python -c \"import torch, torkit3d, torkit3d._C; print('torkit3d ok')\"",
     )
     # ---- pointops (FPS / knn_query au vote par-face) : compile CUDA ----
     .run_commands(
         f"git clone --depth 1 {SAMPART3D_REPO} /tmp/sampart3d",
         "cd /tmp/sampart3d/libs/pointops && FORCE_CUDA=1 python setup.py install",
-        "python -c \"import pointops; print('pointops ok')\"",
+        # Meme precaution que pour torkit3d : pointops est aussi une
+        # extension liee a libtorch.
+        "python -c \"import torch, pointops; print('pointops ok')\"",
         "rm -rf /tmp/sampart3d /tmp/torkit3d",
     )
     # ---- Clone PartSAM + patches (apex contourné + save labels) ----
