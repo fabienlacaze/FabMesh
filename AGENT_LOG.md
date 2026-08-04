@@ -18271,3 +18271,31 @@ pas encore été atteint puisque la construction s'arrêtait avant.
 la construction. Ici elle a bien joué son rôle — mieux vaut échouer au build
 qu'au premier appel utilisateur — mais elle doit s'exécuter dans les mêmes
 conditions que le code réel, qui lui importe torch en premier.
+
+## 2026-08-04 — Segmentation cloud EN LIGNE
+
+`modal_app/_partsam.py` était écrit et commité depuis longtemps mais n'avait
+jamais été déployé — c'est ce que les notes appelaient « débug 1er
+déploiement restent ». Il l'est désormais.
+
+  app  : myfabmesh-partsam (construite en 185 s)
+  URL  : https://fabienlacaze--myfabmesh-partsam-segment-router.modal.run
+  routeur : ASGI SANS GPU (les sondes de santé ne coûtent donc rien),
+            /healthz répond 200 en 5,8 s à froid
+  calcul  : A100, déclenché seulement par /segment-start
+
+`MODAL_SEGMENT_URL` renseigné côté worker. Vérifié en production :
+`/api/pricing` déclare maintenant `segment: OUI`, et `/api/mesh-segment`
+répond 401 sans session (et non plus 503) — le backend répond.
+
+Le bouton se rétablit tout seul dans l'interface cloud grâce au drapeau
+`features` posé juste avant : aucune modification de la liste de masquage
+n'a été nécessaire, exactement le but recherché.
+
+RESTE `mvadapter` en `non` : MV-Adapter n'est pas déployé, creature/animal
+continuent de retomber sur la vue arrière RealVis. Dégradation connue et
+acceptée.
+
+NON VÉRIFIÉ : une segmentation RÉELLE de bout en bout. Le contrat d'API et
+la disponibilité sont confirmés, pas la qualité du résultat ni la durée.
+Un premier appel réel coûtera un réveil d'A100.
