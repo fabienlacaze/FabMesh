@@ -17920,3 +17920,48 @@ SUITE POSSIBLE : maintenant qu'un redémarrage coûte ~17 s au lieu de 211 s,
 la traîne de 300 s du maillage n'a plus la même justification — une longue
 traîne n'est qu'une assurance contre un démarrage lent. À revoir après
 confirmation en production.
+
+## 2026-08-04 — La vue arrière n'avait JAMAIS fonctionné (0 succès / 15)
+
+Découvert grâce à la traçabilité posée le matin même : les appels auxiliaires
+écrivent enfin des lignes, et elles disaient toutes « failed ».
+
+**Cause racine, confirmée par le code puis par l'expérience.**
+`MyFabmeshBackview.__enter__` appelait `enable_xformers_memory_efficient_attention()`
+APRÈS `load_ip_adapter()`. Or xformers REMPLACE tous les processeurs
+d'attention. Il écrasait donc ceux que l'IP-Adapter venait d'installer. Et
+l'IP-Adapter transmet `encoder_hidden_states` sous forme de TUPLE
+(texte, image) : `XFormersAttnProcessor.__call__` fait
+`encoder_hidden_states.shape` dessus → « AttributeError: 'tuple' object has
+no attribute 'shape' ».
+
+**Pourquoi `modify` marchait (48/48) alors que la vue arrière échouait
+(0/15) :** `_modify.py:84` fait `set_ip_adapter_scale(0.0)` et ne passe
+JAMAIS `ip_adapter_image` — aucun tuple, donc aucun plantage.
+`_backview.py:220` passe `ip_adapter_image=ref_no_face` avec ip_scale 0,65.
+Seuls les appels qui utilisent RÉELLEMENT l'IP-Adapter étaient touchés. Cette
+asymétrie explique pourquoi le défaut a survécu depuis le 2026-05-25.
+
+Correctif : xformers d'abord, `load_ip_adapter()` en dernier — ses
+processeurs doivent avoir le dernier mot. **Vérifié en production :
+`back-view succeeded`, premier succès après quinze échecs.**
+
+**CONSÉQUENCE INATTENDUE, traitée dans la foulée.** Réparer la vue arrière a
+réveillé le chemin MULTI-VUES de TRELLIS-2, jamais exercé jusque-là puisque
+`back_img` était toujours None. Il a immédiatement levé :
+« The size of tensor a (256) must match the size of tensor b (128) at
+non-singleton dimension 3 » — et fait échouer la génération entière.
+
+Un utilisateur demandant une vue arrière se serait retrouvé sans rien, ce
+qui est PIRE qu'avant le correctif. Ajout d'un repli : si le multi-vues
+lève, on retombe sur le mono-vue, qui fonctionne. Le maillage sort.
+
+Portée réelle vérifiée avant de paniquer : AUCUN client n'envoie
+`back_view=true` (ni le bureau ni le web), et toutes les générations
+passées portent `back_view: False`. Le multi-vues n'était donc atteint que
+par mon script de mesure. Le correctif de la vue arrière profite en
+revanche à `/api/generate-back-view`, lui bien appelé (15 fois).
+
+RESTE : la vraie cause du décalage 256/128 en multi-vues n'est pas corrigée,
+seulement rendue inoffensive. À traiter quand la vue arrière sera exposée
+dans l'interface.

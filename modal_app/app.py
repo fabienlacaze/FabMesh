@@ -917,15 +917,36 @@ class MyFabmeshBackview:
         print("[backview/ready] moving pipes → CUDA + loading IP-Adapter…", flush=True)
         self.pipe.to("cuda")
         self.florence_model.to("cuda")
+        # ORDRE CRITIQUE — xformers D'ABORD, IP-Adapter ENSUITE.
+        #
+        # L'inverse cassait la vue arriere en production, silencieusement.
+        # `enable_xformers_memory_efficient_attention()` REMPLACE tous les
+        # processeurs d'attention par `XFormersAttnProcessor`. Appele apres
+        # `load_ip_adapter()`, il ecrasait donc les processeurs que
+        # l'IP-Adapter venait d'installer. Or l'IP-Adapter transmet
+        # `encoder_hidden_states` sous forme de TUPLE (texte, image), que
+        # seuls ses propres processeurs savent deballer ; le processeur
+        # xformers, lui, fait `encoder_hidden_states.shape` et leve
+        # « AttributeError: 'tuple' object has no attribute 'shape' »
+        # (diffusers, XFormersAttnProcessor.__call__).
+        #
+        # Consequence observee le 2026-08-04 : chaque appel de vue arriere
+        # plantait, le worker recevait un HTTP 524, et le repli silencieux
+        # laissait la generation continuer en VUE UNIQUE — TRELLIS devinait
+        # l'arriere au lieu de le recevoir. Qualite perdue sur chaque
+        # maillage, GPU paye pour rien, et rien ne le signalait tant que les
+        # appels auxiliaires n'ecrivaient aucune ligne.
+        try:
+            self.pipe.enable_xformers_memory_efficient_attention()
+        except Exception as e:
+            print(f"[backview/ready] xformers skipped: {e}", flush=True)
+        # Charge EN DERNIER : ses processeurs doivent avoir le dernier mot
+        # sur les couches d'attention croisee.
         self.pipe.load_ip_adapter(
             "h94/IP-Adapter", subfolder="sdxl_models",
             weight_name="ip-adapter-plus_sdxl_vit-h.safetensors",
         )
         # IP-Adapter scale set per-call (default 0.65 in _backview.generate).
-        try:
-            self.pipe.enable_xformers_memory_efficient_attention()
-        except Exception as e:
-            print(f"[backview/ready] xformers skipped: {e}", flush=True)
         print(f"[backview/ready] GPU move done in {time.time() - t0:.1f}s", flush=True)
 
     def _route_back_view(self, payload: dict):

@@ -119,47 +119,68 @@ def generate(
 
     torch.manual_seed(seed)
     t_inf = time.time()
+    o_voxel_obj = None
+    vues_utilisees = len(mv_images)
+    # REPLI MONO-VUE SI LE MULTI-VUES ECHOUE — ajoute le 2026-08-04.
+    #
+    # Ce chemin n'avait JAMAIS tourne en production : la vue arriere plantait
+    # systematiquement en amont (xformers ecrasait les processeurs d'attention
+    # de l'IP-Adapter, 0 succes sur 15 tentatives), donc `back_img` etait
+    # toujours None. En reparant la vue arriere on l'a reveille, et il a
+    # immediatement leve : « The size of tensor a (256) must match the size of
+    # tensor b (128) at non-singleton dimension 3 ».
+    #
+    # Sans filet, cette exception fait echouer la generation ENTIERE — un
+    # utilisateur qui demande une vue arriere se retrouverait avec rien du
+    # tout, ce qui est pire qu'avant le correctif. On degrade donc vers le
+    # mono-vue, qui fonctionne : le maillage sort, TRELLIS devine l'arriere.
     if len(mv_images) > 1 and mode in ('512', '1024'):
-        # Multi-view path — verbatim port of
-        # scripts/trellis2_native_full_pipeline.py:210-254 (the same
-        # stage chain that runs on the user's desktop). Cascade modes
-        # use single-view fallback because their `sample_shape_slat_cascade`
-        # has extra constraints we haven't threaded through yet.
-        cond_512 = pipeline.get_cond(mv_images, 512)
-        cond_1024 = pipeline.get_cond(mv_images, 1024) if mode != '512' else None
-        ss_res = {'512': 32, '1024': 64}[mode]
-        coords = pipeline.sample_sparse_structure(cond_512, ss_res, 1, {})
-        if mode == '512':
-            shape_slat = pipeline.sample_shape_slat(
-                cond_512,
-                pipeline.models['shape_slat_flow_model_512'],
-                coords, {})
-            tex_slat = pipeline.sample_tex_slat(
-                cond_512,
-                pipeline.models['tex_slat_flow_model_512'],
-                shape_slat, _tex_params)
-            res = 512
-        else:  # '1024'
-            shape_slat = pipeline.sample_shape_slat(
-                cond_1024,
-                pipeline.models['shape_slat_flow_model_1024'],
-                coords, {})
-            tex_slat = pipeline.sample_tex_slat(
-                cond_1024,
-                pipeline.models['tex_slat_flow_model_1024'],
-                shape_slat, _tex_params)
-            res = 1024
+      try:
+          # Multi-view path — verbatim port of
+          # scripts/trellis2_native_full_pipeline.py:210-254 (the same
+          # stage chain that runs on the user's desktop). Cascade modes
+          # use single-view fallback because their `sample_shape_slat_cascade`
+          # has extra constraints we haven't threaded through yet.
+          cond_512 = pipeline.get_cond(mv_images, 512)
+          cond_1024 = pipeline.get_cond(mv_images, 1024) if mode != '512' else None
+          ss_res = {'512': 32, '1024': 64}[mode]
+          coords = pipeline.sample_sparse_structure(cond_512, ss_res, 1, {})
+          if mode == '512':
+              shape_slat = pipeline.sample_shape_slat(
+                  cond_512,
+                  pipeline.models['shape_slat_flow_model_512'],
+                  coords, {})
+              tex_slat = pipeline.sample_tex_slat(
+                  cond_512,
+                  pipeline.models['tex_slat_flow_model_512'],
+                  shape_slat, _tex_params)
+              res = 512
+          else:  # '1024'
+              shape_slat = pipeline.sample_shape_slat(
+                  cond_1024,
+                  pipeline.models['shape_slat_flow_model_1024'],
+                  coords, {})
+              tex_slat = pipeline.sample_tex_slat(
+                  cond_1024,
+                  pipeline.models['tex_slat_flow_model_1024'],
+                  shape_slat, _tex_params)
+              res = 1024
+          torch.cuda.empty_cache()
+          o_voxel_obj = pipeline.decode_latent(shape_slat, tex_slat, res)
+          if isinstance(o_voxel_obj, list):
+              o_voxel_obj = o_voxel_obj[0]
+      except Exception as e:
+        print(f'[mesh] multi-vues ECHOUE, repli mono-vue : {e}', flush=True)
+        o_voxel_obj = None
+        vues_utilisees = 1
         torch.cuda.empty_cache()
-        o_voxel_obj = pipeline.decode_latent(shape_slat, tex_slat, res)
-        if isinstance(o_voxel_obj, list):
-            o_voxel_obj = o_voxel_obj[0]
-    else:
+    if o_voxel_obj is None:
         # Single-view path (or cascade fallback) — same as before.
         out = pipeline.run(img, num_samples=1, seed=seed,
                            pipeline_type=mode, preprocess_image=False)
         o_voxel_obj = out[0]
     print(f'[mesh] TRELLIS-2 inference dt={time.time()-t_inf:.1f}s '
-          f'mode={mode} views={len(mv_images)}', flush=True)
+          f'mode={mode} views={vues_utilisees}', flush=True)
 
     t_glb = time.time()
     glb_obj = o_voxel_module.postprocess.to_glb(
