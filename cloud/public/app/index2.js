@@ -22646,7 +22646,7 @@ showPage('projects');
         body: JSON.stringify(charge),
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Report sent. Thank you — a human will review it.'; }
+      if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Report sent. Thank you — an admin will review it.'; }
       btnSend.textContent = 'Sent';
       setTimeout(fermer, 1800);
     } catch (e) {

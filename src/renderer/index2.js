@@ -23369,7 +23369,7 @@ window._applyRigAnimPills();
       const rep = await window.meshyAPI?.cloudReportContent?.(charge);
       if (!rep) throw new Error('canal indisponible');
       if (!rep.success) throw new Error(rep.error || 'echec');
-      if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Report sent. Thank you — a human will review it.'; }
+      if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Report sent. Thank you — an admin will review it.'; }
       btnSend.textContent = 'Sent';
       setTimeout(fermer, 1800);
     } catch (e) {
