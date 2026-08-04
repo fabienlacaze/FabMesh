@@ -18129,3 +18129,52 @@ mais non rattachées à une app. **Seul le total de facturation fait foi.**
 DÉTECTION dans l'Auto Inpaint interactif. Marge saine, mais l'usage peut
 devenir punitif si l'utilisateur enchaîne les détections. À réévaluer sur
 retour d'usage — un clic dans l'admin suffit à le baisser.
+
+## 2026-08-04 — L'octroi gratuit était le vrai trou de rentabilité
+
+Après avoir relevé les tarifs, la question « est-on rentable ? » restait
+ouverte. Réponse mesurée : **oui sur chaque vente, non sur l'activité** — et
+la cause n'était plus les prix de génération.
+
+L'ARITHMÉTIQUE QUI TRANCHE (coûts à froid mesurés le jour même) :
+- un compte gratuit qui consomme ses 50 crédits coûte **3,22 à 3,86 €**
+  pour **0 € encaissé** ;
+- une conversion Starter rapporte **+3,07 €** net de frais Stripe ;
+- **un seul compte gratuit coûte donc plus cher qu'une vente Starter ne
+  rapporte.** Il aurait fallu convertir 33 % des inscrits en Pro, ou 14 % en
+  Studio, quand le taux gratuit→payant usuel est de 2 à 5 %.
+
+DEUX CORRECTIFS, appliqués en base et vérifiés :
+
+**1. Octroi 50 → 15 crédits.** 15 crédits = 1 maillage + quelques images :
+assez pour voir la valeur, pas assez pour satisfaire le besoin. Coût par
+inscrit ramené de ~3,9 € à ~1 €. Les comptes existants ne sont PAS touchés —
+reprendre des crédits déjà donnés serait une rupture de parole, et le volume
+en jeu (6 comptes intacts) ne le justifie pas.
+
+**2. Crédits octroyés seulement APRÈS confirmation de l'e-mail.** La
+confirmation n'était pas exigée : `toto@gmail.com` et
+`lundi.premier@gmail.com` n'avaient jamais confirmé et détenaient 50 crédits.
+La trace de l'abus était déjà visible — `lundi.premier@` et
+`lundi.premier1@`, la même personne deux fois.
+
+La règle vit EN BASE, pas dans un réglage du tableau de bord Supabase : un
+réglage se désactive par inadvertance et ne laisse aucune trace dans le
+dépôt ; une contrainte versionnée s'applique quel que soit le chemin
+d'inscription.
+
+PIÈGE ÉVITÉ DE JUSTESSE : la première version n'octroyait rien aux comptes
+non confirmés, mais ne prévoyait PAS de les créditer à la confirmation. Un
+client légitime qui confirme par courriel n'aurait jamais reçu ses crédits —
+j'aurais fermé la porte aux abus en la fermant aussi aux clients. Le
+déclencheur `on_email_confirmed` comble ce trou, et `free_granted` interdit
+le double octroi.
+
+VÉRIFIÉ DE BOUT EN BOUT sur un compte jetable, pas déduit du code :
+  inscription sans confirmation -> 0 crédit, free_granted=false
+  après confirmation            -> 15 crédits, free_granted=true
+  seconde mise à jour           -> 15 crédits (aucun double octroi)
+
+RESTE À DÉCIDER : ce que devient le tarif `segment` (1 → 3 crédits) qui est
+facturé PAR DÉTECTION dans l'Auto Inpaint interactif. Marge saine mais usage
+possiblement punitif.
