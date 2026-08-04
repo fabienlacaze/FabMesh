@@ -18334,3 +18334,44 @@ DEUX PIÈGES RENCONTRÉS DANS LE TEST, à connaître pour tout script client :
   R2 relative donne « mesh_url host not allowed » ;
 - `/api/jobs/<id>` ne renvoie QUE la clé relative (champ `url`), pas une URL
   signée. C'est `/api/meshes` qui signe.
+
+## 2026-08-04 — Audit des marges : positif partout, mais couverture partielle
+
+`scripts/audit_marges.py` ajouté — rejouable. Il lit les prix depuis la
+grille R2 RÉELLEMENT servie (jamais depuis le code), applique le pack le
+plus défavorable (abo Studio, 0,1333 €/crédit) et sépare explicitement les
+coûts MESURÉS des coûts SUPPOSÉS.
+
+RÉSULTAT : **0 opération à marge négative** sur 23 tarifs.
+  mesh_fast 8 cr +40 %  ·  mesh_balanced 10 cr +52 %
+  mesh_quality 13 cr +63 %  ·  mesh_ultra_8k 16 cr +70 %
+  text2image 3 cr +56 %  ·  segment 3 cr +75 %
+
+CE QUE L'AUDIT NE PEUT PAS CERTIFIER, et qui est écrit noir sur blanc dans
+sa sortie :
+- **6 opérations sur 23** ont un coût réellement mesuré ; 9 reposent sur une
+  estimation, **8 sur rien** (les modificateurs de maillage : refine,
+  ultra_hd, quality_plus, multiref, rectify, face_fix) ;
+- seul le préréglage `balanced` a été mesuré. Fast/Quality/Ultra sont
+  supposés coûter pareil alors qu'ils font 12/24/32 étapes de texture. Même
+  en supposant Ultra deux fois plus cher, sa marge reste positive (+40 %) —
+  mais c'est un calcul, pas une mesure.
+
+LE CHIFFRE QUI COMPTE VRAIMENT :
+  coût attribué aux opérations :  3,677 $
+  facture Modal réelle du jour : 11,789 $
+  **NON ATTRIBUÉ : 8,112 $, soit 69 %**
+
+L'essentiel de cet écart vient de MON travail — constructions d'images
+Modal, snapshots recréés, déploiements ratés, préchauffages — pas des
+utilisateurs. Mais il faut le dire clairement : **les marges par opération
+sont bonnes, la marge d'activité n'est pas démontrée.** Il n'a jamais existé
+une journée de trafic réel sans déploiement.
+
+Aujourd'hui ce hors-frais pèse 1,01 $ par maillage, de quoi effacer la marge
+s'il était structurel. Il ne l'est pas — mais tant qu'une journée propre n'a
+pas été observée, ce n'est qu'une conviction.
+
+ACTION FUTURE : rejouer `scripts/audit_marges.py` après une journée SANS
+aucun déploiement, dès qu'il y aura du trafic. C'est la seule chose qui
+transformera cette conviction en certitude.
