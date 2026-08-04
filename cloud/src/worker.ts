@@ -6601,6 +6601,13 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
 
   const replicate = replicateClient(env);
   const version = '851-labs/background-remover:a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc';
+  // TRACABILITE — cette operation ne laissait AUCUNE trace en base. Elle
+  // debite pourtant un credit et declenche un appel Replicate payant, et le
+  // tableau de bord cherche depuis toujours un `operation_type ===
+  // 'remove_background'` que personne n'ecrivait : du code mort en face d'une
+  // depense reelle. C'est exactement la classe de trou qui a fait croire a
+  // « aucune activite depuis six jours » alors que la facture montait.
+  const opDebut = Date.now();
   try {
     const out = await replicate.run(version, { input: { image: imageInput } }) as unknown;
     let url: string | null = null;
@@ -6632,11 +6639,17 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
       console.warn('[remove-bg] MESHES/R2_PUBLIC_URL unset, returning raw Replicate URL (will expire ~1h)');
     }
 
+    await logOperation(env, user.id, 'remove-bg', COST_PER, opDebut, Date.now(), 'succeeded');
     return json({ ok: true, success: true, url, path: url, newPath: url });
   } catch (e: unknown) {
     // Refund the credit + roll back the daily-spend counters on failure.
     await addCredits(env, user.id, COST_PER);
     await refundDailySpend(env, ESTIMATED_USD);
+    // Journalise MEME rembourse : l'appel Replicate a bien eu lieu et il est
+    // facture. Un echec silencieux, c'est de la depense qui n'apparait nulle
+    // part. Credits a 0 puisqu'ils sont rendus, mais la ligne existe.
+    await logOperation(env, user.id, 'remove-bg', 0, opDebut, Date.now(), 'failed',
+                       { error: e instanceof Error ? e.message : String(e) });
     return err(502, 'background-remover failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 }
@@ -7895,6 +7908,12 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
     if ('maskEmpty' in result) {
       await addCredits(env, user.id, cost);
       await refundModalSpend(env, estimatedTotal);
+      // CLIPSeg a bien tourne sur le GPU : masque vide ne veut pas dire
+      // calcul gratuit. Sans cette ligne, le remboursement effacait a la fois
+      // le credit ET le compteur de depense — l'operation disparaissait des
+      // deux surfaces comptables a la fois.
+      await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                         'failed', { op: 'segment', target: targetText, raison: 'masque vide' });
       return json({ ok: false, success: false,
         error: `"${targetText}" not found in the image (credit refunded)` }, { status: 422 });
     }
@@ -7904,6 +7923,11 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal);
+    // Le mode d'echec le PLUS COUTEUX est celui qui passait ici : l'echelle
+    // de reprise sur 524 peut bruler plusieurs minutes de GPU avant de lever.
+    // C'est precisement celui qui ne laissait aucune trace.
+    await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                       'failed', { op: 'segment', error: e instanceof Error ? e.message : String(e) });
     return err(502, `mask preview failed (credit refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }

@@ -17782,3 +17782,30 @@ DEUX RÉGRESSIONS TROUVÉES EN TESTANT LE TRAJET COMPLET :
    toujours, mais rien dans `admin.html` ne les rendait. Ajouté : image
    affichée en vignette, maillage sous forme d'aperçu + lien de
    téléchargement pour Blender.
+
+## 2026-08-04 — Traçabilité : 3 dépenses GPU qui n'écrivaient aucune ligne
+
+Suite de l'audit (22 agents, 7 lacunes confirmées après contre-expertise).
+Les trois plus nettes sont corrigées :
+
+- **`/api/remove-background`** : débitait 1 crédit et lançait un appel
+  Replicate payant sans écrire la moindre ligne. Pire, le tableau de bord
+  cherchait depuis toujours un `operation_type === 'remove_background'` que
+  personne n'écrivait — du code mort en face d'une dépense réelle.
+- **`/api/segment-preview`, ses DEUX sorties d'échec** (masque vide et
+  exception) : le GPU L40S avait tourné, puis `addCredits` +
+  `refundModalSpend` effaçaient le crédit ET le compteur R2. L'opération
+  disparaissait des deux surfaces comptables à la fois. Le mode d'échec le
+  plus coûteux — l'échelle de reprise sur 524 peut brûler plusieurs minutes
+  — était précisément celui qui ne laissait aucune trace.
+
+Les lignes d'échec sont journalisées à 0 crédit : le crédit est bien rendu,
+mais la dépense a eu lieu et doit apparaître.
+
+RESTE À FAIRE (plus lourd, pas fait ici) : les 4 appels GPU auxiliaires de
+`/api/generate` (rectification, vue arrière, feuille, MV-Adapter) n'écrivent
+toujours rien ; et le vrai correctif de fond reste d'ajouter à `jobs` deux
+colonnes `type` et `cost_usd`, `asset_type` étant polysémique ('character'
+pour un maillage, 'text2image' pour une opération) donc inutilisable comme
+filtre. Backfill recommandé : `type` depuis `options->>'operation_type'`,
+`cost_usd` laissé à NULL si absent — jamais 0, qui mentirait sur la marge.
