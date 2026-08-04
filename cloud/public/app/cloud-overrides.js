@@ -985,6 +985,21 @@
       if (!r.ok) return;
       const j = await r.json();
       prices = j.prices || {};
+      // LE SERVEUR DECLARE CE QUI EXISTE VRAIMENT.
+      //
+      // La liste CLOUD_HIDE_BUTTONS masque des boutons dont le backend n'est
+      // pas deploye — c'est correct, mais c'est une liste CODEE EN DUR : le
+      // jour ou le backend arrive, il faut penser a l'editer, sinon la
+      // fonctionnalite reste invisible alors qu'elle marche. On retablit donc
+      // le bouton des que `/api/pricing` annonce la fonction disponible, sans
+      // second deploiement a prevoir.
+      try {
+        const f = j.features || {};
+        if (f.segment) {
+          const el = document.getElementById('ws-mesh-segment-btn');
+          if (el) el.style.display = '';
+        }
+      } catch (_) { /* confort : jamais bloquant */ }
     } catch { return; }
     for (const [pkey, target] of Object.entries(PRICING_TO_DATA_CREDITS)) {
       const v = prices[pkey];

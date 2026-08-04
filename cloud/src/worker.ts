@@ -13464,10 +13464,33 @@ async function handleAdminForceLogoutAll(req: Request, env: Env): Promise<Respon
  *  deploying the static bundle every time the admin tunes a price. */
 async function handlePublicPricing(_req: Request, env: Env): Promise<Response> {
   const prices = await _getPricing(env);
+  // QUELLES FONCTIONS ONT REELLEMENT UN BACKEND.
+  //
+  // Constat de l'audit du 2026-08-04 : le bouton « Segment parts (AI) »
+  // etait present dans l'interface cloud alors qu'aucune application de
+  // segmentation n'etait deployee sur Modal. L'utilisateur cliquait, voyait
+  // « mesh-segment backend unavailable » en anglais, apres qu'on lui ait
+  // annonce un prix de 15 credits. Aucun credit n'etait debite — le 503
+  // tombe avant — mais proposer un bouton mort reste inacceptable.
+  //
+  // On declare donc la disponibilite reelle plutot que de la supposer cote
+  // client. L'interface masque ce qui n'existe pas, et RETABLIT le bouton
+  // toute seule des que la variable d'environnement est renseignee : pas de
+  // second deploiement a penser le jour ou le backend arrive.
+  const features = {
+    segment:   !!env.MODAL_SEGMENT_URL,
+    mvadapter: !!env.MODAL_MVADAPTER_URL,
+    rig:       !!env.MODAL_PUPPETEER_RIG_URL,
+    animate:   !!env.MODAL_ANYTOP_ANIM_URL,
+    retarget:  !!env.MODAL_FBX_RETARGET_URL,
+    tpose:     !!env.MODAL_TPOSE_URL,
+    rectify:   !!env.MODAL_RECTIFY_URL,
+    backview:  !!env.MODAL_BACKVIEW_URL,
+  };
   // Cache 30 s on the edge so a viral landing page doesn't multiply
   // R2 reads. Admin POSTs invalidate the in-process cache; the edge
   // cache will follow within 30 s.
-  return new Response(JSON.stringify({ prices }), {
+  return new Response(JSON.stringify({ prices, features }), {
     status: 200,
     headers: {
       'content-type': 'application/json',

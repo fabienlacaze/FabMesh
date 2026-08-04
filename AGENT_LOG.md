@@ -18178,3 +18178,47 @@ VÉRIFIÉ DE BOUT EN BOUT sur un compte jetable, pas déduit du code :
 RESTE À DÉCIDER : ce que devient le tarif `segment` (1 → 3 crédits) qui est
 facturé PAR DÉTECTION dans l'Auto Inpaint interactif. Marge saine mais usage
 possiblement punitif.
+
+## 2026-08-04 — Audit de pré-lancement : un faux positif et une vraie amélioration
+
+CONSTAT QUE J'AVAIS ANNONCÉ COMME BLOQUANT, ET QUI ÉTAIT FAUX.
+J'ai signalé que « Segment parts (AI) » était exposé côté cloud sans
+backend. **C'est inexact** : le bouton EST masqué à l'exécution par
+`CLOUD_HIDE_BUTTONS` dans `cloud-overrides.js`, avec un commentaire
+explicite. J'avais vérifié le HTML — où il figure bien — sans vérifier le
+JavaScript qui le masque. Confirmé ensuite sur le fichier réellement servi
+en production.
+
+Leçon : chercher un identifiant dans le HTML ne dit RIEN de ce que voit
+l'utilisateur. Il faut lire le fichier servi, pas le gabarit.
+
+CE QUI RESTAIT VRAI, ET QUI EST CORRIGÉ. La liste de masquage est CODÉE EN
+DUR : le jour où le backend PartSAM sera déployé, il faudrait penser à
+l'éditer, sinon la fonctionnalité resterait invisible alors qu'elle marche.
+`/api/pricing` déclare désormais les fonctions réellement disponibles
+(`features`), calculées depuis les variables d'environnement, et le client
+rétablit le bouton dès que le serveur l'annonce. Plus de second déploiement
+à se rappeler.
+
+  segment / mvadapter : non → boutons masqués
+  rig / animate / retarget / tpose / rectify / backview : OUI
+
+DÉPLOIEMENT PARTSAM LANCÉ (`modal_app/_partsam.py`, app autonome
+`myfabmesh-partsam`, jamais mise en ligne). Son contrat correspond
+exactement à ce que le worker attend : `/segment-start`, `/segment-status`,
+`/segment-fetch`. Image lourde (A100, compilations CUDA) — la construction
+est facturée.
+
+AUTRES POINTS DE L'AUDIT :
+- **Le fusible protège 4,6× moins qu'il n'y paraît** : il compte des
+  estimations (2,502 $) là où la facture réelle était de 11,59 $. Un
+  plafond à 10 $ autorise donc ~40 $ de dépense réelle.
+- Fusible toujours à 10 $ (relevé pour la certification) — à redescendre.
+- Les e-mails de confirmation fonctionnent (22 à 65 s entre envoi et
+  confirmation), ce qui compte désormais double puisque les crédits en
+  dépendent. Le débit du service d'envoi reste à vérifier avant d'ouvrir
+  les inscriptions.
+- `rectify` échoue à froid (524), MV-Adapter non déployé, multi-vues
+  neutralisé par un repli : dégradés connus, non bloquants.
+- `MODAL_MESH_URL` : variable morte, aucune référence dans le code.
+- Nettoyé : `myfabmesh-gpusnap-test` était resté déployé (0,97 $) — arrêté.
