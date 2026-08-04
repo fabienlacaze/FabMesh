@@ -153,7 +153,12 @@ MAX_DAILY_SPEND_USD = "4.00"
 # Daily Modal spend cap (GLOBAL, across ALL users). Was bumped to $20/day for
 # heavy dev/test; LOWERED to $10/day for commercial launch so a single bad day
 # can't run away. Raise again for heavy dev sessions if needed.
-MAX_DAILY_MODAL_SPEND_USD = "6.00"
+#
+# 2026-08-04 — TEMPORAIREMENT a 10 $ (etait 6 $) : la certification Microsoft
+# est en cours d'examen. Un testeur bloque par « at capacity » vaut un 5e refus
+# du Store, sans commune mesure avec quelques dollars. A REMETTRE A 6 $ des la
+# certification passee.
+MAX_DAILY_MODAL_SPEND_USD = "10.00"
 # Budget Modal du workspace (USD/mois). Sert de repli a l'alerte
 # « budget bientot epuise » quand _meta/modal_budget_total.txt est
 # absent — c'etait le cas, et l'alerte ne pouvait donc JAMAIS se

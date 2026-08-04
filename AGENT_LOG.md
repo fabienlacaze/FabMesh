@@ -17679,3 +17679,25 @@ voué à l'échec.
 `/api/me/export` avait le même angle mort, en miroir. Il exporte maintenant
 `user_assets` et le volet marketplace (fiches en vente, achats, vendeur) —
 le titulaire doit pouvoir constater que son e-mail y est stocké.
+
+## 2026-08-04 — Certification Microsoft EN COURS + mesure de coût
+
+Le compte `mscert.tester@myfabmesh.ai` s'est connecté à 06:20 UTC et a généré
+une image à 06:24 : **l'examen Store est en cours**. C'est ce qui explique les
+0,63 $ facturés par Modal ce matin sans activité apparente — la table `jobs`
+ne contient que les maillages, pas les images, d'où l'impression d'un compte
+qui dépense tout seul.
+
+Deux actions immédiates :
+- marqueur `_meta/paid/<uid>` posé sur le compte testeur : il n'a jamais payé,
+  il était donc soumis au plafond de 2 $/jour, soit ~5 générations avant un
+  « at capacity » — et un 5e refus du Store ;
+- `MAX_DAILY_MODAL_SPEND_USD` 6 → 10 $ le temps de l'examen. **À REMETTRE À 6 $
+  une fois la certification passée.**
+
+Coût observé, très instructif : les 2 images du testeur ont coûté 0,63 $ à
+elles seules, dont l'essentiel en création de snapshot mémoire (2 × 81 s de
+chargement CPU de RealVisXL) et en traîne de scaledown. Le coût MARGINAL d'une
+image à chaud est de ~0,003 $ (6,2 s), mais la première image sur une app
+froide coûte deux ordres de grandeur de plus. Mesure de contrôle lancée à
+07:23 UTC : 117,2 s bout en bout à froid, comptée 0,06 $ par l'estimateur.
