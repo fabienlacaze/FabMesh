@@ -1102,9 +1102,18 @@
     // 2. Prechauffage aux moments ou une generation devient probable, pour
     //    que le conteneur boote PENDANT que l'utilisateur remplit son
     //    formulaire plutot qu'apres son clic.
-    prewarmGpu(false);
+    //
+    // RETIRE LE 2026-08-04 : le prechauffage a l'OUVERTURE de la page et a
+    // CHAQUE retour d'onglet. Mesure du jour : un reveil de conteneur coute
+    // ~0,20 $ et ne dure que 5 min (scaledown_window=300). Ouvrir la page ou
+    // revenir sur l'onglet ne dit rien d'une intention de generer — 5 reveils
+    // ont coute 1,05 $ pour zero generation, plus que deux generations
+    // completes. On garde le battement de coeur (gratuit) et les
+    // declencheurs d'INTENTION ci-dessous, qui eux tombent dans la bonne
+    // fenetre : l'utilisateur clique dans le champ, le GPU boote pendant
+    // qu'il redige.
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) { pingHeartbeat(); prewarmGpu(false); }
+      if (!document.hidden) pingHeartbeat();
     });
     // Ouvrir le panneau d'options 3D ou saisir un prompt = intention de generer.
     const armer = (id, imageOp) => {

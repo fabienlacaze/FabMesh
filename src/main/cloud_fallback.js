@@ -179,10 +179,19 @@ async function login(email, password) {
   // premier clic payait les 2-3 min de démarrage à froid, que la
   // fenêtre de rejeu (~6 min) ne rattrapait pas toujours.
   //
-  // `force` contourne le débounce de 4 min : on VEUT chauffer ici même
-  // si un préchauffage a été tenté juste avant sans session.
-  // Fire-and-forget, jamais bloquant pour la connexion.
-  try { prewarm({ force: true }).catch(() => {}); } catch (_) {}
+  // PLUS DE PRÉCHAUFFAGE À LA CONNEXION — retiré le 2026-08-04 après mesure.
+  //
+  // Chauffer ici partait d'une bonne intention, mais le compte n'y était pas :
+  // un réveil de conteneur coûte ~0,20 $ et ne tient que 5 minutes
+  // (scaledown_window=300). Or on se connecte pour ouvrir ses projets, pas
+  // pour générer dans les 5 minutes. Mesuré le 2026-08-04 : 5 connexions ont
+  // coûté 1,05 $ de GPU pour ZÉRO génération — plus cher que deux
+  // générations complètes.
+  //
+  // Le préchauffage SUR INTENTION reste en place et couvre le vrai besoin :
+  // il part quand l'utilisateur clique dans le champ de description ou
+  // choisit un type d'objet (index2.js, ~l.23260). Le GPU démarre alors
+  // pendant qu'il rédige, ce qui est exactement la fenêtre utile.
   try { _startHeartbeat(); } catch (_) {}
   return { success: true, email: _mem.email };
 }

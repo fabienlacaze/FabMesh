@@ -17809,3 +17809,40 @@ colonnes `type` et `cost_usd`, `asset_type` étant polysémique ('character'
 pour un maillage, 'text2image' pour une opération) donc inutilisable comme
 filtre. Backfill recommandé : `type` depuis `options->>'operation_type'`,
 `cost_usd` laissé à NULL si absent — jamais 0, qui mentirait sur la marge.
+
+## 2026-08-04 — Mesure des coûts réels : le démarrage à froid coûte plus que le calcul
+
+Protocole : une seule génération par créneau horaire Modal vierge, pendant
+que personne d'autre n'utilise le service.
+
+| Créneau UTC | Contenu | Coût Modal réel | Estimation admin |
+|---|---|---|---|
+| 07:00 | **1 image**, à froid | **0,194 $** | 0,060 $ |
+| 08:00 | **5 préchauffages**, ZÉRO génération | **1,050 $** | 0 |
+| 09:00 | **1 maillage**, à froid | **1,220 $** | 0,377 $ |
+
+**Les deux générations sont sous-évaluées d'un facteur 3,2 identique.**
+Cause trouvée dans les journaux Modal : l'estimateur ne compte que le temps
+de calcul, alors qu'une génération réveille DEUX À TROIS conteneurs GPU
+distincts (`[mesh/ready] full load + GPU move done in 211.6s` ET
+`[backview/ready] GPU move done in 15.8s`), chacun avec son chargement de
+modèles et sa traîne de scaledown. Le calcul utile ne dure que 129,9 s
+sur les ~15 minutes perçues.
+
+CONCILIATION AVEC LA MESURE DU 28/07 (0,376 $/génération, qui validait la
+tarification) : ce jour-là il y a eu 26 générations, donc les conteneurs
+restaient chauds et le démarrage à froid s'amortissait. **Le coût unitaire
+dépend massivement du volume** : ~0,38 $ à 26 générations/jour, ~1,22 $ à
+une seule. La tarification tient à volume, pas au démarrage du service.
+
+CORRECTIF APPLIQUÉ — les préchauffages AVEUGLES sont retirés :
+- bureau : plus de préchauffage à la connexion (`cloud_fallback.login`).
+  On se connecte pour ouvrir ses projets, pas pour générer dans les 5 min
+  que dure la fenêtre chaude ;
+- web : plus de préchauffage à l'ouverture de la page ni à chaque retour
+  d'onglet.
+
+Le préchauffage SUR INTENTION est conservé intégralement (focus du champ de
+description, choix du type d'objet) : lui tombe dans la bonne fenêtre, le
+GPU boote pendant que l'utilisateur rédige. Le battement de cœur reste, il
+est gratuit.
