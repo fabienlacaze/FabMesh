@@ -18299,3 +18299,38 @@ acceptée.
 NON VÉRIFIÉ : une segmentation RÉELLE de bout en bout. Le contrat d'API et
 la disponibilité sont confirmés, pas la qualité du résultat ni la durée.
 Un premier appel réel coûtera un réveil d'A100.
+
+## 2026-08-04 — Segmentation vérifiée de bout en bout, et bien moins chère que prévu
+
+Test réel via `/api/mesh-segment`, parcours identique à celui du client.
+
+RÉSULTAT : **succès**. GLB de 21,05 Mo, en-tête glTF valide, **13 parties
+séparées** (`part_00` à `part_12`), 13 nœuds distincts.
+
+  lancé   17:25:40
+  terminé 17:27:37
+  durée   **117 s** — l'infobulle de l'interface annonce « ~8 min »
+  coût REEL mesuré sur la facture Modal : **0,1107 $**
+  coût estimé par le code : 0,60 $
+  facturé à l'utilisateur : 15 crédits = 2,00 € (pack le plus défavorable)
+
+TROIS ENSEIGNEMENTS :
+
+1. **L'estimation est 5,4× TROP HAUTE** sur cette opération (0,60 $ contre
+   0,1107 $ réels). C'est l'inverse du biais habituel — ailleurs l'estimateur
+   sous-compte. La valeur 0,60 venait de l'époque SAMPart3D (~8 min sur A100) ;
+   PartSAM est feedforward et fait le travail en 2 min. Le fusible journalier
+   consomme donc 5× trop vite sur chaque segmentation.
+
+2. **La marge est énorme** : 2,00 € encaissés pour 0,10 € de coût. Le tarif
+   de 15 crédits a été hérité de l'ancien moteur, pas recalculé pour PartSAM.
+   Il pourrait descendre nettement sans perdre d'argent — argument commercial.
+
+3. **L'infobulle ment** : « ~8 min » pour 2 min de traitement réel. À corriger,
+   c'est un argument de vente gratuit.
+
+DEUX PIÈGES RENCONTRÉS DANS LE TEST, à connaître pour tout script client :
+- le garde anti-SSRF exige une URL SIGNÉE du domaine propre ; passer la clé
+  R2 relative donne « mesh_url host not allowed » ;
+- `/api/jobs/<id>` ne renvoie QUE la clé relative (champ `url`), pas une URL
+  signée. C'est `/api/meshes` qui signe.
