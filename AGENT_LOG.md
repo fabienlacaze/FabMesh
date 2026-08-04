@@ -17965,3 +17965,27 @@ revanche à `/api/generate-back-view`, lui bien appelé (15 fois).
 RESTE : la vraie cause du décalage 256/128 en multi-vues n'est pas corrigée,
 seulement rendue inoffensive. À traiter quand la vue arrière sera exposée
 dans l'interface.
+
+## 2026-08-04 — Suppression de fond : le tarif admin n'avait aucun effet
+
+Dernier constat facile de l'audit de traçabilité. `handleRemoveBackground`
+portait `const COST_PER = 1` en dur, alors que la clé `remove_background`
+existe dans `PRICING_DEFAULTS` depuis le début. L'onglet Pricing de l'admin
+affichait donc un réglage sans aucune prise sur cette opération. Un prix
+qu'on croit piloter et qui ne bouge pas est pire qu'un prix assumé comme
+fixe. Passe par `getPrice(env, 'remove_background')`.
+
+ÉTAT DE L'AUDIT DE TRAÇABILITÉ — les 7 constats se ramènent à 4 problèmes
+distincts (la suppression de fond remontait 3 fois et la segmentation 2
+fois, par des agents de familles différentes) :
+  1. remove-background sans aucune ligne .................. CORRIGÉ
+  2. segment-preview, ses deux sorties d'échec ............ CORRIGÉ
+  3. les 4 appels GPU auxiliaires de /api/generate ........ CORRIGÉ
+  4. colonnes `type` et `cost_usd` sur `jobs` ............. NON FAIT
+
+Le point 4 est la recommandation STRUCTURELLE : `asset_type` est
+polysémique ('character' pour un maillage, 'text2image' pour une
+opération), donc inutilisable comme filtre. C'est une migration de schéma
+avec un choix de reprise des anciennes lignes (backfill `type` depuis
+`options->>'operation_type'`, `cost_usd` laissé à NULL si absent — jamais
+0, qui mentirait sur la marge). En attente du feu vert du user.

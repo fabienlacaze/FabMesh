@@ -6584,7 +6584,12 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
   // sat OUTSIDE the daily budget backstop (release-audit finding): an
   // authenticated user could loop it unbounded. ~$0.02/call on Replicate;
   // charge 1 credit and count it against the global + per-user caps.
-  const COST_PER = 1;
+  // TARIF LU DEPUIS LA GRILLE, plus code en dur. La cle `remove_background`
+  // existait dans PRICING_DEFAULTS depuis le debut, mais ce handler ne la
+  // consultait jamais : l'onglet Pricing de l'admin affichait donc un reglage
+  // qui n'avait AUCUN effet sur cette operation. Un prix qu'on croit piloter
+  // et qui ne bouge pas est pire qu'un prix assume comme fixe.
+  const COST_PER = await getPrice(env, 'remove_background');
   const ESTIMATED_USD = 0.02;
   const remainingBudget = await checkAndIncrementDailySpend(env, ESTIMATED_USD, user.id);
   if (remainingBudget == null) {
