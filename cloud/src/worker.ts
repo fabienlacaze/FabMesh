@@ -5078,11 +5078,12 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     if (env.MODAL_RECTIFY_URL && input.rectify !== false) {
       const rectifyMode: 'front' | 'iso' = isOrganic ? 'front' : 'iso';
       try {
-        const rectifiedUrl = await callModalRectify(env, user.id, {
-          refImageUrl: frontUrl,
-          mode: rectifyMode,
-          seeds: 3,
-        }, 'rectify');
+        const rectifiedUrl = await _journaliserAppelAux(env, user.id, 'rectify',
+          () => callModalRectify(env, user.id, {
+            refImageUrl: frontUrl,
+            mode: rectifyMode,
+            seeds: 3,
+          }, 'rectify'));
         console.log(`[wave2.1] rectified front → ${rectifyMode} (asset=${input.asset_type})`);
         frontUrl = rectifiedUrl;
       } catch (e: unknown) {
@@ -5139,33 +5140,36 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         const isMVACandidate = MVA_TYPES.has(input.asset_type);
         if (isHardSurface && env.MODAL_SHEET_URL) {
           // Wave 2.3 — sheet dispatch.
-          autoBackUrl = await callModalSheet(env, user.id, {
-            frontImageUrl: frontUrl,
-            promptHint: backHint,
-            seed: (input.seed ?? 42) + 1000,
-          }, 'back-auto');
+          autoBackUrl = await _journaliserAppelAux(env, user.id, 'sheet',
+            () => callModalSheet(env, user.id, {
+              frontImageUrl: frontUrl,
+              promptHint: backHint,
+              seed: (input.seed ?? 42) + 1000,
+            }, 'back-auto'));
           console.log(`[wave2.3] sheet back-view for ${input.asset_type} hint=${backHint ? 'yes' : 'no'}`);
         } else if (isMVACandidate && env.MODAL_MVADAPTER_URL) {
           // Wave 2.4 — MV-Adapter dispatch (6 orthographic views) for
           // creature/animal. Stores the BACK view in autoBackUrl for
           // TRELLIS multiref compat; the full 6-view manifest lives in
           // autoMVViews for future TRELLIS-2 multi-view conditioning.
-          const mv = await callModalMVAdapter(env, user.id, {
-            frontImageUrl: frontUrl,
-            promptHint: backHint,
-            seed: (input.seed ?? 42) + 1000,
-          }, 'mv-auto');
+          const mv = await _journaliserAppelAux(env, user.id, 'mvadapter',
+            () => callModalMVAdapter(env, user.id, {
+              frontImageUrl: frontUrl,
+              promptHint: backHint,
+              seed: (input.seed ?? 42) + 1000,
+            }, 'mv-auto'));
           autoBackUrl = mv.back;
           autoMVViews = mv.views;
           console.log(`[wave2.4] mvadapter 6-view for ${input.asset_type} views=${mv.views.length}`);
         } else if (isOrganic && env.MODAL_BACKVIEW_URL) {
           // Wave 2.2 — realvis dispatch (character + fallback for
           // creature/animal when MVAdapter URL is unset).
-          autoBackUrl = await callModalBackView(env, user.id, {
-            frontImageUrl: frontUrl,
-            promptHint: backHint,
-            seed: (input.seed ?? 42) + 1000,
-          }, 'back-auto');
+          autoBackUrl = await _journaliserAppelAux(env, user.id, 'back-view',
+            () => callModalBackView(env, user.id, {
+              frontImageUrl: frontUrl,
+              promptHint: backHint,
+              seed: (input.seed ?? 42) + 1000,
+            }, 'back-auto'));
           console.log(`[wave2.2] realvis back-view for ${input.asset_type}`);
         }
         if (autoBackUrl) {
@@ -6856,6 +6860,39 @@ function _assertImageBytes(buf: ArrayBuffer, source: string): void {
     if (w > 0 && w < 768) {
       throw new Error(`${source} returned a ${w}px wide PNG — too small for a real generation (placeholder size). Re-run or rephrase the prompt.`);
     }
+  }
+}
+
+/** Enrobe un appel GPU AUXILIAIRE pour qu'il laisse une trace.
+ *
+ *  Les quatre appels que `/api/generate` déclenche seul — rectification,
+ *  vue arrière, feuille, MV-Adapter — n'écrivaient AUCUNE ligne. Ils
+ *  n'apparaissaient ni dans le tableau de bord, ni dans les coûts par type.
+ *  C'est la classe de trou qui a fait conclure « aucune activité depuis six
+ *  jours » alors que la facture Modal montait.
+ *
+ *  On enrobe au POINT D'APPEL plutôt que dans le corps des fonctions : elles
+ *  ont chacune plusieurs sorties et plusieurs `throw`, et les retoucher une
+ *  par une aurait multiplié les risques d'en oublier une.
+ *
+ *  Crédits à 0 : ces appels ne sont pas facturés séparément à l'utilisateur,
+ *  ils sont compris dans le prix du maillage. Ce qu'on veut rendre visible,
+ *  c'est leur COÛT (MODAL_COST_USD[opType], renseigné pour les quatre).
+ *
+ *  L'exception est propagée telle quelle : la gestion d'erreur existante en
+ *  aval — replis compris — doit continuer de fonctionner à l'identique. */
+async function _journaliserAppelAux<T>(
+  env: Env, userId: string, opType: string, appel: () => Promise<T>,
+): Promise<T> {
+  const t0 = Date.now();
+  try {
+    const r = await appel();
+    await logOperation(env, userId, opType, 0, t0, Date.now(), 'succeeded', { auto: true });
+    return r;
+  } catch (e) {
+    await logOperation(env, userId, opType, 0, t0, Date.now(), 'failed',
+                       { auto: true, error: e instanceof Error ? e.message : String(e) });
+    throw e;
   }
 }
 
