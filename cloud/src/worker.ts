@@ -415,7 +415,51 @@ async function _spendRefusalMessage(env: Env, userId?: string): Promise<string> 
   return GENERIC;
 }
 
+/** Arrêt dur sur la FACTURE RÉELLE, pas sur une estimation.
+ *
+ *  Le compteur journalier plus bas additionne des ESTIMATIONS, et elles
+ *  sous-évaluent massivement : le 2026-08-04, **2,502 $ au compteur pour
+ *  11,59 $ réellement facturés** — un facteur 4,6. Un plafond affiché à 10 $
+ *  autorisait donc en pratique ~40 $ de dépense. Un garde-fou qui laisse
+ *  passer quatre fois son plafond n'en est pas un.
+ *
+ *  On s'appuie donc sur le seul chiffre incontestable : l'usage du workspace
+ *  Modal, remonté chaque heure par `scripts/modal_usage_push.py`.
+ *
+ *  ÉCHOUE EN MODE OUVERT si la donnée est absente ou périmée. C'est
+ *  délibéré : si le poller tombe, on veut une alerte, pas un service à
+ *  l'arrêt. Le blocage n'intervient que sur une donnée FRAÎCHE qui montre un
+ *  budget épuisé — cas où Modal cesserait de toute façon d'exécuter les apps. */
+async function _budgetReelEpuise(env: Env): Promise<boolean> {
+  if (!env.MESHES) return false;
+  try {
+    let budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
+    if (budget <= 0) budget = parseFloat(env.MODAL_BUDGET_USD ?? '') || 0;
+    if (budget <= 0) return false;                     // aucun budget defini
+    const txt = await r2GetText(env, '_meta/modal_real_usage.json');
+    if (!txt) return false;                            // pas de donnee : on laisse passer
+    const real = JSON.parse(txt) as { usage?: number; ts?: string };
+    if (typeof real.usage !== 'number' || !real.ts) return false;
+    const ageMs = Date.now() - Date.parse(real.ts);
+    if (!(ageMs < 26 * 3600 * 1000)) {
+      console.warn('[budget] usage reel perime — arret dur inactif, on laisse passer');
+      return false;                                    // perimee : on laisse passer
+    }
+    if (real.usage >= budget) {
+      console.error(`[budget] ARRET DUR : usage reel ${real.usage.toFixed(2)} $ >= budget ${budget.toFixed(2)} $`);
+      return true;
+    }
+  } catch (e) {
+    console.warn('[budget] lecture de l\'usage reel impossible:', (e as Error).message);
+  }
+  return false;
+}
+
 async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userId?: string): Promise<number | null> {
+  // Le budget MENSUEL reel prime sur tout, y compris sur les comptes payants :
+  // une fois le budget du workspace epuise, Modal refuse de lancer les apps.
+  // Mieux vaut un message clair qu'un echec technique cote GPU.
+  if (await _budgetReelEpuise(env)) return null;
   const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
   // Paying customers are never refused. Their spend still lands on the
   // SAME daily counter — deliberately, so refundModalSpend stays

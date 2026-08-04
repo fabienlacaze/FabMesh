@@ -18222,3 +18222,29 @@ AUTRES POINTS DE L'AUDIT :
   neutralisé par un repli : dégradés connus, non bloquants.
 - `MODAL_MESH_URL` : variable morte, aucune référence dans le code.
 - Nettoyé : `myfabmesh-gpusnap-test` était resté déployé (0,97 $) — arrêté.
+
+## 2026-08-04 — Arrêt dur sur la facture RÉELLE
+
+Point le plus sérieux de l'audit de pré-lancement. Le fusible journalier
+additionne des ESTIMATIONS, et elles sous-évaluent massivement : le
+2026-08-04, **2,502 $ au compteur pour 11,59 $ réellement facturés**, soit
+un facteur 4,6. Un plafond affiché à 10 $ autorisait donc en pratique ~40 $
+de dépense. Un garde-fou qui laisse passer quatre fois son plafond n'en est
+pas un.
+
+L'alerte budget existait déjà et lisait bien l'usage RÉEL — mais elle se
+contentait d'envoyer un courriel. **Rien ne bloquait.**
+
+`_budgetReelEpuise()` ajoute un arrêt dur en tête de
+`checkAndIncrementModalSpend`, donc sur le passage obligé de tout travail
+GPU. Il compare l'usage réel du workspace (remonté chaque heure par le
+poller) au budget mensuel.
+
+ÉCHOUE EN MODE OUVERT, délibérément : donnée absente ou périmée (> 26 h) →
+on laisse passer avec une trace. Si le poller tombe, on veut une alerte,
+pas un service à l'arrêt. Le blocage n'intervient que sur une donnée
+FRAÎCHE montrant un budget épuisé — cas où Modal cesserait de toute façon
+d'exécuter les applications.
+
+S'applique aussi aux comptes payants : une fois le budget du workspace
+épuisé, mieux vaut un message clair qu'un échec technique côté GPU.
