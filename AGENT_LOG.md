@@ -18408,3 +18408,37 @@ DÉCOMPOSITION HONNÊTE des 11,79 $ du 2026-08-04, pour mémoire :
   surcout de developpement .................. 5,24 $  (44 %)
   dont ecart d attribution (le systeme note
   l estimation 0,377 \$ la ou le reel est 0,707) 2,87 $
+
+## 2026-08-04 — `animate_fbx` : 0 succès sur 2, deux bugs de montage
+
+Le user a justement objecté que les taux de réussite historiques ne sont pas
+exploitables : ils incluent beaucoup de débogage. Vrai. Mais les deux
+constats ci-dessous tiennent INDÉPENDAMMENT des statistiques, parce que la
+documentation Modal les confirme.
+
+**Bug 1 — chemin inexistant.** `_ref_anim.py` faisait
+`sys.path.insert(0, "/scripts")`. Or Modal dépose les paquets dans **`/root`**
+(« Packages are added to the /root directory of containers »). Vérifié dans
+un conteneur : `/scripts` n'existe pas. D'où « No module named 'fbx_motion' ».
+
+**Bug 2 — données jamais embarquées.** Le commentaire annonçait
+« Mount the retargeter + FBX parser + **bone mapping JSONs** », mais
+`add_local_python_source` n'embarque QUE les `.py` (« By default only
+includes .py-files »). Les JSON de `scripts/rig_mappings/` n'ont donc JAMAIS
+été présents. D'où l'erreur « no rig mapping for source='ue5_mannequin'
+target='humanoid_puppeteer' (**known: []**) » — la liste était vide parce
+que le dossier n'arrivait pas.
+
+Correctifs :
+- `.add_local_dir("scripts/rig_mappings", remote_path="/root/scripts/rig_mappings")`
+- résolution du chemin via `__path__` et non en dur. `scripts/` n'a pas
+  d'`__init__.py` : c'est un paquet ESPACE DE NOMS, donc `__file__` vaut
+  `None` et `os.path.dirname` lève. Ma première version « marchait » par
+  accident, en passant par l'exception de repli.
+
+VÉRIFIÉ DANS UN CONTENEUR, pas déduit :
+  paquet_scripts ............ /root/scripts
+  json_correspondance ....... les 3 fichiers présents
+  import fbx_motion ......... trouvé (échoue seulement sur numpy, absent de
+                              l'image de test minimale, présent en réel)
+  /scripts existe ........... False

@@ -69,9 +69,20 @@ image = (
         "fastapi[standard]",
         "requests==2.32.3",
     )
-    # Mount the retargeter + FBX parser + bone mapping JSONs. We DO
-    # NOT mount bvhsdk — this app never reads BVH.
+    # Mount the retargeter + FBX parser. We DO NOT mount bvhsdk — this app
+    # never reads BVH.
+    #
+    # ATTENTION : `add_local_python_source` n'embarque QUE les fichiers .py
+    # (documentation Modal : « By default only includes .py-files in the
+    # source modules »). Le commentaire d'origine promettait « + bone mapping
+    # JSONs » — ils n'ont donc JAMAIS ete presents dans l'image. C'est la
+    # cause de l'erreur observee en production :
+    #   no rig mapping for source='ue5_mannequin' target='humanoid_puppeteer'
+    #   (known: [])
+    # La liste des correspondances connues etait VIDE parce que le dossier
+    # scripts/rig_mappings/ n'arrivait jamais dans le conteneur.
     .add_local_python_source("scripts")
+    .add_local_dir("scripts/rig_mappings", remote_path="/root/scripts/rig_mappings")
 )
 
 output_vol = modal.Volume.from_name(
@@ -119,11 +130,33 @@ def retarget(
     rig_path = os.path.join(work_dir, "rig.glb")
     fbx_path = os.path.join(work_dir, "ref.fbx")
 
-    # The mounted `scripts/` package needs to be on sys.path so the
-    # `from fbx_motion import parse_fbx` lazy import inside
-    # `retarget_fbx_to_rig` works.
-    sys.path.insert(0, "/scripts")
-    sys.path.insert(0, "/")
+    # Le paquet `scripts/` monte doit etre sur sys.path pour que l'import
+    # tardif `from fbx_motion import parse_fbx` (dans `retarget_fbx_to_rig`)
+    # aboutisse.
+    #
+    # CORRIGE : le chemin etait "/scripts", qui N'EXISTE PAS. Modal depose les
+    # paquets dans **/root** (documentation : « Packages are added to the
+    # /root directory of containers »). D'ou l'erreur constatee en
+    # production : « No module named 'fbx_motion' ».
+    #
+    # On derive le chemin du paquet REELLEMENT importe plutot que de le coder
+    # en dur : si Modal change son emplacement, le code suit.
+    # `scripts/` n'a PAS d'__init__.py : c'est un paquet ESPACE DE NOMS, donc
+    # `__file__` vaut None et `os.path.dirname` leve. On lit `__path__`, qui
+    # est renseigne dans les deux cas, et on ne garde le chemin en dur que
+    # comme dernier recours.
+    _scripts_dir = "/root/scripts"
+    try:
+        import scripts as _scripts_pkg
+        _chemins = list(getattr(_scripts_pkg, "__path__", []) or [])
+        if _chemins:
+            _scripts_dir = _chemins[0]
+        elif getattr(_scripts_pkg, "__file__", None):
+            _scripts_dir = os.path.dirname(os.path.abspath(_scripts_pkg.__file__))
+    except Exception as _e:
+        print(f"[retarget] paquet scripts introuvable, repli sur {_scripts_dir}: {_e}", flush=True)
+    sys.path.insert(0, _scripts_dir)
+    sys.path.insert(0, os.path.dirname(_scripts_dir))
 
     try:
         _log(f"job_id={job_id} hint={source_skel_hint} target={target_family}")
