@@ -22627,11 +22627,56 @@ showPage('projects');
     ouvrir({ kind: 'unspecified', asset_url: cible, prompt: promptCourant() });
   });
 
+  const btnSuppr = document.getElementById('rp-delete');
+
+  // Apercu du contenu, pour que l'admin puisse JUGER sans rien installer.
+  // Une image se joint telle quelle ; un maillage .glb ne s'affiche pas dans
+  // un tableau de bord, on capture donc le viewport 3D tel qu'il est a
+  // l'ecran au moment du signalement.
+  function apercuPng() {
+    try {
+      if (contexte.kind !== 'mesh') return '';
+      const cv = document.getElementById('ws-mesh-canvas');
+      if (!cv || !cv.width) return '';
+      return cv.toDataURL('image/png');
+    } catch (_) { return ''; }
+  }
+
+  // Suppression du contenu signale, proposee APRES l'envoi. Elle n'efface
+  // que la copie LOCALE : la piece jointe au signalement reste cote serveur,
+  // sans quoi l'admin ne pourrait plus instruire le dossier.
+  btnSuppr?.addEventListener('click', async () => {
+    const chemin = contexte.asset_url || '';
+    if (!chemin) { fermer(); return; }
+    const ok = await customConfirm(
+      'Delete this content from your project? The copy attached to your report is kept so an admin can review it.',
+      'Delete reported content');
+    if (!ok) return;
+    btnSuppr.disabled = true;
+    try {
+      if (contexte.kind === 'mesh') {
+        const nom = String(chemin).split(/[\/]/).pop();
+        await API.deleteMesh(nom);
+      } else {
+        await API.deleteFile(chemin);
+      }
+      if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Content deleted. Your report was kept.'; }
+      showToast('Reported content deleted.', 'success');
+      setTimeout(() => { fermer(); try { location.reload(); } catch (_) {} }, 1200);
+    } catch (e) {
+      btnSuppr.disabled = false;
+      if (elStatus) { elStatus.style.color = '#ffcf6b'; elStatus.textContent = 'Could not delete: ' + (e?.message || e); }
+    }
+  });
+
   btnSend?.addEventListener('click', async () => {
     const charge = {
       reason: selReason?.value || 'other',
       details: txtDetails?.value || '',
       asset_url: contexte.asset_url || '',
+      // Le chemin sert au processus principal a LIRE le fichier et le joindre.
+      asset_path: contexte.asset_url || '',
+      preview_b64: apercuPng(),
       prompt: contexte.prompt || '',
       kind: contexte.kind || '',
       surface: 'web',
@@ -22640,18 +22685,54 @@ showPage('projects');
     btnSend.textContent = 'Sending…';
     if (elStatus) { elStatus.style.color = ''; elStatus.textContent = 'Sending your report…'; }
     try {
+      // VOIE NORMALE : le processus principal. Un fetch direct depuis le
+      // renderer echoue toujours — le worker n'envoie aucun en-tete CORS et
+      // l'origine du renderer n'est pas la sienne. C'est ce qui faisait
+      // basculer chaque signalement vers le repli courriel au lieu de la
+      // messagerie de l'admin.
+      // Meme origine que le worker : un fetch direct suffit, pas besoin du
+      // detour par un processus principal comme sur le bureau.
+      const form = new FormData();
+      for (const k of ['reason', 'details', 'asset_url', 'job_id', 'prompt', 'surface', 'kind']) {
+        form.append(k, String(charge[k] ?? ''));
+      }
+      // L'objet vit deja sur R2, mais derriere une URL SIGNEE QUI EXPIRE :
+      // on le rapatrie pour le joindre au signalement, sinon l'admin se
+      // retrouverait quelques jours plus tard avec un lien mort.
+      try {
+        if (charge.asset_url) {
+          const b = await (await fetch(charge.asset_url)).blob();
+          if (b && b.size > 0 && b.size <= 60 * 1024 * 1024) {
+            const nom = (String(charge.asset_url).split('/').pop() || 'asset').split('?')[0];
+            form.append('asset', b, nom);
+          }
+        }
+      } catch (_) { /* pas de piece : le signalement part quand meme */ }
+      try {
+        if (charge.preview_b64) {
+          const bin = atob(String(charge.preview_b64).replace(/^data:image\/png;base64,/, ''));
+          const u8 = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+          form.append('preview', new Blob([u8], { type: 'image/png' }), 'apercu.png');
+        }
+      } catch (_) {}
       const r = await fetch('/api/report-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(charge),
+        method: 'POST', body: form, credentials: 'include',
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Report sent. Thank you — an admin will review it.'; }
       btnSend.textContent = 'Sent';
-      setTimeout(fermer, 1800);
+      // Le signalement est parti ET la piece est televersee : on peut
+      // maintenant proposer d'effacer la copie locale. Pas avant — sinon on
+      // inciterait a detruire la preuve plutot qu'a la transmettre.
+      if (btnSuppr) btnSuppr.style.display = '';
+      // Pas de fermeture automatique : elle escamoterait l'offre de
+      // suppression avant que l'utilisateur ait eu le temps de la lire.
     } catch (e) {
-      // REPLI PAR COURRIEL si le worker est injoignable : un dispositif de
-      // signalement qui echoue en cas de panne ne remplirait pas l'exigence.
+      // REPLI HORS LIGNE, INDISPENSABLE. L'application fonctionne sans compte
+      // et sans reseau (generation locale) : un dispositif de signalement qui
+      // echoue des que le serveur est injoignable ne remplirait pas l'exigence.
+      // On bascule sur le courriel, qui aboutit toujours.
       const corps = encodeURIComponent(
         'Reason: ' + charge.reason + '\n' +
         'Type: ' + charge.kind + '\n' +

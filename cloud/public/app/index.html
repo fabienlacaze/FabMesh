@@ -2583,7 +2583,10 @@
           </p>
           <div id="rp-status" style="font-size:12px; min-height:16px;"></div>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px; flex-wrap:wrap;">
+          <!-- Propose apres l'envoi seulement : offrir la suppression AVANT
+               inciterait a effacer la preuve au lieu de la signaler. -->
+          <button id="rp-delete" class="ghost-btn" style="display:none; margin-right:auto; color:#ff8b8b; border-color:#5a2a2a;">&#128465; Delete this content</button>
           <button id="rp-cancel" class="ghost-btn">Cancel</button>
           <button id="rp-send" class="primary-btn">Send report</button>
         </div>

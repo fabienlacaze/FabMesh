@@ -755,7 +755,18 @@ async function handleSignedR2(req: Request, env: Env): Promise<Response> {
   // dans le code pour devenir lisible par n'importe qui. C'est ce que
   // permettait /api/user-assets/record (corrige plus bas). On refuse ici
   // aussi, pour que la meme faute ailleurs reste sans consequence.
-  if (key.startsWith('_')) {
+  //
+  // UNE SEULE EXCEPTION, ETROITE : les pieces jointes des messages de contact
+  // et des signalements de contenu, sous `_meta/contact/<id>/`. Elles sont
+  // FAITES pour etre ouvertes depuis le tableau de bord, et le blocage en bloc
+  // les rendait toutes inaccessibles — captures d'ecran du formulaire de
+  // contact comprises, qui existaient bien avant ce garde. Un signalement dont
+  // on ne peut pas ouvrir la piece est un signalement qu'on ne peut pas
+  // instruire. L'exception reste sure : elle ne couvre que ce sous-dossier,
+  // le fichier `_meta/contact/<id>.json` lui-meme (sans barre oblique) reste
+  // refuse, et la signature demeure exigee.
+  const pieceJointeContact = /^_meta\/contact\/[A-Za-z0-9_]+\/[^/]+$/.test(key);
+  if (key.startsWith('_') && !pieceJointeContact) {
     console.warn(`[r2] tentative de lecture d'une cle interne refusee : ${key.slice(0, 80)}`);
     return err(403, 'forbidden');
   }
@@ -1812,7 +1823,39 @@ async function handleReportContent(req: Request, env: Env): Promise<Response> {
     reason?: string; details?: string; asset_url?: string;
     job_id?: string; prompt?: string; surface?: string; kind?: string;
   };
-  try { corps = await req.json() as typeof corps; } catch { return err(400, 'bad json'); }
+  // L'OBJET LUI-MÊME VOYAGE AVEC LE SIGNALEMENT.
+  // La première version n'envoyait qu'un chemin de fichier — sur la machine
+  // du signalant. Inexploitable depuis le tableau de bord : impossible de
+  // juger un contenu qu'on ne peut pas ouvrir. On accepte donc un envoi
+  // multipart portant le fichier incriminé, plus un aperçu PNG quand le
+  // fichier n'est pas affichable tel quel (un maillage, typiquement).
+  // Le JSON reste accepté : un signalement sans pièce vaut mieux qu'aucun.
+  let fichier: File | null = null;
+  let apercu: File | null = null;
+  const contentType = req.headers.get('content-type') || '';
+  if (contentType.includes('multipart/form-data')) {
+    let form: FormData;
+    try { form = await req.formData(); } catch { return err(400, 'bad multipart'); }
+    const t = (k: string) => String(form.get(k) ?? '');
+    corps = {
+      reason: t('reason'), details: t('details'), asset_url: t('asset_url'),
+      job_id: t('job_id'), prompt: t('prompt'), surface: t('surface'), kind: t('kind'),
+    };
+    const a = form.get('asset');
+    if (a instanceof File && a.size > 0) {
+      // 60 Mo : un maillage texturé pèse lourd, et refuser la pièce
+      // reviendrait à perdre la seule chose qui permette de juger.
+      if (a.size > 60 * 1024 * 1024) return err(413, 'asset too large (>60 MB)');
+      fichier = a;
+    }
+    const p = form.get('preview');
+    if (p instanceof File && p.size > 0) {
+      if (p.size > 5 * 1024 * 1024) return err(413, 'preview too large (>5 MB)');
+      apercu = p;
+    }
+  } else {
+    try { corps = await req.json() as typeof corps; } catch { return err(400, 'bad json'); }
+  }
 
   const motif = String(corps.reason ?? '').trim().toLowerCase();
   if (!MOTIFS_SIGNALEMENT.has(motif)) return err(400, 'reason invalide');
@@ -1874,6 +1917,32 @@ async function handleReportContent(req: Request, env: Env): Promise<Response> {
     details || '(aucune)',
   ].filter((l) => l !== '').join('\n');
 
+  // Écriture des pièces AVANT le message : si l'upload échoue, on préfère
+  // un signalement sans pièce à un message qui promet une pièce absente.
+  const attachments: Array<Record<string, unknown>> = [];
+  for (const [champ, f] of [['preview', apercu], ['asset', fichier]] as Array<[string, File | null]>) {
+    if (!f) continue;
+    try {
+      const nom = (f.name || champ).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
+      const cle = `_meta/contact/${id}/${champ}_${nom}`;
+      const octets = new Uint8Array(await f.arrayBuffer());
+      await env.MESHES.put(cle, octets, {
+        httpMetadata: { contentType: f.type || 'application/octet-stream' },
+      });
+      attachments.push({
+        key: cle,
+        // TTL long : un signalement peut être instruit des jours plus tard.
+        url: await signedR2Url(env, cle, 'export'),
+        mime: f.type || 'application/octet-stream',
+        size: octets.length,
+        name: nom,
+        role: champ,          // 'preview' s'affiche, 'asset' se télécharge
+      });
+    } catch (e) {
+      console.warn(`[signalement] piece ${champ} non stockee:`, (e as Error).message);
+    }
+  }
+
   const payload = {
     id,
     name: user?.email ? `Signalement — ${user.email}` : 'Signalement anonyme',
@@ -1886,7 +1955,7 @@ async function handleReportContent(req: Request, env: Env): Promise<Response> {
     user_agent: req.headers.get('user-agent') ?? null,
     created_at: new Date().toISOString(),
     read: false,          // fait s'allumer le badge de l'onglet Messages
-    attachments: [] as unknown[],
+    attachments,          // l'objet signalé lui-même, + son aperçu
     // Doublon structuré du corps ci-dessus : le texte sert à l'humain,
     // cet objet sert à un futur tri/export sans avoir à ré-analyser la
     // prose. Les deux sont écrits d'un seul tenant, ils ne peuvent pas

@@ -3484,6 +3484,34 @@
             ? '<span style="background:var(--ok); color:#fff; padding:1px 6px; border-radius:9px; font-size:10px; margin-right:6px;">REPLIED</span>'
             : '';
           const unreadBadge = m.read ? '' : '<span style="background:var(--accent); color:#fff; padding:1px 6px; border-radius:9px; font-size:10px; margin-right:6px;">NEW</span>';
+          // PIECES JOINTES — elles n'etaient AFFICHEES NULLE PART. Les
+          // captures d'ecran du formulaire de contact etaient stockees et
+          // signees depuis toujours, mais invisibles ici. Et un signalement
+          // de contenu ne peut pas s'instruire sur un chemin de fichier :
+          // il faut voir l'objet. Une image s'affiche ; un maillage .glb ne
+          // se rend pas dans un navigateur, on donne donc son apercu PNG
+          // (capture du viewport 3D au moment du signalement) plus un lien
+          // de telechargement pour l'ouvrir dans Blender.
+          const pj = Array.isArray(m.attachments) ? m.attachments : [];
+          const pjHtml = pj.length ? `
+              <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; align-items:flex-start;">
+                ${pj.map((a) => {
+                  const url = escapeHtml(a.url || '');
+                  const nom = escapeHtml(a.name || 'piece');
+                  const ko = a.size ? Math.max(1, Math.round(a.size / 1024)) : 0;
+                  const estImage = /^image\//i.test(a.mime || '');
+                  const vignette = estImage
+                    ? `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${nom}" style="max-width:260px; max-height:260px; border-radius:6px; border:1px solid var(--border); display:block;" /></a>`
+                    : `<div style="width:120px; height:90px; display:flex; align-items:center; justify-content:center; background:var(--bg-2); border:1px solid var(--border); border-radius:6px; font-size:28px;">🧊</div>`;
+                  return `<div style="font-size:11px; color:var(--text-2);">
+                    ${vignette}
+                    <div style="margin-top:4px;">
+                      ${a.role === 'preview' ? 'Aperçu' : 'Contenu signalé'} ·
+                      <a href="${url}" download="${nom}" style="color:var(--accent);">${nom}</a>${ko ? ` · ${ko} Ko` : ''}
+                    </div>
+                  </div>`;
+                }).join('')}
+              </div>` : '';
           return `
             <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:8px; padding:14px;">
               <div style="display:flex; justify-content:space-between; align-items:start; gap:10px; margin-bottom:8px;">
@@ -3501,6 +3529,7 @@
                 </div>
               </div>
               <pre style="white-space:pre-wrap; word-break:break-word; background:var(--bg-2); padding:10px; border-radius:6px; font-size:13px; font-family:inherit; margin:0;">${escapeHtml(m.message)}</pre>
+              ${pjHtml}
               ${m.reply_body ? `<div style="margin-top:10px; padding:10px; background:rgba(76,175,80,0.1); border-left:3px solid var(--ok); border-radius:0 6px 6px 0;"><div style="font-size:11px; color:var(--text-2); margin-bottom:4px;">Your reply · ${escapeHtml(new Date(m.replied_at || m.created_at).toLocaleString('fr'))}</div><pre style="white-space:pre-wrap; word-break:break-word; font-size:13px; font-family:inherit; margin:0;">${escapeHtml(m.reply_body)}</pre></div>` : ''}
             </div>
           `;

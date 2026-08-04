@@ -17742,3 +17742,43 @@ DEUX DÉFAUTS TROUVÉS EN TESTANT, pas en relisant :
 
 À FAIRE AVANT DE RESOUMETTRE : reconstruire le paquet MSIX, passer le WACK,
 puis soumettre.
+
+## 2026-08-04 — Signalement : l'objet voyage, et on propose de le supprimer
+
+Retour du user sur la V1 : le message admin ne contenait qu'un CHEMIN de
+fichier (`C:\Users\...`), donc sur la machine du signalant. Inouvrable
+depuis le tableau de bord : impossible de juger un contenu qu'on ne peut
+pas ouvrir. Le signalement transporte désormais **l'objet lui-même**.
+
+- `/api/report-content` accepte un envoi multipart (le JSON reste accepté :
+  un signalement sans pièce vaut mieux qu'aucun signalement) ;
+- bureau : le processus principal lit le fichier et le téléverse (60 Mo max,
+  et au-delà il l'ÉCRIT dans le message au lieu de joindre silencieusement
+  rien) ;
+- web : l'objet est rapatrié depuis R2 avant d'être joint — son URL signée
+  expire, l'admin se serait retrouvé avec un lien mort quelques jours après ;
+- un maillage ne s'affiche pas dans un navigateur : on joint en plus un
+  APERÇU PNG, capture du viewport 3D au moment du signalement.
+
+**Suppression proposée APRÈS l'envoi**, jamais avant — offrir d'effacer
+avant d'envoyer reviendrait à inciter à détruire la preuve plutôt qu'à la
+transmettre. Elle n'efface que la copie locale ; la pièce jointe reste côté
+serveur, sans quoi le dossier deviendrait ininstruisible.
+
+DEUX RÉGRESSIONS TROUVÉES EN TESTANT LE TRAJET COMPLET :
+
+1. **Mon propre durcissement de ce matin cassait les pièces jointes.** Le
+   blocage en bloc des clés `_*` dans les URL signées (posé pour empêcher la
+   lecture de `_meta/admin_password.json`) refusait aussi
+   `_meta/contact/<id>/…` — donc les pièces des signalements ET les captures
+   d'écran du formulaire de contact, antérieures au garde. Exception étroite
+   ajoutée : seul le SOUS-DOSSIER `_meta/contact/<id>/` passe ; le fichier
+   `_meta/contact/<id>.json` lui-même reste refusé, et la signature reste
+   exigée. Vérifié en production : pièce 200, mot de passe admin 403, message
+   JSON 403.
+
+2. **L'admin n'affichait aucune pièce jointe, et ne l'avait jamais fait.**
+   Les captures du formulaire de contact étaient stockées et signées depuis
+   toujours, mais rien dans `admin.html` ne les rendait. Ajouté : image
+   affichée en vignette, maillage sous forme d'aperçu + lien de
+   téléchargement pour Blender.

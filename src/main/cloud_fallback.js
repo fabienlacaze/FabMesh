@@ -1062,15 +1062,63 @@ function register(deps) {
   // compte (le point d'entree serveur l'accepte volontairement).
   ipcMain.handle('cloud-report-content', async (_e, opts = {}) => {
     try {
-      const entetes = { 'Content-Type': 'application/json' };
+      const entetes = {};
       try {
         const tok = await getAccessToken();
         if (tok) entetes.Cookie = `mfm-session=${tok}`;
       } catch (_) { /* pas de session : signalement anonyme, c'est prevu */ }
+
+      // ON JOINT L'OBJET, PAS SON CHEMIN. Un chemin « C:\Users\... » designe
+      // un fichier sur la machine du signalant : depuis le tableau de bord il
+      // est inouvrable, donc le contenu est injugeable. On televerse donc le
+      // fichier lui-meme, plus un apercu PNG quand il n'est pas affichable tel
+      // quel (cas d'un maillage .glb).
+      const form = new FormData();
+      for (const k of ['reason', 'details', 'asset_url', 'job_id', 'prompt', 'surface', 'kind']) {
+        form.append(k, String(opts[k] ?? ''));
+      }
+
+      const MAX = 60 * 1024 * 1024;
+      let joint = false;
+      try {
+        const chemin = opts.asset_path || '';
+        if (chemin && fs.existsSync(chemin)) {
+          const st = fs.statSync(chemin);
+          if (st.size <= MAX) {
+            const buf = fs.readFileSync(chemin);
+            const nom = path.basename(chemin);
+            const ext = path.extname(nom).toLowerCase();
+            const mime = ext === '.png' ? 'image/png'
+                       : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+                       : ext === '.webp' ? 'image/webp'
+                       : ext === '.glb' ? 'model/gltf-binary'
+                       : 'application/octet-stream';
+            form.append('asset', new Blob([buf], { type: mime }), nom);
+            joint = true;
+          } else {
+            // On le DIT au lieu de joindre silencieusement rien : l'admin doit
+            // savoir pourquoi la piece manque.
+            form.append('details', `${opts.details || ''}\n\n[fichier non joint : ${Math.round(st.size / 1048576)} Mo, au-dela de la limite de 60 Mo]`);
+          }
+        }
+      } catch (e) {
+        form.append('details', `${opts.details || ''}\n\n[fichier non joint : ${String(e.message || e)}]`);
+      }
+
+      // Apercu PNG capture par le renderer (viewport 3D pour un maillage).
+      try {
+        const b64 = String(opts.preview_b64 || '').replace(/^data:image\/png;base64,/, '');
+        if (b64) {
+          form.append('preview', new Blob([Buffer.from(b64, 'base64')], { type: 'image/png' }),
+                      'apercu.png');
+        }
+      } catch (_) { /* l'apercu est un confort, jamais un bloqueur */ }
+
+      void joint;
       const r = await fetch(`${WORKER_URL}/api/report-content`, {
         method: 'POST',
         headers: entetes,
-        body: JSON.stringify(opts || {}),
+        body: form,
       });
       const txt = await r.text().catch(() => '');
       if (!r.ok) return { success: false, error: `HTTP ${r.status} ${txt.slice(0, 200)}` };

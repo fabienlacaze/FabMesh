@@ -654,6 +654,12 @@
       // comme un nom au lieu d'un verbe, ce qui rendait le bouton
       // incomprehensible dans la langue de l'utilisateur.
       'Report content': 'Signaler le contenu',
+      'Delete this content': 'Supprimer ce contenu',
+      'Delete reported content': 'Supprimer le contenu signalé',
+      'Delete this content from your project? The copy attached to your report is kept so an admin can review it.':
+        'Supprimer ce contenu de votre projet ? La copie jointe à votre signalement est conservée pour que l’admin puisse l’examiner.',
+      'Content deleted. Your report was kept.': 'Contenu supprimé. Votre signalement est conservé.',
+      'Reported content deleted.': 'Contenu signalé supprimé.',
       'Report AI content': 'Signaler un contenu IA',
       'Report inappropriate AI-generated content': 'Signaler un contenu inapproprié généré par l’IA',
       'AI content & safety': 'Contenu IA et sécurité',

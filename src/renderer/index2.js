@@ -23348,11 +23348,56 @@ window._applyRigAnimPills();
     ouvrir({ kind: 'unspecified', asset_url: cible, prompt: promptCourant() });
   });
 
+  const btnSuppr = document.getElementById('rp-delete');
+
+  // Apercu du contenu, pour que l'admin puisse JUGER sans rien installer.
+  // Une image se joint telle quelle ; un maillage .glb ne s'affiche pas dans
+  // un tableau de bord, on capture donc le viewport 3D tel qu'il est a
+  // l'ecran au moment du signalement.
+  function apercuPng() {
+    try {
+      if (contexte.kind !== 'mesh') return '';
+      const cv = document.getElementById('ws-mesh-canvas');
+      if (!cv || !cv.width) return '';
+      return cv.toDataURL('image/png');
+    } catch (_) { return ''; }
+  }
+
+  // Suppression du contenu signale, proposee APRES l'envoi. Elle n'efface
+  // que la copie LOCALE : la piece jointe au signalement reste cote serveur,
+  // sans quoi l'admin ne pourrait plus instruire le dossier.
+  btnSuppr?.addEventListener('click', async () => {
+    const chemin = contexte.asset_url || '';
+    if (!chemin) { fermer(); return; }
+    const ok = await customConfirm(
+      'Delete this content from your project? The copy attached to your report is kept so an admin can review it.',
+      'Delete reported content');
+    if (!ok) return;
+    btnSuppr.disabled = true;
+    try {
+      if (contexte.kind === 'mesh') {
+        const nom = String(chemin).split(/[\/]/).pop();
+        await API.deleteMesh(nom);
+      } else {
+        await API.deleteFile(chemin);
+      }
+      if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Content deleted. Your report was kept.'; }
+      showToast('Reported content deleted.', 'success');
+      setTimeout(() => { fermer(); try { location.reload(); } catch (_) {} }, 1200);
+    } catch (e) {
+      btnSuppr.disabled = false;
+      if (elStatus) { elStatus.style.color = '#ffcf6b'; elStatus.textContent = 'Could not delete: ' + (e?.message || e); }
+    }
+  });
+
   btnSend?.addEventListener('click', async () => {
     const charge = {
       reason: selReason?.value || 'other',
       details: txtDetails?.value || '',
       asset_url: contexte.asset_url || '',
+      // Le chemin sert au processus principal a LIRE le fichier et le joindre.
+      asset_path: contexte.asset_url || '',
+      preview_b64: apercuPng(),
       prompt: contexte.prompt || '',
       kind: contexte.kind || '',
       surface: 'desktop',
@@ -23371,7 +23416,12 @@ window._applyRigAnimPills();
       if (!rep.success) throw new Error(rep.error || 'echec');
       if (elStatus) { elStatus.style.color = '#7ee08a'; elStatus.textContent = 'Report sent. Thank you — an admin will review it.'; }
       btnSend.textContent = 'Sent';
-      setTimeout(fermer, 1800);
+      // Le signalement est parti ET la piece est televersee : on peut
+      // maintenant proposer d'effacer la copie locale. Pas avant — sinon on
+      // inciterait a detruire la preuve plutot qu'a la transmettre.
+      if (btnSuppr) btnSuppr.style.display = '';
+      // Pas de fermeture automatique : elle escamoterait l'offre de
+      // suppression avant que l'utilisateur ait eu le temps de la lire.
     } catch (e) {
       // REPLI HORS LIGNE, INDISPENSABLE. L'application fonctionne sans compte
       // et sans reseau (generation locale) : un dispositif de signalement qui
