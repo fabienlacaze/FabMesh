@@ -1118,17 +1118,34 @@ function _invalidateServiceFlagsCache() {
  * the admin UI list + the handler that consumes it. Removing one is
  * safe but leftover R2 entries are simply ignored.
  */
+/* TARIFS RELEVES LE 2026-08-04 sur COUT REEL MESURE, pas sur une estimation.
+ *
+ * Mesure : une generation de maillage a FROID, creneau horaire isole, traines
+ * eteintes avant lecture, coute 0,7074 \$ = 0,643 EUR tout compris. Le pack le
+ * plus defavorable (abonnement Studio, 40 EUR / 300 credits) vaut 0,1333 EUR
+ * le credit. Aux anciens tarifs, `mesh_fast` (3 cr = 0,40 EUR) et
+ * `mesh_balanced` (4 cr = 0,53 EUR) etaient donc VENDUS A PERTE des que le
+ * conteneur etait froid — et `mesh_balanced` est le palier PAR DEFAUT.
+ * `segment` et `rectify` a 1 credit l'etaient aussi : vrai appel GPU a
+ * 0,176 EUR pour 0,133 EUR encaisses.
+ *
+ * Le coût unitaire s'effondre avec le volume (0,376 \$ a 26 generations/jour
+ * contre 1,22 \$ pour une seule), mais AU LANCEMENT on est par definition dans
+ * le pire cas. Ces tarifs tiennent des la premiere generation.
+ *
+ * ATTENTION : `_meta/pricing.json` dans R2 PRIME sur ces valeurs. Elles ne
+ * servent que de repli — mais un repli qui vendait a perte etait un piege. */
 const PRICING_DEFAULTS = {
   // Image ops
-  text2image:       2,
-  back_view:        2,
-  modify:           2,
-  segment:          1,  // CLIPSeg detect-only (Auto Inpaint live mask preview) — each = a GPU call
-  auto_inpaint:     3,
-  mask_inpaint:     3,
-  face_fix_image:   2,
-  upscale:          2,  // x2 = this price, x4 = this + 1
-  rectify:          1,
+  text2image:       3,
+  back_view:        3,
+  modify:           3,
+  segment:          3,  // CLIPSeg detect-only (Auto Inpaint live mask preview) — each = a GPU call
+  auto_inpaint:     6,
+  mask_inpaint:     6,
+  face_fix_image:   3,
+  upscale:          3,  // x2 = this price, x4 = this + 1
+  rectify:          3,
   remove_background: 1,
   // Mesh ops
   mesh_op_simple:   1,
@@ -1140,10 +1157,10 @@ const PRICING_DEFAULTS = {
   // vary. At $0.000542/s on L40S plus the 300s scaledown tail, one
   // generation really costs ~$0.37; the old 1-credit price sold it for
   // $0.154 on the Studio pack, i.e. at a 58% LOSS. Floor is now 3.
-  mesh_fast:        3,
-  mesh_balanced:    4,
-  mesh_quality:     6,
-  mesh_ultra_8k:    8,
+  mesh_fast:        8,
+  mesh_balanced:    10,
+  mesh_quality:     13,
+  mesh_ultra_8k:    16,
   mesh_multiref:    1,
   mesh_refine:      2,
   mesh_rectify:     1,

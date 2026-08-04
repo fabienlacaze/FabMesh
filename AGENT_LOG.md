@@ -18084,3 +18084,48 @@ RESTE LE VRAI SUJET : ~0,49 $ des 0,71 $ partent en conteneurs inactifs.
 Le levier reste la traîne de 300 s de la classe vue arrière, bloquée par sa
 lenteur de démarrage. Les deux problèmes — les 524 à froid et cette traîne —
 n'ont qu'une seule solution : accélérer son démarrage.
+
+## 2026-08-04 — Tarifs relevés sur le coût RÉEL mesuré
+
+Le user : « il faut régler les prix pour générer de l'argent même dans le
+pire cas ». Raisonnement juste — au lancement on est PAR DÉFINITION dans le
+pire cas, puisque le trafic est faible et que chaque génération est froide.
+
+BASE DE CALCUL, corrigée avant de conclure. Mon premier chiffre (1,449 $ par
+maillage) incluait mes ~15 déploiements du jour et les créations de snapshot
+qu'ils ont provoquées : aucun utilisateur ne fera ça. Le vrai pire cas d'un
+utilisateur est la mesure propre : **0,7074 $ = 0,643 €**, génération froide,
+isolée, créneau horaire dédié, traînes éteintes avant lecture.
+
+Contrainte : le pack le plus DÉFAVORABLE fait foi — abonnement Studio,
+40 € / 300 crédits = 0,1333 € le crédit. C'est lui qui doit tenir, sinon les
+meilleurs clients sont les plus déficitaires.
+
+CE QUI ÉTAIT VENDU À PERTE À FROID :
+  mesh_fast      3 cr = 0,40 €  contre 0,643 € de coût   -0,243 €
+  mesh_balanced  4 cr = 0,53 €                            -0,110 €  ← PALIER PAR DÉFAUT
+  segment        1 cr = 0,13 €  contre 0,176 €            -0,043 €
+  rectify        1 cr = 0,13 €                            -0,043 €
+
+NOUVELLE GRILLE (choix du user : marge confortable, ~100 %) :
+  mesh_fast 3→8, mesh_balanced 4→10, mesh_quality 6→13, mesh_ultra_8k 8→16
+  text2image/back_view/modify/face_fix_image/upscale 2→3
+  segment 1→3, rectify 1→3, auto_inpaint 3→6, mask_inpaint 3→6
+  inchangés : remove_background (Replicate, 0,018 €) et mesh_op_simple (CPU)
+
+Écrite dans `_meta/pricing.json` (R2), vérifiée en production via
+`/api/pricing`. **Les valeurs par défaut du code ont été alignées** : elles
+portaient encore les anciens tarifs, donc une disparition du fichier R2
+aurait fait revenir des prix à perte, en silence.
+
+ÉCART DE FACTURATION À CONNAÎTRE : la somme du rapport PAR APPLICATION
+(13,935 $ en août) est inférieure de 13 % au total du tableau de bord Modal
+(15,99 $). L'écart existe dans les chiffres de Modal eux-mêmes — sur leur
+propre page, « Deployed Apps 15,77 $ » dépasse la somme des applications
+listées (13,71 $). Ce sont probablement les constructions d'image, facturées
+mais non rattachées à une app. **Seul le total de facturation fait foi.**
+
+À SURVEILLER : `segment` passe de 1 à 3 crédits alors qu'il est facturé PAR
+DÉTECTION dans l'Auto Inpaint interactif. Marge saine, mais l'usage peut
+devenir punitif si l'utilisateur enchaîne les détections. À réévaluer sur
+retour d'usage — un clic dans l'admin suffit à le baisser.
