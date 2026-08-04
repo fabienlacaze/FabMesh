@@ -17846,3 +17846,32 @@ Le préchauffage SUR INTENTION est conservé intégralement (focus du champ de
 description, choix du type d'objet) : lui tombe dans la bonne fenêtre, le
 GPU boote pendant que l'utilisateur rédige. Le battement de cœur reste, il
 est gratuit.
+
+## 2026-08-04 — Traîne de la vue arrière ramenée de 600 à 300 s
+
+Décomposition de la génération de maillage mesurée à 1,22 $ : environ 0,49 $
+partaient en conteneurs GPU **inactifs**, dont 0,325 $ pour la seule classe
+`MyFabmeshBackview`, qui gardait un L40S allumé **10 minutes** après ~16 s
+de calcul.
+
+J'ai failli descendre à 120 s. Le commentaire du code m'en a empêché, à
+raison : la valeur de 600 s avait été posée le 2026-05-26 parce que le
+démarrage à froid de cette classe (RealVisXL + ControlNet + IP-Adapter +
+Florence-2, 12-18 Go) prenait 50-90 s et menaçait de franchir la limite de
+100 s des sous-requêtes Cloudflare (HTTP 524). Et cette classe ne sert pas
+que la vue arrière : elle sert aussi les outils d'édition d'image, utilisés
+en rafale.
+
+MAIS ce commentaire est ANTÉRIEUR à l'activation du snapshot mémoire sur
+cette même classe. Le journal Modal du jour dit « [backview/ready] GPU move
+done in 15.8s » — plus 50-90 s. Le risque qui justifiait 600 s a donc
+largement disparu.
+
+Compromis retenu : **300 s**, aligné sur les deux autres classes. Économie
+~0,16 $ par génération, et la fenêtre de 5 min protège toujours les sessions
+d'édition en rafale, qui restent le motif valable.
+
+LEÇON : un commentaire qui documente une décision passée mérite d'être lu
+AVANT de l'écraser — mais il doit aussi être relu à la lumière de ce qui a
+changé depuis. Ici les deux étaient vrais : la raison était bonne, et elle
+avait cessé de s'appliquer.

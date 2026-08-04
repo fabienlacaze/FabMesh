@@ -805,7 +805,21 @@ class MyFabmeshPredictor:
     # in the Worker. Longer scaledown keeps the container warm across
     # typical edit sessions (multi-modify cycles) without re-paying
     # the 90s cold tax. Idle cost: ~$0.16 per 5min extra warm time.
-    scaledown_window=600,
+    #
+    # RAMENE A 300 s LE 2026-08-04. La raison ci-dessus a vieilli : elle date
+    # d'AVANT l'activation du snapshot memoire sur cette classe. Mesure du
+    # jour, journal Modal : « [backview/ready] GPU move done in 15.8s » — plus
+    # 50-90 s, donc plus de risque serieux de franchir les 100 s de Cloudflare.
+    #
+    # Ce que coutait la difference : la vue arriere automatique fait ~16 s de
+    # calcul par generation, puis gardait un L40S allume 10 minutes. Sur une
+    # generation de maillage mesuree a 1,22 \$, cette seule traine pesait
+    # 0,325 \$ — un quart de la facture pour un conteneur qui ne fait rien.
+    #
+    # On ne descend PAS plus bas volontairement : la fenetre de 5 min protege
+    # les sessions d'edition en rafale (modifier / retoucher), qui sont le
+    # vrai motif d'origine et restent valables.
+    scaledown_window=300,
     enable_memory_snapshot=True,
     secrets=[
         modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
