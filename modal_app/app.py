@@ -798,6 +798,22 @@ class MyFabmeshPredictor:
 @app.cls(
     gpu="L40S",
     timeout=600,
+    # SNAPSHOT GPU ESSAYE PUIS RETIRE LE 2026-08-04 — il ne prenait pas.
+    #
+    # L'idee etait bonne et avait marche sur MyFabmeshMesh (211 s -> 17 s) :
+    # faire entrer la phase `move_to_gpu` dans la photo pour supprimer les
+    # HTTP 524 a froid sur les cinq routes SYNCHRONES de cette classe.
+    # Mesure : le journal continuait d'afficher « [backview/ready] GPU move
+    # done in 14.3s » a chaque demarrage, et DEUX creations de snapshot GPU
+    # sont apparues en 25 minutes — la photo etait refaite au lieu d'etre
+    # restauree. Cout constate : la generation de reference est passee de
+    # 0,7074 \$ a 0,9752 \$, soit l'inverse du but recherche.
+    #
+    # Difference avec la classe maillage, piste pour un futur essai : ici la
+    # pile est diffusers + xformers + IP-Adapter, et `load_ip_adapter()`
+    # installe des processeurs d'attention APRES le passage sur CUDA. Il est
+    # possible que cet etat ne survive pas au checkpoint CUDA.
+    # A ne PAS reessayer sans un banc isole : chaque tentative coute ~1 \$.
     # Bumped 300→600 on 2026-05-26 because cold start of this class
     # (RealVisXL + ControlNet + IPAdapter + Florence-2 + lazy SDXL
     # Inpaint = 12-18 GB) takes ~50-90s, which combined with inference
@@ -1433,7 +1449,24 @@ mesh_output_volume = modal.Volume.from_name(
     image=mesh_image,
     gpu="L40S",
     timeout=900,           # full TRELLIS-2 pipeline can run ~5-10 min cold
-    scaledown_window=300,  # keep warm 5 min after last call so back-to-back gens stay fast
+    # TRAINE RAMENEE DE 300 A 90 s LE 2026-08-04, apres mesure.
+    #
+    # Une longue traine est une ASSURANCE CONTRE UN DEMARRAGE LENT. Le
+    # snapshot GPU active ci-dessous fait tomber ce demarrage de 211,6 s a
+    # ~17 s : l'assurance ne vaut plus sa prime. Mesure du jour, generation
+    # a froid a 0,7074 \$ dont ~0,49 \$ de conteneurs INACTIFS.
+    #
+    # SEULE CETTE CLASSE EST RACCOURCIE, et c'est un choix.
+    # `MyFabmeshMesh` est ASYNCHRONE : `/mesh_start` rend la main en quelques
+    # secondes et le client interroge `/mesh_status` ensuite. Un demarrage a
+    # froid n'y produit donc aucun 524.
+    # `MyFabmeshBackview` (vue arriere, rectification, tpose, feuille,
+    # operations d'image) est SYNCHRONE sous la limite de 100 s des
+    # sous-requetes Cloudflare — c'est deja la qu'on recolte des 524 a froid.
+    # Y raccourcir la traine rendrait ces echecs PLUS FREQUENTS : on
+    # economiserait des dollars en degradant le service. On n'y touche pas
+    # tant que son demarrage n'aura pas ete accelere de la meme facon.
+    scaledown_window=90,
     # SNAPSHOT GPU ACTIVE LE 2026-08-04, apres mesure sur une app isolee.
     #
     # C'etait `enable_memory_snapshot=False`, au motif — exact a l'epoque —

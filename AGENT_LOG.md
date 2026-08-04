@@ -18041,3 +18041,46 @@ VÉRIFIÉ, pas supposé : les 16 listes de colonnes ont été rejouées une par
 une contre PostgREST — une colonne inconnue aurait renvoyé 400 et cassé
 l'endpoint correspondant en production. Les 16 passent. Plus `/api/jobs/<id>`
 et `/api/me` en HTTP 200 sur le worker déployé.
+
+## 2026-08-04 — Réduction des coûts de génération : ce qui a marché, ce qui n'a pas
+
+MESURES SUCCESSIVES, une génération à froid par relevé, créneau horaire
+isolé et traînes éteintes avant chaque lecture :
+
+| État | Coût réel | Réponse HTTP |
+|---|---|---|
+| Ce matin, sans snapshot | **1,2201 $** | 259,7 s |
+| Snapshot GPU sur le maillage | **0,7074 $** | 152,5 s |
+| + snapshot GPU sur la vue arrière | **0,9752 $** | 259,5 s |
+
+**−42 % acquis** avec le snapshot du maillage, et davantage de travail rendu
+au passage (la vue arrière réussissait, ce qui n'était pas le cas le matin).
+
+**TENTATIVE ÉCHOUÉE, ANNULÉE.** Étendre le snapshot GPU à
+`MyFabmeshBackview` a fait REMONTER le coût. Le journal montrait toujours
+« [backview/ready] GPU move done in 14.3s » à chaque démarrage, et DEUX
+créations de snapshot GPU en 25 minutes : la photo était refaite au lieu
+d'être restaurée. Retiré, état antérieur rétabli.
+
+Piste pour un futur essai, notée dans le code : cette classe empile
+diffusers + xformers + IP-Adapter, et `load_ip_adapter()` installe des
+processeurs d'attention APRÈS le passage sur CUDA — cet état ne survit
+peut-être pas au checkpoint. À ne pas retenter sans banc isolé : chaque
+essai coûte ~1 $.
+
+TRAÎNE DU MAILLAGE 300 → 90 s. Choix délibéré de ne toucher QUE cette
+classe : `MyFabmeshMesh` est ASYNCHRONE (`/mesh_start` rend la main vite,
+le client interroge ensuite), donc un démarrage à froid n'y produit aucun
+524. `MyFabmeshBackview` sert cinq routes SYNCHRONES sous la limite de
+100 s de Cloudflare — y raccourcir la traîne aurait multiplié les échecs.
+On aurait économisé des dollars en dégradant le service.
+
+**L'ESTIMATEUR RESTE LOIN DU COMPTE.** Journée : 11,59 $ réels contre
+2,502 $ au compteur du fusible, soit 4,6× d'écart. Le fusible protège donc
+beaucoup moins qu'il n'en a l'air — il faudra soit le calibrer sur la
+facture réelle (via le poller horaire déjà en place), soit l'abaisser.
+
+RESTE LE VRAI SUJET : ~0,49 $ des 0,71 $ partent en conteneurs inactifs.
+Le levier reste la traîne de 300 s de la classe vue arrière, bloquée par sa
+lenteur de démarrage. Les deux problèmes — les 524 à froid et cette traîne —
+n'ont qu'une seule solution : accélérer son démarrage.
