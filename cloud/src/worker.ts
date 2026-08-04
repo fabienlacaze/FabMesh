@@ -5711,7 +5711,7 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
   // client used to maintain, which was hitting the 5 MB quota).
   const [jobsRes, assetsRes] = await Promise.all([
     sb.from('jobs')
-      .select('id, user_id, asset_type, mode, status, mesh_url, created_at, finished_at, project_name, options')
+      .select('id, user_id, asset_type, mode, status, mesh_url, created_at, finished_at, project_name, options, type, cost_usd')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(200),
@@ -5842,7 +5842,7 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
 
   const { data, error } = await supabaseAdmin(env)
     .from('jobs')
-    .select('id, asset_type, mode, status, mesh_url, created_at, project_name, options')
+    .select('id, asset_type, mode, status, mesh_url, created_at, project_name, options, type, cost_usd')
     .eq('user_id', user.id)
     .eq('status', 'succeeded')
     .not('mesh_url', 'is', null)
@@ -6251,7 +6251,7 @@ async function handleMeActiveJobs(req: Request, env: Env): Promise<Response> {
   if (isMock(env)) return json({ jobs: [] });
   const { data, error } = await supabaseAdmin(env)
     .from('jobs')
-    .select('id, asset_type, mode, status, credit_cost, created_at, options, project_name')
+    .select('id, asset_type, mode, status, credit_cost, created_at, options, project_name, type, cost_usd')
     .eq('user_id', user.id)
     .in('status', ['starting', 'processing', 'queued', 'running'])
     .order('created_at', { ascending: false })
@@ -8773,7 +8773,7 @@ async function handleModalStatus(req: Request, env: Env): Promise<Response> {
   // classify by asset_type and options.operation_type.
   const sb = supabaseAdmin(env);
   const { data: recentJobs } = await sb.from('jobs')
-    .select('asset_type, options, finished_at')
+    .select('asset_type, options, finished_at, type, cost_usd')
     .eq('user_id', user.id)
     .eq('status', 'succeeded')
     .gte('finished_at', new Date(now - COLD_THRESHOLD_MS).toISOString())
@@ -8790,7 +8790,7 @@ async function handleModalStatus(req: Request, env: Env): Promise<Response> {
     options: Record<string, unknown> | null;
     finished_at: string | null;
   }>)) {
-    const opType = String(j.options?.operation_type ?? '');
+    const opType = String(j.type ?? j.options?.operation_type ?? '');
     const at = String(j.asset_type ?? '');
     if (opType === 'text2image' || opType === 'tpose') {
       bump(opType === 'tpose' ? 'tpose' : 'text2image', j.finished_at);
@@ -10009,7 +10009,7 @@ async function handleUserAssetsMigrateFromJobs(req: Request, env: Env): Promise<
   if (!user) return err(401, 'unauthorized');
   const sb = supabaseAdmin(env);
   const { data, error } = await sb.from('jobs')
-    .select('id, project_name, options, asset_type, created_at')
+    .select('id, project_name, options, asset_type, created_at, type, cost_usd')
     .eq('user_id', user.id)
     .limit(5000);
   if (error) return err(500, error.message);
@@ -10132,7 +10132,7 @@ async function handleUserAssetsReassignOrphans(req: Request, env: Env): Promise<
   // jobs (not just succeeded) because the image was generated when
   // the user clicked Create regardless of mesh success.
   const { data: jobs, error: jErr } = await sb.from('jobs')
-    .select('id, project_name, options, created_at')
+    .select('id, project_name, options, created_at, type, cost_usd')
     .eq('user_id', user.id)
     .not('project_name', 'is', null)
     .limit(5000);
@@ -12004,7 +12004,7 @@ async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
 
   const { data, error } = await supabaseAdmin(env)
     .from('jobs')
-    .select('id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url')
+    .select('id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url, type, cost_usd')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(5000);
@@ -12023,7 +12023,7 @@ async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
     project_name: string | null; mesh_url: string | null;
   };
   for (const j of ((data ?? []) as J[])) {
-    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const opType = String(j.type ?? j.options?.operation_type ?? j.asset_type ?? 'mesh');
     const durMs = j.options?.duration_ms != null
       ? Number(j.options.duration_ms)
       : (j.finished_at
@@ -12060,7 +12060,7 @@ async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> 
   const sb = supabaseAdmin(env);
   const { data, error } = await sb
     .from('jobs')
-    .select('id, user_id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url')
+    .select('id, user_id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url, type, cost_usd')
     .order('created_at', { ascending: false })
     .limit(10000);
   if (error) return err(500, error.message);
@@ -12103,8 +12103,8 @@ async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> 
   let _rowIdx = 0;
   for (const j of rows) {
     const _signedMeshUrl = meshUrlSigned[_rowIdx++];
-    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
-    const costUsd = Number(j.options?.cost_usd
+    const opType = String(j.type ?? j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const costUsd = Number(j.cost_usd ?? j.options?.cost_usd
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
                           ?? 0);
     const durMs = j.options?.duration_ms != null
@@ -12160,7 +12160,7 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     .from('jobs')
     // finished_at added 2026-07-28: the dashboard now prices each job from
     // its MEASURED duration instead of a static per-op guess.
-    .select('user_id, status, credit_cost, options, created_at, finished_at')
+    .select('user_id, status, credit_cost, options, created_at, finished_at, type, cost_usd')
     .order('created_at', { ascending: false })
     .limit(20000);
   if (jobsErr) return err(500, jobsErr.message);
@@ -12209,7 +12209,7 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     } else if (j.status === 'succeeded' || j.status === 'failed') {
       guessedRows += 1;
     }
-    const costUsd = measured ?? Number(j.options?.cost_usd
+    const costUsd = measured ?? Number(j.cost_usd ?? j.options?.cost_usd
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
                           ?? 0);
     const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
@@ -12684,7 +12684,7 @@ async function handleHistoryXls(req: Request, env: Env): Promise<Response> {
 
   const { data, error } = await supabaseAdmin(env)
     .from('jobs')
-    .select('asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name')
+    .select('asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, type, cost_usd')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(5000);
@@ -12698,7 +12698,7 @@ async function handleHistoryXls(req: Request, env: Env): Promise<Response> {
     project_name: string | null;
   };
   const rows: Array<Array<string | number>> = ((data ?? []) as J[]).map(j => {
-    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const opType = String(j.type ?? j.options?.operation_type ?? j.asset_type ?? 'mesh');
     const durMs = j.options?.duration_ms != null
       ? Number(j.options.duration_ms)
       : (j.finished_at
@@ -12730,7 +12730,7 @@ async function handleHistoryJson(req: Request, env: Env): Promise<Response> {
 
   const { data, error } = await supabaseAdmin(env)
     .from('jobs')
-    .select('id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name')
+    .select('id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, type, cost_usd')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(500);
@@ -12743,7 +12743,7 @@ async function handleHistoryJson(req: Request, env: Env): Promise<Response> {
     project_name: string | null;
   };
   const rows = ((data ?? []) as J[]).map(j => {
-    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const opType = String(j.type ?? j.options?.operation_type ?? j.asset_type ?? 'mesh');
     const durMs = j.options?.duration_ms != null
       ? Number(j.options.duration_ms)
       : (j.finished_at
@@ -12819,7 +12819,7 @@ async function handleAdminActiveJobs(req: Request, env: Env): Promise<Response> 
   // Include 'running' for Modal-path jobs that flip past 'processing'
   // mid-pipeline; without it those slip out of the Active list early.
   const { data, error } = await sb.from('jobs')
-    .select('id, user_id, asset_type, mode, status, credit_cost, created_at, options, project_name')
+    .select('id, user_id, asset_type, mode, status, credit_cost, created_at, options, project_name, type, cost_usd')
     .in('status', ['starting', 'processing', 'queued', 'running'])
     .order('created_at', { ascending: false })
     .limit(200);
@@ -13233,7 +13233,7 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
 
   // Aggregate everything from jobs in ONE query.
   const { data: jobsRows } = await sb.from('jobs')
-    .select('user_id, project_name, mesh_url, status, credit_cost, created_at, options')
+    .select('user_id, project_name, mesh_url, status, credit_cost, created_at, options, type, cost_usd')
     .limit(50_000);
   const projects = new Map<string, Set<string>>();
   const meshes = new Map<string, number>();
@@ -13664,7 +13664,7 @@ async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Pr
   if (guard instanceof Response) return guard;
   const sb = supabaseAdmin(env);
   const { data, error } = await sb.from('jobs')
-    .select('id, user_id, asset_type, mesh_url, status, project_name, created_at, options')
+    .select('id, user_id, asset_type, mesh_url, status, project_name, created_at, options, type, cost_usd')
     .eq('user_id', userId)
     .eq('status', 'succeeded')
     .not('mesh_url', 'is', null)
@@ -13852,7 +13852,7 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
   const sb = supabaseAdmin(env);
   const { data, error } = await sb
     .from('jobs')
-    .select('user_id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url')
+    .select('user_id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url, type, cost_usd')
     .order('created_at', { ascending: false })
     .limit(10000);
   if (error) return err(500, error.message);
@@ -13886,8 +13886,8 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
   const meshUrlSigned = await Promise.all(jrows.map(j =>
     j.mesh_url ? signedR2Url(env, j.mesh_url, 'export') : Promise.resolve('')));
   const rows: Array<Array<string | number>> = jrows.map((j, idx) => {
-    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
-    const costUsd = Number(j.options?.cost_usd
+    const opType = String(j.type ?? j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const costUsd = Number(j.cost_usd ?? j.options?.cost_usd
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
                           ?? 0);
     const durMs = j.options?.duration_ms != null
@@ -14314,7 +14314,7 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
   const GRACE_LABEL = `${Math.round(GRACE_MS / 60000)} min`;
   const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const { data: stuck, error: selErr } = await sb.from('jobs')
-    .select('id, user_id, credit_cost, created_at, status, options, asset_type')
+    .select('id, user_id, credit_cost, created_at, status, options, asset_type, type, cost_usd')
     .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
     .lt('created_at', cutoff)
     // 200 max: each job costs up to 1 status POST + 1 UPDATE + 1 RPC + 1-2 R2

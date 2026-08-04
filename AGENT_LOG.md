@@ -18022,3 +18022,22 @@ DEUX PIÈGES, à retenir :
 RESTE : basculer les LECTEURS (tableau de bord, export CSV/XLSX) des
 `options->>` vers les colonnes. Les données sont correctes dès maintenant,
 mais la valeur ne se concrétise qu'une fois les agrégats branchés dessus.
+
+## 2026-08-04 — Lecteurs basculés sur les colonnes `type` / `cost_usd`
+
+Suite immédiate de la migration. Écrire les colonnes ne sert à rien tant que
+les agrégats continuent de désagréger du JSON.
+
+- 16 listes de colonnes complétées (`type, cost_usd` ajoutés à chaque
+  `.select` portant sur `jobs`). Le script ne modifie une requête que si
+  `from('jobs')` apparaît dans les lignes qui précèdent : ajouter ces
+  colonnes à une requête sur une autre table l'aurait cassée.
+- 9 lecteurs basculés, avec REPLI conservé :
+  `j.type ?? j.options?.operation_type ?? j.asset_type` et
+  `j.cost_usd ?? j.options?.cost_usd ?? MODAL_COST_USD[...]`. Les lignes
+  antérieures à la migration restent lisibles.
+
+VÉRIFIÉ, pas supposé : les 16 listes de colonnes ont été rejouées une par
+une contre PostgREST — une colonne inconnue aurait renvoyé 400 et cassé
+l'endpoint correspondant en production. Les 16 passent. Plus `/api/jobs/<id>`
+et `/api/me` en HTTP 200 sur le worker déployé.
