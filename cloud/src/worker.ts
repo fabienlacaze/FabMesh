@@ -1641,7 +1641,7 @@ const MODAL_COST_USD: Record<string, number> = {
   //   'mesh-op-client' → 0 (pure R2 upload, no GPU, no credits)
   // A mismatch is a silent accounting drift — grep both sides when tuning.
   'rig':            0.05,
-  'segment':        0.60,
+  'segment':        0.15,   // MESURE (0,1107 $ le 2026-08-04, 117 s, PartSAM feedforward)
   'animate':        0.06,
   'animate_fbx':    0.06,
   'mesh-op':        0.001,   // MESURE (n=4, mediane 13 s sur CPU)
@@ -9138,7 +9138,15 @@ async function deleteRigJobRecord(env: Env, jobId: string): Promise<void> {
  *  ~8-10 min GPU/mesh ≈ 10-15x the rig's cost → 15 credits / ~$0.60.
  *  Refunded on spawn failure OR when segment-status surfaces an error. */
 const SEGMENT_COST = 15;
-const ESTIMATED_USD_SEGMENT = 0.60;  // A100 ~$0.00125/s × ~480s + cold start/weights
+// MESURE LE 2026-08-04, pas estimee : une segmentation reelle de bout en bout
+// a coute **0,1107 $** sur la facture Modal (117 s du lancement a la fin,
+// 13 parties produites). La valeur precedente de 0,60 $ datait de l'epoque
+// SAMPart3D (~480 s sur A100) ; PartSAM est feedforward et fait le travail en
+// deux minutes. On surestimait donc d'un facteur 5,4 — le fusible journalier
+// se consommait cinq fois trop vite a chaque segmentation, et le tableau de
+// bord sous-affichait la marge de cette operation.
+// On garde une marge de securite sur la valeur mesuree (cold start variable).
+const ESTIMATED_USD_SEGMENT = 0.15;
 
 /** Job record persisted by /api/mesh-segment, read by /api/mesh-segment-status.
  *  Same R2 pattern as RigJobRecord. Key: `_meta/segment_jobs/<job_id>.json`.
