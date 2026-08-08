@@ -16203,6 +16203,20 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
 // STEP 4: ANIMATION (Seed3D Puppeteer / procedural / AnyTop)
 // UI scaffold only — backend wiring in follow-up commit.
 // ============================================================
+/** Rig de repli : le plus recent, en ecartant Puppeteer si possible.
+ *  Le tableau `rigs` melange des `push` (scan de dossier) et des `unshift`
+ *  (rig fraichement genere) : son ordre ne dit rien de la date. On trie donc
+ *  par mtime, et on ecarte Puppeteer — moteur retire du produit le
+ *  2026-08-08 pour cause de licence non commercialisable. */
+function _rigLePlusRecent(proj) {
+  const rigs = (proj?.rigs || []).filter(r => r && r.path);
+  if (!rigs.length) return null;
+  const date = (r) => Number(r.mtime) || 0;
+  const propres = rigs.filter(r => !/_rigged_puppeteer_/i.test(r.path));
+  const pool = propres.length ? propres : rigs;
+  return pool.slice().sort((x, y) => date(y) - date(x))[0].path;
+}
+
 function _wsAnimEngineSync() {
   const engine = document.getElementById('ws-anim-engine')?.value || 'anytop';
   const animType = document.getElementById('ws-anim-type')?.value || 'idle';
@@ -16556,7 +16570,12 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   }
   // Resolve the current rigged GLB from the active project state
   const proj = state.currentProject;
-  const rigPath = proj?.activeRigPath || proj?.rigs?.[proj.rigs.length - 1]?.path;
+  // Le rig utilise doit etre CELUI QUE L'UTILISATEUR VOIT dans l'apercu
+  // « squelette source » — c'est `selectedRigPath`, ecrit par le bouton
+  // « Used for Animation ». `activeRigPath` n'est ecrite nulle part (verifie
+  // par recherche globale) : s'y fier faisait retomber sur le DERNIER element
+  // du tableau, souvent un vieux rig Puppeteer.
+  const rigPath = proj?.selectedRigPath || proj?.activeRigPath || _rigLePlusRecent(proj);
   if (!rigPath) {
     setStatus('No rigged mesh on this project. Run Step 3 first.', true);
     return;

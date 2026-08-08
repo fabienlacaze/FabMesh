@@ -19426,3 +19426,32 @@ les motifs qui chevauchent ce point — le remplacement suivant echouait
 Diagnostics enrichis en parallele (demande user) : cpu / ram / gpu (nvidia-smi)
 / disque, chaque sonde en tolerance de panne — un diagnostic doit fonctionner
 SURTOUT quand la machine va mal.
+
+## 2026-08-09 — l'animation utilisait le MAUVAIS RIG (ancien Puppeteer)
+
+Symptome user : « l'animation ne marche pas correctement » — pose du loup
+vrillee, pattes ecartees. Diagnostic par le NOM DU FICHIER produit :
+`banque_..._rigged_puppeteer_...` alors que le panneau affichait un rig
+`_rigged_skintokens_` tout neuf.
+
+CAUSE : l'apercu « squelette source » ecrit `p.selectedRigPath` (ligne 9629)
+mais la generation lisait `p.activeRigPath` — variable JAMAIS ecrite nulle
+part dans le renderer (verifie par recherche globale : une seule occurrence,
+la lecture). La generation retombait donc sur `rigs[rigs.length - 1]`, et ce
+tableau melange des `push` (scan de dossier, ligne 808) et des `unshift` (rig
+fraichement genere, ligne 21249) : son ordre ne dit RIEN de la date. Resultat,
+un vieux rig Puppeteer — moteur pourtant retire du produit la veille.
+
+CORRECTIF : `selectedRigPath` d'abord (ce que l'utilisateur VOIT), puis
+`_rigLePlusRecent(proj)` qui trie par mtime ET ecarte les rigs Puppeteer tant
+qu'un autre existe.
+
+A REVERIFIER apres ce correctif : la qualite de l'animation. Le mauvais rig
+explique peut-etre a lui seul la pose vrillee — le pont apovivor n'avait
+jamais ete teste sur un rig Puppeteer, dont la topologie n'a rien a voir avec
+les squelettes natifs SkinTokens pour lesquels `table_cible_quadrupede` a ete
+ecrite.
+
+Diagnostics systeme confirmes en place par le user : i9-14900KF (32 threads),
+31,8 Go RAM, RTX 5080 16 Go, 49 Go libres / 1862 Go. NOTE : 49 Go libres est
+peu au regard des moteurs a telecharger — piste d'avertissement produit.
