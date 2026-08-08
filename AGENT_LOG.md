@@ -19477,3 +19477,36 @@ DEUX RETOURS USER, deux corrections.
    chauffage ») ; le mecanisme d'exclusion `data-i18n-skip` existait deja, il
    n'etait simplement pas pose. `setViewerFilename` le pose maintenant — ce
    qui protege TOUS les apercus d'un coup (mesh, rig, animation).
+
+## 2026-08-09 — preparation du paquet 1.0.16
+
+Reponse a « on est pret pour la release du reste ? » : verification faite, pas
+recitation.
+
+VERIFIE EN LIGNE : le service cloud REPOND (myfabmesh-cloud.fabien65400
+.workers.dev/api/pricing -> 200). Note : `myfabmesh.ai` ne resout pas — le
+domaine n'est pas configure, et la strategie de signature SAC l'exige.
+
+PATCHES DE MA MAIN :
+  * version 1.0.15 -> 1.0.16 ;
+  * `build/m2m` -> `resources/m2m_clips` dans extraResources. SANS CELA la
+    « Creature Motion Library » est VIDE chez un client : le pont cherche
+    `resources/m2m_clips` en paquet. Filtre EXPLICITE sur les 8 creatures —
+    `human-base`/`human-addon` pesent 11 Mo a eux deux et ne servent pas
+    (les humanoides sont couverts par Kimodo). 5,2 Mo au lieu de 16 ;
+  * THIRD_PARTY_LICENSES : ajout de Mesh2Motion (CC0, citation verbatim du
+    README), SkinTokens (MIT) et Kimodo (Apache-2.0 + NVIDIA Open Model
+    License « ready for commercial use »). Aucune de ces dependances n'y
+    figurait — obligatoire pour distribuer les clips.
+
+RESTE AU USER (aucune ligne de code ne peut s'y substituer) :
+  * 11 mentions legales vides (legalForm, siret, rcs, shareCapital,
+    registeredOffice, vatNumber, publicationDirector, designatedAgent, name,
+    postalAddress, url) — la garde de build REFUSE desormais de publier ;
+  * Stripe en mode TEST : cle, 3 identifiants de prix, secret webhook,
+    activation du compte. Tant que c'est test, zero encaissement possible ;
+  * rotation du mot de passe admin (expose le 2026-08-03) ;
+  * achat/configuration du domaine.
+
+RESTE A MOI : rebuild MSIX 1.0.16, WACK, resoumission — et la qualite du
+retargeting quadrupede (voir A/B AB_marche_A/B dans meshes/animated).

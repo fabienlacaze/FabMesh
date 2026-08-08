@@ -1,6 +1,6 @@
 {
   "name": "myfabmesh-ai",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "MyFabmesh.AI — image-to-3D mesh generator with local AI.",
   "main": "src/main/main.js",
   "author": {
@@ -123,6 +123,20 @@
       {
         "from": "LICENSE.txt",
         "to": "LICENSE.txt"
+      },
+      {
+        "from": "build/m2m",
+        "to": "m2m_clips",
+        "filter": [
+          "spider.glb",
+          "dragon.glb",
+          "snake.glb",
+          "kaiju.glb",
+          "horse.glb",
+          "bird.glb",
+          "fox.glb",
+          "shark.glb"
+        ]
       }
     ],
     "win": {

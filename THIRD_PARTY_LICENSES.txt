@@ -423,5 +423,42 @@ CC0, authored by the FabMesh project for the purpose of rig retargeting.
 You may use, modify, and redistribute them without restriction.
 
 ================================================================================
+ Mesh2Motion — animation clips (CC0 1.0 Universal / Public Domain)
+================================================================================
+
+  Source     : https://github.com/Mesh2Motion/mesh2motion-app
+  Files      : resources/m2m_clips/*.glb (spider, dragon, snake, kaiju,
+               horse, bird, fox, shark)
+  Code       : MIT
+  Art assets : CC0 1.0 — quoted verbatim from the project README:
+               "The code and platform are all licensed under the very
+                permissive MIT license. The art assets (3d models, rigs,
+                animations) are all licensed under CC0."
+
+  CC0 places the work in the public domain: no attribution is legally
+  required, and redistribution — including commercially — is unrestricted.
+  This notice is provided as a courtesy to the author and to document the
+  provenance of the shipped animation library.
+
+================================================================================
+ SkinTokens / TokenRig — automatic rigging (MIT)
+================================================================================
+
+  Source    : VAST-AI-Research — TokenRig / SkinTokens
+  Used for  : skeleton + skin weight prediction (Step 3)
+  License   : MIT
+
+================================================================================
+ NVIDIA Kimodo — text-to-motion (Apache-2.0 code, NVIDIA Open Model License)
+================================================================================
+
+  Source    : https://github.com/nv-tlabs/kimodo
+  Weights   : nvidia/Kimodo-* on Hugging Face
+  Code      : Apache-2.0
+  Weights   : NVIDIA Open Model License — the model card states verbatim
+              "This model is ready for commercial use."
+  Training data: Bones Rigplay 1 (commercially licensed motion capture).
+
+================================================================================
  End of third-party notices
 ================================================================================
