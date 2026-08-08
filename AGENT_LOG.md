@@ -19101,3 +19101,37 @@ global dont dependent les autres appelants, et respecte une valeur deja posee.
 A RETENIR : deux heuristiques calibrees sur le cas dragon (le seuil
 wing/arm >= 5 os corrige ce matin, et cette attenuation) plombaient des cas
 qui n'ont rien a voir. Verifier l'origine d'une constante avant de la subir.
+
+## 2026-08-08 — ETAPE 0 REUSSIE : la voie squelette-gabarit est VALIDEE
+
+Le pari du plan (peau SkinTokens sur squelette impose, jamais mesuree) est
+gagne. Fourmi 1,5 M sommets + squelette araignee CC0 (56 os) impose via
+`--use_skeleton` : la peau predite est COHERENTE — chaque patte de la fourmi
+controlee par une chaine du gabarit, du bon cote ; tete et abdomen bien
+attribues. Squelette conserve a 55/56 (seul `root` elague, os-repere sans
+peau, par conception), positions fideles a 0,003 median.
+
+TROIS PIEGES DEBUSQUES, tous invisibles a l'analyse statique :
+
+1. `trim_skeleton()` (asset.py:478) SUPPRIME tout os dont le sous-arbre ne
+   porte aucun poids. Premier essai avec poids d'amorcage 100 % racine :
+   sortie a 1 os. Il faut amorcer chaque os — plus-proche-os par sommet, et
+   60 sommets forces pour les 18 os que personne ne reclame (bouts de pattes).
+2. Les `skeleton_tokens` ne sont fabriques QUE si le dataset recoit le
+   tokenizer ET si l'asset garde ses parents apres transformation — c'est le
+   couple RigDataset.__getitem__ (dataset.py:241) + process_fn
+   (tokenrig.py:315) qui les produit, PAS demo.py.
+3. L'echelle uniforme « min des rapports » est un piege pour les gabarits a
+   membres ecartes : l'araignee (2,96 de large) retrecie a 44 % ne couvrait
+   plus que la moitie de la fourmi. Recalage PAR AXE, positions cuites en
+   translation seule dans les os (le tokenizer ne consomme que les positions).
+
+LIMITES VUES : antennes peau-liees a des chaines de pattes (le gabarit n'en a
+pas) ; abdomen deborde sur patte_d_l (21,9 % vs 3,0 % a droite). Les deux
+relevent du RECALAGE (etape 2), pas de la prediction de peau.
+
+POC reproductible : scripts/poc_gabarit_construire.py (fabrique l'entree) et
+scripts/poc_gabarit_evaluer.py (verdict + image). Resultats :
+build/_etape0_{entree,sortie}.glb, image build/_etape0_peau.png, page
+build/_etape0.html. Prochaine etape du plan : greffe « identite du gabarit »
+(export avec noms/positions/parents originaux + peau predite).

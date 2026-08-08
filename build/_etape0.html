@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Étape 0 — squelette-gabarit : verdict</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0d1117; color:#e6edf3; padding:26px 30px 60px;
+         font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .ok { background:#1f6f3f; color:#d7ffe6; border-radius:6px; padding:2px 9px;
+        font-size:12px; font-weight:700; margin-left:9px; vertical-align:3px; }
+  .sous { color:#8b949e; margin:0 0 22px; max-width:940px; }
+  figure { margin:0 0 20px; border:1px solid #30363d; border-radius:10px;
+           overflow:hidden; background:#0f141b; }
+  img { display:block; width:100%; height:auto; }
+  figcaption { padding:10px 14px; font-size:13.5px; border-top:1px solid #30363d;
+               color:#9aa4af; }
+  table { border-collapse:collapse; font-size:14px; margin:6px 0 24px; }
+  td, th { padding:5px 16px 5px 0; text-align:left; }
+  th { color:#8b949e; font-weight:600; }
+  td.v { font-variant-numeric:tabular-nums; }
+  .warn { color:#ffb86b; }
+</style>
+
+<h1>Fourmi sur squelette d'araignée imposé<span class="ok">ÉTAPE 0 RÉUSSIE</span></h1>
+<p class="sous">On a imposé le squelette de l'araignée CC0 (56 os, noms sémantiques,
+  parfaitement symétrique) au maillage de la fourmi, et demandé à SkinTokens de ne prédire
+  <b>que la peau</b>. Chaque point est coloré par la chaîne d'os qui le contrôle.</p>
+
+<figure>
+  <img src="_etape0_peau.png" alt="Peau prédite, colorée par chaîne, trois vues">
+  <figcaption>Chaque patte de la fourmi est contrôlée par <b>une</b> chaîne du gabarit,
+    du bon côté. Tête en rose, abdomen en violet (chaîne « queue » de l'araignée).
+    Les six pattes lisibles et séparées — comparer au rig natif désordonné du même
+    maillage.</figcaption>
+</figure>
+
+<table>
+  <tr><th>Mesure</th><th>Résultat</th></tr>
+  <tr><td>squelette conservé</td><td class="v">55 os sur 56 — seul <code>root</code>
+      (os-repère sans peau) est élagué, par conception ; récupéré à l'étape 1</td></tr>
+  <tr><td>fidélité des positions</td><td class="v">écart médian <b>0,003</b>,
+      pire 0,006 (normalisé) — le squelette de sortie <b>est</b> le gabarit</td></tr>
+  <tr><td>les 8 chaînes de pattes servies</td><td class="v">oui — de 3,0 % à 21,9 %
+      des sommets chacune</td></tr>
+  <tr><td>poids normalisés</td><td class="v">somme médiane 1,000</td></tr>
+</table>
+
+<p class="sous"><b>Limites vues, assumées :</b>
+  <span class="warn">les antennes sont peau-liées à des chaînes de pattes</span>
+  (le gabarit araignée n'a pas d'antennes — elles bougeront comme des pattes),
+  et l'abdomen déborde un peu sur la chaîne <code>patte_d_l</code> (21,9 % contre
+  3,0 % à droite). Les deux relèvent du <b>recalage</b>, prévu à l'étape 2 —
+  pas de la prédiction de peau, qui fait exactement son travail.</p>
+
+<p class="sous">Conséquence : la voie « squelette-gabarit » est <b>validée</b>.
+  Le rig peut porter les noms et la structure d'un squelette connu — donc symétrie
+  parfaite, chaînes égales, et animations du gabarit jouables directement.</p>
