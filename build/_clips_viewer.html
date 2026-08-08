@@ -1,0 +1,187 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Mesh2Motion — 73 clips CC0</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#0d1117; color:#e6edf3; overflow:hidden;
+              font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  #vue { position:fixed; inset:0 0 0 250px; }
+  #bar { position:fixed; top:0; left:0; bottom:0; width:250px; z-index:10; overflow-y:auto;
+         background:#0f141b; border-right:1px solid #30363d; padding:16px 14px 40px; }
+  h1 { margin:0 0 3px; font-size:15px; }
+  .lic { background:#1f6f3f; color:#d7ffe6; border-radius:5px; padding:1px 7px;
+         font-size:11px; font-weight:600; }
+  .sous { color:#8b949e; font-size:12px; margin:0 0 14px; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.7px; color:#6e7681;
+       margin:16px 0 6px; }
+  .grille { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+  button { font:inherit; font-size:12.5px; color:#c9d1d9; background:#161b22;
+           border:1px solid #30363d; border-radius:6px; padding:6px 8px; cursor:pointer;
+           text-align:left; }
+  button:hover { background:#1c232c; border-color:#4a5568; }
+  button.on { background:#1f6f3f; border-color:#2ea043; color:#fff; font-weight:600; }
+  .clip { display:block; width:100%; margin:3px 0; }
+  #etat { position:fixed; left:250px; right:0; top:0; bottom:0; display:grid;
+          place-content:center; z-index:20; background:#0d1117; color:#8b949e;
+          text-align:center; padding:24px; }
+  .err { color:#ff7b72; max-width:600px; text-align:left; }
+  #hud { position:fixed; right:14px; top:14px; z-index:11; background:rgba(13,17,23,.88);
+         border:1px solid #30363d; border-radius:10px; padding:10px 14px; font-size:12.5px; }
+  #hud b { color:#ffd166; }
+  label { display:block; margin:3px 0; cursor:pointer; user-select:none; font-size:12.5px; }
+</style>
+
+<div id="bar">
+  <h1>Mesh2Motion <span class="lic">CC0</span></h1>
+  <p class="sous">73 clips · 8 créatures · réutilisables commercialement sans condition</p>
+  <h2>Créature</h2>
+  <div class="grille" id="creatures"></div>
+  <h2 id="t-clips">Clips</h2>
+  <div id="clips"></div>
+</div>
+<div id="vue"></div>
+<div id="hud">
+  <div id="meta">—</div>
+  <label><input type="checkbox" id="c-os" checked> squelette</label>
+  <label><input type="checkbox" id="c-mesh" checked> maillage</label>
+  <label><input type="checkbox" id="c-tourne"> rotation</label>
+</div>
+<div id="etat">choisissez une créature…</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const CREATURES = ['spider','dragon','snake','kaiju','horse','bird','fox','shark'];
+const FR = { spider:'Araignée', dragon:'Dragon', snake:'Serpent', kaiju:'Kaiju',
+             horse:'Cheval', bird:'Oiseau', fox:'Renard', shark:'Requin' };
+
+const etat = document.getElementById('etat');
+const panne = (ou, e) => { etat.hidden = false;
+  etat.innerHTML = '<div class="err"><b>Panne — ' + ou + '</b><br><br><code style="font-size:12px;'
+    + 'white-space:pre-wrap">' + ((e && (e.stack || e.message)) || e) + '</code></div>'; };
+addEventListener('error', e => panne('erreur globale', e.error || e.message));
+addEventListener('unhandledrejection', e => panne('promesse rejetée', e.reason));
+
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0d1117);
+const cam = new THREE.PerspectiveCamera(45, 1, 0.01, 2000);
+const rendu = new THREE.WebGLRenderer({ antialias:true });
+rendu.setPixelRatio(Math.min(devicePixelRatio, 2));
+rendu.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById('vue').appendChild(rendu.domElement);
+const dim = () => { const l = 250, w = innerWidth - l, h = innerHeight;
+  cam.aspect = w/h; cam.updateProjectionMatrix(); rendu.setSize(w, h); };
+dim(); addEventListener('resize', dim);
+
+scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x35302b, 2.2));
+const d1 = new THREE.DirectionalLight(0xffffff, 2.0); d1.position.set(3,6,4); scene.add(d1);
+const d2 = new THREE.DirectionalLight(0x88aaff, .8); d2.position.set(-4,1,-3); scene.add(d2);
+const orbite = new OrbitControls(cam, rendu.domElement); orbite.enableDamping = true;
+
+let racine=null, mixer=null, aide=null, clips=[], action=null;
+const maillages=[]; const horloge=new THREE.Clock();
+let tourne=false, voirOs=true, voirMesh=true;
+
+const neutre = () => new THREE.MeshStandardMaterial({ color:0x9fb4cc, roughness:.62,
+  metalness:.05, transparent:true, opacity:.4, depthWrite:false, side:THREE.DoubleSide });
+
+function vider() {
+  if (racine) scene.remove(racine);
+  if (aide) scene.remove(aide);
+  racine = aide = mixer = action = null; maillages.length = 0; clips = [];
+}
+
+function jouer(i) {
+  if (!mixer || !clips[i]) return;
+  if (action) action.stop();
+  action = mixer.clipAction(clips[i]); action.reset().play();
+  document.querySelectorAll('#clips button').forEach((b,k) => b.classList.toggle('on', k===i));
+  document.getElementById('meta').innerHTML =
+    '<b>' + (clips[i].name||'?') + '</b> · ' + clips[i].duration.toFixed(2) + ' s';
+}
+
+async function charger(nom) {
+  vider();
+  etat.hidden = false; etat.textContent = 'chargement de ' + FR[nom] + '…';
+  document.querySelectorAll('#creatures button').forEach(b =>
+    b.classList.toggle('on', b.dataset.c === nom));
+  try {
+    const rep = await fetch('m2m/' + nom + '.glb');
+    if (!rep.ok) throw new Error('HTTP ' + rep.status + ' sur m2m/' + nom + '.glb');
+    const buf = await rep.arrayBuffer();
+    new GLTFLoader().parse(buf, '', (gltf) => {
+      try {
+        racine = gltf.scene; scene.add(racine);
+        racine.traverse(o => {
+          if (o.isMesh || o.isSkinnedMesh) {
+            maillages.push(o);
+            const hab = m => { if (!m) return null; m.transparent=true; m.opacity=.4;
+              m.depthWrite=false; m.side=THREE.DoubleSide; return m; };
+            o.material = Array.isArray(o.material) ? o.material.map(m=>hab(m)||neutre())
+                                                   : (hab(o.material)||neutre());
+            o.visible = voirMesh;
+          }
+        });
+        aide = new THREE.SkeletonHelper(racine); aide.visible = voirOs; scene.add(aide);
+
+        racine.updateMatrixWorld(true);
+        const boite = new THREE.Box3().setFromObject(racine);
+        const taille = boite.getSize(new THREE.Vector3()).length() || 1;
+        const centre = boite.getCenter(new THREE.Vector3());
+        cam.position.set(centre.x + taille*.45, centre.y + taille*.3, centre.z + taille*.65);
+        cam.near = Math.max(taille/500,1e-4); cam.far = taille*20; cam.updateProjectionMatrix();
+        orbite.target.copy(centre); orbite.update();
+
+        clips = gltf.animations || [];
+        mixer = new THREE.AnimationMixer(racine);
+        const boite2 = document.getElementById('clips');
+        boite2.innerHTML = '';
+        clips.forEach((c,i) => {
+          const b = document.createElement('button');
+          b.className = 'clip';
+          b.textContent = (c.name || 'clip ' + i) + '  ·  ' + c.duration.toFixed(1) + ' s';
+          b.onclick = () => jouer(i);
+          boite2.appendChild(b);
+        });
+        document.getElementById('t-clips').textContent = 'Clips (' + clips.length + ')';
+        // Sauter la pose de repos : elle est statique, un premier clip immobile
+        // ferait croire que rien ne fonctionne.
+        const prem = clips.findIndex(c => !/rest/i.test(c.name || ''));
+        jouer(prem >= 0 ? prem : 0);
+        etat.hidden = true;
+        rendu.render(scene, cam);
+      } catch (e) { panne('exploitation de ' + nom, e); }
+    }, (e) => panne('analyse de ' + nom, e));
+  } catch (e) { panne('chargement de ' + nom, e); }
+}
+
+const gc = document.getElementById('creatures');
+CREATURES.forEach(c => {
+  const b = document.createElement('button');
+  b.textContent = FR[c]; b.dataset.c = c; b.onclick = () => charger(c);
+  gc.appendChild(b);
+});
+
+const cb = (id, fn) => document.getElementById(id).addEventListener('change', e => fn(e.target.checked));
+cb('c-os',     v => { voirOs = v;   if (aide) aide.visible = v; });
+cb('c-mesh',   v => { voirMesh = v; maillages.forEach(m => m.visible = v); });
+cb('c-tourne', v => tourne = v);
+
+rendu.setAnimationLoop(() => {
+  const dt = horloge.getDelta();
+  if (mixer) mixer.update(dt);
+  if (tourne) { const c = orbite.target, a = .004;
+    const dx = cam.position.x-c.x, dz = cam.position.z-c.z;
+    cam.position.x = c.x + dx*Math.cos(a) - dz*Math.sin(a);
+    cam.position.z = c.z + dx*Math.sin(a) + dz*Math.cos(a); cam.lookAt(c); }
+  orbite.update();
+  rendu.render(scene, cam);
+});
+
+charger('spider');
+</script>

@@ -22,7 +22,7 @@
   input[type=range] { width:150px; vertical-align:middle; }
 </style>
 <div id="vue"></div>
-<div id="etat">chargement du maillage animé (69 Mo)…<br><small id="pct" style="color:#6e7681"></small></div>
+<div id="etat">chargement du squelette animé…<br><small id="pct" style="color:#6e7681"></small></div>
 <div id="infos" class="carte" hidden>
   <h1>Fourmi animée<span class="lic">MIT + CC0</span></h1>
   <dl>
@@ -86,7 +86,18 @@ const neutre = () => new THREE.MeshStandardMaterial({
   color:0x9fb4cc, roughness:.62, metalness:.05,
   transparent:true, opacity:.38, depthWrite:false, side:THREE.DoubleSide });
 
-new GLTFLoader().load('_ant_walk.glb', (gltf) => {
+// On telecharge nous-memes, PUIS on analyse — au lieu de laisser
+// `loader.load` enchainer les deux en silence.
+//
+// POURQUOI : l'analyse d'un GLB de 69 Mo a 1,5 M de sommets prend plusieurs
+// secondes et se produit APRES le dernier evenement de progression. L'ecran
+// restait donc bloque sur « 100 % » sans rien indiquer, et le visualiseur
+// paraissait plante alors qu'il travaillait. Separer les deux etapes permet
+// d'annoncer « analyse en cours » — la meme attente devient lisible.
+const etape = (txt) => {
+  document.getElementById('pct').textContent = txt;
+};
+const surCharge = (gltf) => {
  try {
   racine = gltf.scene;
   scene.add(racine);
@@ -110,7 +121,30 @@ new GLTFLoader().load('_ant_walk.glb', (gltf) => {
   scene.add(aide);
 
   racine.updateMatrixWorld(true);
-  const boite = new THREE.Box3().setFromObject(racine);
+  // Cadrage sur les OS, jamais sur le maillage : `Box3.setFromObject` parcourt
+  // les sommets un par un (1,5 M sur la version complete), ce qui gelait la
+  // page plusieurs secondes de plus.
+  //
+  // On accepte DEUX formes de fichier : le GLB complet (os accessibles via le
+  // squelette du maillage peaufine) et la version allegee produite par
+  // `scripts/glb_squelette_seul.py`, qui n'a AUCUN maillage — 54 Ko au lieu de
+  // 69 Mo. Sans ce second cas, `maillages` reste vide, la boite englobante est
+  // nulle et la camera se retrouve collee a l'origine.
+  const boite = new THREE.Box3();
+  let bones = maillages[0]?.skeleton?.bones || [];
+  if (!bones.length) {
+    const trouves = [];
+    racine.traverse(o => { if (o.isBone) trouves.push(o); });
+    bones = trouves;
+  }
+  if (bones.length) document.getElementById('n-os').textContent = bones.length;
+  if (bones.length) {
+    const p = new THREE.Vector3();
+    bones.forEach(b => boite.expandByPoint(b.getWorldPosition(p)));
+    boite.expandByScalar(boite.getSize(new THREE.Vector3()).length() * 0.06);
+  } else {
+    boite.setFromObject(racine);
+  }
   const taille = boite.getSize(new THREE.Vector3()).length() || 1;
   const centre = boite.getCenter(new THREE.Vector3());
   cam.position.set(centre.x + taille*.5, centre.y + taille*.35, centre.z + taille*.7);
@@ -126,8 +160,8 @@ new GLTFLoader().load('_ant_walk.glb', (gltf) => {
   } else {
     document.getElementById('n-clip').textContent = 'AUCUNE ANIMATION';
   }
-  document.getElementById('n-os').textContent    = os;
-  document.getElementById('n-verts').textContent = verts.toLocaleString('fr-FR');
+  if (os) document.getElementById('n-os').textContent = os;
+  document.getElementById('n-verts').textContent = verts ? verts.toLocaleString('fr-FR') : 'aucun (squelette seul)';
 
   etat.hidden = true;
   document.getElementById('infos').hidden = false;
@@ -136,10 +170,50 @@ new GLTFLoader().load('_ant_walk.glb', (gltf) => {
   // navigateur n'a pas ordonnance une premiere requestAnimationFrame.
   rendu.render(scene, cam);
  } catch (e) { panne('exploitation du GLB', e); }
-}, (p) => {
-  if (p.total) document.getElementById('pct').textContent =
-    Math.round(p.loaded/p.total*100) + ' %  (' + (p.loaded/1048576).toFixed(0) + ' Mo)';
-}, (e) => panne('chargement', e));
+};
+
+(async () => {
+  try {
+    const rep = await fetch('_ant_walk_light.glb');
+    if (!rep.ok) throw new Error('HTTP ' + rep.status);
+    const total = +(rep.headers.get('content-length') || 0);
+    const morceaux = []; let recu = 0, dernierPct = -2;
+    const lecteur = rep.body.getReader();
+    for (;;) {
+      const { done, value } = await lecteur.read();
+      if (done) break;
+      morceaux.push(value); recu += value.length;
+      // N'ecrire dans le DOM que quand le POURCENTAGE ENTIER change. Sans ce
+      // garde-fou on ecrit a chaque morceau recu — environ 4 300 fois pour
+      // 69 Mo — et la mise en page repetee ralentit le telechargement au point
+      // de le faire paraitre bloque.
+      const p = total ? Math.round(recu / total * 100) : -1;
+      if (p !== dernierPct) {
+        dernierPct = p;
+        etape(total ? `${p} %  (${(recu/1048576).toFixed(0)} Mo)`
+                    : `${(recu/1048576).toFixed(0)} Mo`);
+      }
+    }
+    const tampon = new Uint8Array(recu); let o = 0;
+    for (const m of morceaux) { tampon.set(m, o); o += m.length; }
+
+    etape('analyse…');
+    // Laisser le navigateur PEINDRE ce message avant de bloquer le fil
+    // principal : sans cette pause, il ne s'afficherait jamais.
+    //
+    // On COURSE rAF avec un minuteur : sous `--virtual-time-budget` (Chrome
+    // sans interface), rAF n'est jamais ordonnance, et attendre seulement
+    // deux images bloquait la page indefiniment — c'est ce qui a casse ce
+    // visualiseur alors qu'il fonctionnait juste avant.
+    await new Promise(r => {
+      let fini = false;
+      const fin = () => { if (!fini) { fini = true; r(); } };
+      requestAnimationFrame(() => requestAnimationFrame(fin));
+      setTimeout(fin, 150);
+    });
+    new GLTFLoader().parse(tampon.buffer, '', surCharge, (e) => panne('analyse', e));
+  } catch (e) { panne('chargement', e); }
+})();
 
 const cb = (id, fn) => document.getElementById(id).addEventListener('change', e => fn(e.target.checked));
 let lecture = true, tourne = false, vitesse = 1;

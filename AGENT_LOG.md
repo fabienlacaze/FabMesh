@@ -18978,3 +18978,41 @@ que le maillage ne l'est pas.
 C'est le rig qu'il faut corriger, pas le mouvement : une marche suppose des
 pattes en miroir. Prochaine etape = symetrisation de la pose de liaison
 (avec recalcul des inverseBindMatrices, sans quoi la peau se decale).
+
+## 2026-08-08 — Visualiseurs 3D : pourquoi ils paraissaient plantes
+
+Le user demandait, a juste titre, a voir les resultats en 3D plutot qu'en
+images fixes. Trois causes se sont additionnees, toutes de mon fait :
+
+1. Une exception dans le rappel de chargement de GLTFLoader ne declenche PAS
+   `onError` : l'ecran restait noir sur « 100 % » sans aucun indice. Les
+   visualiseurs affichent desormais toute panne A L'ECRAN (try/catch +
+   `error` + `unhandledrejection`).
+2. `Box3.setFromObject` parcourt les sommets UN PAR UN — 1,5 M sur le GLB de
+   la fourmi. On cadre maintenant sur les OS (58 points).
+3. Surtout : je faisais telecharger 69 Mo pour juger un MOUVEMENT. Le maillage
+   n'apporte rien la. Et j'ecrivais dans le DOM a chaque morceau recu (~4 300
+   fois), ce qui ralentissait encore le telechargement.
+
+NOUVEAU `scripts/glb_squelette_seul.py` : extrait un GLB squelette+animation
+depuis un GLB rigge. **68,6 Mo -> 54,2 Ko, soit 1 270x plus leger.** Il garde la
+hierarchie, les pistes d'animation et les PEAUX, puis recompacte le tampon
+binaire pour n'y laisser que les accesseurs encore references — sans ce
+compactage, retirer une reference ne retire pas les octets.
+
+PIEGE RENCONTRE : la premiere version jetait aussi `skins`. Or three.js
+n'instancie `Bone` que pour les noeuds cites dans `skin.joints` (`_markDefs`) :
+sans peaux, `SkeletonHelper` ne dessine plus rien. Le fichier faisait bien
+54 Ko... et etait vide a l'ecran. `inverseBindMatrices` part en revanche : ces
+matrices ne servent qu'a deformer un maillage, precisement ce qu'on retire.
+
+NOUVEAU `build/_clips_viewer.html` : galerie des 73 clips CC0, selection par
+creature (8) puis par clip, lecture 3D immediate — les fichiers sources font
+0,3 a 1,1 Mo. Saute la pose de repos au premier affichage, sans quoi un clip
+statique laisserait croire a une panne.
+
+METHODE A CONSERVER : chaque visualiseur est valide en Chrome sans interface
+(`--dump-dom`) AVANT d'etre montre — on lit dans le DOM les compteurs (os,
+clip, duree) et l'etat de l'ecran de chargement. Les captures d'ecran, elles,
+ne servent a rien : Chrome sans interface ne capture pas la toile WebGL, meme
+avec le GPU reel.
