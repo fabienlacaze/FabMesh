@@ -19548,3 +19548,29 @@ Trouves en verifiant le contenu de l'appx 1.0.16, pas en relisant le code.
 
 LECON : chaque nouveau pont Python doit etre verifie EN MODE PAQUET, pas
 seulement en developpement. Trois fonctions ont deja eu ce defaut.
+
+## 2026-08-09 — pont de clips personnels : renomme pour etre LIVRE
+
+Constat en inspectant l'appx : `apovivor_bridge.py` ABSENT du paquet. Cause :
+le filtre de paquetage contient `!**/apovivor_*.py` — exclusion deliberee du
+nom du projet personnel. La fonctionnalite « clips perso » n'aurait donc
+JAMAIS ete livree, alors que je venais de cabler son option dans l'interface.
+
+Renomme en `scripts/clips_fbx_bridge.py` et neutralise (docstring, messages
+CLIPS_SUCCESS au lieu d'APOVIVOR_SUCCESS). Le dossier de clips par defaut
+passe de `C:\tmp\apovivor_fbx\glb` a `Documents/FabMesh/clips`
+(`FABMESH_CLIPS_PERSO` pour le changer) : un client n'a pas de C:\tmp.
+
+C'est un ARGUMENT DE VENTE, pas un outil perso : tout client possedant des
+packs Mixamo, Fab ou maison peut les brancher sur FabMesh. Le pont ne
+distribue aucun clip, il lit ceux que l'utilisateur possede deja.
+
+ALERTE LICENCE LEVEE au passage : `MOTION_LIB_CANDIDATES` (code preexistant)
+annoncait une « Apovivor FBX library bundled in external/apovivor/1_Source
+when shipped ». VERIFIE sur l'appx : 0 entree correspondante, et le dossier
+n'existe meme pas dans le depot. Aucun asset sous licence Fab n'est
+redistribue. Commentaire corrige pour que la prochaine lecture ne declenche
+pas la meme frayeur.
+
+PAQUET 1.0.16 FINAL : 592 entrees, 8 clips CC0, les 3 ponts d'animation
+(mesh2motion, clips_fbx, kimodo).

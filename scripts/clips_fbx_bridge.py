@@ -1,7 +1,13 @@
-"""Pont apovivor : animer un rig SkinTokens avec les clips exportes d'Unreal.
+"""Pont CLIPS PERSONNELS : animer un rig SkinTokens avec des clips FBX/GLB.
+
+Renomme depuis `apovivor_bridge.py` le 2026-08-09 : le filtre de paquetage
+exclut `apovivor_*.py` (nom du projet personnel du developpeur), la
+fonctionnalite n'etait donc JAMAIS livree. Elle vaut pourtant comme
+argument de vente : tout client possedant des packs Mixamo, Fab ou maison
+peut brancher FabMesh dessus.
 
 CHAINE (decision user du 2026-08-08) :
-  SkinTokens genere le squelette  ->  la banque apovivor l'anime.
+  SkinTokens genere le squelette  ->  une banque de clips l'anime.
 
   1. `ue_export_anims.py` (dans l'editeur UE) sort les AnimSequence en FBX ;
   2. `fbx_vers_glb.py` (bpy) les convertit en GLB, noms d'os preserves ;
@@ -10,13 +16,14 @@ CHAINE (decision user du 2026-08-08) :
      retargete sur le rig SkinTokens (`retarget_motion_to_rig`, qui sait
      viser les os anonymes bone_N par classification geometrique).
 
-RAPPEL LICENCE : les packs apovivor sont sous licence Fab — usage dans TES
-produits, jamais redistribues en tant qu'assets. Ce pont est un outil
-personnel ; il n'entre pas dans le paquet vendu avec ces clips.
+RAPPEL LICENCE : ce pont ne distribue AUCUN clip — il lit ceux que
+l'utilisateur possede deja. Les packs commerciaux (Fab, Mixamo...) restent
+soumis a leur propre licence : usage dans les produits de leur acheteur,
+jamais redistribues en tant qu'assets.
 
 CLI :
-  python apovivor_bridge.py --rig <rig_skintokens.glb> \
-      --clip C:/tmp/apovivor_fbx/glb/celtic_wolfhound_run_anim.glb \
+  python clips_fbx_bridge.py --rig <rig_skintokens.glb> \
+      --clip <dossier>/mon_clip.glb \
       --out sortie.glb [--clip-name course]
 """
 from __future__ import annotations
@@ -147,7 +154,7 @@ def table_cible_quadrupede(rig_glb: str, avant: str = "z+"):
                     table[nom] = ("head", None, 0)
                 else:
                     table[nom] = ("spine", None, i)
-    print("APOVIVOR: table cible — %d os classes (%d paires de membres)"
+    print("CLIPS: table cible — %d os classes (%d paires de membres)"
           % (len(table), len(paires)), flush=True)
     return table
 
@@ -182,11 +189,11 @@ def animer(rig_glb: str, clip_glb: str, out_glb: str, nom_sortie: str | None):
         target_table=table_cible_quadrupede(rig_glb),
         target_drop_re=None,
     )
-    print("APOVIVOR_SUCCESS: %s" % out_glb, flush=True)
+    print("CLIPS_SUCCESS: %s" % out_glb, flush=True)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Clips apovivor sur rig SkinTokens")
+    ap = argparse.ArgumentParser(description="Clips personnels sur rig SkinTokens")
     ap.add_argument("--rig", required=True)
     ap.add_argument("--clip", required=True)
     ap.add_argument("--out", required=True)

@@ -104,8 +104,11 @@ function _resolveBlender() {
   return _autoDetectBlender();
 }
 
-// Apovivor FBX library bundled in `external/apovivor/1_Source/` when shipped,
-// or pulled from `c:/tmp/apovivor_fbx/1_Source` during dev. We resolve both.
+// Bibliotheque FBX de mouvements, resolue dans trois emplacements. VERIFIE le
+// 2026-08-09 sur l'appx 1.0.16 : AUCUN de ces dossiers n'est livre (0 entree
+// correspondante dans le paquet), donc aucun asset sous licence tierce n'est
+// redistribue. Ces chemins ne servent qu'a une bibliotheque locale que
+// l'utilisateur fournit lui-meme.
 const MOTION_LIB_CANDIDATES = [
   path.join(process.resourcesPath || '', 'apovivor', '1_Source'),
   path.join(__dirname, '..', '..', 'external', 'apovivor', '1_Source'),
@@ -790,7 +793,7 @@ function register(deps) {
       if (!clipPath || !fs.existsSync(clipPath)) {
         return { success: false, error: 'Clip introuvable : ' + clipPath };
       }
-      args = [path.join(scriptsDir, 'apovivor_bridge.py'),
+      args = [path.join(scriptsDir, 'clips_fbx_bridge.py'),
               '--rig', meshPath, '--clip', clipPath, '--out', outGlb,
               '--clip-name', slug];
     } else {
