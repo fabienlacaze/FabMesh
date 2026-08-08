@@ -18633,3 +18633,46 @@ LEÇON : un garde pose à un point de passage OBLIGÉ voit tout — y compris ce
 qu'il ne doit pas juger. Intercepter avant que le code ait choisi sa
 stratégie, c'est décider à sa place. Et c'est une contre-expertise
 indépendante qui l'a vu, pas moi.
+
+## 2026-08-08 — Audit de mise en vente : 14 blocages, deux corrigés
+
+Workflow de 26 agents sur cinq domaines (bureau/Store, cloud, admin/argent,
+juridique, parcours payant), chaque constat passé par une contre-expertise
+chargée de le RÉFUTER. 14 confirmés. Je vérifie chacun MOI-MÊME avant de
+patcher — consigne du user, et prudence justifiée après la régression que
+j'avais introduite le matin.
+
+**BLOCAGE — mentions légales non remplies, EN LIGNE.** Vérifié sur la page
+réellement servie : `/legal/mentions` répond 200 et affiche 22 marqueurs
+« [À_COMPLÉTER: SIREN 9 chiffres…] » à tout visiteur. Quatre agents l'ont
+trouvé indépendamment. SIREN, RCS, siège, directeur de publication et
+médiateur agréé sont obligatoires (LCEN art. 6-III, Code conso. L612-1).
+
+TROISIÈME PROTECTION ÉCRITE MAIS JAMAIS BRANCHÉE de la journée :
+`legalIdentityUnfilledFields()` portait le commentaire « Use in a pre-launch
+guard to fail the build if the operator forgot one ». Jamais appelée.
+`cloud/scripts/check-legal-identity.mjs` la branche en `prebuild`.
+Vérifié : garde seul → 1, avec `ALLOW_UNFILLED_LEGAL=1` → 0, build → 1.
+**Ces valeurs n'appartiennent qu'à l'exploitant** ; aucun outil ne peut les
+inventer. Ce que l'outillage peut faire, c'est interdire de publier sans.
+
+**BLOCAGE — la page d'achat annonçait un prix, la caisse en facturait un
+autre.** Vérifié en direct : la page affichait Fast 1 / Balanced 2 /
+Quality 4 / Ultra 8, quand la grille facturait 8 / 10 / 13 / 16. Jusqu'à
+**2,5× d'écart** — pratique commerciale trompeuse.
+
+Honnêteté sur l'origine : la table était DÉJÀ fausse avant moi (elle
+affichait 1/2/4/8 quand la grille valait 3/4/6/8) ; mon relèvement du
+2026-08-04 n'a fait qu'élargir l'écart. La cause est structurelle : le prix
+était DUPLIQUÉ dans le JSX au lieu d'être lu à la source. La table lit
+désormais `/api/pricing`, et affiche « — » tant que la grille n'est pas
+chargée — mieux vaut un tiret qu'un chiffre faux.
+
+Vérifié sur la page servie après déploiement (avec contournement de cache,
+le premier contrôle lisait une version en cache et m'avait fait croire à un
+échec).
+
+RESTE 12 blocages à vérifier puis traiter, dont : le rig mort dans le paquet
+Store (les DEUX moteurs absents du .appx), les moteurs d'animation absents,
+la bibliothèque de motion sans licence, le remboursement qui ne reprend pas
+les crédits.

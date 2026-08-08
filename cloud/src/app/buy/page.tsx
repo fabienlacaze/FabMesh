@@ -27,6 +27,28 @@ export default function BuyPage() {
       .catch(() => setUser(null));
   }, []);
 
+  // TARIFS LUS DEPUIS LA GRILLE REELLE, jamais ecrits en dur.
+  //
+  // La table ci-dessous annoncait 1 / 2 / 4 / 8 credits alors que la grille
+  // facturait 3 / 4 / 6 / 8 — puis 8 / 10 / 13 / 16 apres le relevement du
+  // 2026-08-04. Un client lisait donc un prix et s'en voyait debiter jusqu'a
+  // 2,5 fois plus : en droit francais c'est une pratique commerciale
+  // trompeuse, et c'est arrive parce que le chiffre etait duplique dans le
+  // JSX au lieu d'etre lu a la source.
+  const [prix, setPrix] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    fetch('/api/pricing')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setPrix((j && j.prices) || null))
+      .catch(() => setPrix(null));
+  }, []);
+  // Tant que la grille n'est pas chargee on n'affiche AUCUN chiffre : mieux
+  // vaut un tiret qu'un prix errone.
+  const cr = (cle: string) => {
+    const v = prix?.[cle];
+    return typeof v === 'number' ? `${v} credit${v > 1 ? 's' : ''}` : '—';
+  };
+
   useEffect(() => {
     fetch('/api/pricing/availability')
       .then(r => r.ok ? r.json() : null)
@@ -125,12 +147,12 @@ export default function BuyPage() {
             <tr><th>Mesh option</th><th>Cost</th><th>Details</th></tr>
           </thead>
           <tbody>
-            <tr><td><strong>Fast</strong> mesh</td><td>1 credit</td><td>~50 s · quick draft</td></tr>
-            <tr><td><strong>Balanced</strong> mesh</td><td>2 credits</td><td>~90 s · recommended</td></tr>
-            <tr><td><strong>Quality</strong> mesh</td><td>4 credits</td><td>~180 s · high detail</td></tr>
-            <tr><td><strong>Ultra 8K</strong> mesh</td><td>8 credits</td><td>maximum detail + texture</td></tr>
-            <tr><td>Text → image (before the mesh)</td><td>2 credits</td><td>only if you start from a text prompt, not an image</td></tr>
-            <tr><td>8K texture · Face fix · Refine</td><td>+2 to +3 credits</td><td>optional add-ons</td></tr>
+            <tr><td><strong>Fast</strong> mesh</td><td>{cr('mesh_fast')}</td><td>~50 s · quick draft</td></tr>
+            <tr><td><strong>Balanced</strong> mesh</td><td>{cr('mesh_balanced')}</td><td>~90 s · recommended</td></tr>
+            <tr><td><strong>Quality</strong> mesh</td><td>{cr('mesh_quality')}</td><td>~180 s · high detail</td></tr>
+            <tr><td><strong>Ultra 8K</strong> mesh</td><td>{cr('mesh_ultra_8k')}</td><td>maximum detail + texture</td></tr>
+            <tr><td>Text → image (before the mesh)</td><td>{cr('text2image')}</td><td>only if you start from a text prompt, not an image</td></tr>
+            <tr><td>8K texture · Face fix · Refine</td><td>+{prix?.mesh_ultra_hd ?? '—'} / +{prix?.mesh_face_fix ?? '—'} / +{prix?.mesh_refine ?? '—'} credits</td><td>optional add-ons</td></tr>
           </tbody>
         </table>
         <p style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 8 }}>
