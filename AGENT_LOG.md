@@ -19035,3 +19035,29 @@ Ajout d'un CHIEN DE GARDE : au bout de 8 s sans aboutir, la page affiche
 l'etape atteinte, le temps ecoule et le fichier attendu, au lieu de rester
 muette. C'est ce qui manquait depuis le debut — j'ai passe plusieurs
 allers-retours a deviner ou ca bloquait faute de le faire dire a la page.
+
+## 2026-08-08 — Visualiseurs : le CDN etait la cause, pas mes fichiers
+
+Les deux visualiseurs se figeaient sur « analyse… » chez le user alors que les
+MEMES fichiers aboutissaient en Chrome sans interface. Indice decisif : la
+galerie chargeait un GLB Mesh2Motion d'ORIGINE, que je n'avais pas touche —
+donc la cause n'etait pas ma manipulation de fichiers.
+
+Ce qui restait de commun aux deux pages : `three` et `GLTFLoader` importes
+depuis unpkg.com via une carte d'imports. Sur cette machine, Kaspersky
+intercepte le TLS (constate le meme jour sur files.pythonhosted.org, avec le
+choix « Ajouter aux exclusions / Deconnecter »). Un module partiellement
+recupere, ou un melange de versions en cache entre `three` et `GLTFLoader`,
+laisse la promesse de `parse` sans resolution — ni erreur, ni fin.
+
+CORRECTIF : three.js est desormais SERVI EN LOCAL (`build/vendor/`) —
+three.module.js, GLTFLoader.js, OrbitControls.js et sa dependance
+BufferGeometryUtils.js. Plus aucune requete externe.
+
+VALIDATION : les deux pages aboutissent avec TOUT le reseau externe coupe
+(`--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`). C'est une
+preuve, pas une supposition : sans acces au CDN, elles fonctionnent.
+
+LECON POUR LE PRODUIT : tout outil de diagnostic destine a la machine du user
+doit etre autonome. Un CDN ajoute une dependance reseau ET un point
+d'interception antivirus, pour un gain nul en local.
