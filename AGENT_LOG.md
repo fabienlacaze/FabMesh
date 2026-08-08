@@ -19400,3 +19400,29 @@ Electron redemarre. PARCOURS UTILISATEUR : projet avec un mesh rigge Step 3
 -> Step 4 -> moteur « Creature Motion Library » -> choisir un clip (PERSO =
 wolfhound...) -> Generate. RESTE A FAIRE : parite cloud de ce moteur, et
 embarquer build/m2m dans extraResources (m2m_clips) pour le paquet Store.
+
+## 2026-08-09 — l'utilisateur choisit une ACTION, pas un fichier
+
+Deux retours user sur le nouveau moteur : « l'utilisateur ne sait pas quoi
+choisir » (la liste montrait des noms de FICHIERS : celtic_wolfhound_idleB_anim)
+et « meme le choix mode (local/cloud) est inutile » (une seule entree
+selectionnable).
+
+CORRECTIONS :
+  * le menu ANIMATION habituel (Marche, Course, Repos, Attaque, Mort, Saut)
+    reprend la main ; `_choisirClip(action, classe, listes)` cote main
+    selectionne le clip — correspondance par MOTS-CLES (walk/marche/promenade,
+    idle/repos/stand...) car les banques nomment differemment la meme
+    intention, PERSO prioritaire sur CC0, puis creature CC0 la plus proche de
+    la morphologie detectee (_CC0_PAR_CLASSE), et en dernier recours le
+    premier clip de la creature la plus proche plutot qu'une erreur.
+  * le statut affiche ce qui a ete retenu : « Termine — walk_anim (perso) ».
+  * rangees CLIP et MODE masquees.
+
+PIEGE DE PATCH A RETENIR : l'insertion d'un bloc AVANT une ancre coupe en deux
+les motifs qui chevauchent ce point — le remplacement suivant echouait
+(assert). Faire les factorisations AVANT les insertions.
+
+Diagnostics enrichis en parallele (demande user) : cpu / ram / gpu (nvidia-smi)
+/ disque, chaque sonde en tolerance de panne — un diagnostic doit fonctionner
+SURTOUT quand la machine va mal.

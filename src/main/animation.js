@@ -650,7 +650,7 @@ function register(deps) {
     } catch (_) { return []; }
   }
 
-  ipcMain.handle('anim:banque-liste', async () => {
+  async function _listerBanque() {
     const out = { m2m: [], apovivor: [] };
     const dir = _dossierClipsM2M();
     if (dir) {
@@ -669,11 +669,87 @@ function register(deps) {
         out.apovivor.push({ clip: f.replace(/\.glb$/, ''), path: path.join(adir, f) });
       }
     }
-    return { success: true, ...out };
-  });
+    return out;
+  }
+  ipcMain.handle('anim:banque-liste', async () => ({ success: true, ...(await _listerBanque()) }));
+
+  // Correspondance ACTION -> mots-cles presents dans les noms de clips.
+  // Les banques nomment differemment la meme intention (walk/marche,
+  // idle/repos/stand) : on cherche par mots-cles, pas par egalite.
+  const _MOTS_ACTION = {
+    idle:   ['idle', 'repos', 'stand'],
+    walk:   ['walk', 'marche', 'promenade'],
+    run:    ['run', 'course', 'gallop'],
+    attack: ['attack', 'attaque', 'bite', 'bark', 'roar', 'ecorce'],
+    death:  ['death', 'die', 'mort', 'dead'],
+    jump:   ['jump', 'saut', 'leap', 'flap', 'fly'],
+  };
+  // Morphologie -> creatures CC0 candidates, de la plus proche a la plus
+  // lointaine. Sert quand aucun clip perso ne correspond.
+  const _CC0_PAR_CLASSE = {
+    quadruped: ['fox', 'horse', 'kaiju'],
+    humanoid:  ['kaiju'],
+    bird:      ['bird', 'dragon'],
+    dragon:    ['dragon', 'kaiju', 'bird'],
+    insect:    ['spider'],
+    arachnid:  ['spider'],
+    snake:     ['snake'],
+    fish:      ['shark'],
+    other:     ['fox', 'kaiju', 'spider'],
+  };
+
+  /** Choisit le meilleur clip pour (action, morphologie). PERSO d'abord. */
+  function _choisirClip(action, classe, listes) {
+    const mots = _MOTS_ACTION[String(action || 'walk').toLowerCase()] || ['walk'];
+    const rang = (nom) => {
+      const n = String(nom).toLowerCase();
+      for (let i = 0; i < mots.length; i++) { if (n.includes(mots[i])) return i; }
+      return -1;
+    };
+    // 1. PERSO : l'utilisateur a importe ces clips, ils priment.
+    let best = null;
+    for (const c of (listes.apovivor || [])) {
+      const r = rang(c.clip);
+      if (r >= 0 && (!best || r < best.r)) {
+        best = { r, choix: { source: 'apovivor', clip: c.clip, clipPath: c.path } };
+      }
+    }
+    if (best) return best.choix;
+    // 2. CC0, par proximite morphologique puis pertinence du mot.
+    const ordre = _CC0_PAR_CLASSE[String(classe || 'other').toLowerCase()]
+      || _CC0_PAR_CLASSE.other;
+    for (const creature of ordre) {
+      let m = null;
+      for (const c of (listes.m2m || [])) {
+        if (c.creature !== creature) continue;
+        const r = rang(c.clip);
+        if (r >= 0 && (!m || r < m.r)) m = { r, choix: { source: 'm2m', creature, clip: c.clip } };
+      }
+      if (m) return m.choix;
+    }
+    // 3. Rien ne colle : premier clip de la creature la plus proche — mieux
+    // qu'une erreur alors qu'un mouvement plausible existe.
+    for (const creature of ordre) {
+      const c = (listes.m2m || []).find(x => x.creature === creature);
+      if (c) return { source: 'm2m', creature, clip: c.clip };
+    }
+    return null;
+  }
 
   ipcMain.handle('anim:banque', async (_e, opts = {}) => {
-    const { meshPath, source, creature, clip, clipPath } = opts;
+    let { meshPath, source, creature, clip, clipPath } = opts;
+    // Mode AUTOMATIQUE : l'interface envoie une action (walk/run/idle...) et
+    // la morphologie detectee ; le clip est choisi ici. Le mode explicite
+    // (source + clip) reste accepte pour les scripts et les tests.
+    if (!source && opts.action) {
+      const listes = await _listerBanque();
+      const choix = _choisirClip(opts.action, opts.classe, listes);
+      if (!choix) {
+        return { success: false, error: 'Aucun clip disponible pour « ' + opts.action + ' ».' };
+      }
+      source = choix.source; creature = choix.creature || null;
+      clip = choix.clip; clipPath = choix.clipPath || null;
+    }
     if (!meshPath || !fs.existsSync(meshPath)) {
       return { success: false, error: 'Mesh not found' };
     }
@@ -695,7 +771,7 @@ function register(deps) {
     // Attenuation PAR CLIP : les clips violents (course, saut, attaque)
     // debordent a pleine puissance — constate sur la course du wolfhound, une
     // patte passait le point de bascule. Les clips calmes restent a 1.0.
-    if (!env.ANYTOP_OUTPUT_DAMP && /run|course|jump|saut|attack|roar/i.test(String(clip || clipPath || ''))) {
+    if (!env.ANYTOP_OUTPUT_DAMP && /run|course|jump|saut|attack|roar|bark|bite/i.test(String(clip || clipPath || ''))) {
       env.ANYTOP_OUTPUT_DAMP = '0.6';
     }
     let args;
@@ -736,7 +812,8 @@ function register(deps) {
             params: { source, creature, clip, damp: env.ANYTOP_OUTPUT_DAMP || '1.0' },
           });
           _sendToAllWindows(BrowserWindow, 'anim:progress', { jobId, phase: 'done', pct: 100 });
-          resolve({ success: true, jobId, glbPath: outGlb });
+          resolve({ success: true, jobId, glbPath: outGlb, clipUtilise: clip,
+                    origine: source === 'apovivor' ? 'perso' : ('CC0 · ' + creature) });
         } else {
           _sendToAllWindows(BrowserWindow, 'anim:progress',
             { jobId, phase: 'error', pct: 0, msg: dernieres.slice(-300) });

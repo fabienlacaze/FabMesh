@@ -16214,10 +16214,16 @@ function _wsAnimEngineSync() {
   const showVideo = false && (engine === 'seed3d_puppeteer');
   if (promptRow) promptRow.style.display = showPrompt ? '' : 'none';
   if (videoRow) videoRow.style.display = showVideo ? '' : 'none';
-  // Banque de clips : la rangee CLIP s'affiche a la place du choix par type
+  // Banque de clips : l'utilisateur choisit une ACTION dans le menu ANIMATION
+  // habituel, l'application choisit le clip (_choisirClip cote main). La
+  // rangee CLIP reste dans le DOM pour un futur mode avance, mais masquee :
+  // « celtic_wolfhound_idleB_anim » ne veut rien dire pour un utilisateur.
   const banqueRow = document.getElementById('ws-banque-row');
-  if (banqueRow) banqueRow.style.display = (engine === 'banque_clips') ? '' : 'none';
-  if (engine === 'banque_clips') _remplirBanqueClips();
+  if (banqueRow) banqueRow.style.display = 'none';
+  // MODE (Local / Cloud) : masque tant que le cloud n'a pas ce moteur — un
+  // menu dont une seule entree est selectionnable n'est pas un choix.
+  const modeRow = document.getElementById('ws-anim-mode')?.closest('.form-row');
+  if (modeRow) modeRow.style.display = 'none';
 }
 
 // Remplit une seule fois la liste des clips (CC0 livres + perso apovivor).
@@ -16578,15 +16584,10 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     // ---- Banque de clips (Mesh2Motion CC0 + perso apovivor) ----
     // Retargeting local d'un clip tout fait sur le squelette SkinTokens.
     if (engine === 'banque_clips') {
-      let choix = null;
-      try { choix = JSON.parse(document.getElementById('ws-banque-clip')?.value || 'null'); } catch (_) {}
-      if (!choix) {
-        setStatus('Choisissez un clip dans la liste.', true);
-        btn.disabled = false;
-        return;
-      }
-      setStatus(`Retargeting « ${choix.clip} » sur le squelette…`);
-      const result = await API.animBanque({ meshPath: rigPath, ...choix });
+      setStatus(`Recherche d'un mouvement « ${animType} » adapté…`);
+      const result = await API.animBanque({
+        meshPath: rigPath, action: animType, classe: detectedClass,
+      });
       if (!result?.success) {
         setStatus(`Echec : ${result?.error || 'unknown'}`, true);
         if (_activeAnimJob && typeof completeJob === 'function') {
@@ -16596,14 +16597,14 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
         btn.disabled = false;
         return;
       }
-      setStatus(`Done — ${result.glbPath?.split(/[\\/]/).pop()}`);
+      setStatus(`Terminé — ${result.clipUtilise || animType} (${result.origine || 'banque'})`);
       const projB = state.currentProject;
       if (projB) {
         projB.animations = projB.animations || [];
         projB.animations.unshift({
           id: result.jobId || `${Date.now()}`,
           batchId: `banque_${Date.now()}`,
-          type: choix.clip,
+          type: animType,
           filename: result.glbPath.split(/[\\/]/).pop(),
           path: result.glbPath,
           url: 'file:///' + result.glbPath.replace(/\\/g, '/'),

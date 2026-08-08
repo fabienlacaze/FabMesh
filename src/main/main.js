@@ -9082,11 +9082,38 @@ ipcMain.handle('export-diagnostics', async () => {
           : b.toString('utf8');
       } catch (e) { return '(not available: ' + (e && e.message) + ')'; }
     };
+    // Infos systeme (demande user 2026-08-09) : chaque bloc est en
+    // tolerance de panne — le diagnostic doit fonctionner SURTOUT quand la
+    // machine va mal, une sonde qui echoue ecrit '(indisponible)' et passe.
+    const go = (fn) => { try { return fn(); } catch (e) { return '(indisponible: ' + (e && e.message) + ')'; } };
+    const cpu = go(() => {
+      const c = os.cpus();
+      return c[0].model.trim() + '  (' + c.length + ' threads)';
+    });
+    const ram = go(() => {
+      const t = os.totalmem() / 1073741824, l = os.freemem() / 1073741824;
+      return t.toFixed(1) + ' Go total, ' + l.toFixed(1) + ' Go libres ('
+        + Math.round(100 * (t - l) / t) + ' % utilises)';
+    });
+    const gpu = go(() => require('child_process')
+      .execSync('nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version'
+        + ' --format=csv,noheader', { timeout: 5000, windowsHide: true })
+      .toString('utf8').trim() || '(aucun GPU NVIDIA)');
+    const disque = go(() => {
+      const st = fs.statfsSync(DATA_BASE);
+      const libre = st.bavail * st.bsize / 1073741824;
+      const total = st.blocks * st.bsize / 1073741824;
+      return libre.toFixed(0) + ' Go libres / ' + total.toFixed(0) + ' Go  (' + DATA_BASE + ')';
+    });
     const body = [
       'MyFabmesh.AI diagnostics',
       'generated : ' + new Date().toISOString(),
       'version   : ' + app.getVersion() + '   packaged: ' + app.isPackaged,
       'os        : ' + process.platform + ' ' + os.release() + ' ' + process.arch,
+      'cpu       : ' + cpu,
+      'ram       : ' + ram,
+      'gpu       : ' + gpu,
+      'disque    : ' + disque,
       'dataBase  : ' + DATA_BASE,
       'aiPython  : exists=' + fs.existsSync(path.join(AI_PYTHON_DIR, 'python.exe')) + '  torchReady=' + _aiPythonReady(),
       '',
