@@ -18442,3 +18442,53 @@ VÉRIFIÉ DANS UN CONTENEUR, pas déduit :
   import fbx_motion ......... trouvé (échoue seulement sur numpy, absent de
                               l'image de test minimale, présent en réel)
   /scripts existe ........... False
+
+## 2026-08-08 — Refus Store 10.1.2.10 : traceback Python brute sur « Generate »
+
+Rapport dced4070. Le testeur a vu une fenêtre « Image generation failed —
+No module named 'torch' » avec la traceback complète, en cliquant simplement
+sur Generate après avoir créé un projet.
+
+LE DÉTAIL QUI DÉSIGNE LA CAUSE, et que le rapport donne : la MÊME version
+fonctionnait sur un autre appareil (« Tested Without Issue: HP Spectre
+x360 », en échec sur « Vektor 16 HX »). Ce n'est donc pas un bug de
+génération — c'est l'absence de contrôle avant de lancer le moteur local sur
+une machine où l'environnement IA (~5 Go, installé au premier lancement)
+n'était pas en place. Exactement le risque que `build/SUBMIT_RUNBOOK.md`
+signalait : « l'install ~5 Go n'a JAMAIS été validée end-to-end sur un PC
+propre ».
+
+CE QUI EXISTAIT DÉJÀ, et qui rend le défaut plus frustrant :
+`_localPyLibsUsable()` et `_localEngineMsg()` étaient en place depuis
+longtemps, avec un commentaire explicite « Jamais de traceback Python
+renvoyée à l'UI ». Ils protégeaient SIX outils secondaires (NSFW, masque,
+variante, étapes de construction, retouche). La fonction PRINCIPALE — le
+bouton Generate — était la seule à ne pas l'être, donc la première qu'un
+testeur atteint.
+
+ANALYSE DU FICHIER, pas correction au cas par cas : 37 poignées IPC lancent
+le Python IA, **26 sans aucun garde**. Les corriger une par une aurait
+garanti d'en oublier et n'aurait rien fait pour les futures. On intercepte
+donc à l'ENREGISTREMENT (`ipcMain.handle` enveloppé) : toute poignée listée
+répond un message produit quand le moteur est absent. 29 poignées couvertes.
+
+ERREUR GRAVE ÉVITÉE DE JUSTESSE. Ma première liste, générée
+automatiquement, incluait `wizard:start-download`, `wizard:detect-hardware`
+et `wizard:final-test` — **les poignées qui INSTALLENT le moteur**. Les
+bloquer en son absence aurait enfermé l'utilisateur dehors : plus aucun
+moyen d'installer, jamais. Également retirés : `export-diagnostics` (les
+diagnostics doivent marcher SURTOUT quand rien ne marche),
+`hidream-available` (sonde de capacité, doit répondre « indisponible » et
+non lever), `set-spellcheck-lang` et `read-mesh-file` (accessoires).
+Les exclusions sont documentées dans le code pour qu'on ne les réintègre
+pas par automatisme.
+
+VÉRIFIÉ en conditions réelles via `FABMESH_FORCE_NO_LOCAL_PY=1` (l'override
+prévu pour rejouer le cas du testeur) :
+  [moteur-local] batch-check-nsfw refuse proprement : environnement IA absent
+
+RESTE : le fond du problème n'est pas corrigé — l'installation de ~5 Go
+échoue toujours sur certaines machines. Le garde transforme un plantage
+incompréhensible en message actionnable, ce qui devrait lever le refus, mais
+il faudra comprendre POURQUOI l'amorçage échoue sur un appareil et pas sur
+l'autre. Et il faut passer en 1.0.16 pour resoumettre.

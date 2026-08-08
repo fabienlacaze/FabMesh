@@ -445,6 +445,79 @@ function _localEngineMsg(tool) {
        + 'It stays available in local mode on a PC with an NVIDIA GPU.';
 }
 
+
+// ───────────────────────── GARDE CENTRAL DU MOTEUR LOCAL ─────────────────────
+// REFUS STORE DU 2026-08-08 (10.1.2.10, « Unusable Feature: Generate ») : le
+// testeur Microsoft a recu une traceback Python brute — « No module named
+// 'torch' » — sur une machine sans environnement IA installe. La meme version
+// marchait sur un autre appareil, donc le defaut n'etait pas la generation
+// mais l'ABSENCE DE CONTROLE avant de lancer le moteur local.
+//
+// `_localPyLibsUsable()` existait deja et protegeait six outils secondaires.
+// Une analyse du fichier a montre que 36 poignees IPC lancent le Python IA,
+// dont la generation principale — la premiere qu'un testeur atteint.
+//
+// Corriger les 36 appels un par un aurait garanti d'en oublier, et n'aurait rien
+// fait pour les futurs. On intercepte donc a l'enregistrement : toute poignee
+// listee ci-dessous repond un message PRODUIT quand le moteur est absent, et
+// n'atteint jamais Python. La liste est explicite a dessein — un nouveau
+// handler non couvert doit sauter aux yeux en relecture.
+// EXCLUSIONS DELIBEREES — ne PAS ajouter ici :
+//   wizard:start-download / detect-hardware / final-test : ce sont elles qui
+//     INSTALLENT le moteur. Les bloquer quand il est absent enfermerait
+//     l'utilisateur dehors — il ne pourrait plus jamais installer.
+//   export-diagnostics : les diagnostics doivent fonctionner SURTOUT quand
+//     rien d'autre ne fonctionne.
+//   hidream-available : sonde de capacite, doit repondre « indisponible » et
+//     non lever une erreur.
+//   set-spellcheck-lang / read-mesh-file : accessoires, ne doivent jamais
+//     bloquer une action de l'utilisateur.
+const _POIGNEES_MOTEUR_LOCAL = new Set([
+  'analyze-skeleton',
+  'animate-ai',
+  'auto-inpaint',
+  'auto-rig',
+  'batch-check-nsfw',
+  'calib-run',
+  'calib-v3',
+  'caption-image',
+  'check-image-nsfw',
+  'detail-synth',
+  'generate-back-view',
+  'generate-build-stages',
+  'generate-construction-stages-3d',
+  'generate-explode-3d',
+  'generate-from-image',
+  'generate-images',
+  'generate-multiview',
+  'image-adjust',
+  'image-quick-edit',
+  'image-to-3d',
+  'image-to-3d-trellis',
+  'img2img',
+  'material-adjust',
+  'mesh-resize',
+  'mesh-tool',
+  'mesh:align-texture',
+  'mesh:region-retex',
+  'mesh:render-front',
+  'remove-background',
+]);
+const _ipcHandleOriginal = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (canal, fn) => _ipcHandleOriginal(canal, async (...args) => {
+  if (_POIGNEES_MOTEUR_LOCAL.has(canal) && !_localPyLibsUsable()) {
+    log.info('moteur-local', `${canal} refuse proprement : environnement IA absent`);
+    return {
+      success: false,
+      ok: false,
+      needsLocalEngine: true,
+      error: _localEngineMsg(canal),
+    };
+  }
+  return fn(...args);
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Dossier INSCRIPTIBLE pour les scripts/JSON temporaires générés à la volée.
 // En installation MSIX (Store), `resources/scripts` est en LECTURE SEULE : y
 // écrire lève EPERM. Ne jamais écrire dans SCRIPTS_DIR.
@@ -6589,6 +6662,30 @@ const _BUILD_STAGE_MODIFIERS = [
 ];
 
 ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction, assetType, buildStages, computeMode }) => {
+  // GARDE MANQUANTE — cause du REFUS STORE du 2026-08-08 (10.1.2.10
+  // « Unusable Feature: Generate »).
+  //
+  // Le testeur Microsoft a vu une traceback Python brute : « No module named
+  // 'torch' », sur une machine ou l'environnement IA local n'etait pas
+  // installe. Le rapport est formel sur le point decisif : la meme version
+  // fonctionnait sur un autre appareil (« Tested Without Issue: HP Spectre
+  // x360 »). Ce n'est donc pas un bug de generation, c'est l'absence de
+  // controle avant de lancer le moteur local.
+  //
+  // `_localPyLibsUsable()` et `_localEngineMsg()` existaient DEJA et
+  // protegeaient six outils secondaires (NSFW, masque, variante, etapes de
+  // construction, retouche). La fonction PRINCIPALE, celle du bouton
+  // « Generate », etait la seule a ne pas l'etre — donc la seule que le
+  // testeur pouvait atteindre en premier.
+  if (!_localPyLibsUsable()) {
+    return {
+      success: false,
+      error: 'The local AI engine is not installed on this device. '
+           + 'Switch to Cloud mode to generate on our GPUs, or install the '
+           + 'local engine from Settings (an NVIDIA GPU is required).',
+      needsLocalEngine: true,
+    };
+  }
   try {
     // Parental control: check prompt for blocked content
     const safety = checkPromptSafety(prompt);
