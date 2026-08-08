@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Étape 1 — greffe d'identité : la fourmi marche</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0d1117; color:#e6edf3; padding:26px 30px 60px;
+         font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .ok { background:#1f6f3f; color:#d7ffe6; border-radius:6px; padding:2px 9px;
+        font-size:12px; font-weight:700; margin-left:9px; vertical-align:3px; }
+  .sous { color:#8b949e; margin:0 0 22px; max-width:940px; }
+  figure { margin:0 0 20px; border:1px solid #30363d; border-radius:10px;
+           overflow:hidden; background:#0f141b; }
+  img { display:block; width:100%; height:auto; }
+  figcaption { padding:10px 14px; font-size:13.5px; border-top:1px solid #30363d;
+               color:#9aa4af; }
+  table { border-collapse:collapse; font-size:14px; margin:6px 0 8px; }
+  td, th { padding:5px 16px 5px 0; text-align:left; }
+  th { color:#8b949e; font-weight:600; }
+  td.v { font-variant-numeric:tabular-nums; }
+</style>
+<h1>La fourmi marche sur le squelette d'araignée<span class="ok">ÉTAPE 1 RÉUSSIE</span></h1>
+<p class="sous">Le rig final porte le <b>vrai gabarit</b> : 56 os, noms d'origine
+  (<code>root</code> compris), rotations locales d'origine — et le clip « Walk » de
+  l'araignée est joué <b>sans aucun retargeting</b> : les canaux du clip s'appliquent
+  tels quels, os par os, par nom.</p>
+
+<figure>
+  <img src="_etape1_maillage.gif" alt="Maillage de la fourmi déformé par la marche">
+  <figcaption><b>Le maillage lui-même</b>, déformé par skinning linéaire — pas seulement
+    le squelette. Corps intact, pattes qui alternent, aucune fragmentation.</figcaption>
+</figure>
+
+<figure>
+  <img src="_etape1_squelette.gif" alt="Squelette greffé en mouvement">
+  <figcaption>Le squelette greffé jouant le clip : amplitude 33,3 % — identique au clip
+    d'origine, puisque c'est <b>le même squelette</b>.</figcaption>
+</figure>
+
+<table>
+  <tr><th>Contrôle</th><th>Mesure</th></tr>
+  <tr><td>transfert des poids (sortie → gabarit)</td><td class="v">écart pire 1,5·10⁻⁸ — exact</td></tr>
+  <tr><td>squelette refit sur les pivots de la fourmi</td><td class="v">écart max 2,6·10⁻⁷</td></tr>
+  <tr><td>canaux du clip apposés</td><td class="v">112, zéro retargeting</td></tr>
+  <tr><td>amplitude du maillage</td><td class="v">25,7 % — sans éclatement (p99 : 17,5 %)</td></tr>
+</table>
+<p class="sous">Conséquence directe : les <b>9 autres clips</b> de l'araignée (Attack,
+  Jump, Death…) se jouent de la même façon, sans travail supplémentaire — et il en ira
+  de même dans Unreal pour un squelette de pack, puisque le rig <b>est</b> ce squelette.</p>

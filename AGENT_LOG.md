@@ -19135,3 +19135,33 @@ scripts/poc_gabarit_evaluer.py (verdict + image). Resultats :
 build/_etape0_{entree,sortie}.glb, image build/_etape0_peau.png, page
 build/_etape0.html. Prochaine etape du plan : greffe « identite du gabarit »
 (export avec noms/positions/parents originaux + peau predite).
+
+## 2026-08-08 — ETAPE 1 REUSSIE : greffe d'identite + clip joue SANS retargeting
+
+`scripts/poc_gabarit_greffe.py` : le rig final porte le VRAI gabarit (56 os,
+noms d'origine root compris, rotations locales d'origine) avec la peau predite
+a l'etape 0, et le clip « Walk » de l'araignee est appose TEL QUEL (112
+canaux, zero retargeting). Le maillage de la fourmi marche : amplitude 25,7 %,
+aucun eclatement (p99 17,5 %).
+
+LE POINT TECHNIQUE CENTRAL (a retenir pour l'industrialisation) : les canaux
+d'animation glTF REMPLACENT la rotation locale du noeud. Pour que les clips du
+gabarit se jouent directement, chaque os doit garder la ROTATION LOCALE
+D'ORIGINE du gabarit ; on ne recalcule que les translations locales vers les
+positions recalees : t_local = R_monde(parent)^-1 @ (p_fit(os) - p_fit(parent)).
+Les rotations monde de la hierarchie restent alors identiques au gabarit image
+par image — memes valeurs de clip, pivots de la fourmi.
+
+DEUX PIEGES DE PLUS :
+1. L'aller-retour Blender DUPLIQUE des sommets aux coutures (1 496 561 vs
+   1 496 541) : l'ordre des sommets de la sortie SkinTokens n'est PAS celui de
+   l'entree. Transfert des poids par plus proche voisin en espace normalise
+   (ecart pire 1,5e-08 — quasi exact).
+2. Les pistes de TRANSLATION d'un clip sont aux proportions du gabarit
+   d'origine : racine a l'echelle par axe du recalage, os internes remplaces
+   par la translation refit constante.
+
+Verdict global du POC (etapes 0+1 en une soiree) : la voie squelette-gabarit
+est PROUVEE de bout en bout — rig aux noms/structure d'un squelette connu,
+symetrie parfaite, clips de la banque joues directement. Restent : recalage
+par membre (etape 2), selecteur+UI (3), parite cloud (4), validation UE (5).
