@@ -19165,3 +19165,34 @@ Verdict global du POC (etapes 0+1 en une soiree) : la voie squelette-gabarit
 est PROUVEE de bout en bout — rig aux noms/structure d'un squelette connu,
 symetrie parfaite, clips de la banque joues directement. Restent : recalage
 par membre (etape 2), selecteur+UI (3), parite cloud (4), validation UE (5).
+
+## 2026-08-08 — ETAPE 2 REUSSIE : recalage par membre
+
+`scripts/poc_gabarit_recalage.py` : le rig natif SkinTokens sert de DETECTEUR
+d'articulations. Chaines d'appendices extraites (feuille -> embranchement),
+appariees par PAIRES MIROIR avec reciprocite ; les chaines sans jumeau (le rig
+natif a un nombre IMPAIR de chaines, 13 — son asymetrie 19/15 se paie ici)
+recoivent un jumeau SYNTHETIQUE par reflexion d'elles-memes. Paires courtes
+(< 35 % de la plus longue) -> mandibules ; substantielles, d'avant en arriere
+-> leg_a..d (les surplus ecartes par LONGUEUR, jamais par position — le tri
+« avant d'abord » seul jetait les pattes arriere). Chaque chaine du gabarit est
+reechantillonnee par abscisse curviligne le long de l'appendice reel. Decision
+fourmi : la paire avant (leg_a) va sur les ANTENNES.
+
+MESURES etape 0 -> etape 2 :
+  squelette conserve            55/56  -> 56/56 (root compris)
+  equilibre patte_d g/d         21,9 % / 3,0 %  -> 5,4 % / 5,0 %
+  dist. sommet->os dominant     mediane 15,4 % -> 6,2 % ; p95 22,1 % -> 13,8 %
+  abdomen                       debordait sur une patte -> uniforme sur `tail`
+  amplitude du maillage anime   25,7 % -> 35,2 %, sans eclatement (p99 21,7 %)
+  cambrure excessive de l'etape 1 : disparue (planche de controle)
+
+PIEGES DE PLUS : (1) les seuils geometriques de classement d'appendices sont
+fragiles — la detection par paires miroir + jumeaux synthetiques est la voie
+robuste ; (2) `list.remove` sur des paires contenant des tableaux numpy
+broadcast et leve ValueError — supprimer par INDEX ; (3) 6 paires pour 4
+emplacements : ecarter par longueur, pas par position.
+
+Scripts parametres (greffe/evaluer acceptent les chemins en argv) — la chaine
+complete etape N se rejoue en 3 commandes. Restent : selecteur+UI (etape 3),
+parite cloud (4), validation Unreal avec le Loup apovivor (5).

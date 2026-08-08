@@ -31,9 +31,11 @@ import sys
 import numpy as np
 
 SPIDER = "build/m2m/spider.glb"
-ENTREE = "build/_etape0_entree.glb"
-SORTIE_SK = "build/_etape0_sortie.glb"
-FINAL = "build/_etape1_final.glb"
+# Chemins parametrables : greffe.py [entree] [sortie_sk] [final] — memes
+# defauts qu'a l'etape 1, pour rejouer les iterations suivantes (etape 2...).
+ENTREE = sys.argv[1] if len(sys.argv) > 1 else "build/_etape0_entree.glb"
+SORTIE_SK = sys.argv[2] if len(sys.argv) > 2 else "build/_etape0_sortie.glb"
+FINAL = sys.argv[3] if len(sys.argv) > 3 else "build/_etape1_final.glb"
 CLIPS = ("Walk",)
 
 _NP = {5120: "<i1", 5121: "<u1", 5122: "<i2", 5123: "<u2", 5125: "<u4", 5126: "<f4"}

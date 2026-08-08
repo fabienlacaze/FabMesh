@@ -16,9 +16,10 @@ import sys
 
 import numpy as np
 
-SORTIE_SK = "build/_etape0_sortie.glb"
-ENTREE = "build/_etape0_entree.glb"
-IMAGE = "build/_etape0_peau.png"
+# Chemins parametrables : evaluer.py [entree] [sortie_sk] [image]
+ENTREE = sys.argv[1] if len(sys.argv) > 1 else "build/_etape0_entree.glb"
+SORTIE_SK = sys.argv[2] if len(sys.argv) > 2 else "build/_etape0_sortie.glb"
+IMAGE = sys.argv[3] if len(sys.argv) > 3 else "build/_etape0_peau.png"
 
 _NP = {5120: "<i1", 5121: "<u1", 5122: "<i2", 5123: "<u2", 5125: "<u4", 5126: "<f4"}
 _N = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}

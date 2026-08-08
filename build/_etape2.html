@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Étape 2 — recalage par membre</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0d1117; color:#e6edf3; padding:26px 30px 60px;
+         font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .ok { background:#1f6f3f; color:#d7ffe6; border-radius:6px; padding:2px 9px;
+        font-size:12px; font-weight:700; margin-left:9px; vertical-align:3px; }
+  .sous { color:#8b949e; margin:0 0 22px; max-width:940px; }
+  figure { margin:0 0 20px; border:1px solid #30363d; border-radius:10px;
+           overflow:hidden; background:#0f141b; }
+  img { display:block; width:100%; height:auto; }
+  figcaption { padding:10px 14px; font-size:13.5px; border-top:1px solid #30363d;
+               color:#9aa4af; }
+  table { border-collapse:collapse; font-size:14px; margin:6px 0 24px; }
+  td, th { padding:5px 18px 5px 0; text-align:left; }
+  th { color:#8b949e; font-weight:600; }
+  td.v { font-variant-numeric:tabular-nums; }
+  .mieux { color:#7ee2a8; font-weight:600; }
+</style>
+<h1>Recalage par membre<span class="ok">ÉTAPE 2 RÉUSSIE</span></h1>
+<p class="sous">Le rig natif SkinTokens sert de <b>détecteur d'articulations</b> : ses
+  appendices sont appariés par paires miroir (un jumeau synthétique est fabriqué quand le
+  rig natif, asymétrique, n'en fournit pas), puis chaque chaîne du gabarit est
+  rééchantillonnée le long de l'appendice réel. La paire avant de l'araignée va sur les
+  <b>antennes</b> — chaque appendice de la fourmi a désormais sa propre chaîne.</p>
+
+<table>
+  <tr><th>Mesure</th><th>étape 0 (boîte)</th><th>étape 2 (par membre)</th></tr>
+  <tr><td>squelette conservé</td><td class="v">55 / 56</td><td class="v mieux">56 / 56 — root compris</td></tr>
+  <tr><td>équilibre patte_d gauche / droite</td><td class="v">21,9 % / 3,0 %</td><td class="v mieux">5,4 % / 5,0 %</td></tr>
+  <tr><td>distance sommet → os dominant (médiane)</td><td class="v">15,4 %</td><td class="v mieux">6,2 %</td></tr>
+  <tr><td>p95 de cette distance</td><td class="v">22,1 %</td><td class="v mieux">13,8 %</td></tr>
+  <tr><td>abdomen</td><td class="v">débordait sur une patte</td><td class="v mieux">uniformément sur la chaîne « queue »</td></tr>
+  <tr><td>amplitude du maillage animé</td><td class="v">25,7 %</td><td class="v mieux">35,2 % — sans éclatement (p99 : 21,7 %)</td></tr>
+</table>
+
+<figure>
+  <img src="_etape2_recalage.png" alt="Avant/après recalage">
+  <figcaption>Rouge : positions au recalage boîte (étape 0). Vert : après recalage par
+    membre — les os rejoignent les appendices réels.</figcaption>
+</figure>
+<figure>
+  <img src="_etape2_peau.png" alt="Peau de l'étape 2">
+  <figcaption>La peau re-prédite sur le squelette recalé (le bandeau indique « étape 0 » —
+    outil commun, c'est bien le résultat de l'étape 2). Abdomen uniformément violet, chaque
+    patte unicolore et symétrique, antennes sur leurs propres chaînes.</figcaption>
+</figure>
+<figure>
+  <img src="_etape2_maillage.gif" alt="Maillage animé, étape 2">
+  <figcaption>La marche rejouée sur le rig recalé : silhouette stable (la cambrure excessive
+    de l'étape 1 a disparu), pattes qui alternent, antennes animées en pattes avant.</figcaption>
+</figure>
