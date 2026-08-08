@@ -18803,3 +18803,52 @@ l'utilisateur vers cet assistant : boucle fermee. Le correctif evident
 licence. La voie propre est SkinTokens, et le rig local restera indisponible
 dans le paquet tant qu'il n'y sera pas embarque ; le mode Cloud, lui,
 fonctionne et est desormais verifie.
+
+## 2026-08-08 — Classement des roles d'os : le bras se faisait passer pour la colonne
+
+Cascade du retrait de Puppeteer. Les rigs SkinTokens sortent des os ANONYMES
+(`bone_0`..`bone_27`, verifie sur le rig personnage). Le conditionneur T5
+d'AnyTop reduit `[\d_]+` a rien : tous ces noms collapsent sur un seul jeton,
+d'ou un mouvement quasi-identite. Le classement de roles n'est donc pas un
+confort, c'est la condition pour animer un rig licence-propre.
+
+DEFAUT TROUVE dans `scripts/puppeteer_joint_renamer.py`, detection des bras :
+
+    longest = max(kids, key=lambda k: len(descendants(k)))
+    for ch in kids:
+        if ch == longest: continue     # cense sauter la colonne
+
+A l'epaule les enfants sont [nuque, bras gauche, bras droit]. Sur un rig ou
+les bras (7 os, main comprise) sont plus longs que nuque+tete (3 os), le
+« plus long » EST un bras : il se faisait sauter comme s'il etait la colonne.
+Resultat mesure sur le rig SkinTokens : un seul bras detecte — et classe
+`LeftWing`, le seuil `sub_size >= 5 -> wing` etant calibre sur les bras
+courts de Puppeteer — l'autre tombant dans le repli `Branch` avec des noms
+absurdes (`NeckBranchBranchBranchBranch...`).
+
+CORRECTIF : la continuation de la colonne est deja connue sans heuristique,
+c'est l'element suivant de `path`, que la marche verticale vient d'etablir.
+On saute celle-la. Et `wing` n'est retenu que si le rig a >= 4 chaines de
+pattes (quadrupede) : se tromper sur un personnage coute plus cher que sur un
+dragon, et les familles volantes connues passent par le niveau 1.
+
+MESURE AVANT / APRES sur le rig SkinTokens humanoide (28 os) :
+  avant : 14 jetons, dont LeftWing x7 et NeckBranch...Branch x7, zero bras
+  apres :  8 jetons — Head, Hips, Left Arm, Left Leg, Neck, Right Arm,
+           Right Leg, Spine. Classement humanoide correct.
+
+NON-REGRESSION : les rigs Puppeteer existants portent de vrais noms
+anatomiques, `is_synthetic_naming` renvoie False et le renommeur ne les
+touche pas — verifie sur 4 fichiers. Le changement n'affecte donc que les
+rigs a noms synthetiques, c'est-a-dire SkinTokens.
+
+ECART DE PARITE A TRAITER — le cloud n'utilise PAS ce script. `_anytop_anim.py`
+embarque sa PROPRE fonction `_anatomical_names` (~200 lignes, avec son propre
+historique de ratés en production documente en commentaire). Testee ici sur le
+meme rig SkinTokens : elle trouve bien les deux bras, mais classe la JAMBE
+GAUCHE en `limb` generique au lieu de `leg_l`, et invente une `tail`. Un
+personnage aurait une jambe animee comme jambe et l'autre comme membre
+indetermine. Non patche volontairement : cette fonction a ete calibree en
+production sur des dragons et quadrupedes, un correctif a l'aveugle en fin de
+session risquerait de casser ces cas. La bonne cible est la convergence des
+deux implementations sur une seule, pas un second rustine parallele.

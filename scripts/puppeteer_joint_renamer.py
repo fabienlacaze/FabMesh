@@ -366,13 +366,33 @@ def _classify_via_topology(
         # For each spine joint, look at every child that is NOT the longest
         # descendant (i.e. not the spine continuation) and check whether
         # its subtree goes laterally (|X| dominant). If yes -> arm.
+        # 2026-08-08 (FabMesh) : on saute la continuation REELLE de la colonne,
+        # pas la plus longue descendance.
+        #
+        # L'ancien code prenait `max(kids, len(descendants))` pour identifier
+        # la suite de la colonne. A l'epaule, les enfants sont [nuque, bras
+        # gauche, bras droit] : sur un rig ou les bras (7 os, main comprise)
+        # sont plus longs que nuque+tete (3 os), le « plus long » EST un bras.
+        # Ce bras se faisait donc sauter comme s'il etait la colonne — un seul
+        # bras etait detecte, l'autre tombait dans le repli `Branch` et
+        # heritait de noms absurdes (NeckBranchBranchBranch...).
+        #
+        # Or la continuation de la colonne est deja connue sans heuristique :
+        # c'est l'element suivant de `path`, que la marche verticale ci-dessus
+        # vient d'etablir. Constate sur un rig SkinTokens humanoide de 28 os.
+        suite_colonne = {path[i + 1] for i in range(len(path) - 1)}
+        # Un rig a 4 chaines de pattes est un quadrupede : ses membres
+        # lateraux hauts sont des AILES. A 2 chaines (bipede), ce sont des
+        # BRAS. La longueur de chaine seule ne distingue pas les deux, et se
+        # tromper sur un personnage coute plus cher que sur un dragon — les
+        # familles volantes connues passent de toute facon par le niveau 1.
+        n_pattes = sum(1 for k in subtree_kinds.values() if k.startswith("leg"))
         for j in path:
             kids = children_by_idx.get(j, [])
             if len(kids) < 2:
                 continue
-            longest = max(kids, key=lambda k: len(descendants(k)))
             for ch in kids:
-                if ch == longest:
+                if ch in suite_colonne:
                     continue
                 d = avg_dir(ch)
                 ax, ay, az = float(d[0]), float(d[1]), float(d[2])
@@ -381,7 +401,7 @@ def _classify_via_topology(
                 if abs_x >= max(abs_y, abs_z) * 0.7:
                     side = "l" if ax < 0 else "r"
                     sub_size = len(descendants(ch))
-                    role = "wing" if sub_size >= 5 else "arm"
+                    role = "wing" if (sub_size >= 5 and n_pattes >= 4) else "arm"
                     walk_chain(ch, role, side)
 
     for ch, kind in subtree_kinds.items():
