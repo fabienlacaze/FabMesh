@@ -18492,3 +18492,48 @@ RESTE : le fond du problème n'est pas corrigé — l'installation de ~5 Go
 incompréhensible en message actionnable, ce qui devrait lever le refus, mais
 il faudra comprendre POURQUOI l'amorçage échoue sur un appareil et pas sur
 l'autre. Et il faut passer en 1.0.16 pour resoumettre.
+
+## 2026-08-08 — Cause de fond du refus : l'installateur mentait sur son succès
+
+Suite du refus 10.1.2.10. Le garde central empêche désormais la traceback,
+mais restait la vraie question : pourquoi l'environnement n'était-il pas
+installé sur une machine et pas sur l'autre ?
+
+DEUX DÉFAUTS TROUVÉS, en cascade.
+
+**1. `_aiPython()` se rabattait en silence sur un interpréteur inutilisable.**
+```
+const provisioned = path.join(AI_PYTHON_DIR, 'python.exe');
+if (fs.existsSync(provisioned)) return provisioned;
+if (!app.isPackaged) return 'python';
+return _embeddedPython();          // ← Python embarqué, SANS torch
+```
+Quand le venv IA n'existe pas, l'app lançait donc ses scripts avec un Python
+qui ne peut pas fonctionner. `_aiPythonReady()` existait et savait le
+détecter — `_aiPython()` ne la consultait jamais. C'est ce repli qui
+produisait « No module named 'torch' » au lieu d'un état « non installé ».
+
+**2. L'installateur annonçait un succès sans vérifier le résultat.**
+```
+log.info('... exited 0 — SUCCESS. torchReady=' + _aiPythonReady());
+resolve({ ok: true });          // ← quoi que dise torchReady
+```
+`_aiPythonReady()` était déjà appelée — **uniquement pour l'écrire dans le
+journal**. Le résultat était ignoré. Un `pip` qui sort en 0 sans avoir posé
+torch (roue ignorée, disque plein en fin de course, antivirus supprimant un
+`.pyd`, installation dans un autre `site-packages`) était donc annoncé comme
+réussi : l'assistant se fermait, l'app se déclarait prête, et le premier clic
+sur Generate plantait.
+
+**C'est l'explication du « marche sur un appareil, pas sur l'autre »** : le
+code de retour de pip ne dit rien de l'état final. Seul l'état final le dit.
+
+Correctif : on vérifie `_aiPythonReady()` et on renvoie un échec explicite —
+avec les trois causes probables (téléchargement interrompu, disque plein,
+antivirus) et l'action à faire — plutôt qu'un faux succès.
+
+LEÇON, la même qu'ailleurs aujourd'hui : **un code de sortie n'est pas un
+résultat.** Le sed silencieux dans l'image PartSAM, le `Prefer: return=minimal`
+qui renvoie 204 sans rien écrire, le cache PostgREST qui accepte des colonnes
+inexistantes — et maintenant pip. Chaque fois, la vérification manquait au
+seul endroit qui comptait : après.

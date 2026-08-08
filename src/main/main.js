@@ -9092,7 +9092,34 @@ ipcMain.handle('wizard:install-deps', async (event) => {
         log.error('main', 'install-deps: FAILED code=' + err.code + ' msg=' + err.message + ' | stderr tail: ' + stderrBuf.slice(-2000));
         reject(new Error(err.message + (stderrBuf ? ' | ' + stderrBuf.slice(-400) : '')));
       } else {
-        log.info('main', 'install-deps: process exited 0 — SUCCESS. torchReady=' + _aiPythonReady());
+        // ON VERIFIE LE RESULTAT, PAS LE CODE DE SORTIE.
+        //
+        // Cette ligne appelait deja `_aiPythonReady()` — mais seulement pour
+        // l'ECRIRE dans le journal, avant de renvoyer `ok: true` quoi qu'il
+        // arrive. Un pip qui sort en 0 sans avoir reellement pose torch
+        // (roue ignoree, espace disque epuise en fin de course, antivirus qui
+        // supprime un .pyd apres coup, install dans un autre site-packages)
+        // etait donc annonce comme un SUCCES a l'utilisateur. L'assistant se
+        // fermait, l'app se declarait prete, et le premier clic sur Generate
+        // levait « No module named 'torch' ».
+        //
+        // C'est le scenario du refus Store du 2026-08-08 : la meme version
+        // fonctionnait sur un appareil et pas sur l'autre. Le code de retour
+        // de pip ne dit rien de l'etat final ; seul l'etat final le dit.
+        const pret = _aiPythonReady();
+        log.info('main', 'install-deps: process exited 0 — torchReady=' + pret);
+        if (!pret) {
+          log.error('main', 'install-deps: pip a rendu 0 mais torch est ABSENT de '
+            + AI_PYTHON_DIR + ' | stderr tail: ' + stderrBuf.slice(-1500));
+          resolve({
+            ok: false,
+            error: 'The installer finished but the AI engine is still missing '
+                 + '(torch was not installed). This usually means the download was '
+                 + 'interrupted, the disk filled up, or an antivirus removed files. '
+                 + 'Check free space and run the installation again.',
+          });
+          return;
+        }
         resolve({ ok: true });
       }
     });
