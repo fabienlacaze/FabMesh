@@ -427,7 +427,7 @@ function _runExport({ glbPath, format, dest }) {
 // register({ ipcMain, app, BrowserWindow, MESHES_DIR, isPathAllowed, trackProc })
 // =============================================================================
 function register(deps) {
-  const { ipcMain, app, BrowserWindow, MESHES_DIR, isPathAllowed, trackProc, isCloudMode } = deps;
+  const { ipcMain, app, BrowserWindow, MESHES_DIR, isPathAllowed, trackProc, isCloudMode, aiPython } = deps;
   const _cloud = () => { try { return typeof isCloudMode === 'function' && isCloudMode(); } catch (_) { return false; } };
   _ensureDir(MOTION_THUMBS_DIR);
 
@@ -764,7 +764,18 @@ function register(deps) {
     const outGlb = path.join(outDir, `banque_${slug}__${rigStem}.glb`);
 
     const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
-    const py = process.env.FABMESH_ANIM_PY || 'python';
+    // Interpreteur : variable d'environnement, puis le python IA de
+    // l'application (numpy/scipy inclus). JAMAIS « python » nu — une
+    // installation Store n'en a aucun, l'appel echouait alors avec une erreur
+    // de processus illisible. Meme classe de defaut que le rig et la
+    // segmentation, corriges les jours precedents.
+    const py = process.env.FABMESH_ANIM_PY
+      || (typeof aiPython === 'function' ? aiPython() : null);
+    if (!py) {
+      return { success: false, needsLocalEngine: true, error:
+        'Le moteur local est introuvable. Passez en mode Cloud, ou '
+        + 'installez-le depuis les Réglages.' };
+    }
     const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' };
     const dirM2M = _dossierClipsM2M();
     if (dirM2M) env.FABMESH_M2M_CLIPS = dirM2M;

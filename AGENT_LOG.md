@@ -19524,3 +19524,27 @@ RESTE : WACK (appcert.exe present ; exige une elevation UAC que seul le user
 peut valider) puis soumission Partner Center. Rappel du protocole projet : le
 WACK est OBLIGATOIRE avant chaque soumission et n'a JAMAIS ete passe sur les
 4 refus precedents.
+
+## 2026-08-09 — deux defauts de MODE PAQUET sur la banque de clips
+
+Trouves en verifiant le contenu de l'appx 1.0.16, pas en relisant le code.
+
+1. CHEMIN DES CLIPS. Dans le paquet, les scripts sont dans
+   `resources/scripts/` et les clips dans `resources/m2m_clips/` — donc le
+   FRERE du dossier scripts. `mesh2motion_bridge` cherchait
+   `resources/resources/m2m_clips`. L'application pose de toute facon
+   FABMESH_M2M_CLIPS, mais un appel en ligne de commande depuis une
+   installation Store n'aurait rien trouve. Candidat corrige + ajoute.
+
+2. INTERPRETEUR PYTHON. `anim:banque` lancait `process.env.FABMESH_ANIM_PY
+   || 'python'`. Une installation Store n'a AUCUN python systeme : l'appel
+   echouait avec une erreur de processus brute. C'est exactement la classe de
+   defaut qui a valu le refus Store 10.1.2.10 (« No module named torch ») et
+   qu'on a corrigee pour le rig et la segmentation les jours precedents — elle
+   etait revenue par la porte de la nouvelle fonctionnalite.
+   Correctif : main.js transmet `aiPython()` au module d'animation ; a defaut
+   d'interpreteur, refus explicite avec `needsLocalEngine` et message
+   actionnable (« Passez en mode Cloud, ou installez-le depuis les Reglages »).
+
+LECON : chaque nouveau pont Python doit etre verifie EN MODE PAQUET, pas
+seulement en developpement. Trois fonctions ont deja eu ce defaut.

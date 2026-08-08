@@ -10052,6 +10052,11 @@ try {
   require('./animation').register({
     ipcMain, app, BrowserWindow,
     MESHES_DIR, isPathAllowed, trackProc,
+    // Interpreteur des ponts d'animation. Dans une installation Store il n'y
+    // a AUCUN `python` systeme : appeler « python » y echouait avec une
+    // erreur de processus brute. `_aiPython()` leve avec `needsLocalEngine`
+    // quand le moteur n'est pas installe — message actionnable.
+    aiPython: () => { try { return _aiPython(); } catch (_) { return null; } },
     // Mode Cloud global : anim:kimodo route vers /api/animate (AnyTop) et
     // anim:retarget (Bibliothèque de mouvements) est désactivé.
     isCloudMode,

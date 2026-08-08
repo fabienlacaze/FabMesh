@@ -55,8 +55,16 @@ import anytop_retarget as ar  # noqa: E402
 # `build/`, et une machine de developpement n'a pas `resources/`.
 _CANDIDATS_CLIPS = [
     os.environ.get("FABMESH_M2M_CLIPS", ""),
+    # PAQUET : les scripts sont dans `resources/scripts/`, les clips dans
+    # `resources/m2m_clips/` — donc le FRERE du dossier scripts. La premiere
+    # version cherchait `resources/resources/m2m_clips` (verifie sur l'appx
+    # 1.0.16 : chemin reel `app/resources/m2m_clips/spider.glb`). L'app pose
+    # de toute facon FABMESH_M2M_CLIPS, mais un appel en ligne de commande
+    # depuis une installation Store n'aurait rien trouve.
+    os.path.join(os.path.dirname(_ICI), "m2m_clips"),
     os.path.join(os.path.dirname(_ICI), "resources", "m2m_clips"),
     os.path.join(os.path.dirname(_ICI), "assets", "m2m_clips"),
+    # DEVELOPPEMENT : depuis `scripts/`, le depot est un cran au-dessus.
     os.path.join(os.path.dirname(_ICI), "build", "m2m"),
 ]
 
@@ -292,17 +300,25 @@ def lire_clip(glb_path: str, nom_clip: str, fps: float = 30.0) -> dict:
         # `scale` volontairement ignore : le format BVH ne l'exprime pas, et
         # aucun clip Mesh2Motion n'anime l'echelle (verifie a l'import).
 
-    # ── Rotation RELATIVE AU REPOS ────────────────────────────────────────
-    # Le BVH n'a pas de rotation de repos : sa pose de repos est faite des
-    # seuls offsets. Le glTF, lui, porte une rotation sur chaque noeud. Fournir
-    # la rotation absolue injecterait donc un decalage constant sur CHAQUE os,
-    # et la creature arriverait tordue des la premiere image.
-    # On transmet delta = inv(q_repos) * q_image : la meme motricite, exprimee
-    # dans la convention que le retargeting attend.
-    r_repos_inv = R.from_quat(q_repos).inv()
+    # ── Rotations LOCALES ABSOLUES (surtout PAS relatives au repos) ───────
+    # Piege majeur, diagnostique le 2026-08-09 sur la marche du wolfhound
+    # (pattes vrillees) : `retarget_motion_to_rig` definit la pose de repos de
+    # la source comme l'IMAGE 0 du clip (`bvh["euler"][0]`, ligne ~1701), puis
+    # s'en sert pour convertir chaque rotation du repere source vers le repere
+    # cible.
+    #
+    # En envoyant des deltas relatifs au repos, l'image 0 valait l'identite :
+    # le retargeting en concluait que tous les os sources etaient alignes sur
+    # le monde au repos. Faux — les os d'un squelette Unreal/Maya ont de fortes
+    # orientations propres. La conversion de repere partait donc d'une base
+    # erronee et tordait les membres.
+    #
+    # On transmet donc les rotations LOCALES telles quelles. La pose de repos
+    # que le retargeting en deduit (image 0) est alors la vraie pose de depart
+    # du clip — ce qu'il attend.
     euler = np.zeros((n_frames, len(joints), 3), dtype=np.float64)
     for k in range(len(joints)):
-        delta = r_repos_inv[k] * R.from_quat(quats[:, k, :])
+        delta = R.from_quat(quats[:, k, :])
         # Colonnes TOUJOURS en [X, Y, Z] ; l'ordre de composition est declare
         # separement par `channels` — c'est le contrat de `_eulers_to_quats`.
         ang = delta.as_euler("ZXY", degrees=True)          # -> [Z, X, Y]
