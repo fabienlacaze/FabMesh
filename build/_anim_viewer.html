@@ -174,7 +174,7 @@ const surCharge = (gltf) => {
 
 (async () => {
   try {
-    const rep = await fetch('_ant_walk_light.glb');
+    const rep = await fetch('_ant_walk_light.glb?v=3');
     if (!rep.ok) throw new Error('HTTP ' + rep.status);
     const total = +(rep.headers.get('content-length') || 0);
     const morceaux = []; let recu = 0, dernierPct = -2;

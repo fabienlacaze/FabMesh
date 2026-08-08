@@ -105,16 +105,43 @@ function jouer(i) {
     '<b>' + (clips[i].name||'?') + '</b> · ' + clips[i].duration.toFixed(2) + ' s';
 }
 
+// Jeton de chargement : si l'utilisateur clique une seconde creature pendant
+// qu'une premiere charge, la reponse la plus lente ecraserait la plus recente.
+// On ignore donc tout resultat dont le jeton n'est plus le courant.
+let jeton = 0;
+// Chien de garde : plutot que de laisser un ecran fige sans explication, on
+// affiche au bout de 8 s l'etape atteinte et le temps ecoule. C'est ce qui
+// manquait aux versions precedentes de ces visualiseurs.
+let garde = null;
+const etapeDe = (nom, txt, t0) => {
+  etat.textContent = 'chargement de ' + FR[nom] + ' — ' + txt;
+  clearTimeout(garde);
+  garde = setTimeout(() => {
+    etat.innerHTML = '<div class="err"><b>Toujours en attente</b><br>créature : ' + nom
+      + '<br>étape : ' + txt + '<br>écoulé : ' + ((performance.now() - t0) / 1000).toFixed(1)
+      + ' s<br><br>Rechargez la page (Ctrl+Maj+R). Si cela persiste, le fichier '
+      + 'm2m/' + nom + '.glb est peut-être absent du serveur.</div>';
+  }, 8000);
+};
+
 async function charger(nom) {
+  const mien = ++jeton;
+  const t0 = performance.now();
   vider();
-  etat.hidden = false; etat.textContent = 'chargement de ' + FR[nom] + '…';
+  etat.hidden = false;
+  etapeDe(nom, 'téléchargement…', t0);
   document.querySelectorAll('#creatures button').forEach(b =>
     b.classList.toggle('on', b.dataset.c === nom));
   try {
-    const rep = await fetch('m2m/' + nom + '.glb');
+    const rep = await fetch('m2m/' + nom + '.glb?v=3');
+    if (mien !== jeton) return;
     if (!rep.ok) throw new Error('HTTP ' + rep.status + ' sur m2m/' + nom + '.glb');
     const buf = await rep.arrayBuffer();
+    if (mien !== jeton) return;
+    etapeDe(nom, 'analyse…', t0);
     new GLTFLoader().parse(buf, '', (gltf) => {
+      if (mien !== jeton) return;
+      clearTimeout(garde);
       try {
         racine = gltf.scene; scene.add(racine);
         racine.traverse(o => {

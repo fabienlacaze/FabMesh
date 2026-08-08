@@ -19016,3 +19016,22 @@ METHODE A CONSERVER : chaque visualiseur est valide en Chrome sans interface
 clip, duree) et l'etat de l'ecran de chargement. Les captures d'ecran, elles,
 ne servent a rien : Chrome sans interface ne capture pas la toile WebGL, meme
 avec le GPU reel.
+
+## 2026-08-08 — Visualiseurs : cache navigateur et chargements concurrents
+
+Le user voyait encore des ecrans figes alors que les MEMES pages validees en
+Chrome sans interface aboutissaient. Deux causes distinctes :
+
+1. CACHE. J'avais modifie la page ET le GLB plusieurs fois depuis son dernier
+   chargement ; son navigateur servait un melange d'anciennes versions (une
+   page corrigee avec un GLB perime, par exemple). Contournement pose sur les
+   URL de donnees (`?v=3`) et ouverture sur une adresse neuve.
+2. CHARGEMENTS CONCURRENTS. Cliquer une seconde creature pendant le chargement
+   d'une premiere laissait la reponse la plus LENTE ecraser la plus recente.
+   Ajout d'un jeton : tout resultat dont le jeton n'est plus courant est
+   ignore.
+
+Ajout d'un CHIEN DE GARDE : au bout de 8 s sans aboutir, la page affiche
+l'etape atteinte, le temps ecoule et le fichier attendu, au lieu de rester
+muette. C'est ce qui manquait depuis le debut — j'ai passe plusieurs
+allers-retours a deviner ou ca bloquait faute de le faire dire a la page.
