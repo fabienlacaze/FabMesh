@@ -399,7 +399,19 @@ def _classify_via_topology(
                 abs_x, abs_y, abs_z = abs(ax), abs(ay), abs(az)
                 # Lateral chain -> arm (or wing if long)
                 if abs_x >= max(abs_y, abs_z) * 0.7:
-                    side = "l" if ax < 0 else "r"
+                    # 2026-08-08 (FabMesh) : le signe etait INVERSE ici par
+                    # rapport a la ligne 283, qui applique `l if ax > 0` aux
+                    # membres partant de la racine. Meme espace, meme vecteur
+                    # direction, deux regles contraires : les BRAS recevaient
+                    # donc le cote oppose a celui des JAMBES sur le meme
+                    # personnage — un retargeting vers un squelette nomme
+                    # (mannequin UE5...) aurait croise les membres.
+                    #
+                    # Cote tranche par la MESURE, pas par l'oeil, sur le rig
+                    # SkinTokens humanoide : orteils vers +Z (avant), tete en
+                    # +Y (haut), donc gauche = avant x haut = +X. Les jambes
+                    # etaient justes, les bras faux.
+                    side = "l" if ax > 0 else "r"
                     sub_size = len(descendants(ch))
                     role = "wing" if (sub_size >= 5 and n_pattes >= 4) else "arm"
                     walk_chain(ch, role, side)

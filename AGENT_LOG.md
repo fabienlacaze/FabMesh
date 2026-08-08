@@ -18889,3 +18889,40 @@ DEUX CONSTATS D'AUDIT NON REPRODUITS (verifies avant patch, comme demande) :
     seul l'epuisement du budget mensuel REEL bloque tout le monde, et dans ce cas
     Modal refuserait de lancer les apps de toute facon. Les 10 $/jour ne bornent
     que le gratuit.
+
+## 2026-08-08 — Gauche/droite inversees entre les bras et les jambes
+
+Trouve en instrumentant le classifieur, pas en le relisant. Sur le MEME
+personnage SkinTokens :
+
+  LeftLeg  -> X positif      LeftArm  -> X negatif
+  RightLeg -> X negatif      RightArm -> X positif
+
+Deux regles contraires coexistaient dans `puppeteer_joint_renamer.py` :
+
+  ligne 283 (membres partant de la racine, donc les JAMBES) : l if ax > 0
+  ligne 402 (branches laterales de la colonne, donc les BRAS) : l if ax < 0
+
+Meme espace, meme vecteur direction, signe oppose. Un retargeting vers un
+squelette nomme (mannequin UE5, Mixamo) aurait CROISE les membres : bras
+gauche pilote par le bras droit de la source.
+
+QUEL COTE EST LE BON — tranche par la mesure, pas a l'oeil (le rendu 3D
+suggerait l'inverse) : sur le rig humanoide, les orteils pointent vers +Z
+(avant) et la tete est en +Y (haut), donc gauche = avant x haut = +X. Les
+JAMBES etaient justes, les BRAS faux. Ligne 402 alignee sur la ligne 283.
+
+Verification : les quatre membres sont desormais coherents (gauche = +X) et
+le classement reste a 8 categories correctes (Head, Hips, Left/Right Arm,
+Left/Right Leg, Neck, Spine).
+
+ENQUETE EN COURS cote cloud — hypothese ECARTEE. Je soupconnais la fonction
+`_anatomical_names` de mal separer les cotes parce qu'elle les decide par
+rapport a la position de la RACINE (`root_side`), possiblement decentree. Les
+mesures la refutent : les jambes sont nettement separees (+0,195 / -0,195
+autour d'une racine a X=0,0117). La cause du `limb` generique sur la jambe
+gauche est donc AILLEURS — probablement dans `split_upper_lower`, qui ne
+retient qu'UNE chaine haute et UNE chaine basse par cote (`upper[0]`,
+`lower[0]`). Non patche : je ne dispose d'aucun rig de dragon SkinTokens pour
+verifier la non-regression, et cette fonction a ete calibree en production sur
+des quadrupedes. A reprendre avec un jeu de test couvrant bipede ET quadrupede.
