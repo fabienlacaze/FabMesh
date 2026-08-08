@@ -19455,3 +19455,25 @@ ecrite.
 Diagnostics systeme confirmes en place par le user : i9-14900KF (32 threads),
 31,8 Go RAM, RTX 5080 16 Go, 49 Go libres / 1862 Go. NOTE : 49 Go libres est
 peu au regard des moteurs a telecharger — piste d'avertissement produit.
+
+## 2026-08-09 — bouton « journaux » = visualiseur en direct + noms de fichiers non traduits
+
+DEUX RETOURS USER, deux corrections.
+
+1. « quand je clique sur le bouton log j'aimerais que ce soit cette page qui
+   s'ouvre » — les deux boutons « Export logs » (reglages + modale de tache)
+   ouvrent desormais le VISUALISEUR EN DIRECT. Le visualiseur vivait dans une
+   IIFE : son ouverture n'etait joignable que par le bouton des reglages, elle
+   est exposee en `window.ouvrirJournauxDirect()`. L'export .txt reste
+   indispensable au support : il devient un bouton « Exporter » DANS le
+   visualiseur (`ll-export`), et sert de repli si le visualiseur n'est pas
+   initialise.
+
+2. « En ce qui concerne l'utilisation de l'energie, la Commission a estime
+   que… » sous l'apercu d'animation : le NOM DE FICHIER, affiche avec ses
+   tirets bas rendus lisibles, passait pour une PHRASE aux yeux du traducteur
+   automatique, qui a hallucine ce texte. Meme classe de bug que
+   `.prompt-overlay` corrige le 2026-07-26 (« brasier eteind » -> « Bois de
+   chauffage ») ; le mecanisme d'exclusion `data-i18n-skip` existait deja, il
+   n'etait simplement pas pose. `setViewerFilename` le pose maintenant — ce
+   qui protege TOUS les apercus d'un coup (mesh, rig, animation).

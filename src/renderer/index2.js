@@ -3168,6 +3168,14 @@ function basename(p) {
 function setViewerFilename(elId, p) {
   const el = document.getElementById(elId);
   if (!el) return;
+  // JAMAIS TRADUIRE un nom de fichier. Constat du 2026-08-09 : le nom
+  // « banque_celtic_wolfhound_run_ani__training_quadruped… », affiche avec ses
+  // tirets bas rendus lisibles, passait pour une PHRASE aux yeux du traducteur
+  // automatique, qui a rendu « En ce qui concerne l'utilisation de l'energie,
+  // la Commission a estime que… ». Meme classe de bug que .prompt-overlay
+  // corrige le 2026-07-26 ; le mecanisme d'exclusion existait deja, il
+  // n'etait pas pose ici.
+  el.setAttribute('data-i18n-skip', '');
   // Masque les noms d'IA internes (trellis2, partsam, …) — exigence produit.
   el.textContent = p ? _maskAiNames(basename(p)) : '';
   el.title = p ? _maskAiNames(p) : '';
@@ -17760,7 +17768,19 @@ async function refreshJobDetailsModal(id) {
   }
 }
 document.getElementById('job-details-close-x')?.addEventListener('click', closeJobDetails);
-document.getElementById('job-details-export-logs')?.addEventListener('click', async (e) => {
+// Ouvre le VISUALISEUR EN DIRECT (demande user 2026-08-09) : l'export .txt
+// reste disponible depuis le visualiseur, mais consulter ne doit pas obliger
+// a ouvrir un fichier dans un editeur externe.
+document.getElementById('job-details-export-logs')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (typeof window.ouvrirJournauxDirect === 'function') {
+    window.ouvrirJournauxDirect();
+    return;
+  }
+  // Repli : si le visualiseur n'est pas initialise, on exporte comme avant.
+  _exporterJournaux(e.currentTarget);
+});
+document.getElementById('job-details-export-logs-legacy')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const _orig = btn.innerHTML;
   btn.disabled = true; btn.innerHTML = 'Exporting…';
@@ -19238,9 +19258,39 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   if (API.openLogsFolder) await API.openLogsFolder();
 });
 
+/** Export .txt de secours — partage par le repli et le bouton du visualiseur. */
+async function _exporterJournaux(btn) {
+  const _orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Export…'; }
+  try {
+    const res = await window.meshyAPI.exportDiagnostics();
+    if (res && res.ok) {
+      showToast && showToast('Journaux enregistrés : ' + (res.path || 'Bureau'), 'success');
+    } else {
+      showToast && showToast('Échec de l\'export : ' + ((res && res.error) || 'inconnu'), 'error');
+    }
+  } catch (err) {
+    showToast && showToast('Échec de l\'export : ' + (err.message || err), 'error');
+  } finally {
+    if (btn) setTimeout(() => { btn.disabled = false; btn.innerHTML = _orig; }, 2000);
+  }
+}
+
 // Export logs → one bundled .txt on the Desktop (same as the wizard + the
 // task modal), so users can grab diagnostics from Settings too.
-document.getElementById('set-export-logs')?.addEventListener('click', async (e) => {
+// Ouvre le VISUALISEUR EN DIRECT (demande user 2026-08-09) : l'export .txt
+// reste disponible depuis le visualiseur, mais consulter ne doit pas obliger
+// a ouvrir un fichier dans un editeur externe.
+document.getElementById('set-export-logs')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (typeof window.ouvrirJournauxDirect === 'function') {
+    window.ouvrirJournauxDirect();
+    return;
+  }
+  // Repli : si le visualiseur n'est pas initialise, on exporte comme avant.
+  _exporterJournaux(e.currentTarget);
+});
+document.getElementById('set-export-logs-legacy')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const _orig = btn.innerHTML;
   btn.disabled = true; btn.innerHTML = 'Exporting…';
@@ -20077,13 +20127,27 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     setStatus('disconnected');
   }
 
-  document.getElementById('set-live-logs')?.addEventListener('click', () => {
+  // Ouverture exposee globalement : le visualiseur vit dans une IIFE, son
+  // ouverture n'etait donc joignable que par le bouton des reglages. Les
+  // boutons « journaux » des autres panneaux passent maintenant par ici.
+  window.ouvrirJournauxDirect = () => {
     modal.classList.remove('hidden');
     document.getElementById('modal-settings')?.classList.add('hidden');
+    document.getElementById('modal-job-details')?.classList.add('hidden');
     output.innerHTML = '';
     lineCount = 0;
     if (countEl) countEl.textContent = '0 lines';
     openStream();
+  };
+
+  // L'export .txt reste accessible, mais depuis le visualiseur : consulter ne
+  // doit plus obliger a ouvrir un fichier dans un editeur externe.
+  document.getElementById('ll-export')?.addEventListener('click', (e) => {
+    _exporterJournaux(e.currentTarget);
+  });
+
+  document.getElementById('set-live-logs')?.addEventListener('click', () => {
+    window.ouvrirJournauxDirect();
   });
 
   closeBtn?.addEventListener('click', () => {
