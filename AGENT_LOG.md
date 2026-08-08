@@ -19310,3 +19310,18 @@ produit choisie par le user. Le squelette-gabarit reste une option qualite
 ulterieure. Le 2e export UE (toutes les anims 'Wolf', AnimSequence only)
 tournait encore en fin de session — les 500+ anims de la banque s'exportent
 avec FILTRE="".
+
+## 2026-08-08 (nuit) — correction : le titre du GIF et l'identite du maillage
+
+Question user (« pourquoi ca prend araignee pour un loup ? ») : le titre grave
+dans le GIF disait « Fourmi — marche d'araignee » — il etait CODE EN DUR dans
+scratchpad/rendu_lbs.py depuis le test de la fourmi et j'ai reutilise le
+script sans le parametrer. Corrige (titre en argv[3]), GIF regenere.
+
+Au passage, identite du maillage rectifiee : le fichier s'appelle
+ANIM_African_elephant_* parce que cette ANIMATION lui avait ete appliquee en
+juin, mais le maillage TRELLIS2 dessous (training_quadruped_seed43) est un
+LOUP. La demo est donc : un loup FabMesh anime par la course du Celtic
+Wolfhound apovivor, sur squelette SkinTokens. Rien de l'araignee nulle part —
+le lecteur de clips partage (module mesh2motion_bridge, prefixe de log M2M)
+est generique.

@@ -21,23 +21,25 @@
 </style>
 <h1>Ta banque apovivor anime un squelette SkinTokens<span class="ok">LA CHAÎNE DEMANDÉE</span></h1>
 <p class="sous">La course du <b>Celtic Wolfhound</b> (pack apovivor, exportée d'Unreal ce soir)
-  retargetée sur le squelette <b>généré par SkinTokens</b> pour un éléphant FabMesh.
+  retargetée sur le squelette <b>généré par SkinTokens</b> pour un maillage FabMesh de loup.
   Aucun gabarit : le squelette est celui de SkinTokens, la banque fournit le mouvement.</p>
 
 <table>
   <tr><th>Étape</th><th>Résultat</th></tr>
   <tr><td>export Unreal (AnimSequence → FBX)</td><td class="v">10 clips wolfhound + export complet en cours (lecture seule sur le projet)</td></tr>
   <tr><td>conversion FBX → GLB (Blender)</td><td class="v">10/10, noms d'os préservés (frontHip_R, Tail0_M…)</td></tr>
-  <tr><td>rig natif SkinTokens de l'éléphant</td><td class="v">1,33 M sommets</td></tr>
+  <tr><td>rig natif SkinTokens du loup</td><td class="v">1,33 M sommets</td></tr>
   <tr><td>retargeting (échelle cm Unreal ×0,02 auto)</td><td class="v">31 canaux, 16 images</td></tr>
   <tr><td>amplitude du maillage animé</td><td class="v">70,3 % — sans éclatement (p99 : 46,4 %)</td></tr>
 </table>
 
 <figure>
-  <img src="_elephant_course.gif" alt="Éléphant animé par la course du wolfhound">
-  <figcaption><b>Le maillage de l'éléphant</b> (déformation par la peau SkinTokens) courant
-    comme le wolfhound. C'est une course de chien sur un corps d'éléphant — juge si
-    l'allure te convient ; le clip Walk sera plus posé.</figcaption>
+  <img src="_elephant_course.gif" alt="Loup animé par la course du wolfhound">
+  <figcaption><b>Le maillage du loup</b> (déformation par la peau SkinTokens) courant comme
+    le wolfhound. Précision d'inventaire : le fichier s'appelle «&nbsp;African_elephant&nbsp;»
+    parce que cette <i>animation</i> lui avait été appliquée en juin — le maillage
+    d'entraînement dessous (<code>training_quadruped_seed43</code>) est bien un loup.
+    Un loup animé par ton wolfhound : difficile de faire plus cohérent.</figcaption>
 </figure>
 <figure>
   <img src="_elephant_course_squelette.gif" alt="Squelette seul">
