@@ -4810,6 +4810,42 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
           .eq('stripe_session_id', ref).maybeSingle();
         if (data) { paiement = data as typeof paiement; break; }
       }
+
+      // RECHERCHE PAR LA SESSION DE PAIEMENT — sans elle, la boucle ci-dessus
+      // ne trouve JAMAIS rien.
+      //
+      // `payments.stripe_session_id` contient l'identifiant de la SESSION
+      // (`cs_...`), pose a l'encaissement. Or un evenement `charge.refunded`
+      // n'apporte que `pi_...` (payment_intent) et `ch_...` (charge) : aucun
+      // des deux ne peut egaler un `cs_...`. La recherche echouait donc a
+      // tous les coups, le repli `metadata.user_id` identifiait bien le
+      // client mais laissait `credits` a 0 — resultat : **un client
+      // rembourse gardait 100 % de ses credits**. Defaut introduit le
+      // 2026-08-03 avec ce gestionnaire, trouve par audit le 2026-08-08.
+      //
+      // On demande donc a Stripe la session rattachee au payment_intent.
+      // Aucune migration necessaire : cela fonctionne sur les lignes
+      // existantes.
+      if (!paiement && ch.payment_intent) {
+        try {
+          const r = await _stripeRest(
+            env,
+            'https://api.stripe.com/v1/checkout/sessions?limit=3&payment_intent='
+              + encodeURIComponent(String(ch.payment_intent)),
+            null, 'GET');
+          const sessions = (r.ok && Array.isArray((r.data as { data?: unknown[] }).data))
+            ? (r.data as { data: Array<{ id?: string }> }).data : [];
+          for (const sess of sessions) {
+            if (!sess?.id) continue;
+            const { data } = await sb.from('payments')
+              .select('id, user_id, credits')
+              .eq('stripe_session_id', sess.id).maybeSingle();
+            if (data) { paiement = data as typeof paiement; break; }
+          }
+        } catch (e) {
+          console.warn('[stripe] resolution de la session impossible:', (e as Error).message);
+        }
+      }
       // Repli : metadata.user_id pose a la creation de la session.
       const uid = paiement?.user_id || ch.metadata?.user_id;
       if (!uid) {

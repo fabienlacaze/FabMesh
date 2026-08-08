@@ -18676,3 +18676,48 @@ RESTE 12 blocages à vérifier puis traiter, dont : le rig mort dans le paquet
 Store (les DEUX moteurs absents du .appx), les moteurs d'animation absents,
 la bibliothèque de motion sans licence, le remboursement qui ne reprend pas
 les crédits.
+
+## 2026-08-08 — Remboursement : la recherche du paiement ne trouvait jamais rien
+
+Défaut dans MON code du 2026-08-03. Le gestionnaire `charge.refunded` /
+`charge.dispute.created` cherchait le paiement ainsi :
+
+    .eq('stripe_session_id', ref)     // ref = ch.payment_intent ou ch.id
+
+Or `payments.stripe_session_id` contient l'identifiant de SESSION
+(`cs_...`), posé à l'encaissement — vérifié en base, les trois lignes
+existantes portent bien `cs_test_...`. Un événement `charge.refunded`
+n'apporte que `pi_...` et `ch_...` : **aucune correspondance possible**.
+
+Le repli `metadata.user_id` identifiait bien le client, mais laissait
+`paiement` à `null`, donc `credits` à 0, donc `aReprendre` à 0.
+**Un client remboursé gardait 100 % de ses crédits.**
+
+Correctif : on demande à Stripe la session rattachée au `payment_intent`
+(`GET /v1/checkout/sessions?payment_intent=…`), puis on retrouve la ligne.
+Aucune migration : fonctionne sur les lignes existantes.
+
+NON TESTÉ DE BOUT EN BOUT — il faudrait un vrai paiement puis un vrai
+remboursement, impossible tant que Stripe est en mode test sans encaissement
+réel. Le chemin est correct par construction, mais je le signale comme
+non vérifié plutôt que de le présenter comme acquis.
+
+## 2026-08-08 — Motion : bibliothèque SANS licence dans le produit vendu
+
+Vérifié par l'API GitHub, pas par lecture de documentation :
+`inbar-2344/Motion` → `/license` renvoie **Not Found**, champ `license: null`.
+Absence de licence = **tous droits réservés** : ni redistribution ni usage
+commercial sans autorisation écrite.
+
+Elle est installée dans l'image d'animation de production
+(`modal_app/_anytop_anim.py:45`). Un audit interne de juin l'avait effleurée
+mais concluait « pas un bloqueur pour nous » — ce raisonnement portait sur le
+FORK marklalon, pas sur l'installation directe que nous faisons. Le dossier
+contient d'ailleurs un brouillon d'e-mail demandant la clarification à
+l'auteur : la question était posée, jamais résolue.
+
+BONNE NOUVELLE SUR LA SORTIE : dans le chemin d'inférence, la bibliothèque ne
+sert qu'à UN SEUL appel — `BVH.save(...)` dans `sample/generate.py:105` — et
+`bvhsdk` est en **MIT** et déjà utilisé dans quatre fichiers du projet. Le
+remplacement est donc circonscrit, mais il exige de vérifier l'équivalence du
+fichier BVH produit : à faire posément, pas en fin de session.
