@@ -19061,3 +19061,43 @@ preuve, pas une supposition : sans acces au CDN, elles fonctionnent.
 LECON POUR LE PRODUIT : tout outil de diagnostic destine a la machine du user
 doit etre autonome. Un CDN ajoute une dependance reseau ET un point
 d'interception antivirus, pour un gain nul en local.
+
+## 2026-08-08 — Symetrisation du rig : objectif atteint, hypothese REFUTEE
+
+NOUVEAU `scripts/rig_symetriser.py`. Apparie les os gauche/droite par miroir
+MUTUELLEMENT le plus proche (un simple « plus proche » accouple deux os du meme
+cote sur un rig tordu), ramene chaque paire a la moyenne, replaque les os
+centraux sur le plan sagittal, puis RECALCULE `inverseBindMatrices`. Ce dernier
+point est critique : la matrice de liaison encode la pose de repos et le shader
+compose monde(os) x IBM — deplacer un os sans la recalculer decale la peau.
+
+Le plan de symetrie est deduit du MAILLAGE, pas du rig : le maillage est la
+reference fiable (asymetrie 0,33 % contre 2,71 %). Le prendre sur le rig
+reviendrait a valider sa propre derive.
+
+RESULTAT sur la fourmi : asymetrie mediane 2,56 % -> 0,00 %. MAIS le pire cas
+reste a 14,94 %, car 19 os a gauche pour 15 a droite : 12 os n'ont aucun
+symetrique. SkinTokens ne produit pas le meme NOMBRE d'os de chaque cote. Les
+profondeurs de chaines restent impaires — de la topologie, qu'aucun
+deplacement ne corrige. Le script le signale au lieu de faire semblant.
+
+HYPOTHESE REFUTEE PAR LA MESURE. J'avais annonce que l'asymetrie « plafonnait
+la qualite ». Faux : apres symetrisation l'amplitude passe de 9,9 % a 10,0 %.
+Aucun gain.
+
+LE VRAI PLAFOND : `ANYTOP_OUTPUT_DAMP`, defaut 0.25 — seuls 25 % du mouvement
+sont appliques. Ce reglage vient du cas dragon (142 os canoniques -> 47 os
+Puppeteer, ecarts de 178-180 deg qui fragmentaient le maillage). Il ne
+s'applique PAS a araignee 56 os -> fourmi 58 os, ou les echelles sont
+comparables. Mesure :
+     damp 0,25 -> amplitude 10,0 %   (defaut, mouvement a peine visible)
+     damp 0,50 -> amplitude 18,9 %
+     damp 1,00 -> amplitude 33,6 %   soit 3,4x, squelette VERIFIE intact
+       (planche de 6 poses : pattes articulees, structure radiale preservee,
+        aucune fragmentation)
+`mesh2motion_bridge.py` pose donc 1.0 pour cette voie, sans toucher au defaut
+global dont dependent les autres appelants, et respecte une valeur deja posee.
+
+A RETENIR : deux heuristiques calibrees sur le cas dragon (le seuil
+wing/arm >= 5 os corrige ce matin, et cette attenuation) plombaient des cas
+qui n'ont rien a voir. Verifier l'origine d'une constante avant de la subir.

@@ -352,6 +352,24 @@ def animer(rig_glb: str, out_glb: str, creature: str, clip: str,
     _log(f"{motion['n_frames']} images, {len(motion['names'])} os source")
     _progress(45)
 
+    # ── Attenuation de sortie ────────────────────────────────────────────
+    # `anytop_retarget` applique par defaut ANYTOP_OUTPUT_DAMP=0.25 : seuls
+    # 25 % du mouvement passent. Ce reglage a ete choisi pour le cas dragon
+    # (142 os canoniques -> 47 os Puppeteer), ou les ecarts par articulation
+    # atteignaient 178-180 deg et fragmentaient le maillage.
+    #
+    # Ici la situation est tout autre : araignee 56 os -> fourmi 58 os, des
+    # echelles comparables. Mesure sur la marche :
+    #     damp 0,25 -> amplitude  10,0 %   (le defaut, mouvement a peine visible)
+    #     damp 0,50 -> amplitude  18,9 %
+    #     damp 1,00 -> amplitude  33,6 %   et squelette VERIFIE intact
+    # On passe donc a 1.0 pour cette voie, sans toucher au defaut global dont
+    # dependent les autres appelants. Une valeur deja posee par l'appelant est
+    # respectee.
+    if "ANYTOP_OUTPUT_DAMP" not in os.environ:
+        os.environ["ANYTOP_OUTPUT_DAMP"] = "1.0"
+        _log("attenuation de sortie : 1.0 (defaut 0.25 reserve au cas dragon)")
+
     abandon = () if garder_toutes_les_pattes else CHAINES_ABANDONNEES
     if abandon:
         n_abandonnes = sum(1 for nom in motion["names"]
