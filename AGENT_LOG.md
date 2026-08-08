@@ -19244,3 +19244,37 @@ franchement laterale (|X| extremite > |X| attache).
 ETAT DES ESPECES : fourmi = pipeline complet valide avec texture et rendu
 reel ; alligator = rig natif OK, recalage a reprendre ; orc (humanoide,
 gabarit human-base.glb 66 os telecharge avec human-addon) = pas commence.
+
+## 2026-08-08 (fin de session) — generalisation multi-especes : etat honnete
+
+Sequencement inverse (orc d'abord, cense etre le cas facile) : rig natif orc
+OK (52 os, 100 % dans la boite, T-pose). MAIS le recalage generique echoue
+encore : orc 17/66 os dans la boite, alligator 38/58.
+
+PROGRES REELS de la soiree sur `gabarit_recaler.py` :
+  * decomposition par EPLUCHAGE (tronc = plus long chemin vers une feuille
+    CENTRALE, puis chaque membre jusqu'au premier os reclame) — chaines
+    disjointes, les bras termines par des doigts sont enfin vus comme membres
+    (l'extraction feuille->embranchement les ratait, la version « au plus
+    long » chevauchait) ;
+  * jumeau synthetique reserve aux chaines franchement laterales (une chaine
+    de tete symetrisee etait devenue une fausse paire) ;
+  * plafond de distance sur l'appariement miroir (une patte s'appariait a un
+    bras de l'autre cote) ;
+  * validation d'appariement par position d'attache normalisee (<= 0,30 le
+    long de l'axe de tri).
+
+CE QUI MANQUE ENCORE (a faire a tete reposee, PAS en rustines nocturnes) :
+  * un JOURNAL D'APPARIEMENT par chaine (gabarit X -> paire Y, positions,
+    raison du refus) — j'ai passe la soiree a deviner sur des nuages de
+    points ce que trois lignes de log auraient dit ;
+  * les chaines « qui suivent » (doigts) atterrissent hors du corps : le
+    delta d'embranchement est probablement applique au mauvais repere ;
+  * un banc d'essai qui rejoue LES TROIS especes (fourmi/araignee OK,
+    alligator/kaiju, orc/humain) a chaque modification — candidat ideal pour
+    un workflow multi-agents demain.
+
+ACQUIS INTACTS : le pipeline fourmi complet (gabarit impose -> peau -> clips
+sans retargeting -> texture reelle -> rendu Cycles) est valide et commite.
+Le cas alligator a aussi valide une chose importante : le maillage etait un
+BIPEDE type t-rex — le SELECTEUR de gabarit (etape 3) n'est pas un luxe.

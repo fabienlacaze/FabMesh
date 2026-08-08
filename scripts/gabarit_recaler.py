@@ -103,21 +103,67 @@ def squelette(js):
     return joints, noms, pj, pos
 
 
-def chaines(pj):
+def chaines(pj, pos=None):
+    """Decomposition par EPLUCHAGE en chaines DISJOINTES.
+
+    1. Le TRONC = plus long chemin racine -> feuille (en distance).
+    2. Chaque feuille restante, par longueur decroissante, forme une chaine
+       jusqu'au premier os deja reclame. L'embranchement rapporte est cet os.
+
+    La version « au plus long depuis chaque embranchement » produisait des
+    chaines qui se CHEVAUCHAIENT (la colonne du kaiju filait dans le bras
+    gauche) ; la version « feuille -> premier embranchement » ratait tout
+    membre termine par des doigts. L'epluchage n'a aucun des deux defauts :
+    les doigts deviennent de petites chaines accrochees au bras, qui suivront
+    leur porteur en bloc.
+    """
     n = len(pj)
     enfants = [[] for _ in range(n)]
     for k, p in enumerate(pj):
         if p != -1:
             enfants[p].append(k)
-    feuilles = [k for k in range(n) if not enfants[k]]
-    out = []
-    for f in feuilles:
+
+    def remonte(f):
         ch = [f]
-        k = pj[f]
-        while k != -1 and len(enfants[k]) == 1:
-            ch.append(k)
-            k = pj[k]
-        out.append((k, list(reversed(ch))))
+        while pj[ch[-1]] != -1:
+            ch.append(pj[ch[-1]])
+        return list(reversed(ch))
+
+    def dist(ch):
+        if pos is None:
+            return float(len(ch))
+        return float(sum(np.linalg.norm(pos[ch[i+1]] - pos[ch[i]])
+                         for i in range(len(ch) - 1)))
+
+    feuilles = [k for k in range(n) if not enfants[k]]
+    chemins = {f: remonte(f) for f in feuilles}
+    ordre = sorted(feuilles, key=lambda f: -dist(chemins[f]))
+
+    # Le TRONC doit finir sur une feuille CENTRALE (queue, tete) — jamais
+    # laterale : sinon le plus long chemin racine->main AVALE un bras entier
+    # dans le tronc et ce membre disparait de l'appariement (constate sur le
+    # kaiju : tronc racine->main gauche). On epluche donc d'abord le plus long
+    # chemin vers une feuille centrale, puis le reste par longueur.
+    if pos is not None and len(feuilles) > 1:
+        ext_x = float(pos[:, 0].max() - pos[:, 0].min()) or 1.0
+        centrales = [f for f in feuilles if abs(float(pos[f][0])) <= 0.10 * ext_x]
+        if centrales:
+            tronc = max(centrales, key=lambda f: dist(chemins[f]))
+            ordre = [tronc] + [f for f in ordre if f != tronc]
+
+    reclames = set()
+    out = []
+    for f in ordre:
+        ch = chemins[f]
+        # ne garder que la partie NON reclamee (du bas vers la feuille)
+        i = len(ch) - 1
+        while i >= 0 and ch[i] not in reclames:
+            i -= 1
+        segment = ch[i + 1:]
+        if not segment:
+            continue
+        reclames.update(segment)
+        out.append((ch[i] if i >= 0 else -1, segment))
     return out, enfants
 
 
@@ -156,7 +202,7 @@ def main():
     # ── Detecteur : chaines du rig natif, paires miroir ────────────────────
     njs, _ = lire(a.natif)
     _, _, npj, npos = squelette(njs)
-    ch_nat, _ = chaines(npj)
+    ch_nat, _ = chaines(npj, npos)
     brutes = [{"points": npos[ch], "A": npos[ch][0], "E": npos[ch][-1],
                "long": longueur(npos[ch])} for _, ch in ch_nat]
     ech_x = npos[:, 0].max() - npos[:, 0].min()
@@ -177,6 +223,9 @@ def main():
         if not cands:
             break
         d0, j0 = min(cands)
+        diag = float(np.linalg.norm(npos.max(0) - npos.min(0)))
+        if d0 > 0.35 * diag:
+            continue          # trop different pour etre un vrai jumeau
         if d0 <= min(d_paire(g2, lat_r[j0]) for g2 in lat_l) + 1e-9:
             pris_r.add(j0)
             paires.append((ga, lat_r[j0]))
@@ -186,6 +235,12 @@ def main():
     long_max = max((b["long"] for b in brutes), default=1.0)
     for b in lat_l + lat_r:
         if id(b) in en_paire or b["long"] < 0.30 * long_max:
+            continue
+        # jumeau synthetique UNIQUEMENT pour une chaine qui S'ECARTE du corps :
+        # extremite franchement laterale ET plus excentree que son attache.
+        # Sans ce filtre, une chaine de tete a peine excentree se symetrisait
+        # en fausse paire — les bras du kaiju s'y rabattaient (echec alligator).
+        if abs(b["E"][0]) < 0.15 * ech_x or abs(b["E"][0]) < abs(b["A"][0]):
             continue
         jum = {"points": np.array([miroir(p) for p in b["points"]]),
                "A": miroir(b["A"]), "E": miroir(b["E"]), "long": b["long"]}
@@ -202,7 +257,7 @@ def main():
     # ── Gabarit : chaines par nom (_l/_r), centrales par direction ─────────
     gjs, _ = lire(a.gabarit)
     _, gn, gpj, gpos = squelette(gjs)
-    ch_gab, enfants_g = chaines(gpj)
+    ch_gab, enfants_g = chaines(gpj, gpos)
 
     def cote_nom(ch):
         nom = gn[ch[-1]].lower()
@@ -243,12 +298,30 @@ def main():
     # membres apparies : reechantillonnage curviligne. Le SURPLUS de chaines
     # du gabarit est ecarte par LONGUEUR (jamais par position).
     substantielle = lambda d: d["long"] >= 0.25 * max((x["long"] for x in gab_l + gab_r), default=1.0)
+    axe_tri = 1 if a.tri == "y" else 2
+    etendue_n = np.maximum(npos.max(0) - npos.min(0), 1e-9)
+    etendue_g = np.maximum(hi_g - lo_g, 1e-9)
+    def pos_norm_gab(d):
+        return float((d["A"][axe_tri] - lo_g[axe_tri]) / etendue_g[axe_tri])
+    def pos_norm_paire(p):
+        v = 0.5 * (p[0]["A"][axe_tri] + p[1]["A"][axe_tri])
+        return float((v - npos.min(0)[axe_tri]) / etendue_n[axe_tri])
+    apparies_gab = {}
     for k_cote, lst in ((0, gab_l), (1, gab_r)):
         subs = [d for d in lst if substantielle(d)]
         while len(subs) > len(paires):
             subs.pop(min(range(len(subs)), key=lambda i: subs[i]["long"]))
-        for d, paire in zip(subs, paires):
-            p_fit[d["ch"]] = reech(paire[k_cote]["points"], len(d["ch"]))
+        libres = list(range(len(paires)))
+        for d in subs:
+            # meilleure paire encore libre, REFUSEE si l'attache normalisee
+            # differe de plus de 0,30 le long de l'axe de tri (un bras ne se
+            # rabat pas sur des jambes)
+            cands = sorted(libres, key=lambda j: abs(pos_norm_paire(paires[j]) - pos_norm_gab(d)))
+            if cands and abs(pos_norm_paire(paires[cands[0]]) - pos_norm_gab(d)) <= 0.30:
+                j = cands[0]
+                libres.remove(j)
+                p_fit[d["ch"]] = reech(paires[j][k_cote]["points"], len(d["ch"]))
+                apparies_gab.setdefault(k_cote, []).append(gn[d["ch"][0]])
 
     # centrales arriere (queue) le long de l'appendice arriere reel
     g_arr = [d for d in gab_c if (d["E"] - d["A"])[2] < -0.05 * (hi_g[2] - lo_g[2])]
@@ -260,12 +333,11 @@ def main():
     # chaines non recalees : elles SUIVENT leur embranchement (offset conserve
     # a l'echelle boite) — c'est le cas des doigts, oreilles, feuilles
     recalees = set()
+    noms_recales = {n for lst in apparies_gab.values() for n in lst}
     for k_cote, lst in ((0, gab_l), (1, gab_r)):
-        subs = [d for d in lst if substantielle(d)]
-        while len(subs) > len(paires):
-            subs.pop(min(range(len(subs)), key=lambda i: subs[i]["long"]))
-        for d in subs:
-            recalees.update(d["ch"])
+        for d in lst:
+            if gn[d["ch"][0]] in noms_recales:
+                recalees.update(d["ch"])
     if g_arr and arrieres:
         recalees.update(max(g_arr, key=lambda d: d["long"])["ch"])
     for embr, ch in ch_gab:
