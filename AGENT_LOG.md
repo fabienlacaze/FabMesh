@@ -18767,3 +18767,39 @@ RESTE A FAIRE cote bureau : la branche cloud de `auto-rig-ai` envoie encore
 donc l'etape « moteur de rig » de l'assistant lit `resources/Puppeteer`, absent
 du paquet — boucle fermee, l'utilisateur est renvoye vers un assistant
 incapable de corriger.
+
+## 2026-08-08 — Bureau : plus aucun chemin ne peut demander Puppeteer
+
+Suite du retrait cote cloud. Cinq points corriges dans l'application bureau :
+
+1. `auto-rig-ai` avait `engine || 'puppeteer'` en defaut : un appelant qui
+   omettait le moteur tombait sur le moteur interdit. Defaut = `skintokens`.
+2. La branche Cloud envoyait `engine: 'puppeteer'` EN DUR et nommait sa sortie
+   `_rigged_puppeteer_`. Verifie avant de renommer : aucun code de l'interface
+   ne teste ce nom (le nettoyage des noms exportes coupe generiquement des
+   `_rigged_`, et les autres occurrences sont des commentaires).
+3. La branche locale Puppeteer refuse desormais l'execution. Le blocage est au
+   point d'EXECUTION, pas seulement dans l'interface : un projet deja
+   enregistre ou un script pouvait encore demander ce moteur. Echappatoire
+   `FABMESH_ALLOW_PUPPETEER=1` valable en developpement uniquement, jamais
+   dans un paquet.
+4. La branche locale SkinTokens n'avait AUCUN controle prealable, a la
+   difference de celle de Puppeteer : elle retombait sur le `python` du
+   systeme, absent ou sans torch dans un paquet Store, et rendait une erreur
+   de processus brute. Elle verifie maintenant interpreteur + `demo.py` et
+   renvoie une consigne exploitable (`needsLocalEngine`).
+5. Intitules : l'option « legacy » retiree du selecteur ; la cible de
+   retargeting garde sa VALEUR `puppeteer_raw` (cle de correspondance dans
+   `scripts/rig_mappings` et les projets enregistres) mais s'affiche
+   « Native skeleton (no remap) ».
+
+TOUJOURS OUVERT — le blocage de fond du paquet Store : `extraResources`
+n'embarque NI Puppeteer NI SkinTokens, alors que `wizard:install-rig` copie
+l'arbre de code depuis `resources/Puppeteer`. Verifie sur le .appx 1.0.15
+livre : 571 entrees, zero arbre de moteur, seuls les ponts. L'etape « moteur
+de rig » de l'assistant ne peut donc JAMAIS aboutir, et le rig renvoyait
+l'utilisateur vers cet assistant : boucle fermee. Le correctif evident
+— ajouter `external/Puppeteer` aux ressources — est justement INTERDIT par la
+licence. La voie propre est SkinTokens, et le rig local restera indisponible
+dans le paquet tant qu'il n'y sera pas embarque ; le mode Cloud, lui,
+fonctionne et est desormais verifie.

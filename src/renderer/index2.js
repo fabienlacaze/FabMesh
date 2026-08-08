@@ -5988,7 +5988,10 @@ const SKELETON_TARGETS = [
   { value: "spider",         emoji: "🕷️", label: "8-legged arachnid",       variete: "Arachnid" },
   { value: "bat",            emoji: "🦇",  label: "Chiropteran",             variete: "Chiropteran" },
   { value: "dragon",         emoji: "🐉",  label: "Fantasy dragon",          variete: "Dragon" },
-  { value: "puppeteer_raw",  emoji: "⚪",  label: "Puppeteer raw (no remap)", variete: "Raw" },
+  // La VALEUR reste `puppeteer_raw` : elle sert de cle de correspondance
+  // (scripts/rig_mappings, projets deja enregistres). Seul l'intitule change,
+  // pour ne plus exposer le nom d'un moteur retire du produit.
+  { value: "puppeteer_raw",  emoji: "⚪",  label: "Native skeleton (no remap)", variete: "Raw" },
 ];
 
 // Map an asset_type to the most appropriate default skeleton target.
@@ -16123,7 +16126,9 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
     || rigSrcMeshPath;
   if (!meshPathToUse) { alert('No mesh available — generate or pick one first.'); return; }
   if (!API.autoRigAI) { alert('Rigging bridge not available.'); return; }
-  const rigEngine = document.getElementById('ws-rig-engine')?.value || 'puppeteer';
+  // Repli sur skintokens : si le selecteur disparait de la page, on ne doit
+  // pas retomber sur puppeteer, dont la licence interdit la vente.
+  const rigEngine = document.getElementById('ws-rig-engine')?.value || 'skintokens';
   const engineLabel = 'MyFabmesh.AI Rig (local, neural)';
   const expectedMs = 90000;
   gatedRun('rig', `Auto-rig AI: ${p.name}`, async () => {

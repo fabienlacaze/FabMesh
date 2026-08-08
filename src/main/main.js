@@ -3610,15 +3610,22 @@ ipcMain.handle('read-bones-json', async (_event, targetName) => {
 // Auto-rigging via Puppeteer (default) or UniRig fallback → rename to target skeleton (orc_m1 UE5 etc.) → bake anims
 ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
   const _t0 = Date.now();
-  const rigEngine = engine || 'puppeteer';
+  // Defaut = SkinTokens (VAST-AI, MIT). Il etait a 'puppeteer', dont le rig
+  // par defaut embarque Michelangelo (GPL-3.0) et PartField (NVIDIA
+  // non-commercial) : interdit dans un produit vendu. Un appelant qui omet
+  // le moteur ne doit pas se retrouver sur le moteur interdit.
+  const rigEngine = engine || 'skintokens';
   const rigSkeleton = (skeleton || 'orc_m1').replace(/[^a-z0-9_-]/gi, '');
   console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} skeleton=${rigSkeleton} @${new Date(_t0).toISOString()}`);
   try {
     // ── Mode Cloud : POST /api/auto-rig (ASYNC, 5 crédits) + polling
-    // GET /api/auto-rig-status (5 s, cap 15 min). Le worker n'a QUE le
-    // moteur Puppeteer — on IGNORE le moteur desktop demandé (skintokens…)
-    // et on force engine=puppeteer + skeleton=orc_m1. Nommage identique au
-    // local (_rigged_puppeteer_) pour le routage renderer.
+    // GET /api/auto-rig-status (5 s, cap 15 min).
+    //
+    // Le cloud tourne desormais sur SkinTokens (MIT) — verifie de bout en
+    // bout le 2026-08-08 : 64 s, 28 os, 100 % des os dans le maillage. On
+    // envoyait ici `engine: 'puppeteer'` en dur, ce qui reclamait au cloud
+    // un moteur NON COMMERCIALISABLE (Michelangelo GPL-3.0 + PartField
+    // NVIDIA non-commercial).
     if (isCloudMode()) {
       if (!meshPath || !fs.existsSync(meshPath)) {
         return { success: false, error: 'Mesh not found' };
@@ -3627,11 +3634,15 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
         return { success: false, error: 'Mesh path not allowed' };
       }
       const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
-      const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_puppeteer_${Date.now()}.glb`);
+      // Le suffixe change (`_rigged_skintokens_`) : verifie, aucun code de
+      // l'interface ne teste ce nom — le nettoyage des noms exportes coupe
+      // generiquement des `_rigged_`, et `puppeteer` n'apparait ailleurs que
+      // dans des commentaires.
+      const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_skintokens_${Date.now()}.glb`);
       safeSend('ai3d-progress', '[cloud] Rig (moteur cloud)…');
       const start = await cloudFallback.startMeshJob({
         meshPath, startPath: '/api/auto-rig',
-        bodyFor: (u) => ({ mesh_url: u, skeleton: 'orc_m1', engine: 'puppeteer' }),
+        bodyFor: (u) => ({ mesh_url: u, skeleton: 'orc_m1', engine: 'skintokens' }),
       });
       if (!start.success) {
         return { success: false, error: start.error || 'cloud rig start failed',
@@ -3653,7 +3664,7 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
       const stats = fs.statSync(outputGlb);
       console.log(`[auto-rig-ai] CLOUD END duration=${((Date.now() - _t0) / 1000).toFixed(2)}s → ${outputGlb}`);
       writeMeta(outputGlb, {
-        kind: 'rig', engine: 'puppeteer', parent: meshPath,
+        kind: 'rig', engine: 'skintokens', parent: meshPath,
         params: { skeleton: 'orc_m1', cloud: true, r2_url: done.resultUrl },
       });
       return { success: true, path: outputGlb, filename: path.basename(outputGlb), size: stats.size };
@@ -3708,12 +3719,39 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
         return { success: false, error: 'skintokens_bridge.py not found' };
       }
       step1Script = skintokensScript;
-      step1Python = [process.env.FABMESH_SKINTOKENS_PY, 'C:\\tmp\\skv\\Scripts\\python.exe']
-        .find(p => p && fs.existsSync(p)) || 'python';
+      // Cette branche n'avait AUCUN controle prealable, contrairement a celle
+      // de Puppeteer : elle retombait sur le `python` du systeme, qui dans un
+      // paquet Store n'existe pas ou n'a pas torch. L'utilisateur recevait
+      // une erreur de processus brute au lieu d'une consigne exploitable.
+      const stPy = [process.env.FABMESH_SKINTOKENS_PY, 'C:\\tmp\\skv\\Scripts\\python.exe',
+                    'C:\\skv\\Scripts\\python.exe']
+        .find(p => p && fs.existsSync(p));
+      const stRoot = app.isPackaged
+        ? path.join(process.resourcesPath, 'SkinTokens')
+        : path.join(__dirname, '..', '..', 'external', 'SkinTokens');
+      if (!stPy || !fs.existsSync(path.join(stRoot, 'demo.py'))) {
+        log.warn('main', 'auto-rig-ai: moteur SkinTokens local absent (python='
+          + (stPy || 'aucun') + ', racine=' + stRoot + ')');
+        return { success: false, needsLocalEngine: true, error:
+          'The local rig engine is not installed. Switch to Cloud mode to rig '
+          + 'this mesh, or install the local engine from Settings.' };
+      }
+      step1Python = stPy;
       step1Label = 'SkinTokens';
       engineSuffix = 'skintokens';
     } else {
-      // Default: Puppeteer
+      // ── Puppeteer : REFUSE. Son rig par defaut embarque Michelangelo
+      // (GPL-3.0) et PartField (NVIDIA non-commercial) — incompatible avec
+      // un produit vendu. Le blocage est ici, au point d'execution, et pas
+      // seulement dans l'interface : un appelant interne, un ancien projet
+      // rechargé ou un script pouvaient encore demander ce moteur.
+      // Echappatoire de developpement uniquement, jamais dans un paquet.
+      if (!(process.env.FABMESH_ALLOW_PUPPETEER === '1' && !app.isPackaged)) {
+        log.warn('main', 'auto-rig-ai: moteur puppeteer refuse (licence non commerciale)');
+        return { success: false, error:
+          'This rig engine is no longer available. Rigging now uses the '
+          + 'MyFabmesh.AI engine — reopen the rig panel and try again.' };
+      }
       if (!fs.existsSync(puppeteerScript)) {
         return { success: false, error: 'puppeteer_bridge.py not found' };
       }
