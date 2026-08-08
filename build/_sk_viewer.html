@@ -1,0 +1,215 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SkinTokens — rig vérifié</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#0d1117; color:#e6edf3;
+              font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; overflow:hidden; }
+  #vue { position:fixed; inset:0; }
+  #infos { position:fixed; top:14px; left:14px; z-index:10; background:rgba(13,17,23,.86);
+           border:1px solid #30363d; border-radius:10px; padding:12px 16px; backdrop-filter:blur(8px);
+           max-width:330px; }
+  h1 { margin:0 0 8px; font-size:15px; letter-spacing:.2px; }
+  .lic { display:inline-block; background:#1f6f3f; color:#d7ffe6; border-radius:5px;
+         padding:1px 7px; font-size:11px; font-weight:600; margin-left:6px; vertical-align:1px; }
+  dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px; }
+  dt { color:#8b949e; } dd { margin:0; font-variant-numeric:tabular-nums; }
+  #cmds { position:fixed; bottom:14px; left:14px; z-index:10; background:rgba(13,17,23,.86);
+          border:1px solid #30363d; border-radius:10px; padding:10px 14px; font-size:12.5px; }
+  label { display:block; margin:3px 0; cursor:pointer; user-select:none; }
+  #etat { position:fixed; inset:0; display:grid; place-content:center; z-index:20;
+          background:#0d1117; text-align:center; color:#8b949e; }
+  .err { color:#ff7b72; max-width:560px; }
+</style>
+<div id="vue"></div>
+<div id="etat">chargement du maillage riggé (14 Mo)…</div>
+<div id="infos" hidden>
+  <h1>SkinTokens<span class="lic">MIT</span></h1>
+  <dl>
+    <dt>os</dt><dd id="n-os">—</dd>
+    <dt>peaux</dt><dd id="n-peaux">—</dd>
+    <dt>sommets</dt><dd id="n-verts">—</dd>
+    <dt>poids/sommet</dt><dd id="n-poids">—</dd>
+  </dl>
+  <div id="diag" style="margin-top:8px;font-size:11px;color:#6e7681;
+       font-variant-numeric:tabular-nums;word-break:break-all"></div>
+</div>
+<div id="cmds" hidden>
+  <label><input type="checkbox" id="c-os" checked> squelette</label>
+  <label><input type="checkbox" id="c-mesh" checked> maillage</label>
+  <label><input type="checkbox" id="c-fil"> fil de fer</label>
+  <label><input type="checkbox" id="c-tourne" checked> rotation</label>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const hote   = document.getElementById('vue');
+const etat   = document.getElementById('etat');
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1117);
+
+const cam = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 1000);
+const rendu = new THREE.WebGLRenderer({ antialias:true });
+rendu.setPixelRatio(Math.min(devicePixelRatio, 2));
+rendu.setSize(innerWidth, innerHeight);
+rendu.outputColorSpace = THREE.SRGBColorSpace;
+hote.appendChild(rendu.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x35302b, 2.1));
+const dir = new THREE.DirectionalLight(0xffffff, 1.9);
+dir.position.set(3, 6, 4); scene.add(dir);
+const dir2 = new THREE.DirectionalLight(0x88aaff, .7);
+dir2.position.set(-4, 1, -3); scene.add(dir2);
+
+const orbite = new OrbitControls(cam, rendu.domElement);
+orbite.enableDamping = true;
+
+let racine = null, aide = null;
+const maillages = [];
+
+/** Materiau de repli — ce GLB n'en embarque aucun. */
+const neutre = () => new THREE.MeshStandardMaterial({
+  color: 0x9fb4cc, roughness: 0.62, metalness: 0.05,
+  transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide,
+});
+
+// Une exception levee DANS le rappel de chargement de GLTFLoader ne
+// declenche pas `onError` : l'ecran restait noir sur « chargement 100 % »,
+// sans le moindre indice. On rend donc toute panne visible A L'ECRAN.
+const montrerPanne = (ou, e) => {
+  etat.hidden = false;
+  etat.innerHTML = '<div class="err"><b>Panne — ' + ou + '</b><br><br>' +
+    '<code style="font-size:12px;white-space:pre-wrap">' +
+    ((e && (e.stack || e.message)) || e) + '</code></div>';
+};
+addEventListener('error',              (e) => montrerPanne('erreur globale', e.error || e.message));
+addEventListener('unhandledrejection', (e) => montrerPanne('promesse rejetée', e.reason));
+
+new GLTFLoader().load('_sk_test_rigged.glb', (gltf) => {
+ try {
+  racine = gltf.scene;
+  scene.add(racine);
+
+  let os = 0, peaux = 0, verts = 0, poids = '—';
+  racine.traverse(o => {
+    if (o.isSkinnedMesh) {
+      peaux++;
+      maillages.push(o);
+      os = Math.max(os, o.skeleton?.bones?.length || 0);
+      verts += o.geometry.attributes.position.count;
+      const w = o.geometry.attributes.skinWeight;
+      if (w) poids = w.itemSize + ' (' + w.count.toLocaleString('fr-FR') + ' sommets pondérés)';
+
+      // Ce GLB ne declare AUCUN materiau (materials: 0) — SkinTokens
+      // exporte la geometrie et le squelette, pas l'apparence. On en
+      // pose donc un explicitement, translucide : sans transparence le
+      // squelette, qui est A L'INTERIEUR du maillage, resterait
+      // invisible, donc invérifiable a l'oeil.
+      const habiller = (m) => {
+        if (!m) return null;                 // <- le defaut absent faisait tout echouer
+        m.transparent = true; m.opacity = 0.42;
+        m.depthWrite = false; m.side = THREE.DoubleSide;
+        return m;
+      };
+      if (Array.isArray(o.material)) {
+        o.material = o.material.map(m => habiller(m) || neutre());
+      } else {
+        o.material = habiller(o.material) || neutre();
+      }
+    }
+  });
+
+  aide = new THREE.SkeletonHelper(racine);
+  aide.material.linewidth = 2;
+  scene.add(aide);
+
+  // Cadrer sur la boite englobante — le maillage arrive dans une echelle
+  // quelconque, un cadrage fixe le sortirait du champ.
+  //
+  // `setFromObject` d'un SkinnedMesh lit les positions AU REPOS, avant que
+  // le shader n'applique le skinning : la boite peut donc ne pas coincider
+  // avec ce qui est reellement affiche. On force d'abord les matrices
+  // monde, sans quoi la boite est calculee sur des transformations
+  // perimees.
+  racine.updateMatrixWorld(true);
+  const boite = new THREE.Box3().setFromObject(racine);
+  const taille = boite.getSize(new THREE.Vector3()).length() || 1;
+  const centre = boite.getCenter(new THREE.Vector3());
+
+  // On NE deplace plus le modele : decaler `racine` sans decaler le
+  // SkeletonHelper (qui suit les os en espace monde) desynchronisait les
+  // deux. On vise le centre avec la camera, c'est equivalent et sur.
+  cam.position.set(centre.x + taille*0.55, centre.y + taille*0.32, centre.z + taille*0.75);
+  cam.near = Math.max(taille/500, 1e-4); cam.far = taille*20; cam.updateProjectionMatrix();
+  orbite.target.copy(centre); orbite.update();
+
+  // Temoins de diagnostic : si la boite rouge et le repere apparaissent
+  // mais pas le maillage, le probleme est le maillage (ou le skinning) —
+  // pas le cadrage. C'est la seule facon de distinguer les deux causes.
+  const temoin = new THREE.Box3Helper(boite, 0xff4444); scene.add(temoin);
+  const repere = new THREE.AxesHelper(taille*0.5); repere.position.copy(centre); scene.add(repere);
+  document.getElementById('diag').textContent =
+    'boîte ' + boite.min.toArray().map(n=>n.toFixed(2)).join('/') + ' → ' +
+    boite.max.toArray().map(n=>n.toFixed(2)).join('/') +
+    ' · diag ' + taille.toFixed(2) +
+    ' · cam ' + cam.position.toArray().map(n=>n.toFixed(2)).join('/');
+
+  document.getElementById('n-os').textContent    = os;
+  document.getElementById('n-peaux').textContent = peaux;
+  document.getElementById('n-verts').textContent = verts.toLocaleString('fr-FR');
+  document.getElementById('n-poids').textContent = poids;
+  etat.hidden = true;
+  document.getElementById('infos').hidden = false;
+  document.getElementById('cmds').hidden  = false;
+
+  // Dessiner UNE image tout de suite, sans attendre la boucle d'animation.
+  // Sans cela, rien n'est affiche tant que le navigateur n'a pas ordonnance
+  // une premiere `requestAnimationFrame` — et un Chrome sans interface, ou
+  // un onglet en arriere-plan, peut ne jamais l'ordonnancer. La page
+  // paraissait alors figee sur « chargement 100 % ».
+  rendu.render(scene, cam);
+ } catch (e) { montrerPanne('exploitation du GLB', e); }
+}, (p) => {
+  if (p.total) etat.textContent = `chargement… ${Math.round(p.loaded/p.total*100)} %`;
+}, (e) => {
+  etat.innerHTML = '<div class="err"><b>Échec du chargement</b><br>' +
+                   (e?.message || e) + '</div>';
+});
+
+const cb = (id, fn) => document.getElementById(id).addEventListener('change', e => fn(e.target.checked));
+cb('c-os',   v => { if (aide) aide.visible = v; });
+cb('c-mesh', v => maillages.forEach(m => m.visible = v));
+cb('c-fil',  v => maillages.forEach(m => {
+  const mats = Array.isArray(m.material) ? m.material : [m.material];
+  mats.forEach(x => { x.wireframe = v; x.opacity = v ? 0.85 : 0.42; });
+}));
+let tourne = true;
+cb('c-tourne', v => tourne = v);
+
+addEventListener('resize', () => {
+  cam.aspect = innerWidth/innerHeight; cam.updateProjectionMatrix();
+  rendu.setSize(innerWidth, innerHeight);
+});
+
+rendu.setAnimationLoop(() => {
+  // On fait tourner la CAMERA autour de la cible plutot que le modele :
+  // faire pivoter `racine` laissait le SkeletonHelper, qui suit les os en
+  // espace monde, immobile — squelette et maillage se desynchronisaient.
+  if (tourne && racine) {
+    const c = orbite.target, a = 0.0045;
+    const dx = cam.position.x - c.x, dz = cam.position.z - c.z;
+    cam.position.x = c.x + dx*Math.cos(a) - dz*Math.sin(a);
+    cam.position.z = c.z + dx*Math.sin(a) + dz*Math.cos(a);
+    cam.lookAt(c);
+  }
+  orbite.update();
+  rendu.render(scene, cam);
+});
+</script>

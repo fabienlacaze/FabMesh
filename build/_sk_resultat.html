@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SkinTokens — résultats de rig</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0d1117; color:#e6edf3; padding:28px 32px 60px;
+         font:15px/1.65 system-ui,-apple-system,Segoe UI,sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h1 .lic { background:#1f6f3f; color:#d7ffe6; border-radius:6px; padding:2px 9px;
+            font-size:12px; font-weight:700; margin-left:9px; vertical-align:3px; }
+  .sous { color:#8b949e; margin:0 0 26px; }
+  section { margin:0 0 34px; border:1px solid #30363d; border-radius:12px;
+            overflow:hidden; background:#0f141b; }
+  header { padding:13px 18px; border-bottom:1px solid #30363d;
+           display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  header b { font-size:16px; }
+  .etiq { border-radius:5px; padding:2px 9px; font-size:12px; font-weight:600; }
+  .ok  { background:#1f6f3f; color:#d7ffe6; }
+  .ko  { background:#7d2b2b; color:#ffd7d7; }
+  .chif { margin-left:auto; color:#8b949e; font-size:13px;
+          font-variant-numeric:tabular-nums; }
+  img { display:block; width:100%; height:auto; background:#0d1117; }
+  p.note { margin:0; padding:13px 18px; border-top:1px solid #30363d;
+           color:#9aa4af; font-size:13.5px; }
+  code { background:#161b22; border:1px solid #30363d; border-radius:4px;
+         padding:1px 5px; font-size:12.5px; }
+</style>
+
+<h1>SkinTokens<span class="lic">MIT — utilisable commercialement</span></h1>
+<p class="sous">Rendu calculé hors navigateur, directement depuis les fichiers GLB :
+  positions des os composées depuis la hiérarchie glTF, sommets projetés sous trois angles.
+  Aucune dépendance à WebGL.</p>
+
+<section>
+  <header>
+    <b>Personnage</b><span class="etiq ok">rig exploitable</span>
+    <span class="chif">28 os · 27 270 sommets · 64,1 s · 100 % des os dans le maillage</span>
+  </header>
+  <img src="_sk_perso_apercu.png" alt="Rig du personnage, trois vues">
+  <p class="note">Colonne vertébrale, clavicules, bras jusqu'aux mains, bassin, jambes et pieds.
+    Hiérarchie à racine unique (27 segments pour 28 os). C'est un rig humanoïde standard,
+    directement animable.</p>
+</section>
+
+<section>
+  <header>
+    <b>Véhicule</b><span class="etiq ko">rig sans valeur</span>
+    <span class="chif">140 os · 292 140 sommets · 139,8 s · 94,3 % des os dans la boîte</span>
+  </header>
+  <img src="_sk_rig_apercu.png" alt="Rig du véhicule, trois vues">
+  <p class="note">Structurellement valide — arbre correct, <code>JOINTS_0</code> et
+    <code>WEIGHTS_0</code> présents — mais les os traversent le modèle sans suivre aucune
+    forme. Attendu : le moteur est entraîné sur des personnages articulés, et son propre
+    pont annonce qu'il rejette les objets mécaniques. C'était une erreur de choix de test
+    de ma part, pas un défaut du moteur.</p>
+</section>
+
+<p class="sous" style="margin:0">Ce que ces deux essais établissent : le rig SkinTokens fonctionne
+  de bout en bout sur Modal, et il faut aiguiller selon le type d'objet — un véhicule ne doit
+  pas partir au rig automatique.</p>

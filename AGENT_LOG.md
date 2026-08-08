@@ -18721,3 +18721,49 @@ sert qu'à UN SEUL appel — `BVH.save(...)` dans `sample/generate.py:105` — e
 `bvhsdk` est en **MIT** et déjà utilisé dans quatre fichiers du projet. Le
 remplacement est donc circonscrit, mais il exige de vérifier l'équivalence du
 fichier BVH produit : à faire posément, pas en fin de session.
+
+## 2026-08-08 — Puppeteer retire du cloud ; SkinTokens verifie de bout en bout
+
+CONSIGNE USER : « Puppeteer => non commercialisable = il ne faut surtout pas
+l'utiliser ». Le sujet depassait le paquet Store : le CLOUD l'utilisait aussi,
+de trois facons distinctes.
+
+1. `_rigBaseUrl` faisait `MODAL_RIG_URL || MODAL_PUPPETEER_RIG_URL`. Une
+   variable absente ou mal orthographiee faisait retomber SILENCIEUSEMENT
+   toute la production sur le moteur interdit (Michelangelo GPL-3.0 +
+   PartField NVIDIA non-commercial) — une infraction de licence sans le
+   moindre signal. Repli SUPPRIME : pas de `MODAL_RIG_URL`, pas de rig.
+   Une panne franche vaut mieux qu'une infraction discrete.
+
+2. Le nettoyeur de taches (`_REAP_BACKENDS.rig`) interrogeait
+   `MODAL_PUPPETEER_RIG_URL` EN DUR, en contournant `_rigBaseUrl`. Il sondait
+   donc l'ancien moteur pendant que la production riggait sur le nouveau :
+   jamais le meme travail. Cela explique le blocage « le nettoyeur ne
+   finalise pas les rigs » que l'audit avait releve sans en trouver la cause.
+
+3. `MODAL_RIG_URL` repose desormais explicitement sur l'app SkinTokens
+   verifiee (`myfabmesh-skintokens-rig-router`).
+
+VERIFICATION DU MOTEUR — premiere reussite de bout en bout (il n'avait jamais
+abouti). Appel direct de `rig_mesh` sur Modal, sans passer par le worker :
+
+  * Personnage (`logs/person_fullpipe/mesh.glb`) : 64,1 s, 28 os, 27 segments
+    (arbre a racine unique), 27 270 sommets, **100 % des os dans le maillage**.
+    Colonne, clavicules, bras, bassin, jambes, pieds — rig humanoide standard.
+  * Vehicule (maillage TRELLIS2) : 139,8 s, 140 os, structurellement valide
+    (JOINTS_0 + WEIGHTS_0) mais os traversant le modele sans suivre de forme.
+    ATTENDU : le moteur est entraine sur des personnages articules. A retenir
+    pour l'aiguillage produit — un vehicule ne doit pas partir au rig auto.
+
+Verification faite HORS NAVIGATEUR (`scratchpad/rendu_rig.py`) : Chrome sans
+interface ne capture pas la toile WebGL, les captures ressortaient vides meme
+avec le GPU reel. Le script recompose les transformations monde depuis la
+hierarchie glTF et projette sous trois angles — c'est ce qui a revele que le
+premier maillage de test etait une VOITURE, ce que les controles structurels
+(140 os, arbre valide, poids presents) n'auraient jamais montre.
+
+RESTE A FAIRE cote bureau : la branche cloud de `auto-rig-ai` envoie encore
+`engine: 'puppeteer'` ; `extraResources` n'embarque NI Puppeteer NI SkinTokens,
+donc l'etape « moteur de rig » de l'assistant lit `resources/Puppeteer`, absent
+du paquet — boucle fermee, l'utilisateur est renvoye vers un assistant
+incapable de corriger.

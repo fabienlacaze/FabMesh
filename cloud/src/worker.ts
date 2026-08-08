@@ -443,10 +443,20 @@ async function _spendRefusalMessage(env: Env, userId?: string): Promise<string> 
  *  délibéré : si le poller tombe, on veut une alerte, pas un service à
  *  l'arrêt. Le blocage n'intervient que sur une donnée FRAÎCHE qui montre un
  *  budget épuisé — cas où Modal cesserait de toute façon d'exécuter les apps. */
-/** URL du backend de rig. `MODAL_RIG_URL` (SkinTokens) prime sur l'ancien
- *  `MODAL_PUPPETEER_RIG_URL`, conserve en repli. */
+/** URL du backend de rig — SkinTokens (VAST-AI, MIT) et RIEN D'AUTRE.
+ *
+ *  LE REPLI VERS PUPPETEER A ETE RETIRE VOLONTAIREMENT (2026-08-08).
+ *  Le rig par defaut de Puppeteer embarque Michelangelo (GPL-3.0) et
+ *  PartField (NVIDIA non-commercial) : il est INTERDIT dans un produit
+ *  vendu. Tant que `MODAL_RIG_URL` restait un simple « prime sur », une
+ *  variable absente ou mal orthographiee faisait retomber SILENCIEUSEMENT
+ *  toute la production sur le moteur interdit — un incident de licence
+ *  sans aucun signal visible.
+ *
+ *  Desormais : pas de `MODAL_RIG_URL`, pas de rig. Une panne franche vaut
+ *  mieux qu'une infraction discrete. */
 function _rigBaseUrl(env: Env): string | undefined {
-  return env.MODAL_RIG_URL || env.MODAL_PUPPETEER_RIG_URL;
+  return env.MODAL_RIG_URL;
 }
 
 async function _budgetReelEpuise(env: Env): Promise<boolean> {
@@ -14432,12 +14442,16 @@ async function _failAndRefundJob(env: Env, job: { id: unknown; user_id?: unknown
  *  handleAnimateFromReferenceStatus, which is why one generic poller covers
  *  them all. `envKey` holds the BASE url of the Modal app; `path` is appended. */
 const _REAP_BACKENDS: Record<string, {
-  envKey: 'MODAL_PUPPETEER_RIG_URL' | 'MODAL_SEGMENT_URL' | 'MODAL_ANYTOP_ANIM_URL' | 'MODAL_FBX_RETARGET_URL';
+  envKey: 'MODAL_RIG_URL' | 'MODAL_SEGMENT_URL' | 'MODAL_ANYTOP_ANIM_URL' | 'MODAL_FBX_RETARGET_URL';
   path: string;
   usd: number;
   delRecord?: (env: Env, id: string) => Promise<void>;
 }> = {
-  rig:         { envKey: 'MODAL_PUPPETEER_RIG_URL', path: '/rig-status',          usd: ESTIMATED_USD_RIG,     delRecord: deleteRigJobRecord },
+  // Le nettoyeur interrogeait `MODAL_PUPPETEER_RIG_URL` en dur, en contournant
+  // `_rigBaseUrl`. Il sondait donc l'ancien moteur pendant que la production
+  // riggait sur SkinTokens : jamais le meme travail, d'ou des taches jamais
+  // finalisees. Corrige avec le retrait de Puppeteer (2026-08-08).
+  rig:         { envKey: 'MODAL_RIG_URL',           path: '/rig-status',          usd: ESTIMATED_USD_RIG,     delRecord: deleteRigJobRecord },
   segment:     { envKey: 'MODAL_SEGMENT_URL',       path: '/segment-status',      usd: ESTIMATED_USD_SEGMENT, delRecord: deleteSegmentJobRecord },
   animate:     { envKey: 'MODAL_ANYTOP_ANIM_URL',   path: '/anim-status',         usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
   animate_fbx: { envKey: 'MODAL_FBX_RETARGET_URL',  path: '/fbx-retarget-status', usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
