@@ -1,0 +1,263 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Loup — banque apovivor sur squelette SkinTokens</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#0d1117; color:#e6edf3; overflow:hidden;
+              font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  #vue { position:fixed; inset:0; }
+  .carte { position:fixed; z-index:10; background:rgba(13,17,23,.88); border:1px solid #30363d;
+           border-radius:10px; padding:12px 16px; backdrop-filter:blur(8px); }
+  #infos { top:14px; left:14px; max-width:330px; }
+  #cmds  { bottom:14px; left:14px; }
+  h1 { margin:0 0 6px; font-size:15px; }
+  .lic { background:#1f6f3f; color:#d7ffe6; border-radius:5px; padding:1px 7px;
+         font-size:11px; font-weight:600; margin-left:6px; vertical-align:1px; }
+  dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px; }
+  dt { color:#8b949e; } dd { margin:0; font-variant-numeric:tabular-nums; }
+  label { display:block; margin:3px 0; cursor:pointer; user-select:none; font-size:12.5px; }
+  #etat { position:fixed; inset:0; display:grid; place-content:center; z-index:20;
+          background:#0d1117; text-align:center; color:#8b949e; padding:20px; }
+  .err { color:#ff7b72; max-width:640px; text-align:left; }
+  input[type=range] { width:150px; vertical-align:middle; }
+</style>
+<div id="vue"></div>
+<div id="etat">chargement du loup (67 Mo)…<br><small id="pct" style="color:#6e7681"></small></div>
+<div id="infos" class="carte" hidden>
+  <h1>Loup animé<span class="lic">banque apovivor</span></h1><div style="margin:6px 0 8px"><button id="b-marche" style="font:inherit;font-size:12.5px;margin-right:6px;padding:4px 10px;border-radius:6px;border:1px solid #2ea043;background:#1f6f3f;color:#fff;cursor:pointer">marche</button><button id="b-course" style="font:inherit;font-size:12.5px;padding:4px 10px;border-radius:6px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;cursor:pointer">course</button></div>
+  <dl>
+    <dt>os</dt><dd id="n-os">—</dd>
+    <dt>clip</dt><dd id="n-clip">—</dd>
+    <dt>durée</dt><dd id="n-duree">—</dd>
+    <dt>sommets</dt><dd id="n-verts">—</dd>
+  </dl>
+</div>
+<div id="cmds" class="carte" hidden>
+  <label><input type="checkbox" id="c-play" checked> lecture</label>
+  <label><input type="checkbox" id="c-os" checked> squelette</label>
+  <label><input type="checkbox" id="c-mesh" checked> maillage</label>
+  <label><input type="checkbox" id="c-tourne"> rotation de la caméra</label>
+  <label>vitesse <input type="range" id="c-vit" min="10" max="200" value="100"></label>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"./vendor/three.module.js?v=3",
+            "three/addons/":"./vendor/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const etat = document.getElementById('etat');
+// Toute panne doit s'AFFICHER. Une exception dans le rappel de chargement de
+// GLTFLoader ne declenche pas `onError` : la premiere version de ce visualiseur
+// restait noire sur « chargement 100 % », sans le moindre indice a l'ecran.
+const panne = (ou, e) => {
+  etat.hidden = false;
+  etat.innerHTML = '<div class="err"><b>Panne — ' + ou + '</b><br><br><code style="font-size:12px;'
+    + 'white-space:pre-wrap">' + ((e && (e.stack || e.message)) || e) + '</code></div>';
+};
+addEventListener('error', (e) => panne('erreur globale', e.error || e.message));
+addEventListener('unhandledrejection', (e) => panne('promesse rejetée', e.reason));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1117);
+const cam = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 1000);
+const rendu = new THREE.WebGLRenderer({ antialias:true });
+rendu.setPixelRatio(Math.min(devicePixelRatio, 2));
+rendu.setSize(innerWidth, innerHeight);
+rendu.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById('vue').appendChild(rendu.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x35302b, 2.2));
+const d1 = new THREE.DirectionalLight(0xffffff, 2.0); d1.position.set(3,6,4); scene.add(d1);
+const d2 = new THREE.DirectionalLight(0x88aaff, .8);  d2.position.set(-4,1,-3); scene.add(d2);
+
+const orbite = new OrbitControls(cam, rendu.domElement);
+orbite.enableDamping = true;
+
+let mixer = null, aide = null, racine = null, horloge = new THREE.Clock();
+const maillages = [];
+// Ce GLB ne declare aucun materiau (SkinTokens exporte geometrie + squelette,
+// pas l'apparence) : on en pose un explicitement, translucide, faute de quoi le
+// squelette — qui est A L'INTERIEUR — resterait invisible.
+const neutre = () => new THREE.MeshStandardMaterial({
+  color:0x9fb4cc, roughness:.62, metalness:.05,
+  transparent:true, opacity:.38, depthWrite:false, side:THREE.DoubleSide });
+
+// On telecharge nous-memes, PUIS on analyse — au lieu de laisser
+// `loader.load` enchainer les deux en silence.
+//
+// POURQUOI : l'analyse d'un GLB de 69 Mo a 1,5 M de sommets prend plusieurs
+// secondes et se produit APRES le dernier evenement de progression. L'ecran
+// restait donc bloque sur « 100 % » sans rien indiquer, et le visualiseur
+// paraissait plante alors qu'il travaillait. Separer les deux etapes permet
+// d'annoncer « analyse en cours » — la meme attente devient lisible.
+const etape = (txt) => {
+  document.getElementById('pct').textContent = txt;
+};
+const surCharge = (gltf) => {
+ try {
+  racine = gltf.scene;
+  scene.add(racine);
+
+  let os = 0, verts = 0;
+  racine.traverse(o => {
+    if (o.isSkinnedMesh) {
+      maillages.push(o);
+      os = Math.max(os, o.skeleton?.bones?.length || 0);
+      verts += o.geometry.attributes.position.count;
+      const habiller = (m) => { if (!m) return null;
+        m.transparent = true; m.opacity = .38; m.depthWrite = false;
+        m.side = THREE.DoubleSide; return m; };
+      o.material = Array.isArray(o.material)
+        ? o.material.map(m => habiller(m) || neutre())
+        : (habiller(o.material) || neutre());
+    }
+  });
+
+  aide = new THREE.SkeletonHelper(racine);
+  scene.add(aide);
+
+  racine.updateMatrixWorld(true);
+  // Cadrage sur les OS, jamais sur le maillage : `Box3.setFromObject` parcourt
+  // les sommets un par un (1,5 M sur la version complete), ce qui gelait la
+  // page plusieurs secondes de plus.
+  //
+  // On accepte DEUX formes de fichier : le GLB complet (os accessibles via le
+  // squelette du maillage peaufine) et la version allegee produite par
+  // `scripts/glb_squelette_seul.py`, qui n'a AUCUN maillage — 54 Ko au lieu de
+  // 69 Mo. Sans ce second cas, `maillages` reste vide, la boite englobante est
+  // nulle et la camera se retrouve collee a l'origine.
+  const boite = new THREE.Box3();
+  let bones = maillages[0]?.skeleton?.bones || [];
+  if (!bones.length) {
+    const trouves = [];
+    racine.traverse(o => { if (o.isBone) trouves.push(o); });
+    bones = trouves;
+  }
+  if (bones.length) document.getElementById('n-os').textContent = bones.length;
+  if (bones.length) {
+    const p = new THREE.Vector3();
+    bones.forEach(b => boite.expandByPoint(b.getWorldPosition(p)));
+    boite.expandByScalar(boite.getSize(new THREE.Vector3()).length() * 0.06);
+  } else {
+    boite.setFromObject(racine);
+  }
+  const taille = boite.getSize(new THREE.Vector3()).length() || 1;
+  const centre = boite.getCenter(new THREE.Vector3());
+  cam.position.set(centre.x + taille*.5, centre.y + taille*.35, centre.z + taille*.7);
+  cam.near = Math.max(taille/500, 1e-4); cam.far = taille*20; cam.updateProjectionMatrix();
+  orbite.target.copy(centre); orbite.update();
+
+  const clips = gltf.animations || [];
+  if (clips.length) {
+    mixer = new THREE.AnimationMixer(racine);
+    mixer.clipAction(clips[0]).play();
+    document.getElementById('n-clip').textContent  = clips[0].name || '(sans nom)';
+    document.getElementById('n-duree').textContent = clips[0].duration.toFixed(2) + ' s';
+  } else {
+    document.getElementById('n-clip').textContent = 'AUCUNE ANIMATION';
+  }
+  if (os) document.getElementById('n-os').textContent = os;
+  document.getElementById('n-verts').textContent = verts ? verts.toLocaleString('fr-FR') : 'aucun (squelette seul)';
+
+  etat.hidden = true;
+  document.getElementById('infos').hidden = false;
+  document.getElementById('cmds').hidden  = false;
+  // Dessiner UNE image tout de suite : sans cela rien n'apparait tant que le
+  // navigateur n'a pas ordonnance une premiere requestAnimationFrame.
+  rendu.render(scene, cam);
+ } catch (e) { panne('exploitation du GLB', e); }
+};
+
+let FICHIER = '_loup_marche.glb?v=1';
+const charge = async () => {
+  try {
+    const rep = await fetch(FICHIER);
+    if (!rep.ok) throw new Error('HTTP ' + rep.status);
+    const total = +(rep.headers.get('content-length') || 0);
+    const morceaux = []; let recu = 0, dernierPct = -2;
+    const lecteur = rep.body.getReader();
+    for (;;) {
+      const { done, value } = await lecteur.read();
+      if (done) break;
+      morceaux.push(value); recu += value.length;
+      // N'ecrire dans le DOM que quand le POURCENTAGE ENTIER change. Sans ce
+      // garde-fou on ecrit a chaque morceau recu — environ 4 300 fois pour
+      // 69 Mo — et la mise en page repetee ralentit le telechargement au point
+      // de le faire paraitre bloque.
+      const p = total ? Math.round(recu / total * 100) : -1;
+      if (p !== dernierPct) {
+        dernierPct = p;
+        etape(total ? `${p} %  (${(recu/1048576).toFixed(0)} Mo)`
+                    : `${(recu/1048576).toFixed(0)} Mo`);
+      }
+    }
+    const tampon = new Uint8Array(recu); let o = 0;
+    for (const m of morceaux) { tampon.set(m, o); o += m.length; }
+
+    etape('analyse…');
+    // Laisser le navigateur PEINDRE ce message avant de bloquer le fil
+    // principal : sans cette pause, il ne s'afficherait jamais.
+    //
+    // On COURSE rAF avec un minuteur : sous `--virtual-time-budget` (Chrome
+    // sans interface), rAF n'est jamais ordonnance, et attendre seulement
+    // deux images bloquait la page indefiniment — c'est ce qui a casse ce
+    // visualiseur alors qu'il fonctionnait juste avant.
+    await new Promise(r => {
+      let fini = false;
+      const fin = () => { if (!fini) { fini = true; r(); } };
+      requestAnimationFrame(() => requestAnimationFrame(fin));
+      setTimeout(fin, 150);
+    });
+    new GLTFLoader().parse(tampon.buffer, '', surCharge, (e) => panne('analyse', e));
+  } catch (e) { panne('chargement', e); }
+};
+const boutons = { 'b-marche': '_loup_marche.glb?v=1', 'b-course': '_loup_course.glb?v=1' };
+for (const [bid, f] of Object.entries(boutons)) {
+  document.getElementById(bid).addEventListener('click', () => {
+    FICHIER = f;
+    for (const b2 of Object.keys(boutons)) {
+      const el = document.getElementById(b2);
+      const actif = b2 === bid;
+      el.style.background = actif ? '#1f6f3f' : '#161b22';
+      el.style.borderColor = actif ? '#2ea043' : '#30363d';
+      el.style.color = actif ? '#fff' : '#c9d1d9';
+    }
+    if (racine) { scene.remove(racine); racine = null; }
+    if (aide) { scene.remove(aide); aide = null; }
+    mixer = null; maillages.length = 0;
+    etat.hidden = false; charge();
+  });
+}
+charge();
+
+const cb = (id, fn) => document.getElementById(id).addEventListener('change', e => fn(e.target.checked));
+let lecture = true, tourne = false, vitesse = 1;
+cb('c-play',   v => lecture = v);
+cb('c-os',     v => { if (aide) aide.visible = v; });
+cb('c-mesh',   v => maillages.forEach(m => m.visible = v));
+cb('c-tourne', v => tourne = v);
+document.getElementById('c-vit').addEventListener('input', e => vitesse = e.target.value/100);
+
+addEventListener('resize', () => {
+  cam.aspect = innerWidth/innerHeight; cam.updateProjectionMatrix();
+  rendu.setSize(innerWidth, innerHeight);
+});
+
+rendu.setAnimationLoop(() => {
+  const dt = horloge.getDelta();
+  if (mixer && lecture) mixer.update(dt * vitesse);
+  if (tourne) {
+    const c = orbite.target, a = .004;
+    const dx = cam.position.x - c.x, dz = cam.position.z - c.z;
+    cam.position.x = c.x + dx*Math.cos(a) - dz*Math.sin(a);
+    cam.position.z = c.z + dx*Math.sin(a) + dz*Math.cos(a);
+    cam.lookAt(c);
+  }
+  orbite.update();
+  rendu.render(scene, cam);
+});
+</script>

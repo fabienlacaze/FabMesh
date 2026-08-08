@@ -65,13 +65,91 @@ def classer_ue(nom: str):
     if "ear" in base or "eye" in base:
         return ("", None, 0)          # pas de correspondant chez la cible
     # membres : rump -> hip -> knee -> ankle -> toes = segments 0..4.
-    # front et back partagent le role 'leg' : l'appariement de chaines du
-    # retargeting est positionnel, il repartira avant/arriere tout seul
-    # (meme mecanique que les 8 pattes de l'araignee sur la fourmi).
+    # AVANT -> 'arm', ARRIERE -> 'leg'. Raison decouverte le 2026-08-09 :
+    # _build_chains groupe les os par (role, cote) — deux pattes du meme cote
+    # partageant 'leg' sont FUSIONNEES en une pseudo-chaine entrelacee, d'ou
+    # « les pattes bougent mal ». Mon ancienne hypothese (« l'appariement
+    # positionnel repartit avant/arriere ») etait fausse : il n'y a pas
+    # d'appariement multi-chaines. Des roles distincts = plus de fusion.
     for i, seg in enumerate(("rump", "hip", "knee", "ankle", "toe")):
         if seg in base:
-            return ("leg", cote, i)
+            return (("arm" if "front" in base else "leg"), cote, i)
     return ("body", cote, idx)
+
+
+def table_cible_quadrupede(rig_glb: str, avant: str = "z+"):
+    """Table {nom_os_minuscule: (role, cote, index)} pour un rig natif bone_N.
+
+    Meme mecanique d'epluchage que le recalage : chaines disjointes, paires
+    miroir laterales triees d'avant en arriere. La PREMIERE paire (avant)
+    recoit le role 'arm', la seconde 'leg' — pour empecher la fusion des
+    pattes dans _build_chains (voir classer_ue). Chaines centrales : vers
+    l'arriere = queue ; le tronc = hip/spine/head.
+    """
+    import numpy as np
+    from gabarit_recaler import lire, squelette, chaines, longueur
+
+    js, _ = lire(rig_glb)
+    _, noms, pj, pos = squelette(js)
+    ch, _enf = chaines(pj, pos)
+    F = 1.0 if avant == "z+" else -1.0
+
+    ech_x = float(pos[:, 0].max() - pos[:, 0].min()) or 1.0
+    lats, centraux = [], []
+    for embr, seg in ch:
+        d = {"seg": seg, "A": pos[seg[0]], "E": pos[seg[-1]],
+             "long": longueur(pos[seg])}
+        (lats if abs(d["E"][0]) > 0.08 * ech_x else centraux).append(d)
+
+    # paires miroir mutuelles, jumeau synthetique pour les orphelines franches
+    gauche = [d for d in lats if d["E"][0] > 0]
+    droite = [d for d in lats if d["E"][0] < 0]
+    def miroir(p):
+        return np.array([-p[0], p[1], p[2]])
+    paires, pris = [], set()
+    for g in sorted(gauche, key=lambda d: -F * d["A"][2]):
+        cands = sorted(((np.linalg.norm(miroir(g["A"]) - dr["A"])
+                         + np.linalg.norm(miroir(g["E"]) - dr["E"]), j)
+                        for j, dr in enumerate(droite) if j not in pris))
+        if cands:
+            pris.add(cands[0][1])
+            paires.append((g, droite[cands[0][1]]))
+    long_max = max((d["long"] for d in lats), default=1.0)
+    en_paire = {id(x) for p in paires for x in p}
+    for d in lats:
+        if id(d) not in en_paire and d["long"] >= 0.3 * long_max:
+            paires.append((d, None) if d["E"][0] > 0 else (None, d))
+    paires.sort(key=lambda p: -F * float(np.mean(
+        [x["A"][2] for x in p if x is not None])))
+
+    table = {}
+    roles_membres = ["arm", "leg", "leg", "leg"]        # avant puis arrieres
+    for rang, (g, dr) in enumerate(paires[:4]):
+        role = roles_membres[min(rang, 3)]
+        for cote, d in (("l", g), ("r", dr)):
+            if d is None:
+                continue
+            for i, b in enumerate(d["seg"]):
+                table[noms[b].lower()] = (role, cote, i)
+    for d in centraux:
+        arriere = F * (d["E"] - d["A"])[2] < 0
+        for i, b in enumerate(d["seg"]):
+            nom = noms[b].lower()
+            if nom in table:
+                continue
+            if arriere:
+                table[nom] = ("tail", None, i)
+            else:
+                # tronc : premier os = hanche, dernier = tete, entre = colonne
+                if i == 0 and pj[b] == -1:
+                    table[nom] = ("hip", None, 0)
+                elif i >= len(d["seg"]) - 1:
+                    table[nom] = ("head", None, 0)
+                else:
+                    table[nom] = ("spine", None, i)
+    print("APOVIVOR: table cible — %d os classes (%d paires de membres)"
+          % (len(table), len(paires)), flush=True)
+    return table
 
 
 def animer(rig_glb: str, clip_glb: str, out_glb: str, nom_sortie: str | None):
@@ -101,7 +179,7 @@ def animer(rig_glb: str, clip_glb: str, out_glb: str, nom_sortie: str | None):
         target_fps=30.0,
         ckpt_family="all",
         source_classifier=classer_ue,
-        target_table=None,
+        target_table=table_cible_quadrupede(rig_glb),
         target_drop_re=None,
     )
     print("APOVIVOR_SUCCESS: %s" % out_glb, flush=True)

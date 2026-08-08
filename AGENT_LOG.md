@@ -19345,3 +19345,32 @@ borne d'angle par articulation (ANYTOP_MAX_ANGLE_DEG existe deja).
 Au passage : reponse a « comment a ete generee l'animation de la fourmi » —
 aucune IA ne genere le mouvement ; les clips sont animes A LA MAIN (Mesh2Motion
 CC0 pour l'araignee, packs apovivor pour le wolfhound), notre code TRANSPOSE.
+
+## 2026-08-09 (nuit) — « les pattes bougent mal » : cause STRUCTURELLE trouvee et corrigee
+
+Constat user confirme par le code : dans anytop_retarget, `_build_chains`
+groupe les os par (role, cote). Deux pattes du meme cote partageant 'leg'
+etaient FUSIONNEES en une pseudo-chaine entrelacee triee par index de segment
+— il n'y a JAMAIS eu d'appariement patte-a-patte multi-chaines. Mon hypothese
+(« l'appariement positionnel repartit avant/arriere ») etait fausse ; la demo
+araignee->fourmi du matin marchait par chance (fusion coherente).
+
+CORRECTIF (apovivor_bridge) :
+  * source : pattes AVANT -> role 'arm', ARRIERE -> 'leg' (roles distincts =
+    plus de fusion possible) ;
+  * cible : TABLE EXPLICITE `table_cible_quadrupede()` — epluchage des
+    chaines du rig natif (machinerie de gabarit_recaler), paires miroir
+    triees d'avant en arriere, paire 1 = 'arm', suivantes = 'leg', centrales
+    arriere = 'tail', tronc = hip/spine/head. Mecanisme identique a la table
+    humanoide de kimodo_bridge.
+
+VERIFIE (FK image par image, os au-dessus du dos) : marche SAINE a pleine
+puissance (0 os) ; course 0 os a attenuation 0,5 (a 0,7 la patte arriere
+gauche bone_27/28 se retourne encore — desaccord d'orientation au repos sur
+cette chaine, a creuser avec le journal d'appariement).
+
+VISUALISEUR 3D `build/_loup_viewer.html` (demande user, fini les GIF) :
+maillage complet 67 Mo en flux avec progression, boutons marche/course,
+three.js local. Valide en Chrome sans interface avant ouverture (30 os,
+clip marche, 1,4 M sommets). PIEGE : en derivant le viewer, `charge` doit
+etre `async` (le corps utilise await) — la substitution l'avait casse.
