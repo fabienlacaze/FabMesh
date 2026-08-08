@@ -19278,3 +19278,35 @@ ACQUIS INTACTS : le pipeline fourmi complet (gabarit impose -> peau -> clips
 sans retargeting -> texture reelle -> rendu Cycles) est valide et commite.
 Le cas alligator a aussi valide une chose importante : le maillage etait un
 BIPEDE type t-rex — le SELECTEUR de gabarit (etape 3) n'est pas un luxe.
+
+## 2026-08-08 (nuit) — LA CHAINE DEMANDEE MARCHE : banque apovivor -> squelette SkinTokens
+
+Decision user recadree en fin de soiree : « SkinTokens genere le squelette et
+on l'anime avec la banque apovivor et/ou Mesh2Motion » — PAS de gabarit. La
+chaine complete a ete construite et DEMONTREE dans la nuit :
+
+1. `scripts/ue_export_anims.py` — export AnimSequence -> FBX depuis l'editeur
+   UE 5.7 SANS INTERFACE (UnrealEditor-Cmd -run=pythonscript). LECTURE SEULE
+   sur D:/apovivor512.15, FBX vers C:/tmp/apovivor_fbx. PIEGE TROUVE :
+   exporter un SkeletalMesh plante l'editeur headless (assertion
+   SkinnedMeshComponent.cpp:4677) et tue la boucle — AnimSequence uniquement,
+   le squelette est de toute facon dans chaque FBX d'anim.
+2. `scripts/fbx_vers_glb.py` — conversion bpy (venv skv), noms d'os
+   preserves, echantillonnage force des courbes. 10/10 wolfhound convertis.
+3. `scripts/apovivor_bridge.py` — classifieur des conventions UE
+   (frontHip_R, backKnee_L, Tail0_M, RootPart1_M... ; front et back partagent
+   le role 'leg', l'appariement positionnel du retargeting repartit
+   avant/arriere, meme mecanique que les 8 pattes d'araignee) + reutilisation
+   integrale de lire_clip et retarget_motion_to_rig. Attenuation 1.0 (defaut
+   0.25 reserve au cas dragon).
+
+DEMO : course du Celtic Wolfhound (41 os, centimetres UE — echelle x0,0199
+absorbee par le retargeting) sur le rig natif SkinTokens d'un elephant
+FabMesh (1,33 M sommets, extrait d'un ancien GLB rigge). Maillage anime a
+70,3 % d'amplitude, sans eclatement (p99 46,4 %). Page build/_apovivor.html.
+
+NOTE STRATEGIQUE : cette chaine (retargeting sur squelette natif) est LA voie
+produit choisie par le user. Le squelette-gabarit reste une option qualite
+ulterieure. Le 2e export UE (toutes les anims 'Wolf', AnimSequence only)
+tournait encore en fin de session — les 500+ anims de la banque s'exportent
+avec FILTRE="".

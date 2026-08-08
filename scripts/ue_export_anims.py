@@ -41,7 +41,11 @@ for chemin in chemins:
         continue
     donnee = unreal.EditorAssetLibrary.find_asset_data(chemin)
     classe = str(donnee.asset_class_path.asset_name) if donnee.is_valid() else ""
-    if classe not in ("AnimSequence", "SkeletalMesh"):
+    # AnimSequence UNIQUEMENT. L'export d'un SkeletalMesh plante l'editeur
+    # sans interface (assertion SkinnedMeshComponent.cpp:4677, constate) et
+    # tuait la boucle avant les autres assets. Le squelette est de toute
+    # facon present dans chaque FBX d'animation.
+    if classe not in ("AnimSequence",):
         continue
     asset = donnee.get_asset()
     nom = str(donnee.asset_name)

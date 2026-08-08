@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Banque apovivor sur squelette SkinTokens</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0d1117; color:#e6edf3; padding:26px 30px 60px;
+         font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .ok { background:#1f6f3f; color:#d7ffe6; border-radius:6px; padding:2px 9px;
+        font-size:12px; font-weight:700; margin-left:9px; vertical-align:3px; }
+  .sous { color:#8b949e; margin:0 0 22px; max-width:940px; }
+  figure { margin:0 0 20px; border:1px solid #30363d; border-radius:10px;
+           overflow:hidden; background:#0f141b; }
+  img { display:block; width:100%; height:auto; }
+  figcaption { padding:10px 14px; font-size:13.5px; border-top:1px solid #30363d;
+               color:#9aa4af; }
+  table { border-collapse:collapse; font-size:14px; margin:6px 0 20px; }
+  td, th { padding:5px 16px 5px 0; text-align:left; }
+  th { color:#8b949e; font-weight:600; }
+  td.v { font-variant-numeric:tabular-nums; }
+</style>
+<h1>Ta banque apovivor anime un squelette SkinTokens<span class="ok">LA CHAÎNE DEMANDÉE</span></h1>
+<p class="sous">La course du <b>Celtic Wolfhound</b> (pack apovivor, exportée d'Unreal ce soir)
+  retargetée sur le squelette <b>généré par SkinTokens</b> pour un éléphant FabMesh.
+  Aucun gabarit : le squelette est celui de SkinTokens, la banque fournit le mouvement.</p>
+
+<table>
+  <tr><th>Étape</th><th>Résultat</th></tr>
+  <tr><td>export Unreal (AnimSequence → FBX)</td><td class="v">10 clips wolfhound + export complet en cours (lecture seule sur le projet)</td></tr>
+  <tr><td>conversion FBX → GLB (Blender)</td><td class="v">10/10, noms d'os préservés (frontHip_R, Tail0_M…)</td></tr>
+  <tr><td>rig natif SkinTokens de l'éléphant</td><td class="v">1,33 M sommets</td></tr>
+  <tr><td>retargeting (échelle cm Unreal ×0,02 auto)</td><td class="v">31 canaux, 16 images</td></tr>
+  <tr><td>amplitude du maillage animé</td><td class="v">70,3 % — sans éclatement (p99 : 46,4 %)</td></tr>
+</table>
+
+<figure>
+  <img src="_elephant_course.gif" alt="Éléphant animé par la course du wolfhound">
+  <figcaption><b>Le maillage de l'éléphant</b> (déformation par la peau SkinTokens) courant
+    comme le wolfhound. C'est une course de chien sur un corps d'éléphant — juge si
+    l'allure te convient ; le clip Walk sera plus posé.</figcaption>
+</figure>
+<figure>
+  <img src="_elephant_course_squelette.gif" alt="Squelette seul">
+  <figcaption>Le squelette SkinTokens seul, jouant le clip retargeté.</figcaption>
+</figure>
