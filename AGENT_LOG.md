@@ -18600,3 +18600,36 @@ VÉRIFIÉ : app lancée avec `FABMESH_FORCE_NO_LOCAL_PY=1`, 5 processus,
 LEÇON : une analyse automatique qui rattache un appel « au handler
 précédent » ment dès que le code n'est pas un handler. Le « 0 non couvert »
 était rassurant et faux.
+
+## 2026-08-08 — RÉGRESSION que j'avais introduite : le garde coupait le mode Cloud
+
+Le workflow d'audit de mise en vente l'a signalée en marge de sa mission, et
+elle était réelle : **j'ai cassé le mode Cloud cet après-midi**, quelques
+heures après avoir posé le garde central.
+
+Le garde interceptait AVANT la poignée, donc avant qu'elle puisse choisir sa
+branche cloud. Analyse du fichier : **11 des 29 poignées listées ont une
+branche cloud** — dont `generate-images` et `image-to-3d`, le cœur du produit
+PAYANT. En mode Cloud, `_localPyLibsUsable()` est faux par construction (pas
+de moteur local) : je refusais donc des fonctions parfaitement opérationnelles.
+
+Correctif : le garde cède le passage à `isCloudMode()`, qui existait déjà et
+vaut vrai quand l'utilisateur a choisi le cloud OU qu'aucun GPU NVIDIA n'est
+présent.
+
+ET CELA EXPLIQUE ENFIN LE REFUS STORE. La machine en échec — **Vektor 16 HX,
+un portable de jeu, donc avec GPU NVIDIA** — partait en mode LOCAL et n'avait
+pas le moteur installé. La machine testée sans incident — **HP Spectre x360,
+sans NVIDIA** — basculait automatiquement en cloud et fonctionnait. Le
+« marche sur l'une, pas sur l'autre » n'était pas un hasard de configuration :
+c'est la détection GPU qui décidait du chemin.
+
+Le garde couvre donc toujours exactement le cas du testeur (NVIDIA présent →
+local → moteur absent), sans plus toucher au cloud. Pour les poignées sans
+branche cloud appelées en mode cloud, le filet reste `_aiPython()`, qui lève
+désormais une erreur claire.
+
+LEÇON : un garde pose à un point de passage OBLIGÉ voit tout — y compris ce
+qu'il ne doit pas juger. Intercepter avant que le code ait choisi sa
+stratégie, c'est décider à sa place. Et c'est une contre-expertise
+indépendante qui l'a vu, pas moi.

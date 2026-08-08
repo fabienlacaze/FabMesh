@@ -505,7 +505,27 @@ const _POIGNEES_MOTEUR_LOCAL = new Set([
 ]);
 const _ipcHandleOriginal = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (canal, fn) => _ipcHandleOriginal(canal, async (...args) => {
-  if (_POIGNEES_MOTEUR_LOCAL.has(canal) && !_localPyLibsUsable()) {
+  // ON NE COUPE PAS LE MODE CLOUD.
+  //
+  // REGRESSION QUE J'AI INTRODUITE le 2026-08-08 et corrigee le jour meme :
+  // ce garde interceptait AVANT la poignee, donc AVANT que celle-ci puisse
+  // choisir sa branche cloud. Or 11 des 29 poignees listees ont une branche
+  // cloud — dont `generate-images` et `image-to-3d`, le coeur du produit
+  // PAYANT. En mode Cloud (ou `_localPyLibsUsable()` est faux, puisqu'il n'y
+  // a pas de moteur local), je refusais donc des fonctions qui marchaient.
+  //
+  // `isCloudMode()` est la bonne condition : elle vaut vrai quand
+  // l'utilisateur a choisi le cloud OU quand aucun GPU NVIDIA n'est present.
+  // Dans ces cas la poignee sait se debrouiller — on la laisse passer.
+  //
+  // Le cas du refus Store reste couvert : la machine du testeur (Vektor 16 HX,
+  // portable de jeu) a un GPU NVIDIA, donc mode LOCAL, donc le garde tire.
+  // L'autre machine testee sans incident (HP Spectre, sans NVIDIA) partait
+  // deja en cloud — ce qui explique enfin « marche sur l'une, pas sur l'autre ».
+  //
+  // Pour les poignees SANS branche cloud appelees en mode cloud, le filet
+  // reste `_aiPython()`, qui leve desormais une erreur claire.
+  if (_POIGNEES_MOTEUR_LOCAL.has(canal) && !isCloudMode() && !_localPyLibsUsable()) {
     log.info('moteur-local', `${canal} refuse proprement : environnement IA absent`);
     return {
       success: false,
