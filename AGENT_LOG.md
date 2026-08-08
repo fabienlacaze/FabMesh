@@ -19510,3 +19510,17 @@ RESTE AU USER (aucune ligne de code ne peut s'y substituer) :
 
 RESTE A MOI : rebuild MSIX 1.0.16, WACK, resoumission — et la qualite du
 retargeting quadrupede (voir A/B AB_marche_A/B dans meshes/animated).
+
+## 2026-08-09 — paquet 1.0.16 CONSTRUIT et verifie
+
+`dist/installer/MyFabmesh.AI 1.0.16.appx` — 199 Mo, 591 entrees.
+Verification du contenu (pas seulement de la sortie du builder) :
+  * 8 clips CC0 presents (spider, dragon, snake, kaiju, horse, bird, fox,
+    shark) — contre ZERO en 1.0.15, ou la Creature Motion Library aurait
+    donc ete vide chez tout client ;
+  * THIRD_PARTY_LICENSES.txt embarque, desormais complet.
+
+RESTE : WACK (appcert.exe present ; exige une elevation UAC que seul le user
+peut valider) puis soumission Partner Center. Rappel du protocole projet : le
+WACK est OBLIGATOIRE avant chaque soumission et n'a JAMAIS ete passe sur les
+4 refus precedents.
