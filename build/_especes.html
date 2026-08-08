@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Espèces 2 et 3 — état réel</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0d1117; color:#e6edf3; padding:26px 30px 60px;
+         font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:17px; margin:30px 0 10px; padding-bottom:6px; border-bottom:1px solid #30363d; }
+  .ok { background:#1f6f3f; color:#d7ffe6; border-radius:5px; padding:2px 8px; font-size:12px; font-weight:700; }
+  .ko { background:#7d2b2b; color:#ffd7d7; border-radius:5px; padding:2px 8px; font-size:12px; font-weight:700; }
+  .sous { color:#8b949e; margin:0 0 22px; max-width:940px; }
+  figure { margin:0 0 18px; border:1px solid #30363d; border-radius:10px; overflow:hidden; background:#0f141b; }
+  img { display:block; width:100%; height:auto; }
+  figcaption { padding:9px 13px; font-size:13.5px; border-top:1px solid #30363d; color:#9aa4af; }
+</style>
+<h1>Alligator et orc — où en est la généralisation</h1>
+<p class="sous">Pour chaque espèce : le rig natif SkinTokens (le « détecteur », étape 1 du
+  pipeline) puis la tentative de recalage du gabarit (rouge = position boîte,
+  vert = position par membre). La fourmi a réussi ; ces deux-là <b>pas encore</b> —
+  montrés tels quels.</p>
+
+<h2>Orc <span class="ok">détecteur excellent</span> <span class="ko">recalage raté — 17/66 os dans le corps</span></h2>
+<figure>
+  <img src="_esp_orc_natif_p.png" alt="Rig natif de l'orc">
+  <figcaption>Le rig natif : T-pose propre, bras avec doigts en éventail, 52 os, 100 %
+    dans le maillage. SkinTokens excelle sur les humanoïdes — les données d'entrée du
+    recalage sont bonnes.</figcaption>
+</figure>
+<figure>
+  <img src="_esp_orc_recalage.png" alt="Recalage humain sur l'orc — raté">
+  <figcaption>Le recalage du gabarit humain (66 os, doigts compris) : des chaînes vertes
+    flottent hors du corps — les « suiveuses » (doigts) reçoivent un décalage dans le
+    mauvais repère. C'est un défaut de MON appariement, pas du détecteur.</figcaption>
+</figure>
+
+<h2>Alligator <span class="ok">détecteur correct</span> <span class="ko">recalage raté — 38/58 os dans le corps</span></h2>
+<figure>
+  <img src="_esp_aligator_natif_p.png" alt="Rig natif de l'alligator">
+  <figcaption>Surprise : le maillage est un <b>bipède dressé type t-rex</b>, pas un
+    quadrupède — d'où le choix du gabarit kaiju. Rig natif : 37 os, 100 % dans le
+    maillage, mais la queue traîne <b>latéralement</b> (vers +X), ce qui piège la règle
+    « queue = chaîne arrière ».</figcaption>
+</figure>
+<figure>
+  <img src="_esp_aligator_recalage.png" alt="Recalage kaiju sur l'alligator — raté">
+  <figcaption>Le recalage du gabarit kaiju : bras appariés à de fausses paires, chaînes
+    hors du corps. Trois garde-fous ont été ajoutés ce soir (épluchage des chaînes,
+    plafond de distance, validation d'attache) — nécessaires mais pas encore suffisants.</figcaption>
+</figure>
+
+<p class="sous"><b>Prochaine session</b> : journal d'appariement par chaîne (fini le
+  débogage sur nuages de points), correction du repère des chaînes suiveuses, banc
+  d'essai rejouant les trois espèces à chaque modification.</p>
