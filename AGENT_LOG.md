@@ -18537,3 +18537,27 @@ résultat.** Le sed silencieux dans l'image PartSAM, le `Prefer: return=minimal`
 qui renvoie 204 sans rien écrire, le cache PostgREST qui accepte des colonnes
 inexistantes — et maintenant pip. Chaque fois, la vérification manquait au
 seul endroit qui comptait : après.
+
+## 2026-08-08 — Couverture du garde vérifiée, et un nom technique qui fuyait
+
+VÉRIFICATION DE COUVERTURE, par analyse du fichier et non à l'œil : les 44
+appels à `_aiPython()` ont été rattachés à leur poignée IPC.
+  37 couverts par le garde central
+   7 exclus volontairement (l'installateur, les diagnostics, les sondes)
+   0 NON COUVERT
+
+Le repli `return _embeddedPython()` dans `_aiPython()` est CONSERVÉ à
+dessein : c'est lui qui permet à `wizard:start-download` de tourner avant
+que le venv existe. Le supprimer casserait l'installation. Sa conséquence
+nuisible est neutralisée en amont par le garde, pas par sa suppression.
+
+DÉFAUT DE FINITION corrigé, signalé par une capture du user : le garde
+passait le nom du CANAL à `_localEngineMsg()`. La fenêtre affichait donc
+« Age change failed » en titre et « Texture-only variant needs the local AI
+engine » en corps — deux libellés pour une seule action, dont un identifiant
+interne que personne ne reconnaît. Les autres auraient donné
+« mesh:region-retex needs... » ou « batch-check-nsfw needs... ».
+
+Le titre dit déjà QUELLE action a échoué ; le corps ne doit expliquer que le
+POURQUOI et l'action à faire. Message rendu générique, et enrichi du chemin
+de sortie : basculer en mode Cloud, ou installer depuis les Réglages.

@@ -511,7 +511,20 @@ ipcMain.handle = (canal, fn) => _ipcHandleOriginal(canal, async (...args) => {
       success: false,
       ok: false,
       needsLocalEngine: true,
-      error: _localEngineMsg(canal),
+      // MESSAGE GENERIQUE, sans le nom du canal.
+      //
+      // Premiere version : on passait `canal` a _localEngineMsg(), donc
+      // l'utilisateur lisait un identifiant INTERNE. Capture d'ecran du user :
+      // titre « Age change failed », corps « Texture-only variant needs... » —
+      // deux libelles differents pour une seule action, dont un que personne
+      // ne reconnait. Les autres auraient donne « mesh:region-retex needs... »
+      // ou « batch-check-nsfw needs... ».
+      //
+      // Le titre de la fenetre dit deja QUELLE action a echoue ; le corps n'a
+      // qu'a expliquer POURQUOI et quoi faire.
+      error: 'This feature needs the local AI engine, which is not installed '
+           + 'on this device. Switch to Cloud mode to run it on our GPUs, or '
+           + 'install the local engine from Settings (an NVIDIA GPU is required).',
     };
   }
   return fn(...args);
