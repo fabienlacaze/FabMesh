@@ -19196,3 +19196,20 @@ emplacements : ecarter par longueur, pas par position.
 Scripts parametres (greffe/evaluer acceptent les chemins en argv) — la chaine
 complete etape N se rejoue en 3 commandes. Restent : selecteur+UI (etape 3),
 parite cloud (4), validation Unreal avec le Loup apovivor (5).
+
+## 2026-08-08 — Livrable texture + reponse a « le squelette SkinTokens sert-il ? »
+
+`scripts/poc_gabarit_texture.py` : fusionne le maillage TEXTURE d'origine
+(374 601 sommets, matiere+textures intactes — SkinTokens les jette, verifie)
+avec le rig gabarit + clips d'une etape. Poids rapatries par plus proche
+voisin (pire 2,3e-08), echelle x2 entre original et version riggee detectee
+et corrigee automatiquement. Sortie 53,5 Mo, copiee dans
+meshes/ant_gabarit_araignee_walk_*.glb pour ouverture dans FabMesh.
+Rendu GIF couleur (texture 4096 echantillonnee aux UV des sommets).
+
+Question user : « le squelette genere par SkinTokens est-il vraiment utilise
+pour les animations ? » — NON, et c'est le point du pivot : le squelette du
+fichier final est celui du GABARIT. SkinTokens ne fournit plus que (1) la
+peau en mode --use_skeleton et (2) son rig natif comme DETECTEUR
+d'articulations pour poser le gabarit. Son squelette genere — le maillon
+faible (19/15) — ne finit jamais dans le fichier.
