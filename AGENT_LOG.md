@@ -18926,3 +18926,55 @@ retient qu'UNE chaine haute et UNE chaine basse par cote (`upper[0]`,
 `lower[0]`). Non patche : je ne dispose d'aucun rig de dragon SkinTokens pour
 verifier la non-regression, et cette fonction a ete calibree en production sur
 des quadrupedes. A reprendre avec un jeu de test couvrant bipede ET quadrupede.
+
+## 2026-08-08 — Mesh2Motion : premiere animation de CREATURE licence-propre
+
+Demande user : « une solution d'animation gratuite, commercialisable et pas
+cloud ». Kimodo (NVIDIA) couvre les humanoides ; les creatures n'avaient RIEN.
+
+CHAINE RETENUE, chaque maillon verifie a la source :
+  rig      SkinTokens (VAST-AI)   MIT
+  clips    Mesh2Motion            CC0  (« The art assets (3d models, rigs,
+                                  animations) are all licensed under CC0 »,
+                                  lu dans le README du depot)
+  retarget anytop_retarget maison  --
+Aucun maillon non commercialisable. 73 clips sur 8 creatures (araignee, dragon,
+serpent, kaiju, cheval, oiseau, renard, requin) pour 5,3 Mo — assez petit pour
+etre EMBARQUE dans le paquet Store, contrairement aux arbres de moteurs qui ont
+fait echouer l'etape « moteur de rig » de l'assistant.
+
+NOUVEAU `scripts/mesh2motion_bridge.py` : lit un clip glTF (quaternions
+echantillonnes), le convertit au format BVH attendu par
+`retarget_motion_to_rig`, retargete sur le rig. Deux points non evidents :
+
+  * ROTATION RELATIVE AU REPOS. Le BVH n'a pas de rotation de repos — sa pose
+    de repos est faite des seuls offsets — alors que chaque noeud glTF en porte
+    une. Transmettre la rotation absolue injecterait un decalage constant sur
+    CHAQUE os et la creature arriverait tordue des la premiere image. On envoie
+    donc inv(q_repos) * q_image.
+  * PIEGE `_read_glb`. Il renvoie (gltf, json_blob, bin_blob) : le DEUXIEME
+    element est le JSON, pas le binaire. Mon depaquetage inverse faisait lire
+    les accesseurs dans le mauvais tampon — les temps sortaient a [0, 1e-08] au
+    lieu de [0.0417, 1.0], d'ou un nombre d'images astronomique et un
+    « Maximum allowed size exceeded » peu parlant.
+
+DECISION PRODUIT (user) : les clips d'araignee pilotent 8 pattes, une fourmi en
+a 6 -> on ABANDONNE la paire arriere (`leg_d`) plutot que de repartir 8 phases
+sur 6 pattes. Les 6 restantes conservent leur alternance ; une repartition
+donnerait une demarche flottante. Desactivable par
+`--garder-toutes-les-pattes`.
+
+RESULTAT VERIFIE sur la fourmi (58 os) : GLB anime ecrit, 59 canaux, 32 images,
+clip « walk » de 1,03 s, amplitude du mouvement 9,9 % de la taille du squelette
+(donc reel, pas un squelette fige). Visualise en 3D (`build/_anim_viewer.html`,
+three.js + AnimationMixer) et en GIF/planche hors navigateur.
+
+DEFAUT SUIVANT, MESURE : le rig SkinTokens de la fourmi est ASYMETRIQUE alors
+que le maillage ne l'est pas.
+  asymetrie du maillage : mediane 0,33 % · p95 1,77 %
+  asymetrie du rig      : mediane 2,71 % · pire 16,4 % · 31 os sur 40 deviants
+  profondeurs de chaines : [4,4,4,5,5,5,6,6,6,7,7,7,7] — comptes IMPAIRS, donc
+  les pattes gauches et droites n'ont pas le meme nombre d'articulations.
+C'est le rig qu'il faut corriger, pas le mouvement : une marche suppose des
+pattes en miroir. Prochaine etape = symetrisation de la pose de liaison
+(avec recalcul des inverseBindMatrices, sans quoi la peau se decale).

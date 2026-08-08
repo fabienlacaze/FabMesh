@@ -44,6 +44,41 @@
 
 <section>
   <header>
+    <b>Fourmi animée</b><span class="etiq ok">chaîne 100 % commercialisable</span>
+    <span class="chif">rig SkinTokens (MIT) + clip « Walk » Mesh2Motion (CC0) · 32 images · amplitude 9,9 %</span>
+  </header>
+  <img src="_ant_walk.gif" alt="Fourmi animée, profil et dessus">
+  <img src="_ant_walk_strip.png" alt="Six poses de la marche">
+  <p class="note">Première animation de créature produite sans aucun maillon sous licence
+    restrictive : rig <b>SkinTokens (MIT)</b>, mouvement <b>Mesh2Motion (CC0)</b>, retargeting
+    maison. Les clips d'araignée pilotent 8 pattes, la fourmi en a 6 : la paire arrière
+    (<code>leg_d</code>) est abandonnée, les 6 restantes gardent leur alternance.
+    <b>Limite assumée</b> : l'amplitude est modeste et le rig est visiblement désordonné —
+    voir la section suivante, c'est le rig qu'il faut corriger, pas le mouvement.</p>
+</section>
+
+<section>
+  <header>
+    <b>Fourmi — rig au repos</b><span class="etiq ko">asymétrique : à corriger</span>
+    <span class="chif">58 os · 1 496 541 sommets · 100 % des os dans le maillage</span>
+  </header>
+  <img src="_ant_apercu.png" alt="Rig de la fourmi, trois vues">
+  <p class="note">Six pattes articulées, antennes, abdomen — tous les os dans le maillage.
+    Mais la <b>mesure</b> contredit l'impression : profondeurs de chaînes
+    <code>[4,4,4,5,5,5,6,6,6,7,7,7,7]</code>, des comptes <b>impairs</b> — les pattes gauches
+    et droites n'ont pas le même nombre d'articulations.</p>
+  <p class="note" style="border-top:none;padding-top:0">
+    <b>Le rig est en cause, pas le maillage</b> — vérifié en mesurant les deux :</p>
+  <table style="margin:0 18px 14px;border-collapse:collapse;font-size:13.5px">
+    <tr><td style="padding:3px 18px 3px 0;color:#8b949e">asymétrie du maillage</td>
+        <td style="font-variant-numeric:tabular-nums">médiane <b>0,33 %</b> · p95 1,77 %</td></tr>
+    <tr><td style="padding:3px 18px 3px 0;color:#8b949e">asymétrie du rig</td>
+        <td style="font-variant-numeric:tabular-nums">médiane <b>2,71 %</b> · pire <b>16,4 %</b> · 31 os sur 40 déviants</td></tr>
+  </table>
+</section>
+
+<section>
+  <header>
     <b>Véhicule</b><span class="etiq ko">rig sans valeur</span>
     <span class="chif">140 os · 292 140 sommets · 139,8 s · 94,3 % des os dans la boîte</span>
   </header>

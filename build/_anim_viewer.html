@@ -1,0 +1,170 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fourmi animée — SkinTokens + Mesh2Motion</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#0d1117; color:#e6edf3; overflow:hidden;
+              font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  #vue { position:fixed; inset:0; }
+  .carte { position:fixed; z-index:10; background:rgba(13,17,23,.88); border:1px solid #30363d;
+           border-radius:10px; padding:12px 16px; backdrop-filter:blur(8px); }
+  #infos { top:14px; left:14px; max-width:330px; }
+  #cmds  { bottom:14px; left:14px; }
+  h1 { margin:0 0 6px; font-size:15px; }
+  .lic { background:#1f6f3f; color:#d7ffe6; border-radius:5px; padding:1px 7px;
+         font-size:11px; font-weight:600; margin-left:6px; vertical-align:1px; }
+  dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px; }
+  dt { color:#8b949e; } dd { margin:0; font-variant-numeric:tabular-nums; }
+  label { display:block; margin:3px 0; cursor:pointer; user-select:none; font-size:12.5px; }
+  #etat { position:fixed; inset:0; display:grid; place-content:center; z-index:20;
+          background:#0d1117; text-align:center; color:#8b949e; padding:20px; }
+  .err { color:#ff7b72; max-width:640px; text-align:left; }
+  input[type=range] { width:150px; vertical-align:middle; }
+</style>
+<div id="vue"></div>
+<div id="etat">chargement du maillage animé (69 Mo)…<br><small id="pct" style="color:#6e7681"></small></div>
+<div id="infos" class="carte" hidden>
+  <h1>Fourmi animée<span class="lic">MIT + CC0</span></h1>
+  <dl>
+    <dt>os</dt><dd id="n-os">—</dd>
+    <dt>clip</dt><dd id="n-clip">—</dd>
+    <dt>durée</dt><dd id="n-duree">—</dd>
+    <dt>sommets</dt><dd id="n-verts">—</dd>
+  </dl>
+</div>
+<div id="cmds" class="carte" hidden>
+  <label><input type="checkbox" id="c-play" checked> lecture</label>
+  <label><input type="checkbox" id="c-os" checked> squelette</label>
+  <label><input type="checkbox" id="c-mesh" checked> maillage</label>
+  <label><input type="checkbox" id="c-tourne"> rotation de la caméra</label>
+  <label>vitesse <input type="range" id="c-vit" min="10" max="200" value="100"></label>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const etat = document.getElementById('etat');
+// Toute panne doit s'AFFICHER. Une exception dans le rappel de chargement de
+// GLTFLoader ne declenche pas `onError` : la premiere version de ce visualiseur
+// restait noire sur « chargement 100 % », sans le moindre indice a l'ecran.
+const panne = (ou, e) => {
+  etat.hidden = false;
+  etat.innerHTML = '<div class="err"><b>Panne — ' + ou + '</b><br><br><code style="font-size:12px;'
+    + 'white-space:pre-wrap">' + ((e && (e.stack || e.message)) || e) + '</code></div>';
+};
+addEventListener('error', (e) => panne('erreur globale', e.error || e.message));
+addEventListener('unhandledrejection', (e) => panne('promesse rejetée', e.reason));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1117);
+const cam = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 1000);
+const rendu = new THREE.WebGLRenderer({ antialias:true });
+rendu.setPixelRatio(Math.min(devicePixelRatio, 2));
+rendu.setSize(innerWidth, innerHeight);
+rendu.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById('vue').appendChild(rendu.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x35302b, 2.2));
+const d1 = new THREE.DirectionalLight(0xffffff, 2.0); d1.position.set(3,6,4); scene.add(d1);
+const d2 = new THREE.DirectionalLight(0x88aaff, .8);  d2.position.set(-4,1,-3); scene.add(d2);
+
+const orbite = new OrbitControls(cam, rendu.domElement);
+orbite.enableDamping = true;
+
+let mixer = null, aide = null, racine = null, horloge = new THREE.Clock();
+const maillages = [];
+// Ce GLB ne declare aucun materiau (SkinTokens exporte geometrie + squelette,
+// pas l'apparence) : on en pose un explicitement, translucide, faute de quoi le
+// squelette — qui est A L'INTERIEUR — resterait invisible.
+const neutre = () => new THREE.MeshStandardMaterial({
+  color:0x9fb4cc, roughness:.62, metalness:.05,
+  transparent:true, opacity:.38, depthWrite:false, side:THREE.DoubleSide });
+
+new GLTFLoader().load('_ant_walk.glb', (gltf) => {
+ try {
+  racine = gltf.scene;
+  scene.add(racine);
+
+  let os = 0, verts = 0;
+  racine.traverse(o => {
+    if (o.isSkinnedMesh) {
+      maillages.push(o);
+      os = Math.max(os, o.skeleton?.bones?.length || 0);
+      verts += o.geometry.attributes.position.count;
+      const habiller = (m) => { if (!m) return null;
+        m.transparent = true; m.opacity = .38; m.depthWrite = false;
+        m.side = THREE.DoubleSide; return m; };
+      o.material = Array.isArray(o.material)
+        ? o.material.map(m => habiller(m) || neutre())
+        : (habiller(o.material) || neutre());
+    }
+  });
+
+  aide = new THREE.SkeletonHelper(racine);
+  scene.add(aide);
+
+  racine.updateMatrixWorld(true);
+  const boite = new THREE.Box3().setFromObject(racine);
+  const taille = boite.getSize(new THREE.Vector3()).length() || 1;
+  const centre = boite.getCenter(new THREE.Vector3());
+  cam.position.set(centre.x + taille*.5, centre.y + taille*.35, centre.z + taille*.7);
+  cam.near = Math.max(taille/500, 1e-4); cam.far = taille*20; cam.updateProjectionMatrix();
+  orbite.target.copy(centre); orbite.update();
+
+  const clips = gltf.animations || [];
+  if (clips.length) {
+    mixer = new THREE.AnimationMixer(racine);
+    mixer.clipAction(clips[0]).play();
+    document.getElementById('n-clip').textContent  = clips[0].name || '(sans nom)';
+    document.getElementById('n-duree').textContent = clips[0].duration.toFixed(2) + ' s';
+  } else {
+    document.getElementById('n-clip').textContent = 'AUCUNE ANIMATION';
+  }
+  document.getElementById('n-os').textContent    = os;
+  document.getElementById('n-verts').textContent = verts.toLocaleString('fr-FR');
+
+  etat.hidden = true;
+  document.getElementById('infos').hidden = false;
+  document.getElementById('cmds').hidden  = false;
+  // Dessiner UNE image tout de suite : sans cela rien n'apparait tant que le
+  // navigateur n'a pas ordonnance une premiere requestAnimationFrame.
+  rendu.render(scene, cam);
+ } catch (e) { panne('exploitation du GLB', e); }
+}, (p) => {
+  if (p.total) document.getElementById('pct').textContent =
+    Math.round(p.loaded/p.total*100) + ' %  (' + (p.loaded/1048576).toFixed(0) + ' Mo)';
+}, (e) => panne('chargement', e));
+
+const cb = (id, fn) => document.getElementById(id).addEventListener('change', e => fn(e.target.checked));
+let lecture = true, tourne = false, vitesse = 1;
+cb('c-play',   v => lecture = v);
+cb('c-os',     v => { if (aide) aide.visible = v; });
+cb('c-mesh',   v => maillages.forEach(m => m.visible = v));
+cb('c-tourne', v => tourne = v);
+document.getElementById('c-vit').addEventListener('input', e => vitesse = e.target.value/100);
+
+addEventListener('resize', () => {
+  cam.aspect = innerWidth/innerHeight; cam.updateProjectionMatrix();
+  rendu.setSize(innerWidth, innerHeight);
+});
+
+rendu.setAnimationLoop(() => {
+  const dt = horloge.getDelta();
+  if (mixer && lecture) mixer.update(dt * vitesse);
+  if (tourne) {
+    const c = orbite.target, a = .004;
+    const dx = cam.position.x - c.x, dz = cam.position.z - c.z;
+    cam.position.x = c.x + dx*Math.cos(a) - dz*Math.sin(a);
+    cam.position.z = c.z + dx*Math.sin(a) + dz*Math.cos(a);
+    cam.lookAt(c);
+  }
+  orbite.update();
+  rendu.render(scene, cam);
+});
+</script>
