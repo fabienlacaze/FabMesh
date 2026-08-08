@@ -19325,3 +19325,23 @@ LOUP. La demo est donc : un loup FabMesh anime par la course du Celtic
 Wolfhound apovivor, sur squelette SkinTokens. Rien de l'araignee nulle part —
 le lecteur de clips partage (module mesh2motion_bridge, prefixe de log M2M)
 est generique.
+
+## 2026-08-09 (nuit) — « le loup bat des ailes » : diagnostic et correction
+
+Constat user sur la course du loup : une patte avant semblait battre comme une
+aile. Diagnostic PAR LA DONNEE (FK image par image, os au-dessus du dos) :
+chaine bone_13->14 (patte avant, repos sous le corps) culminait a Y=0,92.
+
+Test discriminant : la MARCHE du meme wolfhound est saine (0 os au-dessus du
+dos) -> ce n'est PAS un mauvais appariement, c'est un DEBORDEMENT D'AMPLITUDE.
+La course d'un chien replie les pattes tres fort ; a attenuation 1,0 la
+rotation transposee passe le point de bascule et la patte se retourne.
+
+Correction : attenuation 0,7 pour la course -> 0 os au-dessus du dos, GIF
+regenere. A retenir pour l'industrialisation : l'attenuation doit etre PAR
+CLIP (les clips calmes a 1,0, les clips violents bornes) — ou mieux, une
+borne d'angle par articulation (ANYTOP_MAX_ANGLE_DEG existe deja).
+
+Au passage : reponse a « comment a ete generee l'animation de la fourmi » —
+aucune IA ne genere le mouvement ; les clips sont animes A LA MAIN (Mesh2Motion
+CC0 pour l'araignee, packs apovivor pour le wolfhound), notre code TRANSPOSE.
