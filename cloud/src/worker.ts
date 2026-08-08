@@ -93,6 +93,19 @@ export interface Env {
   // Set via `wrangler secret put MODAL_PUPPETEER_RIG_URL`; unset to
   // disable /api/auto-rig (503).
   MODAL_PUPPETEER_RIG_URL?: string;
+  // MOTEUR DE RIG — nom neutre, introduit le 2026-08-04.
+  //
+  // Le bureau est passe a SkinTokens (MIT) le 2026-07-24, mais le cloud
+  // tournait encore sur Puppeteer, qui embarque Michelangelo (GPL-3.0) et
+  // PartField (NVIDIA non-commercial) : un blocage commercial sur le produit
+  // PAYANT. Conserver un nom de variable qui designe le moteur abandonne
+  // aurait perpetue la confusion — c'est d'ailleurs le de-brandage des
+  // libelles qui avait fait echapper l'ecart a l'audit de parite.
+  //
+  // `MODAL_RIG_URL` prime ; `MODAL_PUPPETEER_RIG_URL` reste lu en repli pour
+  // qu'un deploiement n'ait pas a etre synchronise avec la rotation du
+  // secret.
+  MODAL_RIG_URL?: string;
   // AnyTop animation generation on a rigged GLB. Async spawn+poll+stream
   // pattern identical to rig. Set via `wrangler secret put
   // MODAL_ANYTOP_ANIM_URL`; unset to disable /api/animate (503).
@@ -430,6 +443,12 @@ async function _spendRefusalMessage(env: Env, userId?: string): Promise<string> 
  *  délibéré : si le poller tombe, on veut une alerte, pas un service à
  *  l'arrêt. Le blocage n'intervient que sur une donnée FRAÎCHE qui montre un
  *  budget épuisé — cas où Modal cesserait de toute façon d'exécuter les apps. */
+/** URL du backend de rig. `MODAL_RIG_URL` (SkinTokens) prime sur l'ancien
+ *  `MODAL_PUPPETEER_RIG_URL`, conserve en repli. */
+function _rigBaseUrl(env: Env): string | undefined {
+  return env.MODAL_RIG_URL || env.MODAL_PUPPETEER_RIG_URL;
+}
+
 async function _budgetReelEpuise(env: Env): Promise<boolean> {
   if (!env.MESHES) return false;
   try {
@@ -6578,7 +6597,7 @@ async function _cancelModalJob(env: Env, jobId: string): Promise<{ cancelled: bo
   // endpoints configures jusqu'a ce que l'un reconnaisse le job.
   const cibles = [
     env.MODAL_MESH_START_URL,
-    env.MODAL_PUPPETEER_RIG_URL,
+    _rigBaseUrl(env),
     env.MODAL_SEGMENT_URL,
     env.MODAL_ANYTOP_ANIM_URL,
   ].filter(Boolean) as string[];
@@ -9307,7 +9326,7 @@ async function deleteAnimJobRecord(env: Env, jobId: string): Promise<void> {
 async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  if (!env.MODAL_PUPPETEER_RIG_URL) return err(503, 'auto-rig backend unavailable');
+  if (!_rigBaseUrl(env)) return err(503, 'auto-rig backend unavailable');
   if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
   if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
 
@@ -9348,7 +9367,7 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   // We append /rig-start (spawn) here and /rig-status (poll) in
   // handleAutoRigStatus. The trailing-slash strip keeps the join robust
   // whether the secret was set with or without one.
-  const baseUrl = env.MODAL_PUPPETEER_RIG_URL.replace(/\/$/, '');
+  const baseUrl = (_rigBaseUrl(env) as string).replace(/\/$/, '');
   const startUrl = `${baseUrl}/rig-start`;
   let jobId: string;
   try {
@@ -9437,7 +9456,7 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
 async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  if (!env.MODAL_PUPPETEER_RIG_URL) return err(503, 'auto-rig backend unavailable');
+  if (!_rigBaseUrl(env)) return err(503, 'auto-rig backend unavailable');
   if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
   if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
 
@@ -9494,7 +9513,7 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
 
   // Poll Modal rig-status. Transient errors → 'pending' so the browser
   // keeps polling; do NOT refund here, because the rig may still finish.
-  const baseUrl = env.MODAL_PUPPETEER_RIG_URL.replace(/\/$/, '');
+  const baseUrl = (_rigBaseUrl(env) as string).replace(/\/$/, '');
   const statusUrl = `${baseUrl}/rig-status`;
   const fetchUrl = `${baseUrl}/rig-fetch`;
   let modalResp: { ready?: boolean; error?: string; bytes?: number; fetch_endpoint?: string; glb_base64?: string };
@@ -13575,7 +13594,7 @@ async function handlePublicPricing(_req: Request, env: Env): Promise<Response> {
   const features = {
     segment:   !!env.MODAL_SEGMENT_URL,
     mvadapter: !!env.MODAL_MVADAPTER_URL,
-    rig:       !!env.MODAL_PUPPETEER_RIG_URL,
+    rig:       !!_rigBaseUrl(env),
     animate:   !!env.MODAL_ANYTOP_ANIM_URL,
     retarget:  !!env.MODAL_FBX_RETARGET_URL,
     tpose:     !!env.MODAL_TPOSE_URL,
