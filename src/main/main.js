@@ -3608,6 +3608,32 @@ ipcMain.handle('read-bones-json', async (_event, targetName) => {
 });
 
 // Auto-rigging via Puppeteer (default) or UniRig fallback → rename to target skeleton (orc_m1 UE5 etc.) → bake anims
+/** Le moteur de rig local est-il REELLEMENT installe ?
+ *
+ *  Constat du 2026-08-08 sur le .appx 1.0.15 livre : `extraResources` n'embarque
+ *  ni Puppeteer ni SkinTokens (571 entrees, seul l'arbre TRELLIS2 est present).
+ *  Or `wizard:install-rig` copie le code depuis `resources/Puppeteer` via
+ *  `FABMESH_PUPPETEER_CODE` — un dossier qui n'existe jamais dans le paquet.
+ *  L'etape « moteur de rig » ne pouvait donc JAMAIS aboutir, et le rig renvoyait
+ *  l'utilisateur vers cet assistant : une boucle fermee.
+ *
+ *  Le correctif evident — embarquer Puppeteer — est precisement celui que sa
+ *  licence interdit. En attendant qu'un installeur SkinTokens existe, on bascule
+ *  sur le cloud, qui lui est verifie. Mieux vaut une fonction qui marche par une
+ *  autre voie qu'un renvoi vers un assistant impuissant.
+ */
+function _rigLocalDisponible() {
+  try {
+    const py = [process.env.FABMESH_SKINTOKENS_PY, 'C:\\tmp\\skv\\Scripts\\python.exe',
+                'C:\\skv\\Scripts\\python.exe'].find(p => p && fs.existsSync(p));
+    if (!py) return false;
+    const racine = app.isPackaged
+      ? path.join(process.resourcesPath, 'SkinTokens')
+      : path.join(__dirname, '..', '..', 'external', 'SkinTokens');
+    return fs.existsSync(path.join(racine, 'demo.py'));
+  } catch { return false; }
+}
+
 ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
   const _t0 = Date.now();
   // Defaut = SkinTokens (VAST-AI, MIT). Il etait a 'puppeteer', dont le rig
@@ -3626,12 +3652,16 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
     // envoyait ici `engine: 'puppeteer'` en dur, ce qui reclamait au cloud
     // un moteur NON COMMERCIALISABLE (Michelangelo GPL-3.0 + PartField
     // NVIDIA non-commercial).
-    if (isCloudMode()) {
+    const basculeCloud = !isCloudMode() && !_rigLocalDisponible();
+    if (isCloudMode() || basculeCloud) {
       if (!meshPath || !fs.existsSync(meshPath)) {
         return { success: false, error: 'Mesh not found' };
       }
       if (!isPathAllowed(meshPath)) {
         return { success: false, error: 'Mesh path not allowed' };
+      }
+      if (basculeCloud) {
+        log.info('main', 'auto-rig-ai: moteur local absent -> bascule sur le cloud');
       }
       const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
       // Le suffixe change (`_rigged_skintokens_`) : verifie, aucun code de

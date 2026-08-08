@@ -18852,3 +18852,40 @@ indetermine. Non patche volontairement : cette fonction a ete calibree en
 production sur des dragons et quadrupedes, un correctif a l'aveugle en fin de
 session risquerait de casser ces cas. La bonne cible est la convergence des
 deux implementations sur une seule, pas un second rustine parallele.
+
+## 2026-08-08 — Paquet Store : le rig bascule sur le cloud au lieu d'une impasse
+
+INVENTAIRE DU .APPX 1.0.15 LIVRE (571 entrees) — ce qu'il contient vraiment :
+  scripts 346 · TRELLIS2_win 94 · python-embed 40 · wheels 5 · app.asar
+Les « 20 Puppeteer / 3 AnyTop / 3 PartSAM » ne sont que des noms de scripts-ponts.
+SEUL le code de TRELLIS2 est embarque. Aucun arbre de moteur de rig.
+
+Or `wizard:install-rig` copie le code depuis `resources/Puppeteer` (via
+`FABMESH_PUPPETEER_CODE`, `shutil.copytree`), et le dépôt amont ne suffit pas :
+l'arbre livre porte 3 correctifs locaux. L'etape ne pouvait donc JAMAIS aboutir,
+et `auto-rig-ai` renvoyait l'utilisateur vers cet assistant impuissant — boucle
+fermee. Le correctif evident (embarquer Puppeteer) est celui que sa licence
+interdit, et il n'existe AUCUN `wizard_install_skintokens.py`.
+
+CORRECTIF : quand le moteur local est absent, `auto-rig-ai` bascule sur le
+cloud (`_rigLocalDisponible()`), verifie aujourd'hui de bout en bout, au lieu
+de rendre une erreur. Une fonction qui marche par une autre voie vaut mieux
+qu'un renvoi vers un assistant incapable de corriger.
+
+ASYMETRIE UTILE A RETENIR : le rig est le SEUL installeur qui depende d'un
+arbre de code livre dans le paquet. `wizard_install_partsam.py` clone PartSAM,
+torkit3d et pointops depuis GitHub et tire ses poids de HuggingFace ;
+`wizard_install_segment.py` fait de meme. La segmentation n'a donc PAS le
+travers annonce par l'audit — verifie, pas suppose.
+
+DEUX CONSTATS D'AUDIT NON REPRODUITS (verifies avant patch, comme demande) :
+  * « le nettoyeur ne finalise pas les maillages » : la branche maillage existe
+    et est complete ; les 7 types d'operation sont ecrits a l'insertion (3 pour
+    le maillage). Seules d'eventuelles lignes anterieures au 2026-07-26, sans
+    `operation_type` ET sans prefixe `modal_`, seraient ignorees — crediats
+    soldes depuis longtemps. PAS un blocage.
+  * « le fusible journalier rationne les clients » : FAUX. `checkAndIncrementModalSpend`
+    fait passer explicitement les comptes payants (`if (paid) ... return maxUsd`) ;
+    seul l'epuisement du budget mensuel REEL bloque tout le monde, et dans ce cas
+    Modal refuserait de lancer les apps de toute facon. Les 10 $/jour ne bornent
+    que le gratuit.
