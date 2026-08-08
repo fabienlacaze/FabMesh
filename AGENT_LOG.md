@@ -19213,3 +19213,34 @@ fichier final est celui du GABARIT. SkinTokens ne fournit plus que (1) la
 peau en mode --use_skeleton et (2) son rig natif comme DETECTEUR
 d'articulations pour poser le gabarit. Son squelette genere — le maillon
 faible (19/15) — ne finit jamais dans le fichier.
+
+## 2026-08-08 — Rendu REEL (Cycles) + generique multi-especes : premier bilan
+
+RENDU REEL. Question user legitime (« ce n'est pas la texture reelle ca ») :
+le nuage de points echantillonnait la texture au sommet le plus proche —
+bords d'ilots UV touches, taches bleues parasites, eclaircissement artificiel.
+Verite retablie par un rendu Blender Cycles GPU dans le venv SkinTokens
+(scratchpad/rendu_bpy*.py) : la fourmi est bien orange a rayures noires
+(la vignette brune comparee etait une AUTRE generation du meme sujet).
+GIF 24 images ~1,5 s/image sur la 5080. NOTE PRODUIT : ce chemin bpy/Cycles
+est reutilisable pour des apercus fideles des resultats d'animation.
+
+GENERIQUE MULTI-ESPECES (`scripts/gabarit_recaler.py`) : chaines extraites du
+gabarit lui-meme (plus de noms en dur), cote par suffixe _l/_r, options
+--tri z|y (quadrupedes/insectes vs bipedes) et --avant z+|z- (sens du regard
+de la cible). Les chaines sans correspondant (doigts, oreilles) suivent leur
+embranchement en bloc.
+
+TEST ALLIGATOR : surprise — le maillage est un BIPEDE dresse (type t-rex),
+bon gabarit = kaiju, pas cheval (confirme la necessite du selecteur, etape 3).
+Rig natif : 37 os, 7 chaines. ECHEC du recalage v1 : 40/58 os dans la boite,
+bras du kaiju apparies a une FAUSSE paire (chaine de tete symetrisee a tort en
+jumeau synthetique). Correctif identifie pour la prochaine session : valider
+chaque appariement par RECOUVREMENT DES ETENDUES (une paire dont les etendues
+Y/Z ne recouvrent pas celles de la chaine gabarit candidate est refusee), et
+n'autoriser le jumeau synthetique qu'aux chaines dont l'extremite est
+franchement laterale (|X| extremite > |X| attache).
+
+ETAT DES ESPECES : fourmi = pipeline complet valide avec texture et rendu
+reel ; alligator = rig natif OK, recalage a reprendre ; orc (humanoide,
+gabarit human-base.glb 66 os telecharge avec human-addon) = pas commence.
