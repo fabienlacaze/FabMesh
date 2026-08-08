@@ -18561,3 +18561,42 @@ interne que personne ne reconnaît. Les autres auraient donné
 Le titre dit déjà QUELLE action a échoué ; le corps ne doit expliquer que le
 POURQUOI et l'action à faire. Message rendu générique, et enrichi du chemin
 de sortie : basculer en mode Cloud, ou installer depuis les Réglages.
+
+## 2026-08-08 — Défaut 1 corrigé proprement : deux rôles, deux fonctions
+
+Question du user : « comment on le patche proprement ? ». `_aiPython()`
+mélangeait deux intentions contradictoires — « donne-moi l'interpréteur IA »
+et « donne-moi de quoi amorcer l'installation ». On ne peut pas supprimer le
+repli (l'assistant en a besoin AVANT que le venv existe), donc on le rend
+explicite et nommé :
+
+  `_bootstrapPython()` — Python embarqué, SANS torch. Réservé à l'assistant,
+      qui doit fonctionner précisément quand rien n'est installé.
+  `_aiPython()`        — l'interpréteur qui porte torch. **LÈVE** désormais
+      au lieu de rendre un interpréteur condamné d'avance.
+
+MON ANALYSE PRÉCÉDENTE AVAIT UN ANGLE MORT, révélé par la question. J'avais
+conclu « 0 appel non couvert » — faux : deux appels ne sont pas des poignées
+IPC mais des FONCTIONS AUTONOMES (`startSdxlServer`, le serveur NSFW), que
+mon script avait rattachées au handler précédent. Le garde central
+n'intercepte que `ipcMain.handle` : il ne les couvrait pas.
+
+Vérification de chacun des 7 appels restants, un par un :
+  startSdxlServer .... le spawn est dans un `try`, le `catch` remet
+                       sdxlProc=null → le serveur ne démarre pas, sans casse
+  serveur NSFW ....... vérifiait DÉJÀ `_localPyLibsUsable()` et sortait avant
+  wizard × 3 ......... basculés sur `_bootstrapPython()`
+  read-mesh-file ..... a DÉJÀ son propre rejet avec message clair
+  (les autres sites étaient de faux positifs de mon parseur)
+
+Le throw est un FILET, pas la première ligne : le garde central refuse déjà
+proprement les 37 poignées. Il attrape le code hors poignée, et journalise
+« chemin non couvert par le garde central, à vérifier » — de sorte qu'un
+futur oubli se signale au lieu de produire une traceback Python.
+
+VÉRIFIÉ : app lancée avec `FABMESH_FORCE_NO_LOCAL_PY=1`, 5 processus,
+0 erreur fatale, refus propres journalisés.
+
+LEÇON : une analyse automatique qui rattache un appel « au handler
+précédent » ment dès que le code n'est pas un handler. Le « 0 non couvert »
+était rassurant et faux.

@@ -8774,7 +8774,7 @@ ipcMain.handle('wizard:detect-hardware', async () => {
     if (_localPyLibsUsable() || fs.existsSync(_embeddedPython())) {
       const script = path.join(SCRIPTS_DIR, 'hw_detect.py');
       const py = await new Promise((resolve) => {
-        execFile(_aiPython(), [script], { timeout: 20000 }, (err, stdout) => {
+        execFile(_bootstrapPython(), [script], { timeout: 20000 }, (err, stdout) => {
           if (err || !stdout) return resolve(null);
           try { resolve(JSON.parse(String(stdout).trim().split(/\r?\n/).pop())); }
           catch (_) { resolve(null); }
@@ -8865,7 +8865,7 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
     // wizard's Retry UI instead of Node's generic "Command failed". maxBuffer
     // bumped to 64 MB: a long download with retries emits many progress lines.
     let stderrBuf = '';
-    const proc = execFile(_aiPython(), [script, '--mode', mode], {
+    const proc = execFile(_bootstrapPython(), [script, '--mode', mode], {
       timeout: 0, maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
     }, (err) => {
@@ -8914,7 +8914,7 @@ ipcMain.handle('wizard:final-test', async (event, mode) => {
     // streaming it live to the wizard — those leak internal model
     // identifiers and confuse the user. Only flush on failure.
     let stderrBuf = '';
-    const proc = execFile(_aiPython(), [script, '--mode', mode], {
+    const proc = execFile(_bootstrapPython(), [script, '--mode', mode], {
       timeout: 180000, maxBuffer: 5 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
     }, (err) => {
@@ -9019,11 +9019,45 @@ ipcMain.handle('export-diagnostics', async () => {
 //  - dev                    -> system 'python' (the dev already has torch)
 //  - packaged, not set up    -> embedded (bare; AI scripts must wait for
 //    first-run setup to finish before they are invoked)
+// DEUX ROLES SEPARES, depuis le 2026-08-08.
+//
+// `_aiPython()` melangeait « donne-moi l'interpreteur IA » et « donne-moi de
+// quoi amorcer l'installation ». Quand le venv etait absent, il rendait en
+// SILENCE le Python embarque — un interpreteur sans torch. Tout appelant
+// croyait avoir un moteur, lancait son script, et recevait
+// « No module named 'torch' ». C'est le refus Store du 2026-08-08.
+//
+// On ne peut pas supprimer le repli : l'assistant en a besoin pour tourner
+// AVANT que le venv existe. On le rend donc EXPLICITE et nomme, pour qu'on
+// doive le demander sciemment.
+
+/** Interpreteur d'AMORCAGE — Python embarque, SANS torch ni dependances IA.
+ *  Reserve a l'assistant d'installation, qui doit fonctionner precisement
+ *  quand rien n'est encore installe. Ne JAMAIS l'utiliser pour du travail IA. */
+function _bootstrapPython() {
+  if (!app.isPackaged) return 'python';
+  return _embeddedPython();
+}
+
+/** Interpreteur IA — celui qui porte torch. LEVE si le moteur n'est pas
+ *  installe, au lieu de rendre un interpreteur inutilisable.
+ *
+ *  C'est un FILET, pas la premiere ligne de defense : le garde central sur
+ *  `ipcMain.handle` refuse deja proprement les 37 poignees concernees. Mais
+ *  du code hors poignee (serveurs SDXL et NSFW, lances directement) n'est pas
+ *  couvert par ce garde — ici, mieux vaut une erreur claire et journalisee
+ *  qu'un sous-processus Python condamne d'avance. */
 function _aiPython() {
   const provisioned = path.join(AI_PYTHON_DIR, 'python.exe');
   if (fs.existsSync(provisioned)) return provisioned;
   if (!app.isPackaged) return 'python';
-  return _embeddedPython();
+  const e = new Error(
+    'The local AI engine is not installed on this device. '
+    + 'Switch to Cloud mode, or install it from Settings (NVIDIA GPU required).');
+  e.needsLocalEngine = true;
+  log.error('moteur-local', '_aiPython() appele sans moteur installe — '
+    + 'chemin non couvert par le garde central, a verifier');
+  throw e;
 }
 // True once torch has been installed into the writable copy.
 function _aiPythonReady() {
