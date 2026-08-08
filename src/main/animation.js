@@ -615,6 +615,138 @@ function register(deps) {
   // ---------------------------------------------------------------------------
   // anim:judge â€” run headless QA renderer + parse metrics
   // ---------------------------------------------------------------------------
+  // ── Banque de mouvements : clips tout faits retargetes sur le squelette
+  // SkinTokens du mesh (decision user 2026-08-08 : le squelette reste celui de
+  // SkinTokens, les banques l'animent).
+  //   m2m      = 8 creatures / 73 clips CC0 (Mesh2Motion), livres avec l'app
+  //   apovivor = clips FBX exportes d'Unreal par l'utilisateur (perso, jamais
+  //              redistribues — licence Fab)
+  // Les ponts n'ont besoin que de numpy/scipy : python systeme par defaut,
+  // FABMESH_ANIM_PY pour forcer un interpreteur.
+  const _CREATURES_M2M = new Set(['spider', 'dragon', 'snake', 'kaiju',
+                                  'horse', 'bird', 'fox', 'shark']);
+  function _dossierClipsM2M() {
+    const cands = [
+      process.env.FABMESH_M2M_CLIPS,
+      process.resourcesPath ? path.join(process.resourcesPath, 'm2m_clips') : null,
+      path.join(__dirname, '..', '..', 'build', 'm2m'),
+    ];
+    for (const c of cands) { if (c && fs.existsSync(c)) return c; }
+    return null;
+  }
+  // Lire les noms de clips d'un GLB SANS python : en-tete JSON du conteneur.
+  function _nomsClipsGlb(p) {
+    try {
+      const fd = fs.openSync(p, 'r');
+      const tete = Buffer.alloc(20);
+      fs.readSync(fd, tete, 0, 20, 0);
+      if (tete.readUInt32LE(0) !== 0x46546C67) { fs.closeSync(fd); return []; }
+      const lgJson = tete.readUInt32LE(12);
+      const json = Buffer.alloc(lgJson);
+      fs.readSync(fd, json, 0, lgJson, 20);
+      fs.closeSync(fd);
+      const doc = JSON.parse(json.toString('utf8'));
+      return (doc.animations || []).map((a, i) => a.name || ('clip_' + i));
+    } catch (_) { return []; }
+  }
+
+  ipcMain.handle('anim:banque-liste', async () => {
+    const out = { m2m: [], apovivor: [] };
+    const dir = _dossierClipsM2M();
+    if (dir) {
+      for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.glb'))) {
+        const creature = f.replace(/\.glb$/, '').replace(/-animations$/, '');
+        if (!_CREATURES_M2M.has(creature)) continue;
+        for (const nom of _nomsClipsGlb(path.join(dir, f))) {
+          if (/rest/i.test(nom)) continue;      // poses de repos statiques
+          out.m2m.push({ creature, clip: nom });
+        }
+      }
+    }
+    const adir = process.env.FABMESH_APOVIVOR_CLIPS || 'C:\\tmp\\apovivor_fbx\\glb';
+    if (fs.existsSync(adir)) {
+      for (const f of fs.readdirSync(adir).filter(x => x.endsWith('.glb'))) {
+        out.apovivor.push({ clip: f.replace(/\.glb$/, ''), path: path.join(adir, f) });
+      }
+    }
+    return { success: true, ...out };
+  });
+
+  ipcMain.handle('anim:banque', async (_e, opts = {}) => {
+    const { meshPath, source, creature, clip, clipPath } = opts;
+    if (!meshPath || !fs.existsSync(meshPath)) {
+      return { success: false, error: 'Mesh not found' };
+    }
+    if (typeof isPathAllowed === 'function' && !isPathAllowed(meshPath)) {
+      return { success: false, error: 'Mesh path not allowed' };
+    }
+    const jobId = _safeId();
+    const outDir = path.join(MESHES_DIR || os.tmpdir(), 'animated');
+    _ensureDir(outDir);
+    const rigStem = path.basename(meshPath, path.extname(meshPath));
+    const slug = String(clip || 'clip').toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 24);
+    const outGlb = path.join(outDir, `banque_${slug}__${rigStem}.glb`);
+
+    const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
+    const py = process.env.FABMESH_ANIM_PY || 'python';
+    const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' };
+    const dirM2M = _dossierClipsM2M();
+    if (dirM2M) env.FABMESH_M2M_CLIPS = dirM2M;
+    // Attenuation PAR CLIP : les clips violents (course, saut, attaque)
+    // debordent a pleine puissance — constate sur la course du wolfhound, une
+    // patte passait le point de bascule. Les clips calmes restent a 1.0.
+    if (!env.ANYTOP_OUTPUT_DAMP && /run|course|jump|saut|attack|roar/i.test(String(clip || clipPath || ''))) {
+      env.ANYTOP_OUTPUT_DAMP = '0.6';
+    }
+    let args;
+    if (source === 'apovivor') {
+      if (!clipPath || !fs.existsSync(clipPath)) {
+        return { success: false, error: 'Clip introuvable : ' + clipPath };
+      }
+      args = [path.join(scriptsDir, 'apovivor_bridge.py'),
+              '--rig', meshPath, '--clip', clipPath, '--out', outGlb,
+              '--clip-name', slug];
+    } else {
+      args = [path.join(scriptsDir, 'mesh2motion_bridge.py'),
+              '--rig', meshPath, '--out', outGlb,
+              '--creature', String(creature || 'spider'), '--clip', String(clip || 'Walk')];
+    }
+
+    _sendToAllWindows(BrowserWindow, 'anim:progress',
+      { jobId, phase: 'start', pct: 2, msg: `Retargeting « ${clip} »…` });
+    const { spawn } = require('child_process');
+    return await new Promise((resolve) => {
+      let dernieres = '';
+      const proc = spawn(py, args, { env, windowsHide: true });
+      if (typeof trackProc === 'function') { try { trackProc(jobId, proc); } catch (_) {} }
+      const surLigne = (l) => {
+        const m = String(l).match(/LOCAL_M2M_PROGRESS:\s*(\d+)/);
+        if (m) {
+          _sendToAllWindows(BrowserWindow, 'anim:progress',
+            { jobId, phase: 'progress', pct: Number(m[1]) });
+        }
+        dernieres = (dernieres + String(l)).slice(-2000);
+      };
+      proc.stdout?.on('data', surLigne);
+      proc.stderr?.on('data', surLigne);
+      proc.on('close', () => {
+        if (fs.existsSync(outGlb) && fs.statSync(outGlb).size > 1000) {
+          writeMeta(outGlb, {
+            kind: 'anim', engine: 'banque_clips', parent: meshPath,
+            params: { source, creature, clip, damp: env.ANYTOP_OUTPUT_DAMP || '1.0' },
+          });
+          _sendToAllWindows(BrowserWindow, 'anim:progress', { jobId, phase: 'done', pct: 100 });
+          resolve({ success: true, jobId, glbPath: outGlb });
+        } else {
+          _sendToAllWindows(BrowserWindow, 'anim:progress',
+            { jobId, phase: 'error', pct: 0, msg: dernieres.slice(-300) });
+          resolve({ success: false, jobId, error: dernieres.slice(-300) || 'bridge failed' });
+        }
+      });
+      proc.on('error', (e) => resolve({ success: false, jobId, error: String(e.message || e) }));
+    });
+  });
+
   ipcMain.handle('anim:judge', async (_e, { glbPath } = {}) => {
     if (!glbPath || !fs.existsSync(glbPath)) {
       return { verdict: 'missing', metrics: {} };

@@ -16214,6 +16214,32 @@ function _wsAnimEngineSync() {
   const showVideo = false && (engine === 'seed3d_puppeteer');
   if (promptRow) promptRow.style.display = showPrompt ? '' : 'none';
   if (videoRow) videoRow.style.display = showVideo ? '' : 'none';
+  // Banque de clips : la rangee CLIP s'affiche a la place du choix par type
+  const banqueRow = document.getElementById('ws-banque-row');
+  if (banqueRow) banqueRow.style.display = (engine === 'banque_clips') ? '' : 'none';
+  if (engine === 'banque_clips') _remplirBanqueClips();
+}
+
+// Remplit une seule fois la liste des clips (CC0 livres + perso apovivor).
+let _banqueClipsRemplie = false;
+async function _remplirBanqueClips() {
+  if (_banqueClipsRemplie) return;
+  const sel = document.getElementById('ws-banque-clip');
+  if (!sel || !window.meshyAPI?.animBanqueListe) return;
+  try {
+    const l = await window.meshyAPI.animBanqueListe();
+    if (!l?.success) return;
+    sel.innerHTML = '';
+    for (const c of (l.apovivor || [])) {
+      sel.add(new Option('PERSO · ' + c.clip,
+        JSON.stringify({ source: 'apovivor', clip: c.clip, clipPath: c.path })));
+    }
+    for (const c of (l.m2m || [])) {
+      sel.add(new Option('CC0 · ' + c.creature + ' · ' + c.clip,
+        JSON.stringify({ source: 'm2m', creature: c.creature, clip: c.clip })));
+    }
+    _banqueClipsRemplie = sel.options.length > 0;
+  } catch (_) {}
 }
 document.getElementById('ws-anim-engine')?.addEventListener('change', _wsAnimEngineSync);
 document.getElementById('ws-anim-type')?.addEventListener('change', _wsAnimEngineSync);
@@ -16511,14 +16537,14 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     }
   };
 
-  if (engine !== 'rokoko_library' && engine !== 'kimodo_ai') {
+  if (engine !== 'rokoko_library' && engine !== 'kimodo_ai' && engine !== 'banque_clips') {
     customError(`${engine} not wired yet.`, 'Engine not ready');
     return;
   }
   // Garde Cloud : anim:retarget (Motion Library Blender/Rokoko) n'a AUCUN
   // équivalent worker — le main renverrait une erreur brute. L'option est déjà
   // masquée par _applyRigAnimPills ; ceinture-bretelles si le select est forcé.
-  if (engine === 'rokoko_library' && _isCloudMode()) {
+  if ((engine === 'rokoko_library' || engine === 'banque_clips') && _isCloudMode()) {
     _cloudToolUnavailable(_i18nT('Motion Library'));
     return;
   }
@@ -16549,6 +16575,55 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
       }, 20000, { sourceImageUrl: rigPath, projectName: proj?.name })
     : null;
   try {
+    // ---- Banque de clips (Mesh2Motion CC0 + perso apovivor) ----
+    // Retargeting local d'un clip tout fait sur le squelette SkinTokens.
+    if (engine === 'banque_clips') {
+      let choix = null;
+      try { choix = JSON.parse(document.getElementById('ws-banque-clip')?.value || 'null'); } catch (_) {}
+      if (!choix) {
+        setStatus('Choisissez un clip dans la liste.', true);
+        btn.disabled = false;
+        return;
+      }
+      setStatus(`Retargeting « ${choix.clip} » sur le squelette…`);
+      const result = await API.animBanque({ meshPath: rigPath, ...choix });
+      if (!result?.success) {
+        setStatus(`Echec : ${result?.error || 'unknown'}`, true);
+        if (_activeAnimJob && typeof completeJob === 'function') {
+          try { completeJob(_activeAnimJob.id, false, result?.error || 'unknown'); } catch (_) {}
+          _activeAnimJob = null;
+        }
+        btn.disabled = false;
+        return;
+      }
+      setStatus(`Done — ${result.glbPath?.split(/[\\/]/).pop()}`);
+      const projB = state.currentProject;
+      if (projB) {
+        projB.animations = projB.animations || [];
+        projB.animations.unshift({
+          id: result.jobId || `${Date.now()}`,
+          batchId: `banque_${Date.now()}`,
+          type: choix.clip,
+          filename: result.glbPath.split(/[\\/]/).pop(),
+          path: result.glbPath,
+          url: 'file:///' + result.glbPath.replace(/\\/g, '/'),
+          engine: 'banque_clips',
+          mode: 'local',
+          verdict: 'n/a',
+          created: new Date().toISOString(),
+        });
+        try { renderAnimVersions(projB); } catch (_) {}
+        try { _selectAnim?.(projB.animations[0]); } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent('anim:new', { detail: projB.animations[0] })); } catch (_) {}
+      }
+      if (_activeAnimJob && typeof completeJob === 'function') {
+        try { completeJob(_activeAnimJob.id, true); } catch (_) {}
+        _activeAnimJob = null;
+      }
+      btn.disabled = false;
+      return;
+    }
+
     // ---- Generative motion AI (text->motion diffusion, local GPU) ----
     if (engine === 'kimodo_ai') {
       // Garde humanoid-only : moteur LOCAL uniquement. En mode Cloud le

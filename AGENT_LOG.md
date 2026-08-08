@@ -19374,3 +19374,29 @@ maillage complet 67 Mo en flux avec progression, boutons marche/course,
 three.js local. Valide en Chrome sans interface avant ouverture (30 os,
 clip marche, 1,4 M sommets). PIEGE : en derivant le viewer, `charge` doit
 etre `async` (le corps utilise await) — la substitution l'avait casse.
+
+## 2026-08-09 (nuit) — banque de clips CABLEE DANS FABMESH
+
+Demande user : « mets en place dans FabMesh ». Nouveau moteur d'animation dans
+le panneau Step 4 : « Creature Motion Library (CC0 + perso) ».
+
+  * anim:banque-liste (animation.js) : enumere les clips — 8 GLB Mesh2Motion
+    CC0 (l'en-tete JSON du GLB est lu EN NODE, sans python) + les GLB perso de
+    C:/tmp/apovivor_fbx/glb (FABMESH_APOVIVOR_CLIPS pour deplacer). Poses de
+    repos filtrees.
+  * anim:banque (animation.js) : spawn du bon pont (mesh2motion_bridge ou
+    apovivor_bridge) avec python systeme (FABMESH_ANIM_PY pour forcer),
+    progression LOCAL_M2M_PROGRESS -> anim:progress, sortie
+    meshes/animated/banque_<clip>__<rig>.glb + sidecar meta. ATTENUATION PAR
+    CLIP : 0.6 automatique si le nom contient run/course/jump/attack/roar
+    (les clips violents debordent — constate sur la course du wolfhound).
+  * preload : animBanque / animBanqueListe.
+  * renderer : option banque_clips + rangee CLIP dediee (remplie une fois,
+    PERSO d'abord puis CC0), branche de generation calquee champ pour champ
+    sur kimodo_ai (push projet, strip, anim:new), garde cloud (local-only,
+    comme la Motion Library).
+
+Electron redemarre. PARCOURS UTILISATEUR : projet avec un mesh rigge Step 3
+-> Step 4 -> moteur « Creature Motion Library » -> choisir un clip (PERSO =
+wolfhound...) -> Generate. RESTE A FAIRE : parite cloud de ce moteur, et
+embarquer build/m2m dans extraResources (m2m_clips) pour le paquet Store.
