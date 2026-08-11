@@ -19614,3 +19614,28 @@ fausses alertes :
 LECON : une garde ajoutee pour proteger le mode LOCAL doit toujours tester
 `isCloudMode()` en premier. Deux refus Store consecutifs sur la meme fonction,
 pour deux raisons opposees (pas assez de garde, puis trop).
+
+## 2026-08-09 — 1.0.17 : le refus portait sur 1.0.16, pas sur 1.0.15
+
+CORRECTION D'UNE ERREUR QUE J'AI AFFIRMEE. J'avais dit au user « ce rapport ne
+peut pas porter sur 1.0.16, je l'ai construit cette nuit ». FAUX : sa capture
+de Partner Center montre « Packages : MyFabmesh.AI 1.0.16.appx — Validated ».
+Il avait soumis le build de 00 h 12 — celui qui contenait justement ma garde
+fautive. Le refus f57f0d2b porte donc bien sur 1.0.16.
+
+Consequence : le Store refuse un paquet dont la version existe deja. Montee en
+1.0.17 OBLIGATOIRE (le user l'avait devine en demandant « tu l'as reconstruit
+en 1.0.17 ? »).
+
+PAQUET 1.0.17 construit et VERIFIE DANS L'ARCHIVE, pas seulement d'apres la
+sortie du builder :
+  * manifeste : Version="1.0.17.0" ;
+  * 592 entrees, 8 clips CC0 ;
+  * la chaine `!isCloudMode() && !_localPyLibsUsable()` est PRESENTE dans
+    app.asar, et l'ancienne garde nue est ABSENTE — le correctif du refus est
+    bien embarque.
+
+LECON DE METHODE : verifier ce qui a REELLEMENT ete soumis (page Packages de
+Partner Center) avant d'affirmer sur quelle version porte un rapport. Deux
+fichiers ont porte le nom « 1.0.16.appx » avec des contenus differents (00 h 12
+et 13 h 37) — exactement le piege qui fait soumettre le mauvais paquet.
