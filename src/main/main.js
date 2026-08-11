@@ -6778,7 +6778,22 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
   // construction, retouche). La fonction PRINCIPALE, celle du bouton
   // « Generate », etait la seule a ne pas l'etre — donc la seule que le
   // testeur pouvait atteindre en premier.
-  if (!_localPyLibsUsable()) {
+  //
+  // CORRECTIF DU 2026-08-09 — MA garde ci-dessous a CAUSE le refus suivant.
+  // Rapport de certification f57f0d2b : le testeur s'etait CONNECTE au cloud
+  // (« Log in with test credentials », « Connect with AI Assistance using
+  // Cloud connection ») et recevait quand meme « The local AI engine is not
+  // installed ». En corrigeant la traceback Python, j'avais pose la garde
+  // AVANT la branche cloud (ligne ~6857) : elle bloquait donc une machine
+  // parfaitement capable de generer sur nos GPU. J'avais remplace une panne
+  // par un mur.
+  //
+  // La condition juste est celle de la garde centrale (ligne ~528) :
+  // `isCloudMode()` vaut vrai quand l'utilisateur a choisi le cloud OU quand
+  // aucun GPU NVIDIA n'est present — un Surface Laptop 4, precisement. Dans
+  // ces cas la fonction sait se debrouiller : on la laisse atteindre sa
+  // branche cloud.
+  if (!isCloudMode() && !_localPyLibsUsable()) {
     return {
       success: false,
       error: 'The local AI engine is not installed on this device. '

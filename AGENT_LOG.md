@@ -19574,3 +19574,43 @@ pas la meme frayeur.
 
 PAQUET 1.0.16 FINAL : 592 entrees, 8 clips CC0, les 3 ponts d'animation
 (mesh2motion, clips_fbx, kimodo).
+
+## 2026-08-09 — REFUS STORE f57f0d2b : MA garde bloquait les clients cloud
+
+Rapport de certification lu (capture user ; la page Partner Center est
+authentifiee, WebFetch renvoie 403). Verdict 10.1.2.10 « Unusable Feature:
+Create new project using Cloud - Generate a new image from a text prompt,
+EVEN AFTER connecting to cloud servers and using the testing account
+credentials ». Observed on: Surface Laptop 4 (donc SANS GPU NVIDIA).
+
+Etapes du testeur : 3. « Log in with test credentials », 4. « Connect with AI
+Assistance using Cloud connection », 8. « Click on generate », 9. « The product
+pops up a message telling you to connect to cloud servers even when it's
+already connected ». Boite affichee : « The local AI engine is not installed
+on this device. Switch to Cloud mode… ».
+
+CAUSE : la garde que J'AI AJOUTEE hier pour corriger le refus PRECEDENT
+(traceback « No module named torch ») etait posee EN TETE de `generate-images`
+(main.js:6776), donc AVANT la branche cloud de la meme fonction (ligne ~6857,
+`wantCloud || !gpu.hasNvidia`). Sur une machine sans NVIDIA — exactement le
+Surface du testeur — la fonction savait parfaitement generer sur nos GPU, mais
+ne l'atteignait jamais. J'AI REMPLACE UNE PANNE PAR UN MUR.
+
+CORRECTIF : `if (!isCloudMode() && !_localPyLibsUsable())` — la meme condition
+que la garde centrale (ligne 528), qui elle etait juste. `isCloudMode()` vaut
+vrai si l'utilisateur a choisi le cloud OU si aucun GPU NVIDIA n'est present.
+
+AUDIT DES 20 AUTRES OCCURRENCES de `_localPyLibsUsable()` (script
+scratchpad/audit_gardes.py : pour chaque garde, remonter au handler englobant
+et chercher une voie cloud). 6 suspects, TOUS verifies un par un, TOUS de
+fausses alertes :
+  * image-quick-edit (5630) : repli natif Electron, pas un blocage ;
+  * translate/nsfw servers (5940, 5994, 6027, 6052) : saut propre, evite
+    12-18 s d'attente a vide ;
+  * mesh-tool (8109) : la branche `isCloudMode()` s'execute AVANT (ligne 8036),
+    la garde ne couvre que les ops non routees.
+`generate-images` etait donc le SEUL defaut reel.
+
+LECON : une garde ajoutee pour proteger le mode LOCAL doit toujours tester
+`isCloudMode()` en premier. Deux refus Store consecutifs sur la meme fonction,
+pour deux raisons opposees (pas assez de garde, puis trop).
