@@ -163,20 +163,14 @@ document.addEventListener('DOMContentLoaded', () => {
       else window.open(SIGNUP_URL, '_blank');
     });
   }
-  const cloudBtn = document.getElementById('btn-open-cloud');
-  if (cloudBtn) {
-    cloudBtn.addEventListener('click', () => {
-      // Deep-link straight to Sign in → /app (not the marketing root), so a
-      // no-GPU user lands on login and bounces into the app after auth instead
-      // of an anonymous landing page. src=desktop tags the origin for later.
-      const url = 'https://myfabmesh-cloud.fabien65400.workers.dev/login?next=/app&src=desktop';
-      if (window.wizardAPI && window.wizardAPI.openExternal) {
-        window.wizardAPI.openExternal(url);
-      } else {
-        window.open(url, '_blank');
-      }
-    });
-  }
+  // Le bouton « Use the website instead » (btn-open-cloud) a été RETIRÉ de
+  // wizard.html, et son gestionnaire avec lui. Il ouvrait le navigateur sur
+  // /login depuis la page « Cloud mode will be used on this PC » — donc sur
+  // toute machine sans GPU NVIDIA, c'est-à-dire sur toute machine de
+  // certification. Il proposait au testeur de sortir de l'application au
+  // moment précis où elle venait de lui annoncer qu'elle savait se débrouiller.
+  // Si le lien redevient nécessaire un jour, il a sa place dans l'application
+  // (menu Aide), pas dans le chemin de premier lancement.
 });
 
 // ---------- STEP 2: detect ----------

@@ -19825,3 +19825,39 @@ PROTOCOLE PREVU : installer 1.0.17 dans la VM pour tenter de reproduire le
 crash sur machine vierge sans GPU, puis 1.0.18 pour verifier les correctifs,
 puis piloter l'assistant Setup en CDP (dans la VM, `Invoke-CommandInDesktopPackage`
 n'aura pas besoin de l'UAC du user).
+
+## 2026-08-16 (suite) — page « sans GPU » : deux sorties vers le navigateur
+
+TROUVE EN SALLE BLANCHE (VM sans GPU NVIDIA), sur la page que voit
+NECESSAIREMENT tout testeur de certification — ils sont toujours sur une
+machine sans NVIDIA (le Surface Laptop 4 du refus n5, par exemple).
+
+La page « Cloud mode will be used on this PC » annonce que la decision est
+prise, puis offrait QUATRE boutons :
+  * Back                     -> retour a la detection (inutile, le materiel ne
+                                changera pas)
+  * Create a free account    -> openExternal(SIGNUP_URL) : QUITTE L'APP
+  * Use the website instead  -> openExternal(.../login)  : QUITTE L'APP
+  * Continue in Cloud mode   -> completeSetup, seul a poursuivre dans l'app
+
+Deux boutons sur quatre invitaient donc le testeur a sortir de l'application au
+moment precis ou elle venait de lui annoncer qu'elle savait se debrouiller sans
+GPU. Un testeur qui part sur le site n'evalue plus le produit — et peut
+conclure « the product doesn't work on this device ».
+
+CORRECTIF : « Use the website instead » SUPPRIME (bouton + gestionnaire).
+Une seule action primaire reste. Retire aussi de la liste « buy more on our
+website anytime » : le Store encadre strictement le renvoi vers un paiement
+externe pour des biens numeriques.
+
+« Create a free account » CONSERVE volontairement, en action secondaire :
+c'est aujourd'hui le SEUL chemin d'inscription et le testeur en a besoin — le
+refus n2 portait justement sur la creation de compte.
+
+DETTE IDENTIFIEE, NON TRAITEE : il n'existe AUCUNE inscription dans l'app. Le
+pont expose cloudLogin / cloudLogout / cloudRecover / cloudStatus, mais pas de
+cloudSignup ; et dans l'application elle-meme le lien « Create an account »
+(index2.js:22686) appelle _openCloudSite('/login'), donc ouvre le navigateur
+lui aussi. Tant que ce pont n'existe pas, toute creation de compte sort de
+l'application. A ecrire (handler IPC + appel Supabase/worker + UI) — c'est une
+fonctionnalite, pas un nettoyage.
