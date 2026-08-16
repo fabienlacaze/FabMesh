@@ -19639,3 +19639,91 @@ LECON DE METHODE : verifier ce qui a REELLEMENT ete soumis (page Packages de
 Partner Center) avant d'affirmer sur quelle version porte un rapport. Deux
 fichiers ont porte le nom « 1.0.16.appx » avec des contenus differents (00 h 12
 et 13 h 37) — exactement le piege qui fait soumettre le mauvais paquet.
+
+## 2026-08-16 — 5e refus « crashes at launch » : banc de test MSIX REEL monte
+
+Refus du 12/08/2026, policy 10.1.2.10 : « The product crashes at launch.
+The issue was observed on the following devices running OS build 26200.8655 ».
+
+POINT DE DEPART LOGIQUE : entre 1.0.16 (refus n5, l'app DEMARRAIT — le testeur
+atteignait le bouton Generate) et 1.0.17, le seul changement de code est une
+condition dans le handler IPC `generate-images`. Un changement A L'INTERIEUR
+d'un handler IPC ne peut pas faire planter au lancement. La cause etait donc
+latente ou d'environnement.
+
+BANC DE TEST ENFIN MONTE (ce que les 5 refus n'avaient jamais eu). La machine
+de dev tourne sur Windows 11 build 26200 — MEME FAMILLE que le 26200.8655 du
+testeur — avec Smart App Control ACTIF. Procedure :
+  1. certificat de test auto-signe au sujet exact du manifeste
+     (CN=3767FC33-F877-4481-9639-BC9CFF9D1371), signtool sur une COPIE du
+     .appx livre ;
+  2. import dans LocalMachine\TrustedPeople (magasin dedie au sideload, pas
+     les autorites racines) ;
+  3. Add-AppxPackage -> VRAI conteneur MSIX ;
+  4. lancement par `shell:AppsFolder\<AUMID>` comme un vrai utilisateur ;
+  5. instrumentation : comptage des processus, enumeration des fenetres par
+     Win32 (titre + taille + visibilite), captures d'ecran, journaux Windows.
+Scripts dans le scratchpad de session (1_signer / 2_faire_confiance /
+5_zero / 7_zero_total / 8_salle_blanche / 9_restaurer).
+
+RESULTAT PRINCIPAL — LE CRASH N'EST PAS REPRODUCTIBLE tel quel : le paquet
+1.0.17 DEMARRE et PEINT correctement, aussi bien avec un etat prealable
+qu'apres desinstallation totale + reinstallation a zero. Interface complete,
+« Vos projets », bouton « Creer un projet ». Le refus ne porte donc PAS sur un
+plantage deterministe du paquet sur ce build de Windows.
+
+CE QUE LE BANC A TROUVE, EN REVANCHE :
+
+1. AUCUN VERROU D'INSTANCE UNIQUE. `requestSingleInstanceLock` etait absent.
+   Chaque activation demarrait une application ENTIERE de plus : jusqu'a
+   3 instances, 17 processus, 1,2 Go. Elles se disputaient le meme dossier de
+   donnees et le meme port :
+       [ERROR] [mcp-bridge] failed to start:
+               listen EADDRINUSE: address already in use 127.0.0.1:7555
+   Une instance surnumeraire pouvait mourir aussitot apres avoir affiche sa
+   fenetre — ce qu'un testeur decrit par « crashes at launch ».
+   CORRIGE ce jour (verrou + interception 'second-instance' qui REMONTE la
+   fenetre existante au lieu de sortir en silence, et garde dans whenReady
+   pour qu'une instance surnumeraire ne demarre AUCUN sous-systeme).
+   Verifie en dev : la 2e instance journalise « rend la main » puis sort en
+   code 0, le nombre de processus ne bouge pas (5 -> 5).
+
+2. `ready-to-show` MET 8477 ms SUR CETTE MACHINE — RTX 5080, NVMe, modeles
+   deja en cache. Le watchdog des 8 s a du forcer l'affichage :
+       [WARN] ready-to-show not fired in 8s — forcing show
+       [INFO] t=8477ms FENETRE PRETE <- ce que voit le testeur
+   Or a 45 s le meme watchdog (main.js:1345-1351) declare le renderer MORT et
+   ouvre la fenetre rouge « MyFabmesh.AI could not start normally ». Sur une
+   VM de labo sans GPU (rendu logiciel) et au premier lancement (Defender
+   analyse 209 Mo), la marge entre 8,5 s et 45 s est MINCE. C'est aujourd'hui
+   l'hypothese la mieux etayee.
+
+3. LA FENETRE ROUGE EST ATTEIGNABLE PAR N'IMPORTE QUEL REJET DE PROMESSE NON
+   GERE (main.js:864-868), a n'importe quel moment, pas seulement au boot. Un
+   alea reseau au demarrage suffit a afficher « could not start normally » —
+   libelle qu'un testeur transcrit exactement en « crashes at launch ».
+
+4. MON BANC DIVERGEAIT DU LABO ET JE L'AI CORRIGE : `_detectAlreadyInstalled()`
+   (main.js:1151-1156) regarde
+   `~/.cache/huggingface/hub/models--microsoft--TRELLIS.2-4B`. Sur la machine
+   de dev il existe -> `setup auto-completed (models already in HF cache)` ->
+   l'assistant est SAUTE. Sur la machine du testeur il n'existe pas -> il
+   passe TOUJOURS par l'assistant Setup. Autrement dit le chemin que le
+   testeur emprunte est precisement celui qu'on ne teste jamais ici. Masquer
+   ce dossier (reversible) est indispensable a toute reproduction fidele.
+
+5. La virtualisation MSIX explique un faux mystere : quand `%APPDATA%\fabmesh`
+   existe deja, l'app packagee ecrit dedans ; quand il n'existe pas, tout part
+   dans `%LOCALAPPDATA%\Packages\<PFN>\LocalCache\Roaming\`. Chercher les
+   journaux au mauvais endroit fait croire a tort que le logger n'a pas tourne.
+
+LECON DE METHODE : cinq refus ont ete instruits sans jamais installer le
+paquet. Le sideload signe se monte en une heure sur la machine de dev et donne
+le vrai conteneur. A faire AVANT toute soumission, avec WACK (appcert.exe, deja
+present sous C:\Program Files (x86)\Windows Kits\10\App Certification Kit).
+
+RESTE A FAIRE : reconstruire en 1.0.18 avec le verrou ; relever le delai du
+watchdog et/ou distinguer « lent » de « mort » ; ne plus afficher la fenetre
+rouge sur un simple rejet de promesse ; passer WACK ; verifier sur Sentry
+(projet 4511435265212496) s'il existe un evenement du 11-12/08 venant du build
+26200.8655.

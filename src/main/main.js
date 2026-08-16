@@ -1975,7 +1975,64 @@ print("OK")
 // at all — Claude handles the UX and presents results when done.
 const HEADLESS = process.argv.includes('--headless');
 
+/* ═══════════════════════════════════════════════════════════════════
+   VERROU D'INSTANCE UNIQUE
+
+   Sans ce verrou, CHAQUE activation (double-clic sur la vignette,
+   relance depuis le Store, raccourci, seconde activation du shell)
+   demarrait une application ENTIERE de plus. Constate au banc de test
+   MSIX du 16/08/2026 : jusqu'a trois instances simultanees, 17
+   processus, 1,2 Go de memoire. Elles se disputaient le meme dossier
+   de donnees et le meme port :
+       [ERROR] [mcp-bridge] failed to start:
+               listen EADDRINUSE: address already in use 127.0.0.1:7555
+   Une instance surnumeraire pouvait mourir aussitot apres avoir
+   affiche sa fenetre — exactement ce qu'un testeur de certification
+   decrit par « the product crashes at launch ».
+
+   Regle : la premiere instance garde la main ; toute autre rend la
+   main IMMEDIATEMENT et remonte la fenetre de celle qui tourne deja.
+   Elle ne doit RIEN faire d'autre : ni fenetre, ni pont MCP, ni
+   ecriture dans le dossier de donnees.
+
+   Le mode --headless est soumis a la meme regle : si une instance
+   tourne, le pont MCP du port 7555 est DEJA en service, une seconde
+   n'apporterait rien et echouerait sur EADDRINUSE.
+   ═══════════════════════════════════════════════════════════════════ */
+const IS_PRIMARY_INSTANCE = app.requestSingleInstanceLock();
+
+if (!IS_PRIMARY_INSTANCE) {
+  log.info('main', 'une instance de MyFabmesh.AI tourne deja — cette instance rend la main');
+  _log('boot', 'seconde instance detectee -> sortie immediate');
+  app.quit();
+} else {
+  // Une autre instance vient d'etre lancee : plutot que de la laisser
+  // ouvrir une seconde fenetre, on remonte celle qui existe deja. C'est
+  // le comportement attendu quand l'utilisateur reclique sur la vignette
+  // — et cela evite qu'il croie que l'application n'a pas demarre.
+  app.on('second-instance', () => {
+    log.info('main', 'seconde instance interceptee — remontee de la fenetre existante');
+    try {
+      const w = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : _splashWindow;
+      if (w && !w.isDestroyed()) {
+        if (w.isMinimized()) w.restore();
+        if (!w.isVisible()) w.show();
+        w.focus();
+      }
+    } catch (e) {
+      log.warn('main', `remontee de la fenetre impossible: ${e && e.message}`);
+    }
+  });
+}
+
 app.whenReady().then(() => {
+  // Instance surnumeraire : app.quit() est deja demande ci-dessus. On ne
+  // construit RIEN — ni fenetre, ni sous-systeme — sinon on recreerait
+  // precisement la contention que le verrou existe pour empecher.
+  if (!IS_PRIMARY_INSTANCE) {
+    log.info('boot', 'instance surnumeraire — aucun sous-systeme demarre');
+    return;
+  }
   log.info('boot', `t=${bootMs()}ms Electron pret (whenReady)`);
   // ----------------------------------------------------------
   // STEP 1 — Create & paint the window FIRST, in isolation.
