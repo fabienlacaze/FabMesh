@@ -22658,6 +22658,8 @@ async function showCloudLoginModal() {
           <button type="button" id="cl-eye" title="Show password" tabindex="-1"
                   style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#889;cursor:pointer;font-size:14px;padding:4px;line-height:1;">&#128065;</button>
         </div>
+        <input id="cl-code" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code from your email" autocomplete="one-time-code"
+               style="display:none;width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px 10px;border-radius:8px;border:1px solid #3a3a4a;background:#0f0f16;color:#eee;font-size:13px;letter-spacing:2px;">
         <div id="cl-err" style="min-height:16px;font-size:11px;color:#f66;margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">
           <span style="display:flex;flex-direction:column;gap:3px;">
@@ -22683,9 +22685,68 @@ async function showCloudLoginModal() {
       eye.style.color = show ? '#8ab4ff' : '#889';
       inp.focus();
     };
-    ov.querySelector('#cl-signup').onclick = (e) => {
+    /* ═══════════════════════════════════════════════════════════════
+       INSCRIPTION SUR PLACE — la même fenêtre, trois états.
+
+       « Create an account » ouvrait le NAVIGATEUR sur la page de connexion
+       du site. C'était le seul chemin d'inscription de tout le produit, et
+       le refus de certification n°2 portait exactement là-dessus :
+       « the account creation feature is not functional ». Un testeur qui
+       clique dessus quittait l'application — donc cessait de l'évaluer.
+
+       États : 'signin' → 'signup' → 'verify'. Le code à six chiffres vient
+       de l'e-mail Supabase (gabarits `{{ .Token }}` du dépôt : un code, pas
+       un lien, parce qu'Outlook SafeLinks cassait les liens).
+       ═══════════════════════════════════════════════════════════════ */
+    let mode = 'signin';
+    const els = {
+      titre: ov.querySelector('h3'),
+      texte: ov.querySelector('p'),
+      email: ov.querySelector('#cl-email'),
+      pass: ov.querySelector('#cl-pass'),
+      code: ov.querySelector('#cl-code'),
+      err: ov.querySelector('#cl-err'),
+      ok: ov.querySelector('#cl-ok'),
+      lienSignup: ov.querySelector('#cl-signup'),
+      lienForgot: ov.querySelector('#cl-forgot'),
+    };
+    const setMode = (m) => {
+      mode = m;
+      els.err.textContent = '';
+      els.err.style.color = '#f66';
+      const T = (s) => (typeof _i18nT === 'function' ? _i18nT(s) : s);
+      if (m === 'signin') {
+        els.titre.textContent = T('Sign in to MyFabmesh Cloud');
+        els.texte.textContent = T('No NVIDIA GPU was detected on this device, so images are generated on the MyFabmesh cloud. Sign in with your MyFabmesh account (new accounts get free credits).');
+        els.pass.parentElement.style.display = '';
+        els.pass.setAttribute('autocomplete', 'current-password');
+        els.code.style.display = 'none';
+        els.ok.textContent = T('Sign in');
+        els.lienSignup.textContent = T('Create an account');
+        els.lienForgot.style.display = '';
+      } else if (m === 'signup') {
+        els.titre.textContent = T('Create your MyFabmesh account');
+        els.texte.textContent = T('New accounts get 50 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.');
+        els.pass.parentElement.style.display = '';
+        els.pass.setAttribute('autocomplete', 'new-password');
+        els.code.style.display = 'none';
+        els.ok.textContent = T('Create account');
+        els.lienSignup.textContent = T('I already have an account');
+        els.lienForgot.style.display = 'none';
+      } else {
+        els.titre.textContent = T('Confirm your email');
+        els.texte.textContent = T('We sent a 6-digit code to your email address. Enter it below to finish creating your account.');
+        els.pass.parentElement.style.display = 'none';
+        els.code.style.display = '';
+        els.ok.textContent = T('Confirm');
+        els.lienSignup.textContent = T('Back to sign in');
+        els.lienForgot.style.display = 'none';
+        setTimeout(() => els.code.focus(), 50);
+      }
+    };
+    els.lienSignup.onclick = (e) => {
       e.preventDefault();
-      _openCloudSite('/login');
+      setMode(mode === 'signin' ? 'signup' : 'signin');
     };
     ov.querySelector('#cl-forgot').onclick = async (e) => {
       e.preventDefault();
@@ -22702,19 +22763,51 @@ async function showCloudLoginModal() {
       }
     };
     const submit = async () => {
-      const email = ov.querySelector('#cl-email').value.trim();
-      const pass = ov.querySelector('#cl-pass').value;
-      const err = ov.querySelector('#cl-err');
-      if (!email || !pass) { err.textContent = _i18nT('Email and password are required.'); return; }
+      const T = (s) => (typeof _i18nT === 'function' ? _i18nT(s) : s);
+      const email = els.email.value.trim();
+      const pass = els.pass.value;
+      const err = els.err;
+      err.style.color = '#f66';
+
+      if (mode === 'verify') {
+        const code = els.code.value.trim();
+        if (!code) { err.textContent = T('Enter the code from your email.'); return; }
+        err.textContent = '';
+        els.ok.disabled = true;
+        const r = await API.cloudVerifySignup?.({ email, code });
+        els.ok.disabled = false;
+        if (r?.success) done(true);
+        else err.textContent = r?.error || T('That code was not accepted.');
+        return;
+      }
+
+      if (!email || !pass) { err.textContent = T('Email and password are required.'); return; }
+
+      if (mode === 'signup') {
+        if (pass.length < 6) { err.textContent = T('Password must be at least 6 characters.'); return; }
+        err.textContent = '';
+        els.ok.disabled = true;
+        const r = await API.cloudSignup?.({ email, password: pass });
+        els.ok.disabled = false;
+        if (!r?.success) { err.textContent = r?.error || T('Could not create the account.'); return; }
+        // Confirmations desactivees cote Supabase : la session est deja la.
+        if (r.codeRequis === false) { done(true); return; }
+        setMode('verify');
+        err.style.color = '#7ee787';
+        err.textContent = T('Account created — check your email for the code.');
+        return;
+      }
+
       err.textContent = '';
-      ov.querySelector('#cl-ok').disabled = true;
+      els.ok.disabled = true;
       const r = await API.cloudLogin({ email, password: pass });
-      ov.querySelector('#cl-ok').disabled = false;
+      els.ok.disabled = false;
       if (r?.success) done(true);
-      else err.textContent = r?.error || _i18nT('Sign-in failed.');
+      else err.textContent = r?.error || T('Sign-in failed.');
     };
-    ov.querySelector('#cl-ok').onclick = submit;
-    ov.querySelector('#cl-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    els.ok.onclick = submit;
+    els.pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    els.code.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
     setTimeout(() => ov.querySelector('#cl-email')?.focus(), 50);
   });
 }

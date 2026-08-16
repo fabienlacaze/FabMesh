@@ -109,6 +109,12 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   setComputeMode: (m) => ipcRenderer.send('compute-mode', m),
   cloudLogin: (opts) => ipcRenderer.invoke('cloud-login', opts),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
+  // Inscription DANS l'application (refus de certification n2 : « the account
+  // creation feature is not functional » — le seul chemin existant ouvrait le
+  // navigateur). Deux temps : creation, puis code a six chiffres recu par
+  // e-mail.
+  cloudSignup: (opts) => ipcRenderer.invoke('cloud-signup', opts),
+  cloudVerifySignup: (opts) => ipcRenderer.invoke('cloud-verify-signup', opts),
   cloudRecover: (opts) => ipcRenderer.invoke('cloud-recover', opts),
   cloudStatus: () => ipcRenderer.invoke('cloud-status'),
   // Préchauffage du GPU cloud (anti cold start 524) — fire-and-forget.

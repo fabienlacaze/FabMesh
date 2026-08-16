@@ -19993,3 +19993,35 @@ L'ASSISTANT N'OUVRE PLUS LE NAVIGATEUR NULLE PART. Signale au user, non
 tranche : le logo « MyFabmesh.AI » de la barre du haut reste cliquable et ouvre
 le site (wizard.js ~721) — ce n'est pas un bouton de choix, mais c'est une
 sortie decouvrable pendant l'installation.
+
+## 2026-08-16 (suite) — INSCRIPTION DANS L'APPLICATION (refus n2 enfin traite)
+
+Le user, depuis la VM : « si je click sur create account je tombe sur cette
+page internet ». C'est la dette que j'avais identifiee sans la traiter, et
+c'est la cause EXACTE du refus n2 : « the account creation feature is not
+functional ». Le lien « Create an account » de la modale de connexion appelait
+`_openCloudSite('/login')` : le testeur quittait l'application, donc cessait de
+l'evaluer.
+
+MOTEUR (src/main/cloud_fallback.js), calque sur `recoverPassword` qui appelle
+deja Supabase en direct :
+  * `signup(email, password)` -> POST /auth/v1/signup. Si les confirmations
+    sont desactivees, Supabase rend une session : on la garde et c'est fini.
+    Sinon un code a SIX CHIFFRES part par e-mail (les gabarits du depot
+    utilisent `{{ .Token }}`, pas un lien — Outlook SafeLinks cassait les
+    liens de confirmation).
+  * `verifySignup(email, code)` -> POST /auth/v1/verify (type signup), echange
+    le code contre une session, exactement comme une connexion.
+  * Handlers `cloud-signup` et `cloud-verify-signup`, ponts `cloudSignup` et
+    `cloudVerifySignup` dans preload.js.
+
+INTERFACE (src/renderer/index2.js) : la MEME fenetre porte desormais trois
+etats — signin -> signup -> verify. Le lien bascule entre eux au lieu d'ouvrir
+le navigateur ; un champ de code apparait a l'etape de confirmation ; les
+libelles, le texte d'aide et le bouton suivent l'etat. Mot de passe verifie a
+6 caracteres minimum avant tout appel reseau.
+
+VERIFIE EN DEV via CDP : les ponts sont exposes
+(`{"cloudSignup":"function","cloudVerifySignup":"function"}`). La validation
+visuelle des trois etats reste a faire DANS LA VM — le user l'a demande
+explicitement, et c'est la seule salle blanche fidele.

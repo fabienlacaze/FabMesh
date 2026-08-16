@@ -196,6 +196,73 @@ async function login(email, password) {
   return { success: true, email: _mem.email };
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   INSCRIPTION DANS L'APPLICATION
+
+   Jusqu'ici, « Create an account » ouvrait le NAVIGATEUR sur la page de
+   connexion du site. C'était le seul chemin d'inscription existant — et
+   le refus de certification n°2 portait précisément là-dessus :
+   « the account creation feature is not functional ». Un testeur qui
+   veut créer un compte doit pouvoir le faire SANS quitter l'application.
+
+   Deux étapes, parce que Supabase confirme l'adresse :
+     1. `signup()`       crée le compte ; Supabase envoie un code à six
+                         chiffres (les gabarits d'e-mail du dépôt utilisent
+                         `{{ .Token }}`, pas un lien — Outlook SafeLinks
+                         cassait les liens de confirmation) ;
+     2. `verifySignup()` échange le code contre une session, exactement
+                         comme une connexion.
+
+   Si les confirmations sont désactivées côté Supabase, l'étape 1 rend
+   déjà une session : on la garde et on saute l'étape 2.
+   ═══════════════════════════════════════════════════════════════════ */
+async function signup(email, password) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON },
+    body: JSON.stringify({ email, password }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    throw new Error(j.error_description || j.msg || j.error || `HTTP ${r.status}`);
+  }
+  // Confirmations desactivees : Supabase rend directement une session.
+  if (j.access_token) {
+    _mem = {
+      access_token: j.access_token,
+      refresh_token: j.refresh_token || null,
+      expires_at: Date.now() + (Number(j.expires_in || 3600) - 90) * 1000,
+      email: j.user?.email || email,
+    };
+    _saveSession();
+    try { _startHeartbeat(); } catch (_) {}
+    return { success: true, email: _mem.email, codeRequis: false };
+  }
+  // Cas normal : un code a six chiffres part par e-mail.
+  return { success: true, email, codeRequis: true };
+}
+
+async function verifySignup(email, token) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON },
+    body: JSON.stringify({ type: 'signup', email, token }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    throw new Error(j.error_description || j.msg || j.error || `HTTP ${r.status}`);
+  }
+  _mem = {
+    access_token: j.access_token,
+    refresh_token: j.refresh_token || null,
+    expires_at: Date.now() + (Number(j.expires_in || 3600) - 90) * 1000,
+    email: j.user?.email || email,
+  };
+  _saveSession();
+  try { _startHeartbeat(); } catch (_) {}
+  return { success: true, email: _mem.email };
+}
+
 async function recoverPassword(email) {
   // Même flux que le « Mot de passe oublié » du site (LoginForm.tsx:187) :
   // Supabase envoie l'email de réinitialisation, le lien atterrit sur
@@ -1045,6 +1112,15 @@ function register(deps) {
   });
   ipcMain.handle('cloud-login', async (_e, { email, password } = {}) => {
     try { return await login(String(email || ''), String(password || '')); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
+  // Inscription DANS l'application : plus aucun aller-retour par le navigateur.
+  ipcMain.handle('cloud-signup', async (_e, { email, password } = {}) => {
+    try { return await signup(String(email || ''), String(password || '')); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
+  ipcMain.handle('cloud-verify-signup', async (_e, { email, code } = {}) => {
+    try { return await verifySignup(String(email || ''), String(code || '')); }
     catch (e) { return { success: false, error: String(e.message || e) }; }
   });
   ipcMain.handle('cloud-recover', async (_e, { email } = {}) => {
