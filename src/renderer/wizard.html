@@ -149,20 +149,26 @@
           <li>Add an NVIDIA GPU later and you can switch to free local mode (the AI
               models are downloaded at that point)</li>
         </ul>
-        <!-- UNE SEULE action primaire. Cette page annonce que la décision est
-             prise ; lui adjoindre plusieurs sorties revenait à la contredire.
-             « Use the website instead » a été SUPPRIMÉ : sur un poste sans GPU
-             NVIDIA — c'est-à-dire sur TOUTE machine de certification, dont le
-             Surface Laptop 4 du refus n°5 — ce bouton invitait littéralement le
-             testeur à quitter l'application pour aller sur un site. Un testeur
-             qui s'en va n'évalue plus le produit.
-             « Create a free account » reste : c'est aujourd'hui le seul chemin
-             d'inscription (aucun pont cloudSignup n'existe) et le testeur en a
-             besoin — le refus n°2 portait sur la création de compte. Il est
-             ramené au rang d'action secondaire. -->
+        <!-- UNE page, UNE décision. Cette page annonce que le mode Cloud est
+             retenu ; lui adjoindre des sorties revenait à la contredire.
+             Elle est vue par TOUT testeur de certification, puisqu'ils sont
+             toujours sur une machine sans GPU NVIDIA (le Surface Laptop 4 du
+             refus n°5, par exemple).
+
+             SUPPRIMÉ « Use the website instead » : il invitait littéralement
+             le testeur à quitter l'application pour un site. Un testeur qui
+             s'en va n'évalue plus le produit.
+
+             SUPPRIMÉ « Create a free account » : il ouvrait lui aussi le
+             navigateur. L'inscription n'est pas perdue pour autant — l'app
+             présente sa modale de connexion, lien d'inscription compris, dès
+             qu'une action cloud en a besoin (`needsCloudLogin`). Le chemin
+             existe donc là où il sert vraiment, au lieu d'encombrer une page
+             de décision.
+
+             Reste « Back », navigation standard commune à toutes les pages. -->
         <div class="wiz-actions">
           <button class="ghost-btn" data-back="detect">Back</button>
-          <button class="ghost-btn" id="btn-create-account">Create a free account</button>
           <button class="primary-btn" id="btn-launch-cloud">Continue in Cloud mode</button>
         </div>
       </div>

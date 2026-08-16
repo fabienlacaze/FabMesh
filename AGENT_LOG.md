@@ -19935,3 +19935,61 @@ Contenu par rapport au 1.0.17 refuse :
      diagnostics (405aece)
 
 Paquet signe pour le banc et pour la VM.
+
+## 2026-08-16 (suite) — VM : LE CRASH N'EST PAS REPRODUCTIBLE, hypothese 45 s REFUTEE
+
+SALLE BLANCHE REELLE enfin obtenue (VM VirtualBox, Windows 11 Pro 26200.8037,
+AUCUN GPU NVIDIA, aucun cache HF, SAC en mode evaluation, 8 Go / 4 coeurs,
+disque froid, toute premiere installation). Pilotage depuis l'hote par
+`VBoxManage guestcontrol` — operationnel apres un redemarrage de l'invite, qui
+a fait apparaitre la facilite « VirtualBox System Service ».
+
+RESULTATS DU CHRONOMETRAGE, tous en premier lancement :
+
+    1.0.17 (le paquet REFUSE)  t=1603ms FENETRE PRETE (ready-to-show)
+    1.0.18                     t=1295ms
+    machine de dev (RTX 5080)  t=8477ms
+
+MON HYPOTHESE DES 45 s EST REFUTEE. La fenetre peint en 1,3-1,6 s sur la VM
+SANS GPU — soit SIX FOIS PLUS VITE que sur la machine de dev. La lenteur
+constatee sur le poste de dev ne venait pas du GPU mais des DONNEES : 289
+projets, 913 images, 712 maillages a charger. Une machine de labo, vierge, est
+plus rapide, pas plus lente. Le watchdog des 8 s ne s'est meme pas declenche
+dans la VM.
+
+Journal sain par ailleurs : `no NVIDIA GPU -> fallback cloud`,
+`mcp-bridge listening on 127.0.0.1:7555` (aucun EADDRINUSE, instance unique),
+`compute-mode cloud`, routage `welcome -> detect -> no-gpu` correct, AUCUNE
+erreur Windows, aucune fenetre de secours.
+
+CONCLUSION : « The product crashes at launch » n'est PAS reproductible dans une
+salle blanche fidele, ni pour 1.0.17 ni pour 1.0.18. La cause la plus plausible
+qui subsiste est celle que 1.0.18 corrige : un testeur qui clique DEUX FOIS sur
+la vignette obtenait deux applications entieres en concurrence sur le port 7555
+et le dossier de donnees, dont une pouvait mourir aussitot apres avoir affiche
+sa fenetre.
+
+ECARTS RESIDUELS AVEC LE LABO, assumes : build 26200.8037 contre 26200.8655 ;
+paquet auto-signe contre paquet signe par le Store (SAC ne les traite pas
+pareil) ; VM en francais contre labo probablement en anglais ; un des refus
+mentionnait un Surface Laptop 4, donc ils testent aussi sur du materiel reel.
+
+## 2026-08-16 (suite) — page sans-GPU ramenee a UNE decision
+
+Le user, en voyant la page dans la VM : « pourquoi tous ces choix ? » puis
+« toujours trop de choix » puis « pourquoi 2 choix ? ». Il a raison : une page
+intitulee « Cloud mode will be used on this PC » annonce une decision prise,
+elle ne doit pas presenter un menu.
+
+Etat final : « Back » + « Continue in Cloud mode ». Rien d'autre.
+
+RETIRE « Create a free account » : il ouvrait le navigateur lui aussi.
+L'inscription n'est pas perdue — l'application presente sa modale de connexion,
+lien d'inscription compris, des qu'une action cloud le demande
+(`needsCloudLogin`). Le chemin existe donc la ou il sert, au lieu d'encombrer
+une page de decision. `SIGNUP_URL` devenait mort, supprime.
+
+L'ASSISTANT N'OUVRE PLUS LE NAVIGATEUR NULLE PART. Signale au user, non
+tranche : le logo « MyFabmesh.AI » de la barre du haut reste cliquable et ouvre
+le site (wizard.js ~721) — ce n'est pas un bouton de choix, mais c'est une
+sortie decouvrable pendant l'installation.

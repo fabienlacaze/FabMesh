@@ -180,10 +180,9 @@ document.addEventListener('click', (e) => {
   goto(target);
 });
 
-// URL d'inscription (parcours « je n'ai pas encore de compte »). Le mode Cloud
-// exige un compte : sans bouton dédié, le testeur devait deviner que la création
-// se fait depuis une page intitulée « login ».
-const SIGNUP_URL = 'https://myfabmesh-cloud.fabien65400.workers.dev/login?mode=signup&next=/app&src=desktop';
+// SIGNUP_URL a été retiré avec le bouton « Create a free account » : plus
+// aucun code de l'assistant n'ouvre le navigateur. L'inscription se fait
+// depuis la modale de connexion de l'application, au moment où elle sert.
 
 // Titre/texte de la page no-gpu adaptés au matériel réel : la page s'affiche
 // AUSSI pour un GPU NVIDIA à VRAM insuffisante (< 12 Go), où « No NVIDIA GPU
@@ -211,24 +210,20 @@ function renderNoGpuPage() {
   // Sinon : le texte par défaut du HTML (aucun GPU rapporté) est correct.
 }
 
-// Cloud redirect button (no-gpu page).
-document.addEventListener('DOMContentLoaded', () => {
-  const signupBtn = document.getElementById('btn-create-account');
-  if (signupBtn) {
-    signupBtn.addEventListener('click', () => {
-      if (window.wizardAPI && window.wizardAPI.openExternal) window.wizardAPI.openExternal(SIGNUP_URL);
-      else window.open(SIGNUP_URL, '_blank');
-    });
-  }
-  // Le bouton « Use the website instead » (btn-open-cloud) a été RETIRÉ de
-  // wizard.html, et son gestionnaire avec lui. Il ouvrait le navigateur sur
-  // /login depuis la page « Cloud mode will be used on this PC » — donc sur
-  // toute machine sans GPU NVIDIA, c'est-à-dire sur toute machine de
-  // certification. Il proposait au testeur de sortir de l'application au
-  // moment précis où elle venait de lui annoncer qu'elle savait se débrouiller.
-  // Si le lien redevient nécessaire un jour, il a sa place dans l'application
-  // (menu Aide), pas dans le chemin de premier lancement.
-});
+// La page « no-gpu » n'a plus qu'UNE action primaire, « Continue in Cloud
+// mode », et la navigation « Back ». Les deux boutons qui ouvraient le
+// navigateur ont été retirés de wizard.html, leurs gestionnaires avec eux :
+//
+//   - « Use the website instead » (btn-open-cloud) proposait au testeur de
+//     quitter l'application au moment précis où elle venait de lui annoncer
+//     qu'elle savait se débrouiller sans GPU ;
+//   - « Create a free account » (btn-create-account) ouvrait lui aussi le
+//     navigateur. L'inscription reste accessible là où elle sert : l'app
+//     présente sa modale de connexion, lien d'inscription compris, dès qu'une
+//     action cloud le demande (`needsCloudLogin`).
+//
+// Cette page est vue par TOUT testeur de certification — ils sont toujours sur
+// une machine sans GPU NVIDIA. Elle doit poser une décision, pas un menu.
 
 // ---------- STEP 2: detect ----------
 async function runDetect() {
