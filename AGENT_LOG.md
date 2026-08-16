@@ -19727,3 +19727,63 @@ watchdog et/ou distinguer « lent » de « mort » ; ne plus afficher la fenetre
 rouge sur un simple rejet de promesse ; passer WACK ; verifier sur Sentry
 (projet 4511435265212496) s'il existe un evenement du 11-12/08 venant du build
 26200.8655.
+
+## 2026-08-16 (suite) — LE FILET DE SECOURS ETAIT MORT DEPUIS LE REFUS N1
+
+Constat sorti de l'audit adversarial (6 analystes + refutation) : c'est le SEUL
+qui ait survecu a TROIS refutations independantes. Verifie ligne par ligne.
+
+`showFallbackWindow()` (main.js:831 avant correctif) sortait sur :
+
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) return;
+
+Intention d'origine : ne pas empiler une seconde fenetre sur une application
+saine. Sauf que le correctif du refus n1 a fait passer la fenetre principale en
+`show: true` (main.js:1304) — precisement pour qu'une fenetre existe toujours.
+`isVisible()` est donc VRAI DES LA CREATION, avant tout rendu. La garde sortait
+par consequent TOUJOURS.
+
+CONSEQUENCE : les quatre filets anti-ecran-noir etaient inertes :
+  * echec de loadFile (page introuvable, renderer mort) ;
+  * watchdog 45 s « renderer failed to paint » ;
+  * boucle render-process-gone (3 morts du renderer) ;
+  * createWindow qui leve / whenReady qui rejette.
+A 45 s, le watchdog fermait le splash PUIS appelait un filet qui ne faisait
+rien : la fenetre restait la, vide, de la couleur `#1a1a2e`, DEFINITIVEMENT et
+sans un mot. C'est mot pour mot le refus n4 (« unresponsive ») que ce filet
+avait ete ecrit pour rattraper. LE CORRECTIF D'UN REFUS AVAIT NEUTRALISE LE
+FILET D'UN AUTRE.
+
+CORRECTIF : la question n'est pas « la fenetre est-elle visible » mais « a-t-elle
+PEINT ». Nouveau drapeau `_mainWindowPainted`, mis a true dans 'ready-to-show'
+(seul endroit ou le premier rendu est certain), remis a false a chaque
+createWindow().
+
+    if (fenetre && _mainWindowPainted) return;   // app saine -> on n'empile pas
+    if (fenetre && !force) return;               // fenetre pas encore peinte
+
+PIEGE EVITE (souvenir du refus n5, ou une garde posee pour un cas a casse le cas
+oppose) : rearmer le filet sans discernement aurait fait surgir la fenetre rouge
+« could not start normally » sur le moindre rejet de promesse — une coupure
+reseau au demarrage aurait suffi. D'ou le parametre `force`, reserve aux
+appelants qui ont CONSTATE la panne (loadFile echoue, watchdog 45 s, renderer
+mort, createWindow/whenReady en echec). `uncaughtException` et
+`unhandledRejection` restent volontairement SANS force : ils n'affichent le
+diagnostic que s'il n'y a aucune fenetre du tout.
+
+NON-REGRESSION VERIFIEE en dev : demarrage normal -> 5 processus, UNE fenetre
+peinte (`ready-to-show` a 3049 ms), ZERO fenetre de secours. Le rejet non gere
+`app-update.yml` du mode dev, qui ouvrait une fenetre rouge, ne la declenche
+plus.
+
+CONSTATS ECARTES par la refutation (ne pas les refaire) : Electron 31/Chromium
+126 qui mourrait nativement sous MSIX sur 26200 ; fr-FR declare sans fr-FR.pak ;
+MaxVersionTested=10.0.14316.0 qui briderait le comportement d'execution ;
+process GPU en boucle sous SwiftShader ; absence de garde de boot dans
+wizard.html ; maximize() seulement dans ready-to-show ; bouton X inerte avant
+la premiere navigation.
+
+BRUIT DU BANC : les agents d'audit ont extrait le paquet dans le scratchpad
+(run117/) et LANCE l'application — d'ou les instances qui reapparaissaient sur
+le bureau du user. A encadrer la prochaine fois : un agent d'audit ne doit pas
+lancer l'application sur la machine de l'utilisateur.

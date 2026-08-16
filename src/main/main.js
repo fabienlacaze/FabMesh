@@ -824,11 +824,46 @@ const log = {
 // pointer instead of a silent exit.
 // ------------------------------------------------------------
 let _fallbackWindow = null;
-function showFallbackWindow(err) {
+// La fenêtre principale a-t-elle réellement PEINT ? Passe à true sur
+// 'ready-to-show'. Remis à false à chaque createWindow().
+//
+// CE DRAPEAU EXISTE PARCE QUE LA GARDE D'ORIGINE ÉTAIT MORTE. Elle testait
+// `mainWindow.isVisible()` pour ne pas empiler une seconde fenêtre sur une
+// application saine. Or le correctif du refus n°1 a fait passer la fenêtre
+// principale en `show: true` (main.js:1304) : `isVisible()` est donc vrai
+// DÈS SA CRÉATION, avant tout rendu. La garde sortait par conséquent
+// TOUJOURS, et les quatre filets anti-écran-noir étaient inertes — y compris
+// celui des 45 s, écrit précisément pour le cas « fenêtre visible mais
+// jamais peinte » du refus n°4. Le correctif d'un refus avait neutralisé le
+// filet d'un autre.
+//
+// « Visible » ne veut rien dire ici ; « a peint » veut dire quelque chose.
+let _mainWindowPainted = false;
+
+/**
+ * @param {Error|any} err
+ * @param {{force?: boolean}} [opts] force:true = l'appelant sait que
+ *   l'application est dans un état fatal (chargement de page échoué,
+ *   renderer déclaré mort, createWindow qui lève). Sans force, on ne
+ *   dérange PAS l'utilisateur pendant un démarrage qui se déroule
+ *   peut-être normalement : un rejet de promesse isolé (coupure réseau,
+ *   appel cloud qui échoue) ne doit pas faire surgir une fenêtre d'erreur
+ *   rouge par-dessus une application en train de démarrer. C'est
+ *   exactement le travers du refus n°5 : une garde posée pour un cas qui
+ *   casse le cas opposé.
+ */
+function showFallbackWindow(err, opts) {
   try {
     if (typeof app === 'undefined' || !app.isReady || !app.isReady()) return; // can't make a window yet
-    // A real, visible window already exists? Don't stack a second one.
-    if (typeof mainWindow !== 'undefined' && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) return;
+    const force = !!(opts && opts.force);
+    const fenetre = (typeof mainWindow !== 'undefined' && mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null;
+    // L'application a une fenêtre qui a VRAIMENT peint : tout va bien, on
+    // n'empile rien. C'est l'intention d'origine de la garde.
+    if (fenetre && _mainWindowPainted) return;
+    // Une fenêtre existe mais n'a pas encore peint : ce n'est pas forcément
+    // une panne, le premier lancement d'un paquet de 209 Mo est lent. Seuls
+    // les appelants qui ont CONSTATÉ l'échec (force) ont le droit d'afficher.
+    if (fenetre && !force) return;
     if (_fallbackWindow && !_fallbackWindow.isDestroyed()) return;
     _fallbackWindow = new BrowserWindow({
       width: 720, height: 480, show: true, backgroundColor: '#0b0b14',
@@ -1303,6 +1338,9 @@ function createWindow() {
     // SANS FENÊTRE = « crashes at launch ». show:true garantit une fenêtre.
     show: true
   });
+  // Nouvelle fenêtre = rien n'a encore été peint. À remettre à zéro ici,
+  // sinon un rechargement ultérieur laisserait le filet désarmé.
+  _mainWindowPainted = false;
 
   // Route to the wizard on first launch, to the main app afterwards.
   const startPage = isSetupComplete() ? 'index2.html' : 'wizard.html';
@@ -1313,7 +1351,9 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', startPage))
     .catch((e) => {
       log.error('main', `loadFile(${startPage}) failed: ${e && e.message}`);
-      try { if (typeof showFallbackWindow === 'function') showFallbackWindow(e); } catch (_) {}
+      // Échec CONSTATÉ du chargement de la page : la fenêtre ne peindra
+      // jamais rien, on force le diagnostic.
+      try { if (typeof showFallbackWindow === 'function') showFallbackWindow(e, { force: true }); } catch (_) {}
     });
   // WATCHDOG de révélation : si 'ready-to-show' ne fire pas en 8 s (le renderer
   // n'a jamais peint — SAC/GPU bloqué), on force show() + fenêtre de secours,
@@ -1348,11 +1388,15 @@ function createWindow() {
     // Le splash doit disparaître AUSSI sur ce chemin : sinon il resterait
     // au-dessus de la fenêtre de secours, en cachant le diagnostic.
     try { closeSplash(); } catch (_) {}
-    try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer failed to paint within 45s (ready-to-show never fired)')); } catch (_) {}
+    try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer failed to paint within 45s (ready-to-show never fired)'), { force: true }); } catch (_) {}
   }, 45000);
   mainWindow.once('ready-to-show', () => {
     log.info('boot', `t=${bootMs()}ms FENETRE PRETE (ready-to-show) <- ce que voit le testeur`);
     _revealed = true;
+    // Seul endroit où l'on sait que la fenêtre a VRAIMENT peint. Tant que
+    // ce drapeau est faux, la fenêtre n'est qu'une coquille de la couleur
+    // de fond — et le filet de secours doit rester armé.
+    _mainWindowPainted = true;
     clearTimeout(_showWatchdog);
     clearTimeout(_revealWatchdog);
     try { mainWindow.maximize(); } catch (_) {}
@@ -1384,7 +1428,7 @@ function createWindow() {
     // reload à l'infini après 3 essais et on montre la fenêtre de secours.
     if (++_rendererReloads > 3) {
       log.error('main', 'renderer keeps dying — stop reload loop, showing fallback');
-      try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer keeps dying: ' + (details && details.reason))); } catch (_) {}
+      try { if (typeof showFallbackWindow === 'function') showFallbackWindow(new Error('renderer keeps dying: ' + (details && details.reason)), { force: true }); } catch (_) {}
       return;
     }
     if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.reload(); } catch (_) {} }
@@ -2060,7 +2104,8 @@ app.whenReady().then(() => {
   } catch (e) {
     log.error('main', 'createWindow threw: ' + (e && (e.stack || e.message)));
     _log('fatal', 'createWindow threw: ' + (e && (e.stack || e.message)));
-    if (!HEADLESS) { try { showFallbackWindow(e); } catch (_) {} }
+    // createWindow a levé : il n'y aura pas de fenêtre principale utilisable.
+    if (!HEADLESS) { try { showFallbackWindow(e, { force: true }); } catch (_) {} }
   }
 
   // ----------------------------------------------------------
@@ -2105,7 +2150,8 @@ app.whenReady().then(() => {
   // whenReady itself rejected — last line of defense.
   log.error('main', 'whenReady rejected: ' + (e && (e.stack || e.message)));
   _log('fatal', 'whenReady rejected: ' + (e && (e.stack || e.message)));
-  try { showFallbackWindow(e); } catch (_) {}
+  // whenReady lui-même a échoué : plus rien ne construira d'interface.
+  try { showFallbackWindow(e, { force: true }); } catch (_) {}
 });
 
 // Ensure the SDXL server is running. Returns a promise that resolves when the
