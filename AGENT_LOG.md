@@ -19910,3 +19910,28 @@ Parcours joue : welcome -> detect -> mode(cloud) -> no-gpu -> lancement.
 
 Le meme pilote confirme la correction precedente : la page sans-GPU n'affiche
 plus que « Back | Create a free account | Continue in Cloud mode ».
+
+## 2026-08-16 (suite) — paquet 1.0.19 : les trois correctifs reunis
+
+PAQUET 1.0.19 construit et VERIFIE DANS L'ARCHIVE (jamais d'apres la sortie du
+builder) :
+  * manifeste Identity Version="1.0.19.0", 592 entrees, app.asar 71,9 Mo ;
+  * PRESENTS : IS_PRIMARY_INSTANCE x3, _mainWindowPainted x4, wizard-journal,
+    wizard_parcours.jsonl, tailAbs ;
+  * ABSENTS, verifie finement : 0 balise `<button id="btn-open-cloud">`,
+    0 `getElementById('btn-open-cloud')`, 0 « buy more on our website »,
+    0 ancienne garde `mainWindow.isVisible()) return`.
+    (Une recherche brute comptait 1 et 2 occurrences : ce sont les COMMENTAIRES
+    explicatifs laisses dans le code, pas du code vivant. Verifie en cherchant
+    la balise et l'appel, pas la chaine.)
+  * Les deux boutons restants de la page sans-GPU sont bien livres :
+    « Create a free account » et « Continue in Cloud mode ».
+
+Contenu par rapport au 1.0.17 refuse :
+  1. verrou d'instance unique (278628f)
+  2. filet anti-ecran-noir rearme, avec le parametre `force` (768d3f6)
+  3. page sans-GPU : suppression de la sortie vers le navigateur (1198aba)
+  4. journal de parcours de l'assistant + correctif de l'export des
+     diagnostics (405aece)
+
+Paquet signe pour le banc et pour la VM.
