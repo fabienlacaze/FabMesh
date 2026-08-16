@@ -19787,3 +19787,41 @@ BRUIT DU BANC : les agents d'audit ont extrait le paquet dans le scratchpad
 (run117/) et LANCE l'application — d'ou les instances qui reapparaissaient sur
 le bureau du user. A encadrer la prochaine fois : un agent d'audit ne doit pas
 lancer l'application sur la machine de l'utilisateur.
+
+## 2026-08-16 (suite) — paquet 1.0.18 + salle blanche en VM
+
+PAQUET 1.0.18 construit et VERIFIE DANS L'ARCHIVE (jamais d'apres la sortie du
+builder — piege du 1.0.17) :
+  * manifeste Identity Version="1.0.18.0", Name et Publisher inchanges ;
+  * 592 entrees, app.asar 71,9 Mo ;
+  * `IS_PRIMARY_INSTANCE` x3, `requestSingleInstanceLock` x1, `second-instance`
+    x1, `_mainWindowPainted` x4 presents dans l'asar ;
+  * l'ancienne garde morte `mainWindow.isVisible()) return` : 0 occurrence.
+
+VRAIE SALLE BLANCHE MONTEE (VM), car le banc MSIX sur la machine de dev
+reproduit le CONTENEUR mais pas la MACHINE : ici il y a une RTX 5080, Python,
+CUDA, un Windows rode. Le labo Microsoft teste sur des VM neuves sans GPU.
+
+Etat de la machine (scan) : AUCUN hyperviseur installe. WSL2+Ubuntu explique le
+`HypervisorPresent: True` mais ne fait pas tourner d'invite Windows. En
+revanche le user avait DEJA l'ISO : `Win11_25H2_French_x64_v2.iso` (7,89 Go,
+Telechargements) — build 10.0.26200.8037, MEME BRANCHE 25H2 que le testeur
+(26200.8655).
+
+A noter : le telechargement d'ISO Windows NE PEUT PAS ETRE SCRIPTE. L'API
+`software-download-connector` de Microsoft repond
+`ErrorSettings.SentinelReject` a toute requete sans vrai navigateur, meme avec
+la sequence de session complete (fp/tags + getskuinformation + link). L'ID
+d'edition Windows 11 multi-edition x64 est 3321, SKU 20046 = anglais US.
+
+VM : VirtualBox 7.2.14 via winget (base GPL-3 — Extension Pack PUEL NON
+installe, il interdit l'usage commercial). Windows 11 Professionnel (image #6),
+8 Go, 4 coeurs, disque 80 Go dynamique sur D:, EFI + TPM 2.0 + Secure Boot avec
+signatures Microsoft enrolees, ACCELERATION 3D DESACTIVEE — donc rendu logiciel,
+la condition exacte qui met a l'epreuve le watchdog des 45 s. Installation via
+`VBoxManage unattended install` (compte labo / Labo2026!).
+
+PROTOCOLE PREVU : installer 1.0.17 dans la VM pour tenter de reproduire le
+crash sur machine vierge sans GPU, puis 1.0.18 pour verifier les correctifs,
+puis piloter l'assistant Setup en CDP (dans la VM, `Invoke-CommandInDesktopPackage`
+n'aura pas besoin de l'UAC du user).
