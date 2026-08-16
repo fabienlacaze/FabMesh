@@ -20025,3 +20025,37 @@ VERIFIE EN DEV via CDP : les ponts sont exposes
 (`{"cloudSignup":"function","cloudVerifySignup":"function"}`). La validation
 visuelle des trois etats reste a faire DANS LA VM — le user l'a demande
 explicitement, et c'est la seule salle blanche fidele.
+
+## 2026-08-16 (fin de session) — paquet 1.0.21 pret, VALIDATION EN VM A FAIRE
+
+Paquet 1.0.21 construit et signe, portant TOUS les correctifs de la journee.
+Le user a ferme la VM ; la validation dans la salle blanche reste a faire
+demain, en priorite sur le parcours d'inscription.
+
+A FAIRE DEMAIN, dans l'ordre :
+  1. demarrer la VM   : VBoxManage startvm FabMesh-Cert-Lab --type gui
+     (compte labo / Labo2026!, guestcontrol operationnel depuis l'hote)
+  2. copier + installer 1.0.21 :
+     VBoxManage guestcontrol FabMesh-Cert-Lab --username labo --password 'Labo2026!' \
+       copyto "<scratch>\MyFabmesh.AI-1.0.21-signe-test.appx" "C:\labo\MyFabmesh.AI-1.0.21-signe-test.appx"
+     puis  ... run --exe powershell.exe -- powershell -File C:\labo\vm_test.ps1 -Version 1.0.21
+  3. VERIFIER LE PARCOURS D'INSCRIPTION : ouvrir la modale, cliquer « Create an
+     account », confirmer que la fenetre bascule EN INTERNE (titre « Create your
+     MyFabmesh account », bouton « Create account ») et n'ouvre PAS le navigateur.
+     Aller jusqu'au code a six chiffres avec une vraie adresse.
+  4. relever `logs/wizard_parcours.jsonl` dans le conteneur du paquet.
+
+PIEGES DE LA JOURNEE, a ne pas reapprendre :
+  * TOUT script .ps1 doit etre en ASCII PUR — PowerShell 5.1 lit l'UTF-8 sans
+    BOM en ANSI et casse sur le moindre accent ou tiret cadratin.
+  * Git Bash convertit les arguments commencant par « / » en chemins Windows :
+    `signtool /fd` et `cmd /c` cassent. Utiliser MSYS_NO_PATHCONV=1.
+  * `VBoxManage guestcontrol copyto` en 7.2 veut une destination POSITIONNELLE,
+    pas --target-directory.
+  * guestcontrol lance les processus en jeton RESTREINT : pas d'elevation. Le
+    certificat de test etant deja approuve dans la VM, Add-AppxPackage passe
+    quand meme.
+  * Les compteurs d'E/S de Get-Process ne refletent PAS l'activite disque de
+    VirtualBox : ils restent a zero meme quand la VM travaille. Ne pas s'en
+    servir pour diagnostiquer un blocage ; la taille du PNG de `controlvm
+    screenshotpng` est un bien meilleur indicateur (2 Ko = ecran noir).
