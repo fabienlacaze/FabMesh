@@ -19861,3 +19861,52 @@ cloudSignup ; et dans l'application elle-meme le lien « Create an account »
 lui aussi. Tant que ce pont n'existe pas, toute creation de compte sort de
 l'application. A ecrire (handler IPC + appel Supabase/worker + UI) — c'est une
 fonctionnalite, pas un nettoyage.
+
+## 2026-08-16 (suite) — journal de parcours de l'assistant
+
+DEMANDE DU USER : un journal qui enregistre ce que fait l'utilisateur dans les
+menus d'installation, les statuts (pass / rejete) et sa configuration.
+
+C'est le trou de six refus : les rapports Microsoft decrivent un symptome sans
+jamais dire QUEL ECRAN etait affiche ni SUR QUELLE MACHINE. « observed on
+devices running OS build 26200.8655 » ne dit rien du GPU, de la VRAM, de la RAM
+ni de l'etape atteinte.
+
+NOUVEAU : `logs/wizard_parcours.jsonl`, une ligne JSON par evenement.
+  * `session`   : ecran, taille de fenetre, langue(s), plateforme, UA, en ligne
+  * `version`   : version de l'application
+  * `config`    : GPU (vendeur/modele/VRAM/pilote), RAM, disque libre, mode
+                  recommande, avertissements, parcours cloud oui/non
+  * `verdict`   : UN par critere affiche, avec PASS / AVERTISSEMENT / REJETE —
+                  greffe sur `setRow()`, donc exactement ce que le testeur voit
+  * `etape`     : chaque transition, avec le detour reel (mode -> no-gpu)
+  * `clic`      : chaque bouton, son libelle, s'il etait inactif, sa cible
+                  (ecouteur en phase de CAPTURE : journalise meme si un
+                  gestionnaire arrete la propagation)
+  * `mode`      : mode retenu, et PAR QUI (recommandation ou utilisateur)
+  * `test_final`: PASS / REJETE / PLANTE, duree, erreur
+  * `fin`       : lancement, lancement_cloud, abandon, reconfiguration_annulee
+  * `erreur`    : window.onerror et rejets non geres du renderer
+
+AUCUNE DONNEE PERSONNELLE : ni e-mail, ni jeton, ni chemin de projet.
+
+Cote main : `ipcMain.on('wizard-journal')` ecrit le JSONL dans LOGS_DIR et
+double la ligne dans wizard.log, pour qu'une lecture humaine du seul wizard.log
+reste suffisante. Pont `wizardAPI.journal` dans preload.js.
+
+BUG TROUVE EN CHEMIN, CORRIGE : `export-diagnostics` lisait wizard.log via
+`tail()`, qui cherche dans LOGS_DIR (= userData/logs), alors que WIZARD_LOG est
+ecrit dans _userDataDir (= userData). LE JOURNAL DU PREMIER LANCEMENT N'A DONC
+JAMAIS FIGURE DANS LES DIAGNOSTICS EXPORTES — precisement le fichier qu'on
+aurait voulu recevoir d'un testeur. Ajout d'un `tailAbs()` pour les chemins
+absolus ; les diagnostics contiennent desormais wizard.log, wizard.prev.log et
+le parcours.
+
+VALIDE DE BOUT EN BOUT, pas seulement compile : application lancee avec
+`--remote-debugging-port=9222` et assistant pilote AUTOMATIQUEMENT en CDP
+(scratchpad `pilote_wizard.mjs`, sans dependance — Node 22 fournit WebSocket).
+Parcours joue : welcome -> detect -> mode(cloud) -> no-gpu -> lancement.
+19 evenements produits, dont les 5 verdicts PASS et le detour mode -> no-gpu.
+
+Le meme pilote confirme la correction precedente : la page sans-GPU n'affiche
+plus que « Back | Create a free account | Continue in Cloud mode ».

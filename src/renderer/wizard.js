@@ -38,10 +38,66 @@
   send('boot', ['wizard.js loaded at ' + new Date().toISOString() + ' — UA: ' + navigator.userAgent]);
 })();
 
+/* ═══════════════════════════════════════════════════════════════════
+   JOURNAL DE PARCOURS
+
+   Six refus de certification, six rapports décrivant un symptôme sans
+   jamais dire QUEL ÉCRAN était affiché ni SUR QUELLE MACHINE. Ce journal
+   comble ce trou : une ligne JSON par événement, versée dans le fichier
+   de diagnostics que le bouton « Export logs » dépose sur le Bureau.
+
+   Ne jamais y mettre de donnée personnelle : ni e-mail, ni jeton, ni
+   chemin de projet. Uniquement matériel et navigation.
+   ═══════════════════════════════════════════════════════════════════ */
+const _t0 = Date.now();
+function journal(type, data) {
+  try {
+    const evt = { type, ms: Date.now() - _t0, etape: (typeof currentStep === 'string' ? currentStep : null), ...(data || {}) };
+    if (window.wizardAPI && window.wizardAPI.journal) window.wizardAPI.journal(evt);
+  } catch (_) { /* le journal ne doit JAMAIS casser l'assistant */ }
+}
+
 const STEPS = ['welcome', 'detect', 'mode', 'download', 'test', 'no-gpu'];
 let currentStep = 'welcome';
 let hwReport = null;
 let chosenMode = null;
+
+// Ouverture de session : la configuration visible depuis le renderer. Le
+// matériel complet arrive plus tard, à la fin de la détection.
+journal('session', {
+  ecran: `${screen.width}x${screen.height}@${window.devicePixelRatio || 1}`,
+  fenetre: `${window.innerWidth}x${window.innerHeight}`,
+  langue: navigator.language,
+  langues: (navigator.languages || []).slice(0, 4),
+  plateforme: navigator.platform,
+  ua: navigator.userAgent,
+  enLigne: navigator.onLine,
+});
+try {
+  window.wizardAPI.getVersion().then((v) => journal('version', { version: v })).catch(() => {});
+} catch (_) {}
+
+// Toute erreur du renderer entre au journal : c'est elle qui expliquera un
+// écran vide chez un testeur.
+window.addEventListener('error', (e) => journal('erreur', {
+  message: e.message, fichier: e.filename, ligne: e.lineno, pile: e.error && e.error.stack ? String(e.error.stack).slice(0, 900) : null,
+}));
+window.addEventListener('unhandledrejection', (e) => journal('erreur', {
+  message: 'rejet non gere', detail: String(e.reason && e.reason.message ? e.reason.message : e.reason).slice(0, 500),
+}));
+
+// Tout clic sur un bouton, où qu'il soit. Le libellé est tronqué : on veut
+// savoir sur quoi le testeur a appuyé, pas archiver l'interface.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button, a');
+  if (!b) return;
+  journal('clic', {
+    id: b.id || null,
+    libelle: (b.textContent || '').trim().slice(0, 40),
+    inactif: b.disabled === true,
+    cible: b.dataset ? (b.dataset.next || b.dataset.back || null) : null,
+  });
+}, true);  // capture : on journalise même si un gestionnaire arrête la propagation
 // Track which steps have already been initialized so going Back/Next
 // doesn't re-run detect / re-trigger a download / re-run the smoke test.
 const initialized = new Set();
@@ -52,6 +108,7 @@ function goto(step) {
     return;
   }
   console.log('[wizard] goto', currentStep, '->', step);
+  journal('etape', { de: currentStep, vers: step });
   for (const s of STEPS) {
     document.getElementById(`page-${s}`).classList.toggle('active', s === step);
     const head = document.querySelector(`.wiz-step-tag[data-step="${s}"]`);
@@ -184,6 +241,18 @@ async function runDetect() {
     hwReport = await window.wizardAPI.detectHardware();
     if (!hwReport || typeof hwReport !== 'object') throw new Error('empty report');
     initialized.add('detect');
+    // LA CONFIG de la machine. C'est ce qui manquait a chaque rapport de
+    // certification : « observed on devices running OS build X » ne dit rien
+    // du GPU, de la VRAM ni de la RAM de la machine de test.
+    journal('config', {
+      gpu: hwReport.gpu ? { vendeur: hwReport.gpu.vendor, modele: hwReport.gpu.model, vram_mo: hwReport.gpu.vram_mb, pilote: hwReport.gpu.driver } : null,
+      ram_mo: hwReport.ram_mb,
+      disque_libre_go: hwReport.disk_free_gb,
+      mode_recommande: hwReport.recommended_mode,
+      pilote_ok: hwReport.driver_ok,
+      avertissements: hwReport.warnings || [],
+      parcours_cloud: needsCloudPath(),
+    });
   } catch (e) {
     // DÉGRADATION SÛRE : la détection ne doit jamais empêcher d'entrer dans
     // l'application. Sans rapport matériel exploitable on suppose « pas de GPU
@@ -198,6 +267,7 @@ async function runDetect() {
     status.textContent = 'Hardware check unavailable — MyFabmesh.AI will use Cloud mode. Click Continue.';
     if (retryBtn) retryBtn.classList.remove('hidden');
     document.getElementById('btn-detect-next').disabled = false;
+    journal('config', { detection: 'ECHEC', raison: String((e && e.message) || e).slice(0, 200), repli: 'cloud' });
     return;
   }
   status.classList.add('hidden');
@@ -209,6 +279,13 @@ async function runDetect() {
     const el = document.getElementById(id);
     el.textContent = text;
     el.className = 'wiz-val ' + (cls || '');
+    // Chaque critère au journal avec son verdict : c'est exactement ce que le
+    // testeur a sous les yeux sur la page « Checking your system ».
+    journal('verdict', {
+      critere: id.replace(/^r-/, ''),
+      valeur: String(text).slice(0, 60),
+      statut: cls === 'ok' ? 'PASS' : (cls === 'warn' ? 'AVERTISSEMENT' : (cls === 'bad' ? 'REJETE' : 'INCONNU')),
+    });
   };
 
   if (gpu && String(gpu.vendor || '').toUpperCase() === 'NVIDIA') {
@@ -295,6 +372,7 @@ function renderModeCards() {
     recoCard.querySelector('input').checked = true;
     recoCard.classList.add('selected');
     chosenMode = target;
+    journal('mode', { choisi: chosenMode, par: 'recommandation' });
     document.getElementById('btn-mode-next').disabled = false;
   }
 }
@@ -306,6 +384,7 @@ document.querySelectorAll('.wiz-mode-card').forEach(card => {
     card.classList.add('selected');
     card.querySelector('input').checked = true;
     chosenMode = card.dataset.mode;
+    journal('mode', { choisi: chosenMode, par: 'utilisateur' });
     document.getElementById('btn-mode-next').disabled = false;
   });
 });
@@ -569,6 +648,12 @@ async function runFinalTest() {
 
   try {
     const result = await window.wizardAPI.runFinalTest(chosenMode);
+    journal('test_final', {
+      statut: result && result.success ? 'PASS' : 'REJETE',
+      mode: chosenMode,
+      duree_s: result ? result.duration_s : null,
+      erreur: result && !result.success ? String(result.error || '').slice(0, 300) : null,
+    });
     if (result.success) {
       // 2026-06-14: animated success — a checkmark that draws itself in
       // a popping circle, then the text fades up. Replaces the plain
@@ -597,10 +682,12 @@ async function runFinalTest() {
   } catch (e) {
     status.textContent = '⚠ Test crashed: ' + e.message;
     status.classList.add('error');
+    journal('test_final', { statut: 'PLANTE', mode: chosenMode, erreur: String(e && e.message).slice(0, 300) });
   }
 }
 
 document.getElementById('btn-launch').addEventListener('click', async () => {
+  journal('fin', { sortie: 'lancement', mode: chosenMode });
   await window.wizardAPI.completeSetup({ mode: chosenMode, hw: hwReport });
 });
 
@@ -612,6 +699,7 @@ document.getElementById('btn-launch-cloud')?.addEventListener('click', async () 
   const b = document.getElementById('btn-launch-cloud');
   if (b) { b.disabled = true; b.textContent = 'Starting…'; }
   try { localStorage.setItem('fab-compute-mode', 'cloud'); } catch (_) {}
+  journal('fin', { sortie: 'lancement_cloud', mode: 'cloud' });
   await window.wizardAPI.completeSetup({ mode: 'cloud', hw: hwReport });
 });
 
@@ -712,6 +800,9 @@ function wizConfirm({ title, body, okLabel = 'Confirm', cancelLabel = 'Cancel' }
       cancelLabel: 'Keep setting up',
     });
     if (!ok) return;
+    // Un testeur qui QUITTE l'assistant, et a quelle etape, est l'information
+    // la plus precieuse d'un refus : elle dit ou il a renonce.
+    journal('fin', { sortie: isReco ? 'reconfiguration_annulee' : 'abandon', mode: chosenMode });
     try { await window.wizardAPI.cancel(); } catch (_) {}
   });
 })();

@@ -8076,6 +8076,42 @@ ipcMain.on('wizard-log', (_event, payload) => {
   } catch (_) {}
 });
 
+/* ═══════════════════════════════════════════════════════════════════
+   JOURNAL DE PARCOURS DE L'ASSISTANT
+
+   `wizard.log` ci-dessus est du texte libre : utile pour lire une pile
+   d'appels, inexploitable pour répondre à « qu'a fait le testeur, et
+   qu'a-t-il vu ? ». Or c'est LA question restée sans réponse pendant six
+   refus de certification : les rapports Microsoft décrivent un symptôme
+   sans jamais dire quel écran était affiché ni sur quelle machine.
+
+   Ce journal-ci est structuré (une ligne = un objet JSON) et enregistre :
+     - la CONFIG de la machine (matériel, OS, écran, langue, version) ;
+     - chaque ÉTAPE traversée, avec le temps écoulé depuis le démarrage ;
+     - chaque CLIC, avec l'identifiant et le libellé du bouton ;
+     - chaque VERDICT de la détection (ok / warn / bad, par critère) ;
+     - le mode retenu, le résultat du test final, la sortie de l'assistant.
+
+   Il est versé dans le fichier de diagnostics exporté, donc récupérable
+   auprès d'un testeur ou d'un utilisateur en une seule action.
+
+   AUCUNE DONNÉE PERSONNELLE : ni e-mail, ni jeton, ni chemin de projet —
+   uniquement du matériel et de la navigation.
+   ═══════════════════════════════════════════════════════════════════ */
+const WIZARD_JOURNAL = path.join(LOGS_DIR, 'wizard_parcours.jsonl');
+ipcMain.on('wizard-journal', (_event, evt) => {
+  try {
+    const ligne = JSON.stringify({
+      t: new Date().toISOString(),
+      ...(evt && typeof evt === 'object' ? evt : { type: 'brut', valeur: String(evt) }),
+    });
+    fs.appendFileSync(WIZARD_JOURNAL, ligne + '\n');
+    // Doublé dans wizard.log en texte, pour qu'une lecture humaine du seul
+    // wizard.log reste suffisante.
+    fs.appendFileSync(WIZARD_LOG, `[${new Date().toISOString()}] [parcours] ${ligne}\n`);
+  } catch (_) {}
+});
+
 // --- Save Buffer IPC (for GLTFExporter output) ---
 ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer, base64 }) => {
   try {
@@ -9200,6 +9236,16 @@ ipcMain.handle('export-diagnostics', async () => {
           : b.toString('utf8');
       } catch (e) { return '(not available: ' + (e && e.message) + ')'; }
     };
+    // Meme chose pour un chemin ABSOLU (tous les journaux ne vivent pas
+    // dans LOGS_DIR — wizard.log est a la racine de userData).
+    const tailAbs = (abs, max = 500 * 1024) => {
+      try {
+        const b = fs.readFileSync(abs);
+        return b.length > max
+          ? '...(truncated, last ' + Math.round(max / 1024) + ' KB)...\n' + b.slice(b.length - max).toString('utf8')
+          : b.toString('utf8');
+      } catch (e) { return '(not available: ' + (e && e.message) + ')'; }
+    };
     // Infos systeme (demande user 2026-08-09) : chaque bloc est en
     // tolerance de panne — le diagnostic doit fonctionner SURTOUT quand la
     // machine va mal, une sonde qui echoue ecrit '(indisponible)' et passe.
@@ -9236,7 +9282,13 @@ ipcMain.handle('export-diagnostics', async () => {
       'aiPython  : exists=' + fs.existsSync(path.join(AI_PYTHON_DIR, 'python.exe')) + '  torchReady=' + _aiPythonReady(),
       '',
       '===== fabmesh.log =====', tail('fabmesh.log'),
-      '', '===== wizard.log =====', tail('wizard.log'),
+      // CORRECTIF : `tail()` lit dans LOGS_DIR (= userData/logs), alors que
+      // wizard.log est ecrit dans _userDataDir (= userData). Le journal du
+      // PREMIER LANCEMENT — le plus utile de tous — n'a donc jamais figure
+      // dans les diagnostics exportes. On le lit desormais la ou il est.
+      '', '===== wizard.log =====', tailAbs(WIZARD_LOG),
+      '', '===== wizard.prev.log (execution precedente) =====', tailAbs(WIZARD_LOG_PREV),
+      '', '===== parcours de l assistant (etapes, clics, verdicts) =====', tail('wizard_parcours.jsonl'),
       '', '===== last_error.log =====', tail('last_error.log'),
     ].join('\n');
     fs.writeFileSync(out, body, 'utf8');

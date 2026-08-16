@@ -42,6 +42,11 @@ contextBridge.exposeInMainWorld('wizardAPI', {
   // Forward all wizard console logs to %APPDATA%\fabmesh\wizard.log
   // for post-mortem debugging of first-run issues.
   log: (payload) => ipcRenderer.send('wizard-log', payload),
+  // Journal STRUCTURE du parcours : etapes traversees, clics, verdicts de
+  // detection (ok/warn/bad), mode retenu, resultat du test, sortie. Repond a
+  // « qu'a fait le testeur et qu'a-t-il vu ? », question restee sans reponse
+  // pendant six refus de certification. Verse dans les diagnostics exportes.
+  journal: (evt) => ipcRenderer.send('wizard-journal', evt),
   detectHardware: () => ipcRenderer.invoke('wizard:detect-hardware'),
   getDownloadPlan: (mode) => ipcRenderer.invoke('wizard:download-plan', mode),
   freeSpace: () => ipcRenderer.invoke('wizard:free-space'),
