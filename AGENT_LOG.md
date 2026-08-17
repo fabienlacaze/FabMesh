@@ -20059,3 +20059,47 @@ PIEGES DE LA JOURNEE, a ne pas reapprendre :
     VirtualBox : ils restent a zero meme quand la VM travaille. Ne pas s'en
     servir pour diagnostiquer un blocage ; la taille du PNG de `controlvm
     screenshotpng` est un bien meilleur indicateur (2 Ko = ecran noir).
+
+## 2026-08-17 — WACK enfin passe : PASS, mais il NE TESTE PAS le lancement
+
+Windows App Certification Kit (appcert.exe 10.0.26100.7175) execute sur le
+paquet 1.0.21 signe, sur Windows 11 26200. Jamais fait sur aucun des six refus.
+
+    OVERALL_RESULT = PASS
+    24 tests, 23 PASS, 1 FAIL optionnel
+    duree : ~1 minute
+
+DECOUVERTE DE METHODE, LA PLUS IMPORTANTE DE CETTE PASSE : le journal dit
+    Note: Test application type - Centennial.
+    Note: Running tests without application deployment.
+Pour un paquet desktop-bridge, WACK fait de l'ANALYSE STATIQUE : il extrait le
+paquet et inspecte les fichiers. Il n'installe pas, ne lance pas, ne chronometre
+pas le demarrage. Autrement dit WACK N'AURAIT JAMAIS ATTRAPE un plantage au
+lancement — le reproche que je nous faisions (« jamais passe sur six refus »)
+etait donc en partie mal fonde. Il reste utile pour le manifeste, les capacites
+et les fichiers interdits ; il ne remplace pas la salle blanche en VM.
+
+L'UNIQUE ECHEC : « Blocked executables », marque OPTIONAL=TRUE, sans effet sur
+le verdict global. Il cherche des suites d'octets, sans distinguer un appel
+d'une coincidence. Faux positifs manifestes :
+    horse.glb / kaiju.glb  -> "CsI"     (des modeles 3D)
+    icudtl.dat             -> "Reg", "cdb"  (table Unicode)
+    af.pak, sv.pak         -> "reg"     (traductions Chromium)
+    unicodedata.pyd        -> "BASH", "CSI"
+Vraies references, dans app.asar : "\System32\REG.exe", "\sysnative\cmd.exe",
+"powershell", "bash". Les deux premieres ne sont PAS dans notre code (elles
+viennent d'un module embarque). `powershell` l'est, a huit endroits — tous dans
+`_collectProcTree`, `setProcessHardMemoryLimit` et `installAllLimitsSafetyKill`,
+c'est-a-dire la gestion des processus Python. AUCUN sur le chemin de demarrage :
+rien avant la ligne 2100, alors que la fenetre est creee vers 1280. Coherent
+avec le demarrage en 1,3 s mesure en VM.
+
+Pour un paquet a runFullTrust, lancer cmd ou powershell est licite — c'est
+precisement l'objet du full trust. D'ou le test optionnel et le PASS global.
+
+RAPPORT CONSERVE : scratchpad msixtest/wack_rapport.xml (717 Ko) et
+wack_sortie.txt.
+
+PIEGE D'ANALYSE A NE PAS REFAIRE : dans le XML de WACK, RESULT est un ELEMENT
+ENFANT, pas un attribut. Ma premiere lecture comparait un System.Xml.XmlElement
+a la chaine 'PASS' et annoncait « 24 echecs » — il y en avait un seul.
