@@ -452,3 +452,178 @@ les 54 s du budget de la requête, ne laissant que la diffusion.
 
 **=> Garder un GPU chaud en permanence (~47 $/jour) est INUTILE.** Le
 préchauffage traite la cause.
+
+---
+
+# Resoumission 1.0.22 — rapport de certification du 12/08/2026
+
+## Le grief
+
+`10.1.2.10 Functionality` :
+
+> The product crashes at launch. The issue was observed on the following devices
+> running OS build 26200.8655
+
+## Ce que l'enquête a établi — LE CRASH N'EST PAS REPRODUCTIBLE
+
+Pour la première fois en six refus, le paquet a été **réellement installé et
+lancé**, dans deux environnements :
+
+1. **Banc MSIX sur la machine de dev** — copie du `.appx` livré signée avec un
+   certificat auto-signé dont le sujet est exactement le `Publisher` du
+   manifeste, approuvée dans `Cert:\LocalMachine\TrustedPeople`, installée par
+   `Add-AppxPackage`, lancée par `shell:AppsFolder\<AUMID>`. Windows 11 build
+   26200, Smart App Control ACTIF.
+2. **Salle blanche en VM** — VirtualBox, Windows 11 Pro **26200.8037** (la même
+   branche 25H2 que le 26200.8655 du testeur), **aucun GPU NVIDIA**, aucun
+   Python, aucun cache HuggingFace, profil vierge, disque froid.
+
+Chronométrage de `ready-to-show`, tout premier lancement :
+
+| Paquet | VM sans GPU |
+|---|---|
+| 1.0.17 (celui refusé) | **1 603 ms** |
+| 1.0.18 | 1 295 ms |
+| 1.0.21 | 3 475 ms |
+| 1.0.22 | 5 968 ms |
+
+Aucune passe n'a déclenché la fenêtre de secours, ni la moindre erreur dans le
+journal d'événements Windows. (Ces mesures ne sont pas un banc contrôlé :
+l'hôte compilait pendant certaines passes. La marge avant le seuil des 45 s
+reste d'un facteur 7 dans le pire cas.)
+
+**Hypothèse réfutée en chemin** : je pensais que le watchdog des 45 s
+(« renderer considéré mort ») se déclenchait sur une machine lente sans GPU. La
+VM sans GPU est en réalité SIX FOIS PLUS RAPIDE que la machine de dev — la
+lenteur locale venait des données accumulées (289 projets, 913 images), pas du
+matériel. Une machine de labo est vierge, donc rapide.
+
+## Les défauts réels trouvés, et corrigés
+
+Le crash ne s'est pas reproduit, mais le banc a révélé quatre défauts qu'aucun
+test de lancement classique n'aurait montrés :
+
+1. **Aucun verrou d'instance unique.** `requestSingleInstanceLock` était absent :
+   chaque activation démarrait une application ENTIÈRE de plus. Constaté :
+   3 instances, 17 processus, 1,2 Go, en concurrence sur le même dossier de
+   données et le même port (`EADDRINUSE 127.0.0.1:7555`). Une instance
+   surnuméraire pouvait mourir juste après avoir affiché sa fenêtre — ce qu'un
+   testeur décrit exactement par « the product crashes at launch ». **C'est
+   aujourd'hui l'explication la plus plausible du refus.**
+2. **Le filet anti-écran-noir était mort depuis le refus n°1.** Sa garde testait
+   `mainWindow.isVisible()`, vrai dès la création à cause du `show:true` posé
+   *pour ce refus-là*. Les quatre filets de sécurité étaient donc inertes, dont
+   celui des 45 s écrit pour rattraper le refus « unresponsive ». Le correctif
+   d'un refus avait neutralisé celui d'un autre.
+3. **La page « sans GPU » offrait deux sorties vers le navigateur.** Sur la page
+   que voit NÉCESSAIREMENT tout testeur — ils sont toujours sans GPU NVIDIA —
+   deux boutons sur quatre quittaient l'application. Ramenée à une seule
+   décision : « Back » et « Continue in Cloud mode ».
+4. **Aucune inscription dans l'application.** « Create an account » ouvrait le
+   navigateur — la cause exacte du refus n°2 (« the account creation feature is
+   not functional »), jamais corrigée depuis. Désormais possible sans quitter
+   l'application, avec confirmation par code à 6 chiffres.
+
+## Ajouté pour rendre un éventuel 7e refus DIAGNOSTICABLE
+
+`logs/wizard_parcours.jsonl` : une ligne JSON par événement de l'assistant —
+configuration matérielle, étapes traversées, clics, verdict PASS/AVERTISSEMENT/
+REJETÉ de chaque critère affiché, mode retenu, résultat du test final, sortie.
+Aucune donnée personnelle.
+
+Corrigé au passage : `export-diagnostics` cherchait `wizard.log` dans `LOGS_DIR`
+alors qu'il est écrit dans `userData`. **Le journal du premier lancement n'avait
+donc JAMAIS figuré dans le fichier de diagnostics** — précisément celui qu'on
+aurait voulu recevoir d'un testeur.
+
+## Notes for certification — texte prêt à coller (1.0.22)
+
+```
+This app works on machines WITHOUT an NVIDIA GPU. On such devices the setup
+wizard detects the absence of an NVIDIA GPU and the app runs in Cloud mode:
+image generation, 3D meshes, rigging and animation all run on the MyFabmesh
+cloud service. No local AI model is downloaded or used.
+
+--- IF ANYTHING FAILS, PLEASE SEND US ONE FILE ---
+This build writes a detailed diagnostics log. If the app crashes, hangs, or a
+feature does not work, please click "Export logs" (top-right of the setup
+wizard, and in Settings inside the app). It saves a single .txt file to the
+Desktop containing the hardware configuration, every setup step you went
+through, and the exact error. Attaching that file to the report would let us
+fix the issue in one pass. Previous reports did not let us reproduce the
+problem.
+
+--- ABOUT THE PREVIOUS "CRASHES AT LAUNCH" REPORT ---
+We installed and launched the signed package on Windows 11 build 26200, and on
+a clean Windows 11 Pro 26200 virtual machine with no NVIDIA GPU, no Python and
+an empty user profile. The window paints in 1.3 to 6.0 seconds and we could not
+reproduce a crash. We did however find and fix a defect that matches the
+symptom: the app had no single-instance lock, so activating the tile twice
+started a second complete application; both instances then competed for the
+same data folder and the same local port, and one could exit immediately after
+showing its window. This build enforces a single instance.
+
+--- ACCOUNT CREATION IS NOW INSIDE THE APP ---
+Creating an account no longer opens a web browser. In the sign-in dialog, click
+"Create an account", enter an email and a password, then confirm with the
+6-digit code sent to that address. Everything happens inside the app.
+
+Test account (already funded with credits):
+  email:    <A REMPLIR>
+  password: <A REMPLIR>
+
+Steps to test image generation:
+  1. Launch the app. The wizard shows "Cloud mode will be used on this PC".
+     Click "Continue in Cloud mode".
+  2. Sign in with the test account above. (Signing in starts warming a cloud
+     GPU in the background.)
+  3. Create a project, type any prompt, click "Generate".
+  4. The FIRST generation after a period of inactivity can take up to 3 minutes
+     while a GPU container boots - the progress bar and a "Warming up cloud AI"
+     notice are shown. This is expected, not a failure. Later generations take
+     about 30 seconds.
+
+First launch is slower: Windows verifies the ~200 MB package the first time it
+runs. A splash screen with a progress indicator is shown during this time.
+
+In-app purchases: credits are sold on our website
+(https://myfabmesh-cloud.fabien65400.workers.dev), never inside the app -
+declared under "This app allows users to make purchases, but does not use the
+Microsoft Store commerce system".
+```
+
+## Vérifications faites sur ce paquet
+
+- **WACK** (`appcert.exe` 10.0.26100.7175) : `OVERALL_RESULT = PASS`, 23/24.
+  L'unique échec, « Blocked executables », est OPTIONNEL et composé de faux
+  positifs — WACK cherche des suites d'octets sans distinguer un appel d'une
+  coïncidence (`horse.glb` contient « CsI », `icudtl.dat` contient « Reg »,
+  `unicodedata.pyd` contient « BASH »). Les vraies références à `powershell`
+  sont toutes hors du chemin de démarrage.
+  **À SAVOIR** : pour un paquet Centennial, WACK annonce « Running tests without
+  application deployment » — il fait de l'analyse statique et **ne teste pas le
+  lancement**. Il n'aurait jamais attrapé ce refus. Utile pour le manifeste et
+  les fichiers interdits, il ne remplace pas la salle blanche.
+- Contenu de l'archive vérifié entrée par entrée, jamais d'après la sortie du
+  builder : manifeste `1.0.22.0`, 592 entrées, correctifs présents, boutons
+  supprimés à 0 occurrence.
+
+## Ce qui reste hors de portée, et qu'il faut assumer
+
+- **Smart App Control** : notre paquet de test est auto-signé, celui du Store ne
+  le sera pas. Un test sous SAC en mode appliqué produirait un FAUX POSITIF —
+  SAC bloquerait un paquet que le Store, lui, signerait. Cet angle mort ne peut
+  se lever qu'après acceptation. Ne pas retenter.
+- Build **26200.8037** contre **26200.8655** du testeur.
+- VM en français ; le labo teste probablement en anglais.
+- Un refus antérieur mentionnait un Surface Laptop 4 : ils testent aussi sur du
+  matériel réel, avec un iGPU Intel/AMD et sa propre pile graphique.
+
+## À FAIRE AVANT DE SOUMETTRE
+
+- [ ] Renseigner les identifiants du compte de test dans les notes ci-dessus
+- [ ] Vérifier sur Partner Center QUELLE version est réellement soumise — deux
+      fichiers ont déjà porté le même nom avec des contenus différents
+- [ ] Cocher la déclaration 10.8.2 (achats hors application)
+- [ ] Déployer le worker si `cloud/` a changé :
+      `cd cloud && npm run build && npx wrangler deploy`

@@ -20168,3 +20168,30 @@ comparaison honnete demanderait une VM fraiche et un hote au repos.
 Ce qui reste solide : meme la pire mesure (5968 ms) laisse une marge d'un
 facteur 7 avant le seuil des 45 s du watchdog, et aucune passe n'a declenche
 la fenetre de secours ni la moindre erreur Windows.
+
+## 2026-08-17 — notes de certification 1.0.22 redigees
+
+Section ajoutee a docs/STORE_RESUBMISSION.md. Choix de fond : puisque SIX
+rapports sur six ont eu une cause reelle differente de leur libelle, le
+probleme numero un n'est pas technique, c'est qu'on est AVEUGLE sur ce que le
+testeur voit. Les notes s'ouvrent donc sur une demande explicite :
+
+    --- IF ANYTHING FAILS, PLEASE SEND US ONE FILE ---
+    ... please click "Export logs" ... Attaching that file to the report would
+    let us fix the issue in one pass. Previous reports did not let us reproduce
+    the problem.
+
+Affirmation VERIFIEE avant de l'ecrire a Microsoft : le bouton « Export logs »
+existe bien a TROIS endroits — l'assistant (wiz-export-logs), les reglages
+(set-export-logs) et le panneau de tache (job-details-export-logs). Tous
+appellent exportDiagnostics, qui embarque desormais wizard.log, wizard.prev.log
+et le parcours.
+
+Les notes disent aussi la verite sur l'enquete : le crash n'est pas
+reproductible, on annonce le defaut trouve qui correspond au symptome (absence
+de verrou d'instance), et on signale que la creation de compte se fait
+maintenant dans l'application.
+
+Ecarts assumes ecrits noir sur blanc dans le document : SAC intestable avec un
+paquet auto-signe, build 26200.8037 contre 26200.8655, VM en francais, materiel
+reel non couvert.
