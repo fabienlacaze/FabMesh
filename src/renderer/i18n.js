@@ -954,6 +954,25 @@
       'This mesh has no job ID — cannot publish.': 'Ce maillage n\'a pas d\'identifiant de tâche — publication impossible.',
       'OK': 'OK',
       'Sign in': 'Se connecter',
+      // ---- Inscription DANS l'application (modale de connexion, 3 etats) ----
+      // Sans ces entrees, un utilisateur francais voyait une interface
+      // francaise ponctuee de messages d'erreur anglais — constate au banc.
+      'Create your MyFabmesh account': 'Créez votre compte MyFabmesh',
+      'New accounts get 50 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.':
+        'Les nouveaux comptes obtiennent 50 crédits gratuits. Choisissez un mot de passe d\'au moins 6 caractères — nous vous enverrons un code de confirmation à 6 chiffres par e-mail.',
+      'Create account': 'Créer le compte',
+      'I already have an account': 'J\'ai déjà un compte',
+      'Confirm your email': 'Confirmez votre adresse e-mail',
+      'We sent a 6-digit code to your email address. Enter it below to finish creating your account.':
+        'Nous avons envoyé un code à 6 chiffres à votre adresse e-mail. Saisissez-le ci-dessous pour terminer la création de votre compte.',
+      'Confirm': 'Confirmer',
+      'Back to sign in': 'Revenir à la connexion',
+      '6-digit code from your email': 'Code à 6 chiffres reçu par e-mail',
+      'Password must be at least 6 characters.': 'Le mot de passe doit comporter au moins 6 caractères.',
+      'Could not create the account.': 'Impossible de créer le compte.',
+      'Account created — check your email for the code.': 'Compte créé — consultez votre e-mail pour le code.',
+      'Enter the code from your email.': 'Saisissez le code reçu par e-mail.',
+      'That code was not accepted.': 'Ce code n\'a pas été accepté.',
       'Sending…': 'Envoi…',
       'Submitting…': 'Soumission…',
       'Saving…': 'Enregistrement…',

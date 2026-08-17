@@ -20103,3 +20103,43 @@ wack_sortie.txt.
 PIEGE D'ANALYSE A NE PAS REFAIRE : dans le XML de WACK, RESULT est un ELEMENT
 ENFANT, pas un attribut. Ma premiere lecture comparait un System.Xml.XmlElement
 a la chaine 'PASS' et annoncait « 24 echecs » — il y en avait un seul.
+
+## 2026-08-17 — 1.0.21 valide en VM + inscription verifiee etat par etat
+
+SALLE BLANCHE, paquet 1.0.21 : installation 17,1 s, fenetre peinte,
+`t=3475ms FENETRE PRETE`, `mcp-bridge listening` sans conflit,
+`compute-mode cloud`. Aucun plantage.
+
+LE JOURNAL DE PARCOURS FONCTIONNE DANS LE PAQUET — premiere preuve en
+conditions reelles. Il a capte la config de la VM :
+  {"type":"session","ecran":"2560x1315@1","langue":"fr","langues":["fr","en-US"],
+   "ua":"...myfabmesh-ai/1.0.21 Chrome/126...","enLigne":true}
+  {"type":"version","version":"1.0.21"}
+
+INSCRIPTION VERIFIEE ETAT PAR ETAT (pilotage CDP) :
+  2. modale      -> « Connexion au cloud MyFabmesh », bouton « Se connecter »,
+                    mot de passe visible, code masque, « oublie » visible
+  3. clic Creer  -> « Creez votre compte MyFabmesh », bouton « Creer le compte »,
+                    lien « J'ai deja un compte », « oublie » masque
+                    -> AUCUN NAVIGATEUR OUVERT
+  4. mdp trop court -> erreur affichee, aucun appel reseau
+  5. retour      -> etat connexion restaure
+  6. fermeture   -> modale retiree
+
+BUG DE MON PILOTE, corrige : `Runtime.evaluate` avec `awaitPromise:true` sur
+`showCloudLoginModal()` bloquait — cette fonction rend une promesse qui ne se
+resout QUE sur une action de l'utilisateur. Je concluais a tort que la modale
+ne s'ouvrait pas.
+
+FINITION TROUVEE AU BANC : les 14 nouvelles chaines n'etaient pas dans
+`i18n.js`. Un utilisateur francais voyait une interface francaise ponctuee de
+messages anglais (« Password must be at least 6 characters. »). Ajoutees ;
+reverifie : tout est en francais.
+
+CONSTAT IMPORTANT SUR SMART APP CONTROL — angle mort INTESTABLE localement.
+J'ai propose de repasser la VM avec SAC en mode applique (1) au lieu
+d'evaluation (2). C'est sans valeur : notre paquet est AUTO-SIGNE, et SAC
+bloquerait alors probablement un paquet que le Store, lui, signerait et donc
+approuverait. Un echec sous SAC applique serait un FAUX POSITIF. La question
+« SAC bloque-t-il notre paquet ? » ne peut se trancher qu'avec le paquet
+signe par le Store, c'est-a-dire apres acceptation. A ne pas retenter.
