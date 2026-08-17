@@ -20143,3 +20143,28 @@ bloquerait alors probablement un paquet que le Store, lui, signerait et donc
 approuverait. Un echec sous SAC applique serait un FAUX POSITIF. La question
 « SAC bloque-t-il notre paquet ? » ne peut se trancher qu'avec le paquet
 signe par le Store, c'est-a-dire apres acceptation. A ne pas retenter.
+
+## 2026-08-17 — 1.0.22 (traductions incluses) valide en VM
+
+Paquet verifie DANS L'ARCHIVE : manifeste 1.0.22.0, 592 entrees, presents
+IS_PRIMARY_INSTANCE x3, _mainWindowPainted x4, wizard-journal, cloud-signup,
+cloud-verify-signup, et la traduction francaise de l'inscription. Absents :
+btn-create-account et btn-open-cloud (0 occurrence de la balise).
+
+Salle blanche : installation 20,1 s, fenetre peinte, aucune erreur Windows.
+
+CHRONOMETRAGE `ready-to-show`, quatre paquets, meme VM :
+    1.0.17  1603 ms
+    1.0.18  1295 ms
+    1.0.21  3475 ms
+    1.0.22  5968 ms
+
+La tendance monte et il faut le dire : je ne peux PAS l'attribuer au code. Ces
+mesures n'ont pas ete prises dans des conditions comparables — l'hote compilait
+des paquets pendant certaines passes, la VM tourne depuis des heures, et son
+disque virtuel s'est fragmente au fil des installations/desinstallations. Une
+comparaison honnete demanderait une VM fraiche et un hote au repos.
+
+Ce qui reste solide : meme la pire mesure (5968 ms) laisse une marge d'un
+facteur 7 avant le seuil des 45 s du watchdog, et aucune passe n'a declenche
+la fenetre de secours ni la moindre erreur Windows.
