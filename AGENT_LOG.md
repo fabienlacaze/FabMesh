@@ -20240,3 +20240,28 @@ DEUX ACTIONS RESTANTES, HORS CODE :
     par une migration correctrice si le user redeploie un jour a zero.
   * Le gabarit d'e-mail corrige n'est pas encore en ligne : il faut un
     `supabase config push` pour que l'e-mail reel annonce 15.
+
+## 2026-08-18 — 1.0.23 : credits alignes, valide en salle blanche
+
+Archive verifiee : manifeste 1.0.23.0, 592 entrees.
+  « 15 free credits »  : 3 occurrences
+  « 50 free credits »  : 0   <- la promesse fausse a disparu du paquet
+  version francaise    : presente
+  correctifs anterieurs : IS_PRIMARY_INSTANCE x3, _mainWindowPainted x4,
+                          wizard-journal, cloud-verify-signup — tous intacts.
+
+Salle blanche (VM redemarree a neuf pour ce test) : installation 8,3 s,
+`t=2063ms FENETRE PRETE`, aucune erreur Windows.
+
+LE PIC A 5968 ms DU 1.0.22 ETAIT BIEN DU BRUIT, pas une regression : sur une
+VM fraiche le 1.0.23 retombe a 2063 ms. J'avais eu raison de refuser de
+l'attribuer au code.
+
+    1.0.17  1603 ms      1.0.22  5968 ms  (hote en compilation)
+    1.0.18  1295 ms      1.0.23  2063 ms  (VM fraiche)
+    1.0.21  3475 ms
+
+CENTRAGE : j'avais cru voir la carte de l'assistant decalee a droite sur une
+capture du user. FAUX — c'etait un artefact de recadrage. Capture directe de la
+VM en 2560x1315 : la carte est centree (centre a 1280 sur 2560). Elle est
+seulement ancree en haut, ce qui laisse du vide sur un ecran large. Cosmetique.
