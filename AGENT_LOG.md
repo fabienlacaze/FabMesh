@@ -20326,3 +20326,33 @@ Paquet a soumettre, verifie une derniere fois :
 Comptes de test valides, 15 credits chacun, boucle d'inscription prouvee :
     fabien65400+storetest@hotmail.fr  / FabMeshTest17870491
     fabien65400+storetest2@hotmail.fr / FabMeshTest17870509
+
+## 2026-08-18 — 1.0.23 SOUMIS (7e soumission)
+
+Partner Center : « In certification », pre-traitement en cours. La page
+Packages affiche bien « MyFabmesh.AI 1.0.23.appx — Validated » : le bon paquet
+est parti, le piege des deux fichiers homonymes est evite cette fois.
+
+CE QUI DISTINGUE CETTE SOUMISSION DES SIX PRECEDENTES :
+  * le paquet a ete REELLEMENT installe et lance (banc MSIX signe sur la
+    machine de dev + salle blanche en VM sans GPU) : demarrage ~2 s, aucune
+    erreur Windows, aucune fenetre de secours ;
+  * WACK est passe : OVERALL_RESULT = PASS, 23/24 (l'echec restant est
+    optionnel et compose de faux positifs) ;
+  * le parcours d'inscription est PROUVE EN PRODUCTION de bout en bout —
+    creation, e-mail Brevo, code a 6 chiffres, confirmation, session, credits.
+    C'est le refus n2 traite, quatre refus plus tard ;
+  * les notes de certification demandent explicitement le fichier de
+    diagnostic en cas de probleme.
+
+SI REFUS : reclamer D'ABORD le fichier exporte par « Export logs ». Il contient
+la config materielle, le parcours complet de l'assistant (etapes, clics,
+verdicts PASS/AVERTISSEMENT/REJETE) et l'erreur exacte. Ce serait la premiere
+fois qu'on saurait ce que le testeur voit au lieu de le deviner.
+
+ANGLES MORTS ASSUMES, dans l'ordre de vraisemblance :
+  1. Smart App Control face a un paquet signe par le STORE — intestable avant
+     acceptation, un test avec notre paquet auto-signe donnerait un faux positif ;
+  2. leur build 26200.8655 contre notre VM en 26200.8037 ;
+  3. une machine physique a iGPU Intel/AMD (un refus mentionnait un Surface
+     Laptop 4) — notre VM utilise le pilote d'affichage VirtualBox.
