@@ -3069,6 +3069,28 @@ function _updateVarStrengthHint() {
   else t = '⚠ Very strong — big re-interpretation; can drift away from the original.';
   el.textContent = t;
 }
+/* Cout REEL des variantes : prix unitaire de `modify` x nombre demande.
+ * Le prix unitaire vient de la grille vivante (window.__LIVE_PRICES, remplie
+ * par syncLivePricing) ; sans elle on retombe sur le defaut de la grille. */
+function _prixVariante() {
+  const p = window.__LIVE_PRICES;
+  if (p && typeof p.modify === 'number') return p.modify;
+  return 3;   // valeur de PRICING_DEFAULTS.modify
+}
+window._majCoutVariantes = function _majCoutVariantes() {
+  const n = Math.max(1, parseInt(document.getElementById('var-count')?.value, 10) || 1);
+  const unite = _prixVariante();
+  const badge = document.getElementById('var-apply-cost-badge');
+  if (badge) {
+    badge.textContent = String(unite * n);
+    badge.title = n + ' variante(s) x ' + unite + ' credits = ' + (unite * n);
+  }
+  // La phrase « Costs N per variant » de la modale doit suivre le prix
+  // unitaire, pas rester figee a 1.
+  const parVariante = document.getElementById('var-unit-cost');
+  if (parVariante) parVariante.textContent = String(unite);
+};
+
 document.getElementById('ws-variant-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
@@ -3076,8 +3098,13 @@ document.getElementById('ws-variant-btn')?.addEventListener('click', () => {
   if (!modal) return;
   const srcImg = document.getElementById('var-source-img');
   if (srcImg) srcImg.src = _toFileUrl(p.selectedImagePath) + (String(p.selectedImagePath).includes('?') ? '&' : '?') + 't=' + Date.now();
-  const badge = document.getElementById('var-apply-cost-badge');
-  if (badge) badge.textContent = document.getElementById('var-count')?.value || '1';
+  // PRIX x NOMBRE, et non le nombre.
+  //
+  // Ce badge affichait la valeur du curseur — quelqu'un a confondu « combien
+  // de variantes » et « combien ca coute ». Chaque variante appelle
+  // /api/modify-image, facture au prix `modify` (3 credits) : 4 variantes
+  // coutaient 12 credits pour 4 annonces. Audit du 2026-08-18.
+  window._majCoutVariantes();
   _updateVarStrengthHint();
   modal.classList.remove('hidden');
 });
@@ -3087,8 +3114,7 @@ document.getElementById('var-strength')?.addEventListener('input', (e) => {
 });
 document.getElementById('var-count')?.addEventListener('input', (e) => {
   document.getElementById('var-count-val').textContent = e.target.value;
-  const b = document.getElementById('var-apply-cost-badge');
-  if (b) b.textContent = e.target.value;
+  window._majCoutVariantes();
 });
 const _varClose = () => document.getElementById('variant-modal')?.classList.add('hidden');
 document.getElementById('var-cancel')?.addEventListener('click', _varClose);

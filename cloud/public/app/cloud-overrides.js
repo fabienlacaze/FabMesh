@@ -816,9 +816,38 @@
   // helpers don't have to wait for /api/pricing — they can render
   // immediately with the default and syncLivePricing rewrites later.
   const _COST_DEFAULTS = {
-    modify: 2, multi_view: 6, auto_inpaint: 3,
-    mask_inpaint: 3, upscale_image: 2, segment: 1,
+    modify: 3, multi_view: 3, auto_inpaint: 6,
+    mask_inpaint: 6, upscale_image: 3, segment: 3,
   };
+
+  /* CORRESPONDANCE AVEC LES VRAIES CLES DE LA GRILLE.
+   *
+   * Audit du 2026-08-18 : ces badges affichaient des chiffres FIGES, tous
+   * inferieurs au prix reellement debite — Auto Inpaint 3 pour 6, Draw Mask
+   * 3 pour 6, Modify 2 pour 3, Upscale 2 pour 3, apercu de masque 1 pour 3.
+   * syncLivePricing() ne les corrigeait jamais : elle ne touche que
+   * `dataset.credits` et `.cloud-cost-badge`, pas `.credit-badge`.
+   *
+   * Deux des cles utilisees ici n'existent meme pas dans la grille du worker
+   * (`multi_view`, `upscale_image`) : elles n'auraient donc pas pu etre
+   * resynchronisees telles quelles. D'ou cette table de correspondance.
+   *
+   * multi_view -> back_view : en mode 2 vues le bouton appelle /api/back-view
+   * (3 credits) ; en mode 6 vues il echoue avant tout debit. */
+  const _COST_PRICING_KEY = {
+    modify: 'modify',
+    multi_view: 'back_view',
+    auto_inpaint: 'auto_inpaint',
+    mask_inpaint: 'mask_inpaint',
+    upscale_image: 'upscale',
+    segment: 'segment',
+  };
+
+  /* Boutons qui ne declenchent AUCUN appel serveur : ils ne doivent porter
+   * aucun badge. `res-downscale` en portait un a 2 credits alors qu'il ne
+   * fait qu'un drawImage dans un canvas local — on facturait a l'ecran une
+   * operation gratuite. */
+  const _BOUTONS_GRATUITS = new Set(['res-downscale']);
 
   function _ensureModalBalanceStyle() {
     if (document.getElementById('cloud-modal-credit-style')) return;
@@ -868,13 +897,19 @@
     card.appendChild(pill);
   }
 
-  function _injectModalCostBadge(btnId, cost) {
+  function _injectModalCostBadge(btnId, cost, cleTarif) {
+    // Bouton purement local : pas de badge du tout.
+    if (_BOUTONS_GRATUITS.has(btnId)) return;
     const btn = document.getElementById(btnId);
     if (!btn) return;
     if (btn.querySelector('.credit-badge')) return;
     const badge = document.createElement('span');
     badge.className = 'credit-badge';
     badge.dataset.cost = String(cost);
+    // La cle de grille est portee par le badge lui-meme : syncLivePricing()
+    // peut ainsi reecrire n'importe quel badge sans connaitre la modale d'ou
+    // il vient. C'est ce chainon qui manquait.
+    if (cleTarif) badge.dataset.pricingKey = cleTarif;
     badge.textContent = String(cost);
     btn.appendChild(document.createTextNode(' '));
     btn.appendChild(badge);
@@ -889,11 +924,18 @@
       _injectModalBalanceBadge(modal);
       if (conf.skipCost) continue;
       const cost = _COST_DEFAULTS[conf.cost] ?? 1;
-      if (conf.applyBtn) _injectModalCostBadge(conf.applyBtn, cost);
-      (conf.extraBtns || []).forEach((id) => _injectModalCostBadge(id, cost));
-      // Secondary action priced differently (e.g. Auto-Inpaint "Preview mask"
-      // = 1 segment credit, distinct from the 3-credit Apply).
-      if (conf.previewBtn) _injectModalCostBadge(conf.previewBtn, _COST_DEFAULTS[conf.previewCost] ?? 1);
+      const cle = _COST_PRICING_KEY[conf.cost];
+      if (conf.applyBtn) _injectModalCostBadge(conf.applyBtn, cost, cle);
+      (conf.extraBtns || []).forEach((id) => _injectModalCostBadge(id, cost, cle));
+      // Action secondaire au tarif different (l'apercu de masque d'Auto-Inpaint
+      // est facture au prix `segment`, distinct de l'application).
+      if (conf.previewBtn) {
+        _injectModalCostBadge(
+          conf.previewBtn,
+          _COST_DEFAULTS[conf.previewCost] ?? 1,
+          _COST_PRICING_KEY[conf.previewCost]
+        );
+      }
     }
     // First refresh — fills the "…" with the actual balance. The
     // refresh function is exported on window so the existing topbar
@@ -1024,6 +1066,28 @@
       if (!btn) continue;
       const existing = btn.querySelector('.cloud-cost-badge');
       if (existing) existing.textContent = String(v);
+    }
+    /* BADGES DES MODALES — le chainon qui manquait.
+     *
+     * Ces `.credit-badge` n'etaient JAMAIS reecrits : la boucle ci-dessus ne
+     * traite que `.cloud-cost-badge`. Resultat, ils gardaient a vie leur
+     * valeur d'injection, toutes inferieures au prix debite (Auto Inpaint 3
+     * pour 6, Modify 2 pour 3...). Chaque badge porte maintenant sa cle de
+     * grille, on les met donc tous a jour d'un coup.
+     *
+     * On exclut `.modal-balance-badge` : celui-la affiche le SOLDE de
+     * l'utilisateur, pas un prix. */
+    /* La grille est exposee pour que le reste de l'application puisse
+     * calculer un total sans re-interroger le reseau — la modale des
+     * variantes s'en sert (prix unitaire x nombre demande). */
+    window.__LIVE_PRICES = prices;
+    try { window._majCoutVariantes?.(); } catch (_) {}
+    for (const badge of document.querySelectorAll('.credit-badge[data-pricing-key]')) {
+      if (badge.classList.contains('modal-balance-badge')) continue;
+      const v = prices[badge.dataset.pricingKey];
+      if (typeof v !== 'number') continue;
+      badge.dataset.cost = String(v);
+      badge.textContent = String(v);
     }
     // Trigger mesh meter recompute (it'll read the fresh data-credits).
     const preset = document.getElementById('ws-trellis2-preset');
