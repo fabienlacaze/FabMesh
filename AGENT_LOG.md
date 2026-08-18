@@ -20310,3 +20310,19 @@ REGLES A RETENIR :
      la production, pas un fragment.
   3. Ce depot a un historique de divergences dashboard/depot : credits 50 vs
      15, sujet d'e-mail, site_url. Toujours verifier avant de pousser.
+
+## 2026-08-18 — soumission 1.0.23 : notes pretes a coller
+
+`docs/NOTES_CERTIFICATION_1.0.23.txt` : le bloc anglais des « Notes for
+certification », identifiants du compte de test DEJA renseignes, pret a coller
+tel quel dans Partner Center. Plus aucun <A REMPLIR>.
+
+Paquet a soumettre, verifie une derniere fois :
+    dist/installer/MicrosoftStore/MyFabmesh.AI 1.0.23.appx   199,3 Mo
+    Identity Version   1.0.23.0
+    Identity Name      AyrosStudio.MyFabmesh.AI
+    Publisher          CN=3767FC33-F877-4481-9639-BC9CFF9D1371
+
+Comptes de test valides, 15 credits chacun, boucle d'inscription prouvee :
+    fabien65400+storetest@hotmail.fr  / FabMeshTest17870491
+    fabien65400+storetest2@hotmail.fr / FabMeshTest17870509

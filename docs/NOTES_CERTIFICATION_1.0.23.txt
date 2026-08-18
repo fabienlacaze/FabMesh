@@ -1,0 +1,51 @@
+This app works on machines WITHOUT an NVIDIA GPU. On such devices the setup
+wizard detects the absence of an NVIDIA GPU and the app runs in Cloud mode:
+image generation, 3D meshes, rigging and animation all run on the MyFabmesh
+cloud service. No local AI model is downloaded or used.
+
+--- IF ANYTHING FAILS, PLEASE SEND US ONE FILE ---
+This build writes a detailed diagnostics log. If the app crashes, hangs, or a
+feature does not work, please click "Export logs" (top-right of the setup
+wizard, and in Settings inside the app). It saves a single .txt file to the
+Desktop containing the hardware configuration, every setup step you went
+through, and the exact error. Attaching that file to the report would let us
+fix the issue in one pass. Previous reports did not let us reproduce the
+problem.
+
+--- ABOUT THE PREVIOUS "CRASHES AT LAUNCH" REPORT ---
+We installed and launched the signed package on Windows 11 build 26200, and on
+a clean Windows 11 Pro 26200 virtual machine with no NVIDIA GPU, no Python and
+an empty user profile. The window paints in about 2 seconds and we could not
+reproduce a crash. We did however find and fix a defect that matches the
+symptom: the app had no single-instance lock, so activating the tile twice
+started a second complete application; both instances then competed for the
+same data folder and the same local port, and one could exit immediately after
+showing its window. This build enforces a single instance.
+
+--- ACCOUNT CREATION IS NOW INSIDE THE APP ---
+Creating an account no longer opens a web browser. In the sign-in dialog, click
+"Create an account", enter an email and a password, then confirm with the
+6-digit code sent to that address. Everything happens inside the app.
+
+Test account (already funded with credits):
+  email:    fabien65400+storetest@hotmail.fr
+  password: FabMeshTest17870491
+
+Steps to test image generation:
+  1. Launch the app. The wizard shows "Cloud mode will be used on this PC".
+     Click "Continue in Cloud mode".
+  2. Sign in with the test account above. (Signing in starts warming a cloud
+     GPU in the background.)
+  3. Create a project, type any prompt, click "Generate".
+  4. The FIRST generation after a period of inactivity can take up to 3 minutes
+     while a GPU container boots - the progress bar and a "Warming up cloud AI"
+     notice are shown. This is expected, not a failure. Later generations take
+     about 30 seconds.
+
+First launch is slower: Windows verifies the ~200 MB package the first time it
+runs. A splash screen with a progress indicator is shown during this time.
+
+In-app purchases: credits are sold on our website
+(https://myfabmesh-cloud.fabien65400.workers.dev), never inside the app -
+declared under "This app allows users to make purchases, but does not use the
+Microsoft Store commerce system".
