@@ -13,21 +13,53 @@ project_id = "ovoccoipeqmkfnugkmyh"
 #     sender <the same gmail>   (free, works without owning a domain).
 # Every template shows {{ .Token }} (the 6-digit code) so users never need to
 # click a link — Outlook/Hotmail SafeLinks blocks Supabase links.
+# ── Auth : valeurs de PRODUCTION, obligatoires ──────────────────────────────
+# DANGER, constaté le 2026-08-18 : ce fichier ne déclarait NI `site_url` NI
+# `additional_redirect_urls`. `supabase config push` poussait donc ses DÉFAUTS
+# LOCAUX à la place — `http://127.0.0.1:3000` — ce qui aurait fait pointer tous
+# les liens de confirmation vers localhost et empêché quiconque de valider son
+# compte. Le diff avant application l'a montré ; la poussée n'a jamais été faite.
+#
+# Tout réglage présent dans le dashboard mais ABSENT d'ici est écrasé par le
+# défaut de la CLI. Ne jamais lancer `config push` sans lire le diff.
+[auth]
+site_url = "https://myfabmesh-cloud.fabien65400.workers.dev"
+additional_redirect_urls = [
+  "https://myfabmesh-cloud.fabien65400.workers.dev/auth/callback",
+  "https://myfabmesh-cloud.fabien65400.workers.dev/*",
+  "https://myfabmesh-cloud.fabien65400.workers.dev",
+]
+
+# MFA TOTP : ACTIVÉE en production. Sans ces deux lignes, la CLI la désactivait.
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
 [auth.email]
 enable_confirmations = true   # require email verification (the OTP flow LoginForm uses)
+# Anti-spam : 1 minute entre deux e-mails. Le défaut de la CLI est 1 seconde,
+# ce qui ouvrait la porte à un abus de l'envoi d'e-mails.
+max_frequency = "1m0s"
 
 [auth.email.template.confirmation]
-subject = "Your MyFabmesh.AI verification code"
-content_path = "./email-templates/confirm-signup.html"
+subject = "Welcome to MyFabmesh.AI — confirm your account"
+content_path = "./supabase/email-templates/confirm-signup.html"
 
 [auth.email.template.recovery]
 subject = "Reset your MyFabmesh.AI password"
-content_path = "./email-templates/reset-password.html"
+content_path = "./supabase/email-templates/reset-password.html"
 
 [auth.email.template.magic_link]
 subject = "Your MyFabmesh.AI sign-in code"
-content_path = "./email-templates/magic-link.html"
+content_path = "./supabase/email-templates/magic-link.html"
 
 [auth.email.template.email_change]
 subject = "Confirm your new MyFabmesh.AI email"
-content_path = "./email-templates/change-email.html"
+content_path = "./supabase/email-templates/change-email.html"
+
+# ── Storage ─────────────────────────────────────────────────────────────────
+# Les buckets vectoriels sont une option PAYANTE, désactivée sur ce projet.
+# Sans cette déclaration, la CLI poussait son défaut `enabled = true` et la
+# commande finissait en « 402 Please upgrade the project to a paid tier ».
+[storage.vector]
+enabled = false

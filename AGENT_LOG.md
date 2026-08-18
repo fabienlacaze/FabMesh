@@ -20265,3 +20265,48 @@ CENTRAGE : j'avais cru voir la carte de l'assistant decalee a droite sur une
 capture du user. FAUX — c'etait un artefact de recadrage. Capture directe de la
 VM en 2560x1315 : la carte est centree (centre a 1280 sur 2560). Elle est
 seulement ancree en haut, ce qui laisse du vide sur un ecran large. Cosmetique.
+
+## 2026-08-18 — INCIDENT : `supabase config push` a casse l'auth de production
+
+FAUTE DE MA PART, corrigee dans la foulee. A lire avant tout futur config push.
+
+Je voulais pousser le gabarit d'e-mail corrige (50 -> 15 credits). J'ai lance
+`echo "n" | npx supabase config push` en croyant obtenir un diff SANS
+appliquer. LA CLI N'A PAS DEMANDE DE CONFIRMATION : elle a applique
+immediatement. Le « n » n'a servi a rien.
+
+CE QUE LA POUSSEE A CASSE, parce que config.toml ne declarait PAS ces cles et
+que la CLI pousse alors SES DEFAUTS LOCAUX :
+    site_url                 https://myfabmesh-cloud...workers.dev -> http://127.0.0.1:3000
+    additional_redirect_urls les 3 URL de prod                     -> ["https://127.0.0.1:3000"]
+    auth.mfa.totp            enroll/verify true                    -> false
+    auth.email.max_frequency 1m0s                                  -> 1s
+Concretement : tous les liens de confirmation pointaient vers localhost, donc
+plus aucune validation de compte possible, MFA desactivee, et la limite
+anti-spam d'envoi d'e-mails ramenee de 1 min a 1 s.
+
+RESTAURE en declarant les valeurs de production dans config.toml puis en
+repoussant. Verifie : « Remote Auth config is up to date » sur les 4 services,
+puis une inscription reelle qui repart correctement.
+
+CORRIGE AUSSI DANS LE MEME FICHIER :
+  * `content_path` valait `./email-templates/...` alors que la CLI resout
+    depuis `cloud/`, pas depuis `cloud/supabase/`. LES GABARITS VERSIONNES
+    N'AVAIENT DONC JAMAIS PU ETRE POUSSES — d'ou la production qui affichait
+    encore « 50 free credits ». Corrige en `./supabase/email-templates/...`.
+  * Le sujet de l'e-mail de confirmation divergeait : le depot disait « Your
+    MyFabmesh.AI verification code », la production « Welcome to MyFabmesh.AI —
+    confirm your account ». Aligne sur la PRODUCTION pour ne pas ecraser une
+    amelioration faite au dashboard.
+  * `[storage.vector] enabled = false` ajoute : sans lui la CLI poussait son
+    defaut `true` et finissait en « 402 Please upgrade to a paid tier ».
+
+REGLES A RETENIR :
+  1. `supabase config push` N'EST PAS INTERACTIF. Il applique. Il n'existe pas
+     d'option --dry-run ; pour voir un diff sans risque, il faut lire le
+     fichier et comparer a la main, ou accepter d'appliquer.
+  2. Tout reglage present dans le dashboard mais ABSENT de config.toml est
+     ECRASE par le defaut de la CLI. Le fichier doit etre un miroir COMPLET de
+     la production, pas un fragment.
+  3. Ce depot a un historique de divergences dashboard/depot : credits 50 vs
+     15, sujet d'e-mail, site_url. Toujours verifier avant de pousser.
