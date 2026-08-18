@@ -20414,3 +20414,62 @@ Verifie par pilotage CDP, mode cloud force et session supprimee :
     modale automatique : « Connexion au cloud MyFabmesh »
     badge              : « Se connecter », needLogin=1, infobulle traduite
     apres annulation   : modaleFermee=true, application utilisable
+
+## 2026-08-18 — FUITE R2 REFERMEE (incident de securite)
+
+L'audit de release cloud a trouve, et j'ai CONFIRME moi-meme depuis cette
+machine sans aucun jeton, que le bucket `myfabmesh-meshes` etait expose via son
+URL publique r2.dev :
+
+    _meta/admin-totp.json       HTTP 200   secret 2FA admin EN CLAIR
+    _meta/admin_password.json   HTTP 200   sel + hash + identifiant « fabidou »
+    _meta/pricing.json          HTTP 200   grille tarifaire
+    _meta/admin_audit/*.log     journal d'audit avec l'IP du gerant
+    <uid>/...                   meshes clients, dont un asset marketplace vendu
+
+ACTIONS FAITES, dans cet ordre :
+
+1. VERIFIE l'impact avant d'agir. Decouverte determinante : le secret
+   `R2_URL_SIGNING_SECRET` etait DEJA deploye, donc `signedR2Url()` servait
+   deja les objets depuis le worker avec signature HMAC + expiration. L'URL
+   publique n'etait qu'un vestige. Et `r2PathFromPublicUrl()` sait reconvertir
+   les anciennes URL publiques en cles pour les re-signer. La coupure devenait
+   donc une action a faible risque, pas un arbitrage.
+
+2. COUPE : `wrangler r2 bucket dev-url disable myfabmesh-meshes`.
+   Verifie : les trois fichiers repondent HTTP 401. Site toujours debout
+   (accueil et /login en 200).
+
+3. ROTATION de `ADMIN_PASSWORD` (64 caracteres hex aleatoires). Attention au
+   role reel de ce secret : d'apres worker.ts:11688-11702, quand
+   `_meta/admin_password.json` existe (mode 'r2'), ADMIN_PASSWORD ne sert QUE
+   de cle de signature du cookie — le mot de passe de CONNEXION reste le hash
+   stocke dans R2. Le faire tourner invalide donc tout cookie admin existant,
+   y compris un cookie forge a partir du hash qui etait public, SANS risque de
+   verrouiller le gerant dehors.
+
+4. GARDE-FOU CONTRE LA RECIDIVE : `cloud/scripts/check-r2-public.mjs`, cable en
+   `predeploy`. Il refuse le deploiement si l'acces public est reactive, et
+   explique quoi faire. Tolerant a la panne : si l'API Cloudflare est
+   injoignable il previent et laisse passer, pour ne pas devenir un point de
+   panne qui empeche de livrer un correctif.
+   BUG ATTRAPE AU TEST : la premiere version utilisait execFileSync('npx.cmd'),
+   qui echoue en EINVAL sous Windows — le garde-fou repondait « controle
+   impossible » A CHAQUE FOIS, donc ne protegeait rien. Corrige en execSync.
+   Teste dans les deux sens : cas nominal OK, detection d'un bucket public OK.
+
+5. Regle inscrite dans CLAUDE.md.
+
+RESTE A FAIRE PAR LE USER, et je ne peux pas le faire a sa place :
+  * CHANGER le mot de passe admin de connexion (le hash a ete public, il est
+    exploitable hors ligne). Passer par l'ecran de reinitialisation de l'app,
+    qui exige un code recu par e-mail.
+  * RE-ENROLER le 2FA : le secret TOTP a ete public en clair, il faut le
+    regenerer depuis le tableau de bord.
+  * Si ce mot de passe etait reutilise ailleurs, le changer partout.
+
+DETTE STRUCTURELLE NON TRAITEE : stocker un secret TOTP en CLAIR dans un
+bucket objet reste fragile, meme prive. Il devrait etre chiffre au repos (AES-GCM
+via WebCrypto avec un secret worker) ou sorti de R2. Non fait aujourd'hui : cela
+touche le chemin d'authentification admin, et le faire pendant que le gerant a
+besoin d'y acceder aurait ete imprudent.

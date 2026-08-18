@@ -12,7 +12,9 @@
     "deploy": "wrangler deploy",
     "setup:supabase": "node scripts/supabase-setup.mjs",
     "setup:prod": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-prod.ps1",
-    "sync-app": "node scripts/sync-app.mjs"
+    "sync-app": "node scripts/sync-app.mjs",
+    "check:r2-public": "node scripts/check-r2-public.mjs",
+    "predeploy": "node scripts/check-r2-public.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.53.1",

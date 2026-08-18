@@ -65,3 +65,24 @@ Pattern: `cd cloud && npm run build && npx wrangler deploy`.
 - **Demander confirmation**: refactor large, suppression de fichiers,
   changement de licence ou dépendance lourde, destruction de branches.
   (Le push n'est PLUS soumis à confirmation — voir Auto-commit.)
+
+## JAMAIS d'accès public sur le bucket R2
+
+Le bucket `myfabmesh-meshes` ne doit **jamais** avoir son URL `r2.dev`
+activée. Le 18/08/2026, elle l'était : le secret 2FA de l'admin, le hash de
+son mot de passe, le journal d'audit avec l'IP du gérant et les fichiers des
+clients étaient téléchargeables par n'importe qui, sans jeton.
+
+**Aucun code ne peut empêcher ça** : `r2.dev` sert les objets directement
+depuis Cloudflare, sans passer par le worker. Ni authentification ni routage
+n'y changent rien.
+
+Le mécanisme légitime existe déjà : `signedR2Url()` sert les objets depuis
+l'origine du worker, avec signature HMAC et expiration
+(`R2_URL_SIGNING_SECRET`, déjà déployé). Il n'y a aucune raison de rouvrir
+l'accès public — même « juste pour déboguer un téléchargement ».
+
+Un garde-fou bloque le déploiement si l'accès est réactivé :
+```bash
+cd cloud && npm run check:r2-public     # lancé automatiquement par predeploy
+```
