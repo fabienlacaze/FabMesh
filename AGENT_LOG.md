@@ -20562,3 +20562,43 @@ NON PUBLIE : `npm run build` cote cloud reste bloque par check-legal-identity �
 9 champs obligatoires manquent dans cloud/src/config/legal-identity.ts (forme
 juridique, SIREN, siege, TVA, directeur de publication, et les 3 champs du
 mediateur de la consommation). Ce sont des donnees du gerant, pas du code.
+
+## 2026-08-18 — 1.0.26 : nouveau paquet Store (le 1.0.23 a ete supprime)
+
+Le user a supprime la soumission 1.0.23 de Partner Center. Nouveau paquet
+genere avec TOUT ce qui a ete corrige depuis.
+
+Contenu par rapport au 1.0.17 refuse :
+  1. verrou d'instance unique
+  2. filet anti-ecran-noir rearme (mort depuis le refus n1)
+  3. page sans-GPU ramenee a une seule decision, puis rendue lisible
+     (trois chiffres au lieu de cinq puces)
+  4. journal de parcours de l'assistant + export des diagnostics corrige et
+     reordonne (le parcours passe de la ligne 4822 a la ligne 12)
+  5. inscription DANS l'application, prouvee en production
+  6. credits offerts alignes sur 15 (la base en accorde 15, l'app disait 50)
+  7. PRIX AFFICHES ALIGNES SUR LA FACTURATION — le desktop annoncait jusqu'a
+     8 fois moins que ce qu'il debitait ; il lit desormais /api/pricing
+  8. options refine / face-fix / smooth masquees en mode Cloud (le worker les
+     neutralise, les afficher revenait a vendre un raffinement fictif)
+  9. texte corrige quand le mode Cloud est choisi VOLONTAIREMENT avec une
+     carte capable (il reprochait a une RTX 5080 de 16 Go d'etre « below 12 GB »)
+
+VERIFIE DANS L'ARCHIVE 1.0.25 (identique en substance au 1.0.26) :
+    manifeste 1.0.25.0, 592 entrees
+    presents  : IS_PRIMARY_INSTANCE x3, _mainWindowPainted x4, wizard-journal,
+                cloud-verify-signup, cloud-pricing, _prixDe x4, CLE_PRESET,
+                masquerOptionsSansEffetCloud
+    absents   : `const BASE = {` 0, « 50 free credits » 0, « 2 credits per image » 0
+                (une occurrence de « fast: 1, balanced: 2 » subsiste : c'est le
+                 COMMENTAIRE qui documente l'ancienne valeur, pas du code)
+
+SALLE BLANCHE, 1.0.25 : installation 15,1 s, fenetre peinte, assistant affiche,
+aucune erreur Windows.
+
+1.0.26 = 1.0.25 moins la mise en avant violette de la case du milieu, retiree a
+la demande du user. Les trois encadres sont desormais identiques.
+
+Le garde-fou des prix tourne bien en prebuild :
+    [check-prix] 6 valeurs de repli web conformes a la grille
+    [check-prix] desktop : aucun prix en dur detecte

@@ -406,3 +406,45 @@
   0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
   50%      { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0.25); }
 }
+
+/* ── Chiffres clés de la page « sans GPU » ─────────────────────────────────
+   Cette page ne pose qu'une question : continuer en mode Cloud, oui ou non ?
+   Elle presentait un paragraphe suivi de cinq puces — un mur de texte pour une
+   decision binaire. Les trois chiffres qui comptent (rien a telecharger, les
+   credits offerts, le prix d'une image) sont desormais lisibles d'un coup
+   d'oeil, et le reste tient en deux lignes.
+
+   Grille auto-ajustable : trois colonnes sur la largeur de la carte (760 px),
+   une seule sur une fenetre etroite, sans point de rupture code en dur. */
+.wiz-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 20px 0 18px;
+}
+.wiz-fact {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  text-align: center;
+}
+.wiz-fact-val {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+  color: var(--text-0);
+}
+.wiz-fact-lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-top: 2px;
+}
+.wiz-fact-sub {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 6px;
+  line-height: 1.45;
+}

@@ -139,20 +139,40 @@
           works</b> — images, 3D meshes, rigs and animations are generated on the
           MyFabmesh cloud and downloaded straight into your projects.
         </p>
+        <!-- Les trois chiffres qui comptent, en évidence plutôt que noyés dans
+             une liste à puces. Le mur de texte precedent (un paragraphe + cinq
+             puces) demandait un effort de lecture sur une page qui ne pose
+             qu'une seule question : on continue en Cloud, oui ou non ?
+             15 credits et 2 credits/image sont des chiffres VERIFIES contre la
+             production le 2026-08-18 — le texte annoncait 50 alors que la base
+             en accordait 15. -->
+        <div class="wiz-facts">
+          <div class="wiz-fact">
+            <div class="wiz-fact-val">0 GB</div>
+            <div class="wiz-fact-lbl">to download</div>
+            <div class="wiz-fact-sub">the ~17 GB of local AI models are skipped</div>
+          </div>
+          <div class="wiz-fact">
+            <div class="wiz-fact-val">15</div>
+            <div class="wiz-fact-lbl">free credits</div>
+            <div class="wiz-fact-sub">when you create your account</div>
+          </div>
+          <!-- 3 et non 2 : verifie le 2026-08-18 contre la grille REELLE de
+               production (_meta/pricing.json, text2image = 3, identique a
+               PRICING_DEFAULTS du worker). L'interface annoncait 2 partout —
+               troisieme chiffre faux de la meme famille apres les credits
+               offerts (50 annonces / 15 accordes). -->
+          <div class="wiz-fact">
+            <div class="wiz-fact-val">3</div>
+            <div class="wiz-fact-lbl">credits / image</div>
+            <div class="wiz-fact-sub">3D meshes, rigs and animations cost more</div>
+          </div>
+        </div>
         <ul class="wiz-list">
-          <li><b>Nothing to download</b>: the ~17 GB of local AI models are skipped</li>
-          <li>The main features work in Cloud mode — image generation, image editing,
-              Image&nbsp;→&nbsp;3D, mesh tools, auto-rig and animation. A few expert
-              tools stay reserved for local mode</li>
-          <!-- 15 et non 50 : l'octroi a l'inscription a ete calibre sur la
-               rentabilite (2 credits par image, ~0,376 $ de GPU par
-               generation). Le texte annoncait 50 alors que la production en
-               accorde 15 depuis un ajustement fait cote Supabase — une
-               promesse fausse dans l'interface, que le Store verifie. -->
-          <li>Sign in with a MyFabmesh account — <b>new accounts get 15 free credits</b></li>
-          <li>Generations use credits (2 per image)</li>
-          <li>Add an NVIDIA GPU later and you can switch to free local mode (the AI
-              models are downloaded at that point)</li>
+          <li>Image generation, image editing, Image&nbsp;→&nbsp;3D, mesh tools,
+              auto-rig and animation all work. A few expert tools stay reserved
+              for local mode.</li>
+          <li>Add an NVIDIA GPU later and you can switch to free local mode.</li>
         </ul>
         <!-- UNE page, UNE décision. Cette page annonce que le mode Cloud est
              retenu ; lui adjoindre des sorties revenait à la contredire.
