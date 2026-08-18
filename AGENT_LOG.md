@@ -20382,3 +20382,35 @@ wizard.log, wizard.prev.log, puis fabmesh.log en dernier et plafonne a 120 Ko
 NE PAS RESOUMETTRE POUR AUTANT : 1.0.23 est en cours de certification. Cette
 amelioration part avec la prochaine version, qu'il s'agisse d'une mise a jour
 apres acceptation ou d'une resoumission apres refus.
+
+## 2026-08-18 — sortie de l'assistant en mode Cloud : aucun point d'entree vers la connexion
+
+TROUVE PAR LE USER EN SALLE BLANCHE, sur le parcours EXACT du testeur : il
+termine l'assistant en mode Cloud, arrive sur la page principale, et
+  * le badge de credits affiche « — » sans rien expliquer ;
+  * rien ne lui propose de se connecter ni de creer un compte ;
+  * il ne decouvrira le probleme qu'en cliquant « Generate ».
+C'est le scenario du refus n5, alors meme que l'assistant venait de lui
+annoncer « Sign in with a MyFabmesh account — new accounts get 15 free credits ».
+
+PIRE : cliquer sur le badge appelait `_openCloudSite('/buy')` (index2.js:23258)
+— on ouvrait le NAVIGATEUR sur une page d'ACHAT de credits pour quelqu'un qui
+n'a meme pas de compte.
+
+CORRIGE, deux volets :
+  1. Le badge devient le point d'entree vers la connexion DANS l'application
+     quand aucune session n'existe : libelle « Se connecter », infobulle qui
+     annonce les 15 credits, et le clic ouvre showCloudLoginModal() —
+     inscription in-app comprise — au lieu du navigateur. Connecte, il retrouve
+     son role de raccourci vers la recharge.
+  2. A la premiere entree en mode Cloud sans session, la modale est proposee
+     UNE fois (drapeau localStorage `fab-login-proposed`).
+
+PIEGE DU REFUS N5 EVITE : rien n'est bloquant. Annuler laisse l'application
+parfaitement utilisable — verifie au banc : modale fermee, bouton « nouveau
+projet » present, interface rendue. C'est une invitation, pas un mur.
+
+Verifie par pilotage CDP, mode cloud force et session supprimee :
+    modale automatique : « Connexion au cloud MyFabmesh »
+    badge              : « Se connecter », needLogin=1, infobulle traduite
+    apres annulation   : modaleFermee=true, application utilisable

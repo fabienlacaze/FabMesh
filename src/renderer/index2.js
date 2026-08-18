@@ -23248,15 +23248,74 @@ window._refreshTopbarCredits = async function (creditsKnown) {
     const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
     if (!cloud) { el.style.display = 'none'; return; }
     el.style.display = 'inline-flex';
-    if (creditsKnown != null) { val.textContent = String(creditsKnown); return; }
+    const T = (s) => (typeof _i18nT === 'function' ? _i18nT(s) : s);
+    if (creditsKnown != null) {
+      val.textContent = String(creditsKnown);
+      el.dataset.needLogin = '';
+      el.title = T('MyFabmesh credits — click to top up');
+      return;
+    }
     const s = await API.cloudStatus?.();
-    if (s?.loggedIn && s.credits != null) val.textContent = String(s.credits);
-    else if (s?.loggedIn) val.textContent = '…';
-    else val.textContent = '—';
+    if (s?.loggedIn && s.credits != null) {
+      val.textContent = String(s.credits);
+      el.dataset.needLogin = '';
+      el.title = T('MyFabmesh credits — click to top up');
+    } else if (s?.loggedIn) {
+      val.textContent = '…';
+      el.dataset.needLogin = '';
+    } else {
+      // PAS CONNECTÉ. Le badge affichait « — » sans rien expliquer, et le clic
+      // ouvrait le NAVIGATEUR sur /buy : on envoyait acheter des crédits
+      // quelqu'un qui n'a même pas de compte. Constaté en salle blanche le
+      // 2026-08-18, sur le parcours EXACT du testeur de certification — il sort
+      // de l'assistant en mode Cloud, voit « — », et n'a aucun point d'entrée
+      // visible vers la connexion. C'est le scénario du refus n°5.
+      val.textContent = T('Sign in');
+      el.dataset.needLogin = '1';
+      el.title = T('Sign in to your MyFabmesh account — new accounts get 15 free credits');
+    }
   } catch (_) {}
 };
-document.getElementById('topbar-credits')?.addEventListener('click', () => _openCloudSite('/buy'));
+document.getElementById('topbar-credits')?.addEventListener('click', async () => {
+  const el = document.getElementById('topbar-credits');
+  // Non connecté : le badge est le point d'entrée vers la connexion DANS
+  // l'application (inscription incluse), pas vers une page d'achat au navigateur.
+  if (el && el.dataset.needLogin === '1') {
+    try {
+      const ok = await showCloudLoginModal();
+      if (ok) window._refreshTopbarCredits();
+    } catch (_) {}
+    return;
+  }
+  _openCloudSite('/buy');
+});
 window._refreshTopbarCredits();
+
+/* ═══════════════════════════════════════════════════════════════════
+   PREMIÈRE ENTRÉE EN MODE CLOUD — proposer la connexion UNE fois.
+
+   L'assistant annonce « Sign in with a MyFabmesh account — new accounts get
+   15 free credits », puis l'application s'ouvrait sans jamais le proposer.
+   L'utilisateur ne découvrait le problème qu'en cliquant « Generate ».
+
+   On propose donc la connexion une seule fois, et JAMAIS de façon bloquante :
+   annuler laisse l'application parfaitement utilisable (projets, imports,
+   outils locaux). Le drapeau empêche de harceler à chaque lancement.
+
+   Souvenir du refus n°5 : une garde posée pour aider avait fini par bloquer
+   le testeur. Ici rien n'est bloqué — c'est une invitation, pas un mur.
+   ═══════════════════════════════════════════════════════════════════ */
+(async () => {
+  try {
+    if (typeof window._computeMode !== 'function' || window._computeMode() !== 'cloud') return;
+    if (localStorage.getItem('fab-login-proposed') === '1') return;
+    const s = await API.cloudStatus?.();
+    if (s?.loggedIn) return;
+    localStorage.setItem('fab-login-proposed', '1');
+    const ok = await showCloudLoginModal();
+    if (ok) window._refreshTopbarCredits();
+  } catch (_) { /* ne doit jamais empêcher l'application de s'ouvrir */ }
+})();
 
 // ============================================================
 // PASTILLES ⚡ SUR LES OUTILS IA (mode Cloud) — prix réels du

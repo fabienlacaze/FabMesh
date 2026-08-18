@@ -957,6 +957,9 @@
       // ---- Inscription DANS l'application (modale de connexion, 3 etats) ----
       // Sans ces entrees, un utilisateur francais voyait une interface
       // francaise ponctuee de messages d'erreur anglais — constate au banc.
+      'Sign in to your MyFabmesh account — new accounts get 15 free credits':
+        'Connectez-vous à votre compte MyFabmesh — les nouveaux comptes reçoivent 15 crédits gratuits',
+      'MyFabmesh credits — click to top up': 'Crédits MyFabmesh — cliquez pour recharger',
       'Create your MyFabmesh account': 'Créez votre compte MyFabmesh',
       'New accounts get 15 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.':
         'Les nouveaux comptes obtiennent 15 crédits gratuits. Choisissez un mot de passe d\'au moins 6 caractères — nous vous enverrons un code de confirmation à 6 chiffres par e-mail.',
