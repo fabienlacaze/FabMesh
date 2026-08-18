@@ -958,8 +958,8 @@
       // Sans ces entrees, un utilisateur francais voyait une interface
       // francaise ponctuee de messages d'erreur anglais — constate au banc.
       'Create your MyFabmesh account': 'Créez votre compte MyFabmesh',
-      'New accounts get 50 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.':
-        'Les nouveaux comptes obtiennent 50 crédits gratuits. Choisissez un mot de passe d\'au moins 6 caractères — nous vous enverrons un code de confirmation à 6 chiffres par e-mail.',
+      'New accounts get 15 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.':
+        'Les nouveaux comptes obtiennent 15 crédits gratuits. Choisissez un mot de passe d\'au moins 6 caractères — nous vous enverrons un code de confirmation à 6 chiffres par e-mail.',
       'Create account': 'Créer le compte',
       'I already have an account': 'J\'ai déjà un compte',
       'Confirm your email': 'Confirmez votre adresse e-mail',

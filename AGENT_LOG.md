@@ -20195,3 +20195,48 @@ maintenant dans l'application.
 Ecarts assumes ecrits noir sur blanc dans le document : SAC intestable avec un
 paquet auto-signe, build 26200.8037 contre 26200.8655, VM en francais, materiel
 reel non couvert.
+
+## 2026-08-17 — inscription in-app PROUVEE en production + credits alignes sur 15
+
+BOUCLE COMPLETE VERIFIEE POUR LA PREMIERE FOIS, sur le vrai Supabase :
+    cloudSignup('pas-une-adresse')  -> {"success":false,"error":"Unable to
+                                        validate email address: invalid format"}
+                                       (prouve preload -> IPC -> cloud_fallback
+                                        -> Supabase, sans creer de compte)
+    cloudSignup(adresse reelle)     -> {"success":true,"codeRequis":true}
+    e-mail recu                     -> code a 6 chiffres, expediteur
+                                       myfabmesh.contact@11725235.brevosend.com
+    cloudVerifySignup(code)         -> {"success":true}
+    cloudStatus()                   -> {"loggedIn":true,"credits":15}
+
+LE REFUS N2 EST DONC TRAITE DE BOUT EN BOUT. Sa cause racine etait Supabase
+incapable d'envoyer l'e-mail de confirmation (expediteur sandbox Resend) ; le
+SMTP est desormais sur BREVO et l'e-mail arrive. Le gabarit est le bon : code a
+6 chiffres bien visible, plus un bouton et une URL de repli.
+
+COMPTE DE TEST POUR LA SOUMISSION :
+    fabien65400+storetest@hotmail.fr / FabMeshTest17870491  (15 credits)
+
+DIVERGENCE TROUVEE ET CORRIGEE : l'interface et l'e-mail promettaient « 50 free
+credits », la production en accorde 15. Le user confirme que 15 a ete calibre
+SUR LA RENTABILITE — a 2 credits par image et ~0,376 $ de GPU par generation,
+50 credits offerts couteraient ~9,40 $ par inscription gratuite contre ~2,60 $
+a 15. On aligne donc le TEXTE, jamais l'octroi.
+
+Corrige aux 4 endroits visibles :
+    src/renderer/wizard.html                             page sans-GPU
+    src/renderer/index2.js                               modale d'inscription
+    src/renderer/i18n.js                                 cle EN + traduction FR
+    cloud/supabase/email-templates/confirm-signup.html   l'e-mail
+Verifie a l'ecran : « Les nouveaux comptes obtiennent 15 credits gratuits ».
+Cle i18n et chaine du code confirmees IDENTIQUES (sinon la traduction ne
+s'applique pas).
+
+DEUX ACTIONS RESTANTES, HORS CODE :
+  * `cloud/supabase/migrations/*_init_schema.sql` accorde encore 50 dans le
+    declencheur `handle_new_user`. Je ne l'ai PAS modifie : ces migrations sont
+    de l'historique applique, et la production est deja a 15 (ajustee dans le
+    dashboard). Mais un environnement NEUF repartirait a 50 — piege a traiter
+    par une migration correctrice si le user redeploie un jour a zero.
+  * Le gabarit d'e-mail corrige n'est pas encore en ligne : il faut un
+    `supabase config push` pour que l'e-mail reel annonce 15.

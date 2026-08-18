@@ -22726,7 +22726,7 @@ async function showCloudLoginModal() {
         els.lienForgot.style.display = '';
       } else if (m === 'signup') {
         els.titre.textContent = T('Create your MyFabmesh account');
-        els.texte.textContent = T('New accounts get 50 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.');
+        els.texte.textContent = T('New accounts get 15 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.');
         els.pass.parentElement.style.display = '';
         els.pass.setAttribute('autocomplete', 'new-password');
         els.code.style.display = 'none';
