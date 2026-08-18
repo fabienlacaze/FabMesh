@@ -5,7 +5,7 @@
   "description": "MyFabmesh.AI Cloud frontend — Next.js static export + Cloudflare Worker",
   "scripts": {
     "dev": "next dev -p 3030",
-    "prebuild": "node scripts/check-legal-identity.mjs",
+    "prebuild": "node scripts/check-legal-identity.mjs && node ../build/check-prix-affiches.mjs",
     "build": "next build && node scripts/stamp-assets.mjs",
     "start": "next start -p 3030",
     "lint": "next lint",

@@ -20,12 +20,13 @@
     "start": "set ELECTRON_RUN_AS_NODE= && electron .",
     "dev": "set ELECTRON_RUN_AS_NODE= && electron . --dev",
     "launch": "start.bat",
-    "prebuild:licence-check": "python build/patch_ovoxel_wheel.py --verify",
+    "prebuild:licence-check": "python build/patch_ovoxel_wheel.py --verify && node build/check-prix-affiches.mjs",
     "build:installer": "npm run prebuild:licence-check && npm run prebuild:prompt-tables && electron-builder --win nsis && node build/organize_dist.js",
     "build:installer:dir": "electron-builder --win nsis --dir",
     "build:msix": "npm run prebuild:licence-check && npm run prebuild:prompt-tables && electron-builder --win appx && node build/organize_dist.js",
     "build:all": "npm run prebuild:licence-check && npm run prebuild:prompt-tables && electron-builder --win nsis appx && node build/organize_dist.js",
-    "prebuild:prompt-tables": "python build/sync_prompt_tables.py --verify"
+    "prebuild:prompt-tables": "python build/sync_prompt_tables.py --verify",
+    "check:prix": "node build/check-prix-affiches.mjs"
   },
   "dependencies": {
     "@google/model-viewer": "^4.2.0",

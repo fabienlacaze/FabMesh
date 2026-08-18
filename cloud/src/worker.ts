@@ -37,6 +37,12 @@ export interface Env {
   // Server-side env.
   MOCK?: string;
   STRIPE_SECRET_KEY?: string;
+  /** '1' = accepter deliberement une cle Stripe de TEST en production, pour
+   *  eprouver la chaine de paiement. Sans ce drapeau, un paiement de test est
+   *  refuse et le webhook n'accorde AUCUN credit : une cle sk_test_ deployee
+   *  laissait sinon n'importe qui se creer des credits avec la carte 4242
+   *  (constate en production le 2026-08-18, 350 credits accordes pour 0 EUR). */
+  STRIPE_ALLOW_TEST_MODE?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   // Stripe Price IDs for the monthly subscriptions (created in
   // Stripe Dashboard once, then set as Worker secrets). Without
@@ -4576,6 +4582,17 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
   if (!pack) return err(400, 'unknown pack');
   if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
 
+  /* Cle de TEST en production : on refuse d'ouvrir un paiement plutot que de
+   * laisser croire a une vente. Le webhook refuse deja de crediter sur un
+   * evenement livemode:false ; ce garde-ci evite en plus que l'utilisateur
+   * saisisse une carte pour rien — et surtout que la carte de test 4242
+   * serve a se fabriquer des credits.
+   * STRIPE_ALLOW_TEST_MODE=1 pour eprouver la chaine deliberement. */
+  if (/^sk_test_/.test(env.STRIPE_SECRET_KEY) && env.STRIPE_ALLOW_TEST_MODE !== '1' && !isMock(env)) {
+    console.error('[stripe] cle de TEST en production — ouverture de paiement refusee.');
+    return err(503, 'Payments are temporarily unavailable. Please try again later.');
+  }
+
   const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2025-02-24.acacia' as Stripe.LatestApiVersion });
   const SITE = siteUrl(env, 'http://localhost:3030');
 
@@ -4653,8 +4670,39 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   const ok = await verifyStripeSignature(raw, sig, secret);
   if (!ok) return err(400, 'bad signature');
 
-  let event: { type: string; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> }; charges_enabled?: boolean; payouts_enabled?: boolean; details_submitted?: boolean; country?: string; requirements?: { currently_due?: string[] } } } };
+  let event: { type: string; livemode?: boolean; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> }; charges_enabled?: boolean; payouts_enabled?: boolean; details_submitted?: boolean; country?: string; requirements?: { currently_due?: string[] } } } };
   try { event = JSON.parse(raw); } catch { return err(400, 'bad json'); }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     ROBINET A CREDITS GRATUITS — refus des evenements de TEST.
+
+     Audit du 2026-08-18 : la cle Stripe deployee en production etait une
+     cle de TEST (sk_test_). Consequence double, et les deux faces etaient
+     vraies en meme temps :
+       - aucun euro ne pouvait etre encaisse ;
+       - n'importe qui pouvait creer un compte, cliquer « Acheter » et payer
+         avec la carte de test 4242 4242 4242 4242 pour se creer des credits.
+
+     Ce n'etait pas theorique : la table `payments` de production contenait
+     deja une ligne cs_test_ du 2026-07-28 — pack Studio, 350 credits
+     accordes, 0 EUR encaisse.
+
+     On refuse donc de CREDITER sur un evenement `livemode: false`. Le
+     webhook repond 200 pour que Stripe ne rejoue pas indefiniment, mais
+     aucun credit n'est accorde.
+
+     Contournement explicite pour tester la chaine de paiement :
+     STRIPE_ALLOW_TEST_MODE=1
+     ═══════════════════════════════════════════════════════════════════ */
+  const modeTestAutorise = env.STRIPE_ALLOW_TEST_MODE === '1' || isMock(env);
+  if (event.livemode === false && !modeTestAutorise) {
+    console.warn(
+      `[stripe] evenement de TEST refuse (${event.type}, ${event.data?.object?.id}) — ` +
+      'aucun credit accorde. Basculer Stripe en mode live, ou poser ' +
+      'STRIPE_ALLOW_TEST_MODE=1 pour eprouver la chaine de paiement.'
+    );
+    return json({ received: true, ignored: 'test_mode' });
+  }
 
   // Helper: credit the user atomically, then mark the payment processed.
   //

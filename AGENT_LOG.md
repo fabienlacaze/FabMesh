@@ -20521,3 +20521,44 @@ VERIFIE PAR PILOTAGE CDP, mode cloud force :
 RESTE A FAIRE (volet web + garde-fou) : syncLivePricing ne reecrit pas les
 badges de classe `.credit-badge` ; le badge de variante affiche le NOMBRE de
 variantes au lieu du prix ; et il faut un test qui compare affichage et grille.
+
+## 2026-08-18 — volet web des prix + robinet Stripe + garde-fou anti-recidive
+
+WEB — les badges des modales n'etaient JAMAIS resynchronises. `syncLivePricing`
+ne traite que `dataset.credits` et `.cloud-cost-badge` ; les `.credit-badge`
+gardaient a vie leur valeur d'injection :
+    Auto Inpaint 3 pour 6 · Draw Mask 3 pour 6 · Modify 2 pour 3
+    Upscale 2 pour 3 · apercu de masque 1 pour 3
+Chaque badge porte desormais `data-pricing-key` et la boucle les met tous a
+jour. Deux cles utilisees n'existaient meme pas dans la grille du worker
+(`multi_view`, `upscale_image`) : mappees vers `back_view` et `upscale`.
+Le bouton `res-downscale` ne porte plus de badge — il ne fait qu'un drawImage
+local, il est GRATUIT et on facturait 2 credits a l'ecran.
+Le badge de variante affichait le NOMBRE de variantes : desormais prix x
+nombre, et la phrase « Costs N per variant » suit la grille.
+
+STRIPE — le robinet a credits gratuits est ferme, en deux endroits :
+  * `handleStripeWebhook` refuse de crediter sur un evenement `livemode:false`
+    (repond 200 pour que Stripe ne rejoue pas indefiniment, mais n'accorde
+    RIEN) ;
+  * `handleCheckout` refuse d'ouvrir un paiement si la cle est `sk_test_`,
+    pour que l'utilisateur ne saisisse pas une carte pour rien.
+  Contournement deliberi : `STRIPE_ALLOW_TEST_MODE=1`.
+  Rappel du constat : la table `payments` de production contenait deja une
+  ligne cs_test_ du 2026-07-28 — 350 credits accordes, 0 EUR encaisse.
+
+GARDE-FOU ANTI-RECIDIVE — `build/check-prix-affiches.mjs`, cable au prebuild
+des DEUX projets. Il lit PRICING_DEFAULTS dans worker.ts et verifie :
+  * que chaque valeur de repli web (_COST_DEFAULTS) egale le tarif reel via
+    _COST_PRICING_KEY ;
+  * que le desktop n'a pas reintroduit `const BASE = { fast: … }` ni
+    `String(N * count)`, et qu'il lit toujours `window._prixDe()`.
+EPROUVE POUR DE VRAI, pas seulement lance : en remettant volontairement
+`auto_inpaint: 3`, le controle echoue avec le bon message et le code 1 ; apres
+restauration il repasse. Lecon retenue du garde-fou R2, qui repondait
+« controle impossible » a chaque fois sans que personne ne s'en apercoive.
+
+NON PUBLIE : `npm run build` cote cloud reste bloque par check-legal-identity —
+9 champs obligatoires manquent dans cloud/src/config/legal-identity.ts (forme
+juridique, SIREN, siege, TVA, directeur de publication, et les 3 champs du
+mediateur de la consommation). Ce sont des donnees du gerant, pas du code.
