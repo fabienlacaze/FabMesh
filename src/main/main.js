@@ -9281,15 +9281,30 @@ ipcMain.handle('export-diagnostics', async () => {
       'dataBase  : ' + DATA_BASE,
       'aiPython  : exists=' + fs.existsSync(path.join(AI_PYTHON_DIR, 'python.exe')) + '  torchReady=' + _aiPythonReady(),
       '',
-      '===== fabmesh.log =====', tail('fabmesh.log'),
+      // ORDRE DELIBERE : le plus utile d'abord.
+      //
+      // Ce fichier est destine a quelqu'un qui nous rend service — un testeur
+      // de certification Microsoft, ou un utilisateur bloque. Mesure du
+      // 2026-08-18 : l'export faisait 4 850 lignes dont 4 801 de fabmesh.log,
+      // et le parcours de l'assistant — l'information qui repond a « qu'a fait
+      // l'utilisateur et qu'a-t-il vu » — arrivait a la ligne 4 822. Illisible.
+      //
+      // Desormais : parcours de l'assistant, puis erreurs, puis journaux bruts.
+      // Et fabmesh.log plafonne a 120 Ko : au-dela ce sont des generations
+      // anciennes, sans rapport avec le probleme qu'on cherche.
+      '===== PARCOURS DE L ASSISTANT (etapes, clics, verdicts) =====',
+      '(une ligne JSON par evenement : configuration materielle, chaque etape,',
+      ' chaque clic, et le verdict PASS/AVERTISSEMENT/REJETE de chaque critere)',
+      tail('wizard_parcours.jsonl'),
+      '', '===== last_error.log =====', tail('last_error.log'),
       // CORRECTIF : `tail()` lit dans LOGS_DIR (= userData/logs), alors que
       // wizard.log est ecrit dans _userDataDir (= userData). Le journal du
       // PREMIER LANCEMENT — le plus utile de tous — n'a donc jamais figure
       // dans les diagnostics exportes. On le lit desormais la ou il est.
       '', '===== wizard.log =====', tailAbs(WIZARD_LOG),
       '', '===== wizard.prev.log (execution precedente) =====', tailAbs(WIZARD_LOG_PREV),
-      '', '===== parcours de l assistant (etapes, clics, verdicts) =====', tail('wizard_parcours.jsonl'),
-      '', '===== last_error.log =====', tail('last_error.log'),
+      '', '===== fabmesh.log (journal general, tronque aux 120 derniers Ko) =====',
+      tail('fabmesh.log', 120 * 1024),
     ].join('\n');
     fs.writeFileSync(out, body, 'utf8');
     try { shell.showItemInFolder(out); } catch (_) {}

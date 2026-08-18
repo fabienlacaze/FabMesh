@@ -20356,3 +20356,29 @@ ANGLES MORTS ASSUMES, dans l'ordre de vraisemblance :
   2. leur build 26200.8655 contre notre VM en 26200.8037 ;
   3. une machine physique a iGPU Intel/AMD (un refus mentionnait un Surface
      Laptop 4) — notre VM utilise le pilote d'affichage VirtualBox.
+
+## 2026-08-18 — « Export logs » teste, puis rendu lisible
+
+J'avais ecrit dans les notes de certification que le testeur Microsoft devait
+cliquer « Export logs » — SANS avoir jamais verifie que ce bouton produit un
+fichier exploitable. Faute corrigee : teste.
+
+CE QUI MARCHAIT DEJA : bouton present dans les reglages, appel en 101 ms,
+fichier depose sur le Bureau, et les cinq sections presentes — dont les deux
+ajoutees hier (wizard.log via tailAbs, et le parcours de l'assistant).
+
+CE QUI N'ALLAIT PAS : l'ordre. 4 850 lignes dont 4 801 de fabmesh.log, et le
+parcours de l'assistant — la seule section qui repond a « qu'a fait le testeur
+et qu'a-t-il vu » — arrivait a la LIGNE 4 822. On demandait un service a
+quelqu'un et on lui rendait un fichier illisible.
+
+REORDONNE : configuration materielle, PARCOURS DE L'ASSISTANT, last_error.log,
+wizard.log, wizard.prev.log, puis fabmesh.log en dernier et plafonne a 120 Ko
+(au-dela ce sont des generations anciennes, sans rapport avec le probleme).
+
+    avant : 521 341 octets, 4 850 lignes, parcours a la ligne 4 822
+    apres : 132 413 octets, 1 420 lignes, parcours a la ligne 12
+
+NE PAS RESOUMETTRE POUR AUTANT : 1.0.23 est en cours de certification. Cette
+amelioration part avec la prochaine version, qu'il s'agisse d'une mise a jour
+apres acceptation ou d'une resoumission apres refus.
