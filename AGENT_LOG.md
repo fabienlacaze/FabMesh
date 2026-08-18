@@ -20473,3 +20473,51 @@ bucket objet reste fragile, meme prive. Il devrait etre chiffre au repos (AES-GC
 via WebCrypto avec un secret worker) ou sorti de R2. Non fait aujourd'hui : cela
 touche le chemin d'authentification admin, et le faire pendant que le gerant a
 besoin d'y acceder aurait ete imprudent.
+
+## 2026-08-18 — LES PRIX AFFICHES NE SUIVAIENT PAS LA FACTURATION (volet desktop)
+
+Audit dedie de la chaine des credits. Constat : TOUS les prix montres par le
+desktop etaient des constantes, et TOUS avaient derive SOUS le prix reellement
+facture. Toujours dans le meme sens — annoncer moins que ce qu'on preleve.
+
+    maillage « fast »   annonce 1   facture 8    x8
+    maillage balanced   annonce 2   facture 10
+    maillage quality    annonce 4   facture 13
+    maillage ultra_8k   annonce 8   facture 16
+    image               annonce 2   facture 3    par image
+
+CAUSE RACINE : `GET /api/pricing` existe, est PUBLIQUE, et le site web s'y
+synchronise toutes les 5 min depuis longtemps. Le desktop ne l'appelait NULLE
+PART — `grep -rn "pricing" src/` ne renvoyait qu'un commentaire. Ce n'etait pas
+un cache en retard : l'interface etait STRUCTURELLEMENT incapable de suivre.
+
+CORRECTIF :
+  * `cloud_fallback.getPricing()` + handler `cloud-pricing` + pont
+    `cloudPricing` dans preload. Cache 5 min, comme le web.
+  * `window._prix` / `window._prixDe(cle)` cote renderer, charges au demarrage
+    puis toutes les 5 min.
+  * Les deux fonctions de pastille lisent la grille. Si elle n'est pas encore
+    connue, AUCUN chiffre n'est affiche — un chiffre invente vaut moins que pas
+    de chiffre, et c'est precisement l'habitude du « defaut » qui a produit
+    l'ecart.
+  * Les options REFINE, FACE FIX et SMOOTH sont desormais MASQUEES en mode
+    Cloud : le worker les neutralise (OPTIONS_SANS_EFFET_CLOUD, worker.ts:1746)
+    avant de calculer le prix. Les laisser cochables revenait a vendre un
+    raffinement qui n'aurait jamais lieu. Le site web les masquait deja.
+
+PIEGE ATTRAPE AU BANC : `style.display = 'none'` etait sans effet, la feuille
+de style imposant `.inline-check { display: inline-flex !important }`
+(index2.css:3885). Le style en ligne valait 'none' pendant que le style calcule
+restait 'flex'. Corrige par setProperty(..., 'important'), applique au LABEL et
+non au conteneur `.form-row` qui peut regrouper plusieurs options.
+
+VERIFIE PAR PILOTAGE CDP, mode cloud force :
+    grille chargee : text2image 3, mesh_fast 8, balanced 10, quality 13, ultra_8k 16
+    image     1 -> 3    2 -> 6    4 -> 12                        OK
+    maillage  fast 8   balanced 10   quality 13   ultra_8k 16    OK
+    fast + rectify + quality_plus = 10                            OK
+    refine / face_fix / smooth : MASQUEES                         OK
+
+RESTE A FAIRE (volet web + garde-fou) : syncLivePricing ne reecrit pas les
+badges de classe `.credit-badge` ; le badge de variante affiche le NOMBRE de
+variantes au lieu du prix ; et il faut un test qui compare affichage et grille.

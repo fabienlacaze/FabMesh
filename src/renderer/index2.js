@@ -22830,7 +22830,7 @@ window._computeMode = () => localStorage.getItem('fab-compute-mode') || 'local';
     if (mode === 'cloud') {
       let who = '';
       try { const s = await API.cloudStatus?.(); if (s?.loggedIn) who = ` — ${s.email}`; } catch (_) {}
-      note.textContent = (typeof _i18nT === 'function' ? _i18nT('2 credits per image') : '2 credits per image') + who;
+      note.textContent = (typeof _i18nT === 'function' ? _i18nT('3 credits per image') : '3 credits per image') + who;
     } else {
       note.textContent = gpu?.name ? `GPU: ${gpu.name}` : '';
     }
@@ -23170,6 +23170,51 @@ document.getElementById('btn-cloud-library')?.addEventListener('click', showClou
 // jaune que le site web sur le bouton Générer (2 crédits × N).
 // Idempotent : rappelé après chaque réécriture du label du bouton.
 // ============================================================
+/* ═══════════════════════════════════════════════════════════════════
+   GRILLE TARIFAIRE — LUE, JAMAIS ECRITE EN DUR
+
+   Audit du 2026-08-18 : tous les prix affiches par le desktop etaient des
+   constantes, et TOUS avaient derive sous le prix reellement facture :
+
+       maillage « fast »   annonce 1   facture 8    (x8)
+       maillage balanced   annonce 2   facture 10
+       maillage quality    annonce 4   facture 13
+       image               annonce 2   facture 3    (par image)
+
+   Toujours dans le meme sens — annoncer moins que ce qu'on preleve est une
+   pratique commerciale trompeuse. Le site web se synchronisait deja sur
+   `/api/pricing` ; le desktop ne l'appelait NULLE PART.
+
+   `_prix` est donc la seule source. Tant qu'elle n'est pas chargee, on
+   n'affiche AUCUN chiffre plutot qu'un chiffre invente : c'est exactement
+   cette habitude du chiffre « par defaut » qui a produit l'ecart.
+   ═══════════════════════════════════════════════════════════════════ */
+window._prix = null;
+window._prixFeatures = null;
+
+window._chargerPrix = async function (opts) {
+  try {
+    const r = await API.cloudPricing?.(opts || {});
+    if (r && r.success && r.prices) {
+      window._prix = r.prices;
+      window._prixFeatures = r.features || null;
+      // Reposer toutes les pastilles avec les vrais prix.
+      try { window._applyCloudCostPill?.(); } catch (_) {}
+      try { window._applyMeshCostPill?.(); } catch (_) {}
+      try { window._applyToolPills?.(); } catch (_) {}
+      return true;
+    }
+  } catch (_) {}
+  return false;
+};
+
+/** Prix d'une operation, ou null si la grille n'est pas encore connue. */
+window._prixDe = function (cle) {
+  const p = window._prix;
+  if (!p || typeof p[cle] !== 'number') return null;
+  return p[cle];
+};
+
 window._applyCloudCostPill = function (btn) {
   try {
     if (!btn) btn = document.getElementById('ws-generate-image');
@@ -23178,6 +23223,10 @@ window._applyCloudCostPill = function (btn) {
     let pill = btn.querySelector('.generate-cost-pill');
     if (!cloud) { if (pill) pill.remove(); return; }
     const count = parseInt(document.getElementById('ws-count')?.value, 10) || 4;
+    const unitaire = window._prixDe('text2image');
+    // Grille pas encore chargee : pas de pastille du tout. Un chiffre faux
+    // vaut moins que pas de chiffre.
+    if (unitaire == null) { if (pill) pill.remove(); return; }
     if (!pill) {
       pill = document.createElement('span');
       pill.className = 'generate-cost-pill';
@@ -23185,7 +23234,7 @@ window._applyCloudCostPill = function (btn) {
       btn.appendChild(pill);
     }
     const v = pill.querySelector('.gcp-val');
-    if (v) v.textContent = String(2 * count);
+    if (v) v.textContent = String(unitaire * count);
   } catch (_) {}
 };
 document.getElementById('ws-count')?.addEventListener('change', () => window._applyCloudCostPill());
@@ -23203,19 +23252,31 @@ window._applyMeshCostPill = function (btn) {
     const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
     let pill = btn.querySelector('.generate-cost-pill');
     if (!cloud) { if (pill) pill.remove(); return; }
-    const BASE = { fast: 1, balanced: 2, quality: 4, ultra_8k: 8 };
+    // Prix LUS dans la grille (voir window._prix). Les anciennes constantes
+    // { fast: 1, balanced: 2, quality: 4, ultra_8k: 8 } annonçaient jusqu'à
+    // HUIT FOIS moins que la facturation réelle (8, 10, 13, 16).
     const preset = document.getElementById('ws-trellis2-preset')?.value || 'fast';
+    const CLE_PRESET = {
+      fast: 'mesh_fast', balanced: 'mesh_balanced',
+      quality: 'mesh_quality', ultra_8k: 'mesh_ultra_8k',
+    };
+    const base = window._prixDe(CLE_PRESET[preset] || 'mesh_fast');
+    if (base == null) { if (pill) pill.remove(); return; }   // grille inconnue : pas de chiffre
+
     const on = (id) => !!document.getElementById(id)?.checked;
-    let cost = BASE[preset] ?? 1;
-    if (on('ws-trellis2-multiref')) cost += 1;
-    if (on('ws-trellis2-refine')) cost += 2;
-    if (on('ws-trellis2-rectify')) cost += 1;
-    if (on('ws-trellis2-quality-plus')) cost += 1;
-    if (on('ws-trellis2-ultra-q')) cost += 2;
+    const plus = (id, cle) => { if (on(id)) { const p = window._prixDe(cle); if (p != null) cost += p; } };
+    let cost = base;
+    plus('ws-trellis2-multiref', 'mesh_multiref');
+    plus('ws-trellis2-rectify', 'mesh_rectify');
+    plus('ws-trellis2-quality-plus', 'mesh_quality_plus');
+    plus('ws-trellis2-ultra-q', 'mesh_ultra_q');
     // ultra_hd est ignoré par le worker quand le preset est déjà ultra_8k.
-    if (on('ws-trellis2-ultra-hd') && preset !== 'ultra_8k') cost += 3;
-    if (on('ws-trellis2-face-fix')) cost += 2;
-    // NB : ws-trellis2-smooth est gratuit côté worker — pas compté.
+    if (preset !== 'ultra_8k') plus('ws-trellis2-ultra-hd', 'mesh_ultra_hd');
+    // NE SONT PAS COMPTÉS, et c'est volontaire : refine, face_fix et smooth
+    // figurent dans OPTIONS_SANS_EFFET_CLOUD (worker.ts:1746) et sont
+    // neutralisés AVANT le calcul du prix. Les facturer à l'écran faisait
+    // croire à l'utilisateur qu'il achetait un raffinement qui n'aurait
+    // jamais lieu — le site web, lui, masque déjà ces cases en mode Cloud.
     if (!pill) {
       pill = document.createElement('span');
       pill.className = 'generate-cost-pill';
@@ -23235,6 +23296,56 @@ window._applyMeshCostPill = function (btn) {
   'ws-trellis2-ultra-hd', 'ws-trellis2-face-fix',
 ].forEach(id => document.getElementById(id)?.addEventListener('change', () => window._applyMeshCostPill()));
 window._applyMeshCostPill();
+
+/* ═══════════════════════════════════════════════════════════════════
+   CHARGEMENT DE LA GRILLE + MASQUAGE DES OPTIONS SANS EFFET
+
+   La grille est chargée au démarrage puis rafraîchie toutes les 5 minutes,
+   comme le fait déjà le site web. Un prix ajusté par l'administrateur suit
+   donc l'application sans re-livraison.
+
+   Et on masque en mode Cloud les trois options que le serveur neutralise
+   (`OPTIONS_SANS_EFFET_CLOUD`, worker.ts:1746). Les laisser cochables
+   revenait à vendre un raffinement qui n'a jamais lieu — le site web les
+   masque depuis longtemps (`removeUnimplementedPaidOptions`), le desktop
+   les affichait encore.
+   ═══════════════════════════════════════════════════════════════════ */
+window._masquerOptionsSansEffetCloud = function () {
+  try {
+    const cloud = (typeof window._computeMode === 'function') && window._computeMode() === 'cloud';
+    for (const id of ['ws-trellis2-refine', 'ws-trellis2-face-fix', 'ws-trellis2-smooth']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      // On remonte au label pour masquer la ligne entière, pas seulement la
+      // case à cocher orpheline.
+      //
+      // setProperty(..., 'important') est OBLIGATOIRE : la feuille de style
+      // impose `.inline-check { display: inline-flex !important }`
+      // (index2.css:3885), qui écrasait un simple `style.display = 'none'`.
+      // Constaté au banc : le style en ligne valait bien 'none' alors que le
+      // style calculé restait 'flex'.
+      //
+      // On vise le LABEL et non le conteneur `.form-row`, qui peut regrouper
+      // plusieurs options — masquer le parent en emporterait d'autres.
+      const ligne = el.closest('label') || el.parentElement || el;
+      if (cloud) {
+        if (el.checked) { el.checked = false; }   // ne pas laisser un état coché invisible
+        ligne.style.setProperty('display', 'none', 'important');
+      } else {
+        ligne.style.removeProperty('display');
+      }
+    }
+    try { window._applyMeshCostPill?.(); } catch (_) {}
+  } catch (_) {}
+};
+window._masquerOptionsSansEffetCloud();
+
+(async () => {
+  await window._chargerPrix();
+  window._masquerOptionsSansEffetCloud();
+  // Même cadence que le web : 5 minutes.
+  setInterval(() => { window._chargerPrix(); }, 5 * 60 * 1000);
+})();
 
 
 // ============================================================

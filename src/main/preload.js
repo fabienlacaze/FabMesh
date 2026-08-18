@@ -113,6 +113,10 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   // creation feature is not functional » — le seul chemin existant ouvrait le
   // navigateur). Deux temps : creation, puis code a six chiffres recu par
   // e-mail.
+  // Grille tarifaire vivante — l'interface doit LIRE les prix, jamais les
+  // ecrire en dur. Trois chiffres avaient diverge de la facturation reelle
+  // sans que rien ne le detecte (audit du 2026-08-18, ecart jusqu'a x8).
+  cloudPricing: (opts) => ipcRenderer.invoke('cloud-pricing', opts),
   cloudSignup: (opts) => ipcRenderer.invoke('cloud-signup', opts),
   cloudVerifySignup: (opts) => ipcRenderer.invoke('cloud-verify-signup', opts),
   cloudRecover: (opts) => ipcRenderer.invoke('cloud-recover', opts),

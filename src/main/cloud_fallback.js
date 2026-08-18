@@ -1102,10 +1102,62 @@ function _startHeartbeat() {
   ping();
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   GRILLE TARIFAIRE VIVANTE
+
+   L'application affichait des prix ECRITS EN DUR, qui avaient divergé de
+   la facturation réelle sans que rien ne le détecte. Audit du 2026-08-18 :
+
+       maillage « fast »   annoncé 1  → facturé 8   (×8)
+       maillage balanced   annoncé 2  → facturé 10
+       image               annoncé 2  → facturé 3   (par image)
+
+   Toujours dans le même sens : moins annoncé que facturé, ce qui est une
+   pratique commerciale trompeuse. Le web se synchronisait déjà sur
+   `/api/pricing` ; le desktop, lui, ne l'appelait NULLE PART — il était
+   structurellement incapable de suivre la grille.
+
+   La route est publique et sans authentification : on peut donc afficher un
+   prix juste avant même que l'utilisateur se connecte.
+
+   Cache de 5 minutes, comme le web. En cas d'échec réseau on renvoie null :
+   l'appelant garde alors son dernier prix connu plutôt que d'afficher un
+   chiffre inventé.
+   ═══════════════════════════════════════════════════════════════════ */
+let _prixCache = { prix: null, features: null, ts: 0 };
+const PRIX_TTL_MS = 5 * 60 * 1000;
+
+async function getPricing({ force = false } = {}) {
+  const maintenant = Date.now();
+  if (!force && _prixCache.prix && (maintenant - _prixCache.ts) < PRIX_TTL_MS) {
+    return { success: true, prices: _prixCache.prix, features: _prixCache.features, cache: true };
+  }
+  try {
+    const r = await fetch(`${WORKER_URL}/api/pricing`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if (!j || typeof j.prices !== 'object' || !j.prices) throw new Error('reponse sans grille');
+    _prixCache = { prix: j.prices, features: j.features || {}, ts: maintenant };
+    return { success: true, prices: j.prices, features: j.features || {}, cache: false };
+  } catch (e) {
+    // On NE renvoie PAS de prix de repli invente : l'interface conserve le
+    // dernier prix connu, ou n'affiche rien. Mieux vaut pas de chiffre qu'un
+    // chiffre faux — c'est precisement ce qui a cause cet audit.
+    if (_prixCache.prix) {
+      return { success: true, prices: _prixCache.prix, features: _prixCache.features, cache: true, perime: true };
+    }
+    return { success: false, error: String((e && e.message) || e) };
+  }
+}
+
 function register(deps) {
   _deps = deps;
   const { ipcMain } = deps;
   _startHeartbeat();
+  ipcMain.handle('cloud-pricing', async (_e, opts = {}) => {
+    try { return await getPricing(opts || {}); }
+    catch (e) { return { success: false, error: String(e.message || e) }; }
+  });
   ipcMain.handle('cloud-prewarm', async (_e, opts = {}) => {
     try { return await prewarm(opts || {}); }
     catch (e) { return { success: false, error: String(e.message || e) }; }
