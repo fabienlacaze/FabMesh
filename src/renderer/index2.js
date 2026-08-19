@@ -23763,6 +23763,27 @@ window._applyRigAnimPills();
     ouvrir({ kind: 'mesh', asset_url: cible, prompt: promptCourant() });
   });
 
+  /* ENTREE PERMANENTE — barre du haut.
+   *
+   * La politique 11.16 a valu DEUX refus (2026-08-04, puis 2026-08-19) alors
+   * que le dispositif de signalement existait deja les deux fois. Le probleme
+   * n'a jamais ete son absence, mais sa DECOUVRABILITE :
+   *   - « Report content » des panneaux d'outils n'apparait qu'une fois une
+   *     image ou un maillage selectionne. Un testeur qui n'a rien genere —
+   *     et sur un Surface sans GPU, generer exige un compte — ne le voit
+   *     jamais ;
+   *   - l'entree « A propos » demande d'ouvrir une fenetre secondaire, ce
+   *     qu'un examinateur cherchant « Report an Issue » ne fait pas.
+   *
+   * Ce bouton-ci est dans la barre du haut, visible des le premier lancement,
+   * sans compte, sans projet et sans contenu. */
+  document.getElementById('btn-report-ai')?.addEventListener('click', () => {
+    let cible = '';
+    try { cible = editTarget(state.currentProject) || ''; } catch (_) {}
+    if (!cible) { try { cible = getCurrentMeshObj()?.path || ''; } catch (_) {} }
+    ouvrir({ kind: 'unspecified', asset_url: cible, prompt: promptCourant() });
+  });
+
   // Entree depuis la fenetre « A propos ». Les boutons places pres du
   // contenu n'existent qu'une fois une image ou un maillage selectionne ;
   // celui-ci est disponible A TOUT MOMENT, y compris au tout premier

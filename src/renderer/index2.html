@@ -78,6 +78,16 @@
       <div class="topbar-right">
         <span id="topbar-credits" class="generate-cost-pill" title="MyFabmesh credits — click to top up" style="display:none; cursor:pointer; font-size:12px; padding:4px 11px;">&#9889; <span id="topbar-credits-val">…</span></span>
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
+        <!-- SIGNALEMENT DE CONTENU IA — politique 11.16 du Microsoft Store.
+             REFUSE DEUX FOIS (2026-08-04 puis 2026-08-19) alors que le
+             dispositif existait deja. La cause est la DECOUVRABILITE : les
+             boutons vivaient dans les panneaux d'outils, donc uniquement une
+             fois du contenu genere, et le troisieme etait enfoui dans la
+             fenetre « A propos » — a deux clics, dans un endroit qu'un
+             examinateur cherchant « Report an Issue » n'ouvre pas.
+             Il est desormais dans la barre du haut, visible en permanence,
+             des le tout premier lancement et sans aucun contenu. -->
+        <button id="btn-report-ai" class="icon-btn" title="Report inappropriate AI-generated content">&#9873;</button>
         <button id="btn-parental-lock" class="icon-btn" title="Parental control" style="font-size:14px;">&#128274;</button>
         <button id="btn-about" class="icon-btn" title="About MyFabmesh.AI">?</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
@@ -2068,7 +2078,7 @@
           <div class="settings-box-title">Image generation compute</div>
           <div class="settings-box-desc" style="display:flex; flex-direction:column; gap:4px; line-height:1.5;">
             <div>&#128421;&#65039; <b style="color:var(--text-0);">Local</b> &nbsp;·&nbsp; <span data-i18n>Free and unlimited</span> &nbsp;·&nbsp; <span data-i18n>Requires an NVIDIA GPU</span></div>
-            <div>&#9729;&#65039; <b style="color:var(--text-0);">Cloud</b> &nbsp;·&nbsp; <span data-i18n>Works on any PC</span> &nbsp;·&nbsp; <span data-i18n>2 credits per image</span> &nbsp;·&nbsp; <span data-i18n>Results also appear in your web library</span></div>
+            <div>&#9729;&#65039; <b style="color:var(--text-0);">Cloud</b> &nbsp;·&nbsp; <span data-i18n>Works on any PC</span> &nbsp;·&nbsp; <span data-i18n>3 credits per image</span> &nbsp;·&nbsp; <span data-i18n>Results also appear in your web library</span></div>
           </div>
           <div style="display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap;">
             <div class="compute-toggle">
