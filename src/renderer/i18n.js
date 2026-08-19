@@ -960,6 +960,10 @@
       'Sign in to your MyFabmesh account — new accounts get 15 free credits':
         'Connectez-vous à votre compte MyFabmesh — les nouveaux comptes reçoivent 15 crédits gratuits',
       'MyFabmesh credits — click to top up': 'Crédits MyFabmesh — cliquez pour recharger',
+      'Your account was created but not confirmed. Sign in with the 6-digit code we emailed you.':
+        'Votre compte a été créé mais reste à confirmer. Saisissez le code à 6 chiffres reçu par e-mail.',
+      'This email is already registered. Enter the 6-digit code we emailed you, or go back and sign in.':
+        'Cette adresse est déjà inscrite. Saisissez le code à 6 chiffres reçu par e-mail, ou revenez à la connexion.',
       'Create your MyFabmesh account': 'Créez votre compte MyFabmesh',
       'New accounts get 15 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.':
         'Les nouveaux comptes obtiennent 15 crédits gratuits. Choisissez un mot de passe d\'au moins 6 caractères — nous vous enverrons un code de confirmation à 6 chiffres par e-mail.',

@@ -22675,8 +22675,46 @@ async function showCloudLoginModal() {
     document.body.appendChild(ov);
     try { window.FabI18n?.apply?.(ov); } catch (_) {}
     const done = (v) => { ov.remove(); resolve(v); };
-    ov.querySelector('#cl-cancel').onclick = () => done(false);
-    ov.addEventListener('click', (e) => { if (e.target === ov) done(false); });
+    ov.querySelector('#cl-cancel').onclick = () => {
+      // Annuler PENDANT la confirmation laisse un compte cree mais non
+      // confirme : sans un mot d'explication, l'utilisateur ne comprend pas
+      // pourquoi sa prochaine inscription echouera (« adresse deja utilisee »)
+      // ni ou est passe son code.
+      if (mode === 'verify') {
+        try {
+          showToast(
+            (typeof _i18nT === 'function'
+              ? _i18nT('Your account was created but not confirmed. Sign in with the 6-digit code we emailed you.')
+              : 'Your account was created but not confirmed. Sign in with the 6-digit code we emailed you.'),
+            'info', 9000);
+        } catch (_) {}
+      }
+      done(false);
+    };
+    /* PAS DE FERMETURE AU CLIC A COTE.
+     *
+     * Signale par le user le 2026-08-19, en creant un compte dans la VM : un
+     * clic hors de la fenetre la faisait disparaitre, e-mail et mot de passe
+     * saisis perdus — et, en etape de confirmation, le code a 6 chiffres avec.
+     * Sur le parcours d'un testeur de certification, c'est une impasse
+     * silencieuse : rien n'explique ce qui vient de se passer.
+     *
+     * La fenetre ne se ferme donc plus que par un geste EXPLICITE : le bouton
+     * « Cancel ». Il reste toujours visible, donc aucun blocage — le piege du
+     * refus n5 (une garde bien intentionnee qui enferme l'utilisateur) est
+     * evite. On absorbe simplement le clic sur le fond. */
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) {
+        e.stopPropagation();
+        // Retour visuel : sans lui, l'utilisateur croit l'interface figee.
+        const carte = ov.firstElementChild;
+        if (carte) {
+          carte.style.transition = 'transform .12s';
+          carte.style.transform = 'scale(1.015)';
+          setTimeout(() => { carte.style.transform = ''; }, 120);
+        }
+      }
+    });
     const eye = ov.querySelector('#cl-eye');
     eye.onclick = () => {
       const inp = ov.querySelector('#cl-pass');
@@ -22789,7 +22827,20 @@ async function showCloudLoginModal() {
         els.ok.disabled = true;
         const r = await API.cloudSignup?.({ email, password: pass });
         els.ok.disabled = false;
-        if (!r?.success) { err.textContent = r?.error || T('Could not create the account.'); return; }
+        if (!r?.success) {
+          // ADRESSE DEJA INSCRITE — le cas se produit surtout apres une
+          // inscription interrompue avant la confirmation. Sans ce
+          // rattrapage, l'utilisateur boucle : il ne peut ni s'inscrire
+          // (deja pris) ni se connecter (non confirme), et rien ne le lui dit.
+          if (/already\s*registered|already\s*exists|User already/i.test(String(r?.error || ''))) {
+            setMode('verify');
+            err.style.color = '#7ee787';
+            err.textContent = T('This email is already registered. Enter the 6-digit code we emailed you, or go back and sign in.');
+            return;
+          }
+          err.textContent = r?.error || T('Could not create the account.');
+          return;
+        }
         // Confirmations desactivees cote Supabase : la session est deja la.
         if (r.codeRequis === false) { done(true); return; }
         setMode('verify');

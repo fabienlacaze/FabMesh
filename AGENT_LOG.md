@@ -20647,3 +20647,36 @@ A NOTER pour la prochaine fois : deux refus 11.16 de suite sur un dispositif
 PRESENT. Quand Microsoft reproche une fonction manquante, verifier d'abord si
 elle est simplement INTROUVABLE depuis l'ecran d'accueil, sans contenu et sans
 compte — c'est l'etat dans lequel le testeur arrive.
+
+## 2026-08-19 — la modale de compte disparaissait au clic a cote
+
+SIGNALE PAR LE USER en creant un compte dans la VM : un clic hors de la fenetre
+la faisait disparaitre, e-mail et mot de passe saisis perdus. Et en etape de
+confirmation, le code a 6 chiffres avec.
+
+Sur le parcours d'un testeur de certification c'est une impasse SILENCIEUSE :
+rien n'explique ce qui vient de se passer, et il n'a aucune raison de
+recommencer.
+
+TROIS CORRECTIFS, du plus visible au plus retors :
+
+1. `ov.addEventListener('click', … done(false))` supprime. La fenetre ne se
+   ferme plus que par un geste EXPLICITE — le bouton « Cancel », toujours
+   visible. Le clic sur le fond est absorbe, avec un leger effet d'echelle :
+   sans retour visuel, l'utilisateur croit l'interface figee.
+   Le piege du refus n5 est evite : rien n'enferme l'utilisateur.
+
+2. Annuler PENDANT la confirmation laisse un compte cree mais non confirme.
+   Un message le dit desormais, au lieu de laisser l'utilisateur devant un
+   echec incomprehensible a sa prochaine tentative.
+
+3. LE PIEGE COMPLET, referme : apres une inscription interrompue, recommencer
+   echouait en « adresse deja utilisee » — l'utilisateur ne pouvait donc NI
+   s'inscrire (deja pris) NI se connecter (non confirme), sans que rien ne le
+   lui dise. La detection de cette erreur bascule maintenant en etape de
+   confirmation avec l'explication.
+
+VERIFIE PAR PILOTAGE CDP :
+    clic sur le fond -> modale conservee, e-mail et mot de passe intacts,
+                        mode « creation » preserve
+    bouton Cancel    -> ferme toujours
