@@ -653,6 +653,8 @@
       // « Report content » par « Contenu du rapport » — il lisait « report »
       // comme un nom au lieu d'un verbe, ce qui rendait le bouton
       // incomprehensible dans la langue de l'utilisateur.
+      'Signed in as': 'Connecté en tant que',
+      'click to top up': 'cliquez pour recharger',
       'Report content': 'Signaler le contenu',
       // « Report » seul : le repli automatique l'avait rendu par
       // « Rapport annuel » sur le bouton place sous l'image.

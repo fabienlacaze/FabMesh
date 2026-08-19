@@ -20758,3 +20758,53 @@ Et le clic ouvre bien `#modal-report`.
 A SURVEILLER : tout nouveau libelle d'un controle exige par la certification
 doit etre curate dans les 5 langues AVANT l'envoi au Store. Sinon la machine
 decide a notre place.
+
+## 2026-08-19 — « ca a lance la generation alors que je n'avais pas tape mon compte »
+
+CONSTAT DU USER : une generation cloud a demarre et abouti alors qu'il n'avait
+ni cree ni saisi de compte.
+
+ENQUETE. Workflow de 25 agents (5 angles : gardes du serveur, credits anonymes,
+garde du bureau, jeton embarque, repli silencieux), chaque piste soumise a un
+refutateur. RESULTAT : 20 pistes examinees, ZERO confirmee. Aucun contournement
+d'authentification n'existe.
+
+Deux enseignements du travail de refutation, a garder :
+  * le badge « Generated on the MyFabmesh cloud » NE PROUVE RIEN sur l'origine
+    des pixels : `_isCloudMode()` = `computeMode==='cloud' || !_hasNvidia()`
+    (index2.js:132-134). Dans une machine sans carte NVIDIA il est TOUJOURS
+    vrai. Ne jamais s'en servir comme preuve dans un diagnostic.
+  * le chemin cloud du bureau est bien garde : cloud_fallback.js:327-331 rend
+    `{ needsCloudLogin: true }` quand `getAccessToken()` est nul.
+
+CAUSE REELLE, etablie par la mesure et non par la lecture :
+La VM etait ETEINTE (`VBoxManage list runningvms` vide). La generation a donc
+tourne sur la machine de developpement, ou `%APPDATA%\myfabmesh-ai\
+cloud_session.json` existe (154 o, `{enc:...}`, chiffre par safeStorage/DPAPI)
+et contient un refresh_token. Au demarrage, `getAccessToken()`
+(cloud_fallback.js:288-303) le rejoue en silence. Mesure par pilotage CDP,
+application fraichement lancee, sans aucune saisie :
+
+    window.meshyAPI.cloudStatus()
+    -> {"loggedIn":true,"email":"fabien65400+storetest@hotmail.fr","credits":9}
+
+Ce n'est donc pas une faille, c'est « rester connecte ». Mais le DEFAUT est
+reel : RIEN a l'ecran ne nommait le compte debite. Le proprietaire lui-meme
+s'est cru anonyme et a depense des credits de son compte de test Store. Sur un
+produit facture a l'unite, c'est inacceptable.
+
+CORRECTIF : la pastille de la barre du haut porte desormais le compte a cote du
+solde — « ⚡ 9 | fabien65400+sto… », infobulle « Connecte en tant que
+<adresse> — cliquez pour recharger ». La partie locale suffit a se reconnaitre,
+l'adresse complete reste dans l'infobulle. Retenue dans `window._compteCloud`
+pour ne pas disparaitre quand le solde est rafraichi sans interroger le serveur.
+Porte sur le web (`cloud-overrides.js`, chip a cote de la pastille, alimente par
+`/api/me` -> `j.user.email`). Traduit dans les 5 langues sur les 2 plateformes.
+Verifie par capture d'ecran.
+
+CONSTAT ANNEXE NON CORRIGE, a instruire pour lui-meme : `/api/proxy-image`
+(worker.ts:11431, « Public — no auth required ») relaie sans authentification
+vers une liste blanche qui contient `image.pollinations.ai` (l.11455-11459) et
+le joker `*.r2.dev` (l.11468), avec `access-control-allow-origin: *`. C'est un
+relais ouvert : cela coute de l'egress, pas des credits, et n'explique pas le
+fait observe — mais cela reste a fermer.

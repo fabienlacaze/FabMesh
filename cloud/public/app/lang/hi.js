@@ -2,6 +2,8 @@
  * Load AFTER i18n.js. */
 (function () {
   var dict = {
+      'Signed in as': 'इस रूप में साइन इन',
+      'click to top up': 'रिचार्ज के लिए क्लिक करें',
       // ---- Signalement de contenu IA (politique 11.16 du Store) ----
       // Entrees EXPLICITES : sans elles le repli automatique traduit
       // « Report » comme un NOM (le francais avait donne « Rapport

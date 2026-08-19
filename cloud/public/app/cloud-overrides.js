@@ -1367,7 +1367,17 @@
    * any successful generate/buy action.
    * ────────────────────────────────────────────────────────────────── */
   let _creditsPillEl = null;
+  let _compteChipEl = null;
   let _creditsPollTimer = null;
+
+  function _majChipCompte(email) {
+    if (!_compteChipEl) return;
+    if (!email) { _compteChipEl.style.display = 'none'; _compteChipEl.textContent = ''; return; }
+    const local = String(email).split('@')[0];
+    _compteChipEl.textContent = local.length > 18 ? local.slice(0, 17) + '…' : local;
+    _compteChipEl.title = 'Signed in as ' + email;
+    _compteChipEl.style.display = 'inline-flex';
+  }
 
   function installCreditsPill() {
     if (_creditsPillEl) return; // already installed
@@ -1386,6 +1396,20 @@
     pill.textContent = '…';
     right.insertBefore(pill, right.firstChild);
     _creditsPillEl = pill;
+
+    // QUI est connecte, a cote du solde. Sur le bureau, une session restauree
+    // en silence a fait depenser des credits a un proprietaire qui se croyait
+    // deconnecte (2026-08-19). Le solde seul ne dit pas a QUI il appartient ;
+    // le web affiche donc la meme mention, par parite.
+    const compte = document.createElement('span');
+    compte.id = 'cloud-account-chip';
+    compte.style.cssText = [
+      'display:none', 'align-items:center', 'font-size:11px', 'opacity:.72',
+      'margin-left:8px', 'max-width:150px', 'overflow:hidden',
+      'text-overflow:ellipsis', 'white-space:nowrap',
+    ].join(';');
+    right.insertBefore(compte, pill.nextSibling);
+    _compteChipEl = compte;
 
     // First fetch + polling
     refreshCreditsPill();
@@ -1448,14 +1472,17 @@
         }
         _creditsPillEl.textContent = 'Sign in';
         _creditsPillEl.href = '/login';
+        _majChipCompte(null);
         return;
       }
       const j = await r.json();
       const credits = j?.user?.credits;
+      _majChipCompte(j?.user?.email || null);
       if (typeof credits === 'number') {
         // Bolt comes from .credit-badge::before, so we just set text.
         _creditsPillEl.textContent = `${credits} credit${credits === 1 ? '' : 's'}`;
         _creditsPillEl.href = '/buy';
+        if (j?.user?.email) _creditsPillEl.title = 'Signed in as ' + j.user.email + ' — click to buy more credits';
       } else {
         _creditsPillEl.textContent = 'Sign in';
         _creditsPillEl.href = '/login';

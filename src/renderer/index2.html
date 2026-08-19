@@ -76,7 +76,13 @@
         <span id="breadcrumb"></span>
       </div>
       <div class="topbar-right">
-        <span id="topbar-credits" class="generate-cost-pill" title="MyFabmesh credits — click to top up" style="display:none; cursor:pointer; font-size:12px; padding:4px 11px;">&#9889; <span id="topbar-credits-val">…</span></span>
+        <!-- Le solde, ET le compte auquel il appartient. Le proprietaire a
+             lance une generation le 2026-08-19 en croyant n'etre connecte a
+             rien : une session precedente avait ete restauree en silence
+             (cloud_session.json, jeton de rafraichissement chiffre par DPAPI).
+             Des credits reels partaient sans que rien a l'ecran ne nomme le
+             compte debite. Le solde seul ne suffit pas — il faut dire A QUI. -->
+        <span id="topbar-credits" class="generate-cost-pill" title="MyFabmesh credits — click to top up" style="display:none; cursor:pointer; font-size:12px; padding:4px 11px;">&#9889; <span id="topbar-credits-val">…</span><span id="topbar-account" style="display:none; opacity:.72; margin-left:7px; padding-left:7px; border-left:1px solid rgba(0,0,0,.28); max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom;"></span></span>
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
         <!-- SIGNALEMENT DE CONTENU IA — politique 11.16 du Microsoft Store.
              REFUSE DEUX FOIS (2026-08-04 puis 2026-08-19) alors que le

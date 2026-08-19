@@ -23443,6 +23443,23 @@ window._masquerOptionsSansEffetCloud();
 // ============================================================
 // SOLDE DE CRÉDITS DANS LA TOPBAR (mode Cloud uniquement)
 // ============================================================
+/* QUI est connecte. Retenu entre deux appels : quand le solde est deja connu
+ * (`creditsKnown`), la fonction rendait sans interroger le serveur et la
+ * mention du compte aurait disparu a chaque generation. */
+window._compteCloud = window._compteCloud || null;
+
+function _majMentionCompte(email) {
+  const chip = document.getElementById('topbar-account');
+  if (!chip) return;
+  if (!email) { chip.style.display = 'none'; chip.textContent = ''; return; }
+  // La partie locale suffit a se reconnaitre et tient dans la barre ; le
+  // libelle complet reste dans l'infobulle.
+  const local = String(email).split('@')[0];
+  chip.textContent = local.length > 16 ? local.slice(0, 15) + '…' : local;
+  chip.title = email;
+  chip.style.display = '';
+}
+
 window._refreshTopbarCredits = async function (creditsKnown) {
   try {
     const el = document.getElementById('topbar-credits');
@@ -23452,20 +23469,28 @@ window._refreshTopbarCredits = async function (creditsKnown) {
     if (!cloud) { el.style.display = 'none'; return; }
     el.style.display = 'inline-flex';
     const T = (s) => (typeof _i18nT === 'function' ? _i18nT(s) : s);
+    const titreConnecte = (mail) => (mail
+      ? T('Signed in as') + ' ' + mail + ' — ' + T('click to top up')
+      : T('MyFabmesh credits — click to top up'));
     if (creditsKnown != null) {
       val.textContent = String(creditsKnown);
       el.dataset.needLogin = '';
-      el.title = T('MyFabmesh credits — click to top up');
+      _majMentionCompte(window._compteCloud);
+      el.title = titreConnecte(window._compteCloud);
       return;
     }
     const s = await API.cloudStatus?.();
+    if (s?.loggedIn) window._compteCloud = s.email || window._compteCloud;
+    else window._compteCloud = null;
+    _majMentionCompte(window._compteCloud);
     if (s?.loggedIn && s.credits != null) {
       val.textContent = String(s.credits);
       el.dataset.needLogin = '';
-      el.title = T('MyFabmesh credits — click to top up');
+      el.title = titreConnecte(window._compteCloud);
     } else if (s?.loggedIn) {
       val.textContent = '…';
       el.dataset.needLogin = '';
+      el.title = titreConnecte(window._compteCloud);
     } else {
       // PAS CONNECTÉ. Le badge affichait « — » sans rien expliquer, et le clic
       // ouvrait le NAVIGATEUR sur /buy : on envoyait acheter des crédits

@@ -3,6 +3,8 @@
  * translations, add an <option> in index.html and a flag in i18n.js. */
 (function () {
   var dict = {
+      'Signed in as': 'Sesion iniciada como',
+      'click to top up': 'haz clic para recargar',
       // ---- Signalement de contenu IA (politique 11.16 du Store) ----
       // Entrees EXPLICITES : sans elles le repli automatique traduit
       // « Report » comme un NOM (le francais avait donne « Rapport
