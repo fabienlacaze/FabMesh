@@ -20860,3 +20860,48 @@ AUTRES CONSTATS D'EXPLOITATION :
 RESULTAT : 1.0.30 installee en 6,9 s (desinstallation de 1.0.28 comprise),
 assistant affiche, « MyFabmesh.AI v1.0.30 » en bas a droite, build 26200.9168
 sans carte NVIDIA.
+
+## 2026-08-20 — Renonciation au droit de retractation : case ratee, et sans preuve
+
+Le proprietaire, en relisant /buy : « il faut que la checkbox soit plutot dans
+une popup, elle est pas assez visible ». Il l'avait ratee lui-meme.
+
+DEUX DEFAUTS, dont un juridique.
+
+1. ERGONOMIE. La case vivait en haut de page, au-dessus des cartes de prix,
+   dans un cadre gris de 13 px. Elle desactivait TOUS les boutons « Buy » sans
+   que rien n'explique pourquoi : le visiteur voyait six boutons morts.
+
+2. AUCUNE PREUVE. Le consentement n'existait QUE dans le navigateur — l'etat
+   React `consented` desactivait le bouton, un point c'est tout. `/api/checkout`
+   ne recevait rien et n'enregistrait rien. Or l'article L221-28 13° fait peser
+   sur le PROFESSIONNEL la charge de prouver que le consommateur a expressement
+   demande l'execution immediate ET reconnu perdre son droit de retractation.
+   En cas de contestation nous n'avions rien a produire. Le consentement etait
+   en outre donne AVANT le choix du pack, donc rattache a aucun contrat precis.
+
+CORRECTIF.
+  * `BuyButton.tsx` : le clic sur « Buy » ouvre une fenetre modale qui nomme le
+    pack, ses credits et son prix TTC, puis demande le consentement dans un
+    encadre a bordure de 2 px qui vire a l'accent une fois coche. « Confirm and
+    pay <montant> » reste inactif tant que la case ne l'est pas. Le
+    consentement porte donc sur un achat IDENTIFIE, au moment de l'achat.
+  * `page.tsx` : la case globale devient un simple avertissement ; les boutons
+    « Buy » ne sont plus jamais desactives sans explication.
+  * `worker.ts / handleCheckout` : `consent: true` est desormais EXIGE (400
+    sinon) et horodate dans les metadonnees Stripe — `withdrawal_waiver` et
+    `withdrawal_waiver_at` — sur les DEUX branches, paiement unique et
+    abonnement. La preuve vit donc a cote du paiement, consultable dans le
+    tableau de bord Stripe.
+
+VERIFIE par pilotage CDP sur le site reellement construit (cloud/out servi en
+HTTP, /api/me et /api/pricing simules) :
+    6 boutons Buy, 0 desactive
+    clic -> fenetre ouverte
+    « Confirm and pay » desactive tant que la case ne l'est pas
+    apres la coche -> actif, libelle « Confirm and pay 5 € »
+
+NON DEPLOYE : `npm run build` reste bloque par les 9 champs vides de
+`cloud/src/config/legal-identity.ts` (LCEN art. 6-III + Code conso. art.
+L612-1). Verification faite avec ALLOW_UNFILLED_LEGAL=1 uniquement. Le
+deploiement attend que le proprietaire renseigne son identite et son mediateur.

@@ -4577,9 +4577,28 @@ async function handlePricingAvailability(_req: Request, env: Env): Promise<Respo
 async function handleCheckout(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  const { packId } = await req.json() as { packId: PackId };
+  const corps = await req.json() as { packId: PackId; consent?: boolean; consentedAt?: string };
+  const packId = corps.packId;
   const pack = PACKS[packId];
   if (!pack) return err(400, 'unknown pack');
+
+  /* RENONCIATION AU DROIT DE RETRACTATION — Art. L221-28 13°.
+   *
+   * La case a cocher n'existait QUE dans le navigateur : elle desactivait le
+   * bouton, rien de plus. Aucune trace n'etait conservee. En cas de
+   * contestation, c'est au professionnel de prouver que le consommateur a
+   * expressement demande l'execution immediate ET reconnu perdre son droit de
+   * retractation — nous n'aurions rien eu a produire.
+   *
+   * Le consentement est desormais EXIGE ici, et horodate dans les metadonnees
+   * de la session Stripe, ou il reste consultable a cote du paiement. */
+  if (corps.consent !== true) {
+    return err(400, 'Consent to immediate delivery is required before payment (Art. L221-28 13°).');
+  }
+  const consentementLe = (typeof corps.consentedAt === 'string' && corps.consentedAt.length <= 40)
+    ? corps.consentedAt
+    : new Date().toISOString();
+
   if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
 
   /* Cle de TEST en production : on refuse d'ouvrir un paiement plutot que de
@@ -4614,9 +4633,13 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
       metadata: {
         user_id: user.id, pack_id: pack.id,
         credits: String(pack.credits), is_subscription: 'true',
+        withdrawal_waiver: 'accepted', withdrawal_waiver_at: consentementLe,
       },
       subscription_data: {
-        metadata: { user_id: user.id, pack_id: pack.id, credits: String(pack.credits) },
+        metadata: {
+      user_id: user.id, pack_id: pack.id, credits: String(pack.credits),
+      withdrawal_waiver: 'accepted', withdrawal_waiver_at: consentementLe,
+    },
       },
       // EU VAT / sales-tax: let Stripe Tax compute and collect the correct
       // rate from the customer's billing address. Requires Stripe Tax to be

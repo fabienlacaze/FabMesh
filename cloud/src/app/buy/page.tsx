@@ -16,9 +16,6 @@ export default function BuyPage() {
   // those cards so the user doesn't get a 503 mid-checkout. null = still
   // loading; missing key = treat as available (fail-open on fetch error).
   const [availability, setAvailability] = useState<Record<string, boolean> | null>(null);
-  // EU right-of-withdrawal waiver (Art. L221-28 13°): the user must explicitly
-  // consent before any checkout can start. Gates every BuyButton on the page.
-  const [consented, setConsented] = useState(false);
 
   useEffect(() => {
     fetch('/api/me')
@@ -77,27 +74,29 @@ export default function BuyPage() {
         according to your country at checkout.
       </p>
 
-      <label
+      {/* La case de renonciation vivait ICI, au-dessus des cartes. Le
+          proprietaire l'a ratee lui-meme le 2026-08-20 : trop discrete, et
+          elle desactivait les boutons « Buy » sans rien expliquer. Elle est
+          desormais demandee au moment de l'achat, dans une fenetre qui nomme
+          le pack — voir BuyButton.tsx. Il ne reste ici qu'un avertissement. */}
+      <p
         style={{
           display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 24,
-          padding: '12px 14px', border: '1px solid var(--border, #333)', borderRadius: 8,
-          fontSize: 13, lineHeight: 1.5, cursor: 'pointer',
+          padding: '11px 14px', borderRadius: 8, fontSize: 13, lineHeight: 1.5,
+          background: 'rgba(255,170,51,.07)', border: '1px solid rgba(255,170,51,.3)',
+          color: 'var(--text-2)',
         }}
       >
-        <input
-          type="checkbox"
-          checked={consented}
-          onChange={(e) => setConsented(e.target.checked)}
-          style={{ marginTop: 3 }}
-        />
+        <span aria-hidden="true">&#9432;</span>
         <span>
-          I expressly request that credits be made available immediately and I
-          acknowledge that, once I start consuming a credit or generate an asset, I{' '}
-          <strong>lose my 14-day right of withdrawal</strong> for that digital
-          content (Art. L221-28 13° of the French Consumer Code). See the{' '}
+          Credits are digital content delivered immediately. Before paying you
+          will be asked to confirm that you{' '}
+          <strong>waive your 14-day right of withdrawal</strong> for the credits
+          you consume (Art. L221-28 13&deg; of the French Consumer Code). Unspent
+          credits stay refundable for 14 days. See the{' '}
           <a href="/legal/terms">Terms of Service</a>.
         </span>
-      </label>
+      </p>
 
       <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>One-shot top-ups</h3>
       <div className="pricing-grid" style={{ padding: 0 }}>
@@ -110,7 +109,7 @@ export default function BuyPage() {
             <div className="amount">{p.euros} € <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-2)' }}>TTC</span></div>
             <div className="unit">{p.credits} credits</div>
             <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
-            <BuyButton packId={p.id} loggedIn={!!user} consented={consented} />
+            <BuyButton packId={p.id} loggedIn={!!user} />
           </div>
         ))}
       </div>
@@ -134,7 +133,7 @@ export default function BuyPage() {
               <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>TTC / month</span></div>
               <div className="unit">{p.credits} credits / month</div>
               <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
-              <BuyButton packId={p.id} loggedIn={!!user} consented={consented} />
+              <BuyButton packId={p.id} loggedIn={!!user} />
             </div>
           ))}
         </div>
