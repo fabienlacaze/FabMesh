@@ -964,6 +964,14 @@
         'Votre compte a été créé mais reste à confirmer. Saisissez le code à 6 chiffres reçu par e-mail.',
       'This email is already registered. Enter the 6-digit code we emailed you, or go back and sign in.':
         'Cette adresse est déjà inscrite. Saisissez le code à 6 chiffres reçu par e-mail, ou revenez à la connexion.',
+      'This email address is missing the @ sign.':
+        'Il manque le @ dans cette adresse e-mail.',
+      'This email address looks incomplete — check the part after the @.':
+        'Cette adresse e-mail semble incomplète — vérifiez ce qui suit le @.',
+      'Wrong email or password. No account yet? Use "Create an account" below.':
+        'Adresse ou mot de passe incorrect. Pas encore de compte ? Utilisez « Créer un compte » ci-dessous.',
+      'This account is not confirmed yet. Enter the 6-digit code we emailed you.':
+        'Ce compte n’est pas encore confirmé. Saisissez le code à 6 chiffres reçu par e-mail.',
       'Create your MyFabmesh account': 'Créez votre compte MyFabmesh',
       'New accounts get 15 free credits. Pick a password of at least 6 characters — we will email you a 6-digit confirmation code.':
         'Les nouveaux comptes obtiennent 15 crédits gratuits. Choisissez un mot de passe d\'au moins 6 caractères — nous vous enverrons un code de confirmation à 6 chiffres par e-mail.',

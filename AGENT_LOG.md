@@ -20680,3 +20680,38 @@ VERIFIE PAR PILOTAGE CDP :
     clic sur le fond -> modale conservee, e-mail et mot de passe intacts,
                         mode « creation » preserve
     bouton Cancel    -> ferme toujours
+
+## 2026-08-19 — « Invalid login credentials » accusait le mauvais coupable
+
+Le user, dans la VM : saisie `fabien65400hotmail.fr` — le @ MANQUAIT. L'adresse
+partait telle quelle au serveur, qui repondait « Invalid login credentials ».
+Ce message accuse le MOT DE PASSE alors que la faute est dans l'adresse. Un
+testeur en conclut que la connexion ne fonctionne pas.
+
+Cause du @ manquant : le clavier AZERTY de la machine virtuelle. AltGr passe
+mal sous VirtualBox. Ce n'est pas un defaut de l'application, mais le defaut
+d'ERGONOMIE qu'il a revele en est un.
+
+CORRECTIFS :
+  * validation de l'adresse AVANT tout appel reseau, avec un message qui
+    designe la vraie faute : « Il manque le @ dans cette adresse e-mail » ou
+    « Cette adresse semble incomplete — verifiez ce qui suit le @ ». Le champ
+    reprend le focus et son contenu est selectionne.
+    Test volontairement permissif (@ present, domaine avec un point) : on
+    n'essaie pas de valider la RFC, seulement d'attraper la faute grossiere.
+  * les messages bruts de Supabase sont traduits en langage utile :
+      « Invalid login credentials » -> « Adresse ou mot de passe incorrect.
+        Pas encore de compte ? Utilisez "Creer un compte" ci-dessous. »
+      « Email not confirmed »       -> bascule en etape de code, avec
+        l'explication.
+
+VERIFIE PAR PILOTAGE CDP, les trois cas :
+    sans @             -> « Il manque le @ dans cette adresse e-mail. »
+    domaine incomplet  -> « ...verifiez ce qui suit le @. »
+    compte inexistant  -> « Adresse ou mot de passe incorrect. Pas encore de
+                           compte ? ... »
+
+NOTE D'EXPLOITATION pour la VM : le presse-papiers est en `bidirectional`, le
+copier-coller depuis l'hote fonctionne. En dernier recours,
+`VBoxManage controlvm <vm> keyboardputstring <texte>` tape directement dans
+l'invite et contourne le clavier.

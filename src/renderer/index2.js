@@ -22821,6 +22821,28 @@ async function showCloudLoginModal() {
 
       if (!email || !pass) { err.textContent = T('Email and password are required.'); return; }
 
+      /* VALIDATION DE L'ADRESSE, AVANT TOUT APPEL RESEAU.
+       *
+       * Constate par le user le 2026-08-19 dans la VM : il avait saisi
+       * « fabien65400hotmail.fr » — le @ manquait, probablement avale par le
+       * clavier AZERTY de la machine virtuelle (AltGr passe mal). L'adresse
+       * partait quand meme au serveur, qui repondait « Invalid login
+       * credentials » : un message qui accuse le MOT DE PASSE alors que le
+       * probleme est dans l'adresse. Un testeur en conclut que la connexion
+       * ne fonctionne pas.
+       *
+       * Test volontairement permissif : on ne cherche pas a valider la norme
+       * RFC, seulement a attraper la faute grossiere (@ absent, espace,
+       * domaine sans point) avant de blamer l'utilisateur pour autre chose. */
+      const adresseVraisemblable = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      if (!adresseVraisemblable) {
+        err.textContent = email.includes('@')
+          ? T('This email address looks incomplete — check the part after the @.')
+          : T('This email address is missing the @ sign.');
+        try { els.email.focus(); els.email.select(); } catch (_) {}
+        return;
+      }
+
       if (mode === 'signup') {
         if (pass.length < 6) { err.textContent = T('Password must be at least 6 characters.'); return; }
         err.textContent = '';
@@ -22853,8 +22875,21 @@ async function showCloudLoginModal() {
       els.ok.disabled = true;
       const r = await API.cloudLogin({ email, password: pass });
       els.ok.disabled = false;
-      if (r?.success) done(true);
-      else err.textContent = r?.error || T('Sign-in failed.');
+      if (r?.success) { done(true); return; }
+
+      /* Les messages bruts de Supabase sont exacts mais trompeurs pour un
+       * utilisateur : « Invalid login credentials » accuse le mot de passe
+       * alors que la cause la plus frequente est de ne pas avoir encore de
+       * compte, et « Email not confirmed » ne dit pas quoi faire. */
+      const brut = String(r?.error || '');
+      if (/invalid login credentials/i.test(brut)) {
+        err.textContent = T('Wrong email or password. No account yet? Use "Create an account" below.');
+      } else if (/email not confirmed|not confirmed/i.test(brut)) {
+        err.textContent = T('This account is not confirmed yet. Enter the 6-digit code we emailed you.');
+        setMode('verify');
+      } else {
+        err.textContent = brut || T('Sign-in failed.');
+      }
     };
     els.ok.onclick = submit;
     els.pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
