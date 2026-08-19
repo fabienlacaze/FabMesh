@@ -2,6 +2,16 @@
  * Load AFTER i18n.js. */
 (function () {
   var dict = {
+      // ---- Signalement de contenu IA (politique 11.16 du Store) ----
+      // Entrees EXPLICITES : sans elles le repli automatique traduit
+      // « Report » comme un NOM (le francais avait donne « Rapport
+      // annuel »), ce qui rend un controle exige par la certification
+      // incomprehensible dans la langue de l'utilisateur.
+      'Report content': 'सामग्री की रिपोर्ट करें',
+      'Report': 'रिपोर्ट करें',
+      'Report AI content': 'AI सामग्री की रिपोर्ट करें',
+      'Report inappropriate AI-generated content': 'AI द्वारा बनाई गई अनुचित सामग्री की रिपोर्ट करें',
+      'Report an issue': 'समस्या की रिपोर्ट करें',
     // ---- Top bar / nav ----
     'Projects': 'प्रोजेक्ट्स',
     'New project': 'नया प्रोजेक्ट',

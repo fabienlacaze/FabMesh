@@ -2,6 +2,16 @@
  * Load AFTER i18n.js. The app sets dir=rtl when ar is active. */
 (function () {
   var dict = {
+      // ---- Signalement de contenu IA (politique 11.16 du Store) ----
+      // Entrees EXPLICITES : sans elles le repli automatique traduit
+      // « Report » comme un NOM (le francais avait donne « Rapport
+      // annuel »), ce qui rend un controle exige par la certification
+      // incomprehensible dans la langue de l'utilisateur.
+      'Report content': 'الإبلاغ عن المحتوى',
+      'Report': 'إبلاغ',
+      'Report AI content': 'الإبلاغ عن محتوى الذكاء الاصطناعي',
+      'Report inappropriate AI-generated content': 'الإبلاغ عن محتوى غير لائق منشأ بالذكاء الاصطناعي',
+      'Report an issue': 'الإبلاغ عن مشكلة',
       // ---- Top bar / nav ----
       'Projects': 'المشاريع',
       'New project': 'مشروع جديد',

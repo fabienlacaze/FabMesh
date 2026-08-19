@@ -3,6 +3,16 @@
  * translations, add an <option> in index.html and a flag in i18n.js. */
 (function () {
   var dict = {
+      // ---- Signalement de contenu IA (politique 11.16 du Store) ----
+      // Entrees EXPLICITES : sans elles le repli automatique traduit
+      // « Report » comme un NOM (le francais avait donne « Rapport
+      // annuel »), ce qui rend un controle exige par la certification
+      // incomprehensible dans la langue de l'utilisateur.
+      'Report content': 'Denunciar contenido',
+      'Report': 'Denunciar',
+      'Report AI content': 'Denunciar contenido de IA',
+      'Report inappropriate AI-generated content': 'Denunciar contenido inapropiado generado por IA',
+      'Report an issue': 'Informar de un problema',
       // ---- Top bar / nav ----
       'Projects': 'Proyectos',
       'New project': 'Nuevo proyecto',

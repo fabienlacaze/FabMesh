@@ -561,6 +561,10 @@
       // comme un nom au lieu d'un verbe, ce qui rendait le bouton
       // incomprehensible dans la langue de l'utilisateur.
       'Report content': 'Signaler le contenu',
+      // « Report » seul : le repli automatique l'avait rendu par
+      // « Rapport annuel » sur le bouton place sous l'image.
+      'Report': 'Signaler',
+      'Report an issue': 'Signaler un problème',
       'Delete this content': 'Supprimer ce contenu',
       'Delete reported content': 'Supprimer le contenu signalé',
       'Delete this content from your project? The copy attached to your report is kept so an admin can review it.':

@@ -2,6 +2,16 @@
  * Load AFTER i18n.js. */
 (function () {
   var dict = {
+      // ---- Signalement de contenu IA (politique 11.16 du Store) ----
+      // Entrees EXPLICITES : sans elles le repli automatique traduit
+      // « Report » comme un NOM (le francais avait donne « Rapport
+      // annuel »), ce qui rend un controle exige par la certification
+      // incomprehensible dans la langue de l'utilisateur.
+      'Report content': '举报内容',
+      'Report': '举报',
+      'Report AI content': '举报 AI 内容',
+      'Report inappropriate AI-generated content': '举报不当的 AI 生成内容',
+      'Report an issue': '报告问题',
       // ---- Top bar / nav ----
       'Projects': '项目',
       'New project': '新建项目',

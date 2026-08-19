@@ -20715,3 +20715,46 @@ NOTE D'EXPLOITATION pour la VM : le presse-papiers est en `bidirectional`, le
 copier-coller depuis l'hote fonctionne. En dernier recours,
 `VBoxManage controlvm <vm> keyboardputstring <texte>` tape directement dans
 l'invite et contourne le clavier.
+
+## 2026-08-19 — Signalement sous l'image + « Rapport annuel »
+
+Demande du user : le bouton de signalement doit etre A COTE de « Copy prompt »,
+c'est-a-dire directement sous l'image. Celui du panneau d'outils exige de faire
+defiler la colonne de droite ; c'est exactement le defaut de decouvrabilite qui
+a valu DEUX refus au titre de la politique 11.16.
+
+Ajout : `ws-report-img-inline-btn` dans `#ws-image-actions`, bureau ET web.
+
+REGRESSION CORRIGEE AU PASSAGE : `#ws-image-actions` etait masquee en entier
+quand le projet n'avait pas de prompt (une image importee, par exemple). Le
+signalement aurait disparu avec la barre. Desormais la BARRE s'affiche des
+qu'une image est a l'ecran, et seul le bouton de copie est masque faute de
+prompt.
+
+DEFAUT DE TRADUCTION — GRAVE. Le libelle « Report » n'etait dans aucun
+dictionnaire ; le repli de traduction automatique embarque (argos, via
+`i18nAutoTranslate`, cache localStorage `fabmesh.i18n.auto.v3.`) l'a rendu par
+« RAPPORT ANNUEL ». Un controle EXIGE PAR LA CERTIFICATION se presentait donc en
+francais sous un libelle qui n'a aucun rapport avec sa fonction. Le meme piege
+avait deja frappe « Report content » -> « Contenu du rapport », d'ou le
+commentaire deja present dans i18n.js.
+
+Le probleme est structurel : toute chaine anglaise NON curatee est traduite a
+l'aveugle a l'execution. Les entrees de signalement n'existaient QUE en
+francais — l'espagnol, le chinois, le hindi et l'arabe passaient tous par la
+machine, sur un bouton que Microsoft teste. 5 entrees curatees ajoutees dans
+CHACUNE des 4 langues + 2 en francais, bureau et web (blocs copies
+textuellement pour que les deux plateformes disent la meme chose).
+
+VERIFIE PAR PILOTAGE CDP, les six langues :
+  fr  ⚑ Signaler          | ⚑ Signaler le contenu
+  es  ⚑ Denunciar         | ⚑ Denunciar contenido
+  zh  ⚑ 举报              | ⚑ 举报内容
+  hi  ⚑ रिपोर्ट करें        | ⚑ सामग्री की रिपोर्ट करें
+  ar  ⚑ إبلاغ             | ⚑ الإبلاغ عن المحتوى
+  en  ⚑ Report            | ⚑ Report content
+Et le clic ouvre bien `#modal-report`.
+
+A SURVEILLER : tout nouveau libelle d'un controle exige par la certification
+doit etre curate dans les 5 langues AVANT l'envoi au Store. Sinon la machine
+decide a notre place.

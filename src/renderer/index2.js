@@ -3266,14 +3266,20 @@ function showStep1Preview(imgPath) {
       btn.textContent = isSelected ? '\u2713 Used for 3D generation \u2192' : 'Use this image for 3D \u2192';
     }
   }
-  // Image actions bar — Copy prompt button.
+  // Barre d'actions sous l'image : « Copy prompt » et « Report ».
+  //
+  // La barre entiere etait masquee quand le projet n'avait pas de prompt (une
+  // image importee, par exemple). Le signalement doit rester atteignable quel
+  // que soit le contenu affiche : on montre donc la BARRE des qu'une image est
+  // a l'ecran, et on ne masque que le bouton de copie faute de prompt.
   const actionsBar = document.getElementById('ws-image-actions');
   const copyBtn = document.getElementById('ws-copy-prompt-btn');
+  if (actionsBar) actionsBar.classList.remove('hidden');
   if (actionsBar && copyBtn) {
     const p = state.currentProject;
     const promptText = (p && (p.prompt || p.initialPrompt)) || '';
     if (promptText) {
-      actionsBar.classList.remove('hidden');
+      copyBtn.style.display = '';
       copyBtn.onclick = async (e) => {
         e.stopPropagation();
         try {
@@ -3287,7 +3293,7 @@ function showStep1Preview(imgPath) {
         }
       };
     } else {
-      actionsBar.classList.add('hidden');
+      copyBtn.style.display = 'none';
     }
   }
 }
@@ -23838,6 +23844,15 @@ window._applyRigAnimPills();
   }
 
   document.getElementById('ws-report-img-btn')?.addEventListener('click', () => {
+    let cible = '';
+    try { cible = editTarget(state.currentProject) || ''; } catch (_) {}
+    ouvrir({ kind: 'image', asset_url: cible, prompt: promptCourant() });
+  });
+
+  // Le meme signalement, mais dans la barre sous l'image, a cote de
+  // « Copy prompt » : c'est la que le regard se porte apres une generation.
+  document.getElementById('ws-report-img-inline-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     let cible = '';
     try { cible = editTarget(state.currentProject) || ''; } catch (_) {}
     ouvrir({ kind: 'image', asset_url: cible, prompt: promptCourant() });
