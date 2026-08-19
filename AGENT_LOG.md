@@ -20808,3 +20808,55 @@ vers une liste blanche qui contient `image.pollinations.ai` (l.11455-11459) et
 le joker `*.r2.dev` (l.11468), avec `access-control-allow-origin: *`. C'est un
 relais ouvert : cela coute de l'egress, pas des credits, et n'explique pas le
 fait observe — mais cela reste a fermer.
+
+## 2026-08-20 — Pilotage de la VM : mot de passe, disposition, verrouillage
+
+TROIS PIEGES QUI M'ONT COUTE UNE HEURE, a ne pas refaire.
+
+1. LE MOT DE PASSE DE LA VM EST `Labo2026!`, PAS `labo`. Le compte est `labo`,
+   ce qui m'a fait ecrire `--password labo` dans une boucle d'attente de 24
+   iterations. Windows a verrouille le compte au bout de 10 echecs. C'est moi
+   qui ai verrouille la machine, deux fois.
+   La commande correcte :
+     VBoxManage guestcontrol "FabMesh-Cert-Lab" --username labo --password 'Labo2026!' ...
+
+2. DISPOSITION CLAVIER. Le clavier physique du proprietaire est AZERTY,
+   l'invite Windows est en QWERTY. VirtualBox transmet des SCANCODES, c'est-a-
+   dire des POSITIONS de touches, pas des caracteres : la position emise est
+   relue avec la disposition de l'invite. Consequences :
+     * taper « labo » sur le clavier physique produit « lqbo » dans l'invite —
+       c'est ce qui a fait echouer les saisies manuelles ;
+     * pour produire `Labo2026!` a la main il faut taper `Lqbo` + `e-accent` +
+       `a-accent` + `e-accent` + `-` + `1` ;
+     * le `@` (AltGr+0 en AZERTY) ne passe pas du tout — d'ou l'adresse
+       `fabien65400hotmail.fr` du 2026-08-19.
+   LA BONNE METHODE reste `keyboardputscancode`, qui court-circuite toute
+   disposition puisqu'on choisit les positions soi-meme. `Labo2026!` :
+     2a 26 a6 aa | 1e 9e | 30 b0 | 18 98 | 03 83 | 0b 8b | 03 83 | 07 87 | 2a 02 82 aa
+   Toujours capturer AVANT de valider : 9 points dans le champ = bonne longueur.
+
+3. L'INJECTION CLAVIER NE PASSE PAS TANT QU'UNE BOITE DE DIALOGUE MODALE EST
+   AFFICHEE (le message « compte verrouille »), et `controlvm screenshotpng`
+   renvoie E_FAIL dans le meme etat. Deux captures identiques octet pour octet
+   apres envoi de touches = l'invite ne recoit rien ; ne pas insister, ne pas
+   conclure que la VM est morte. Une fois le verrouillage expire (10 min,
+   politique par defaut de Windows 11), les deux refonctionnent.
+
+AUTRES CONSTATS D'EXPLOITATION :
+  * le dossier partage ne survit pas a un redemarrage de la VM. Le remettre
+    avec `sharedfolder add ... --transient`, PUIS le monter a la main dans
+    l'invite : `net use Z: \VBOXSVR\labo`. `--automount` seul ne suffit pas,
+    il n'agit qu'au demarrage.
+  * `bootstrap_vm.ps1` echoue desormais en « Acces refuse » sur
+    `schtasks /create ... /rl HIGHEST` : guestcontrol ouvre les processus avec
+    un jeton restreint. Ce n'est plus necessaire : le certificat de test est
+    deja dans LocalMachine\TrustedPeople, donc `Add-AppxPackage` passe sans
+    elevation (`poser_130.ps1`).
+  * lancer par AUMID : `guestcontrol run explorer.exe -- explorer.exe
+    "shell:AppsFolder\<AUMID>"` ouvre le dossier Documents — l'argument est
+    mange. Utiliser un script qui appelle `Start-Process 'shell:AppsFolder\...'`
+    (`lancer_130.ps1`).
+
+RESULTAT : 1.0.30 installee en 6,9 s (desinstallation de 1.0.28 comprise),
+assistant affiche, « MyFabmesh.AI v1.0.30 » en bas a droite, build 26200.9168
+sans carte NVIDIA.
