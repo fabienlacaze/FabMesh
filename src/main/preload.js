@@ -56,6 +56,10 @@ contextBridge.exposeInMainWorld('wizardAPI', {
   onTestLog: (cb) => ipcRenderer.on('wizard:test-log', (_e, line) => cb(line)),
   completeSetup: (state) => ipcRenderer.invoke('wizard:complete', state),
   openExternal: (url) => ipcRenderer.invoke('wizard:open-external', url),
+  // Canal SEPARE : wizard:open-external refuse tout ce qui n'est pas https,
+  // donc les liens mailto: n'ont jamais pu s'ouvrir. Voir app:open-mailto.
+  openMailto: (url) => ipcRenderer.invoke('app:open-mailto', url),
+  isStoreBuild: () => ipcRenderer.invoke('app:is-store-build'),
   openLegal: (which) => ipcRenderer.invoke('app:open-legal', which),
   getVersion: () => ipcRenderer.invoke('wizard:get-version'),
   resetSetup: () => ipcRenderer.invoke('wizard:reset-setup'),

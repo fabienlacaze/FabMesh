@@ -20314,10 +20314,38 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
 // ============================================================
 // PARENTAL CONTROL
 // ============================================================
+/* DANS LE PAQUET DU STORE, CE DISPOSITIF N'EXISTE PAS.
+ *
+ * Le processus principal refuse desormais de lever le filtre dans une
+ * livraison Store (isStoreBuild + deux verrous). Laisser le cadenas et la
+ * section « Parental Control » a l'ecran serait pire que sans : ils
+ * ANNONCENT un mode « unrestricted adult use » sur un produit vendu par
+ * Microsoft, et le bouton ne repondrait plus. On les retire donc, et on
+ * remplace la description par ce qui est vrai : le filtre est permanent.
+ *
+ * Sur les autres livraisons (itch.io, Gumroad) rien ne change. */
+let _estBuildStore = null;
+async function _buildStore() {
+  if (_estBuildStore !== null) return _estBuildStore;
+  try { _estBuildStore = !!(await window.meshyAPI?.isStoreBuild?.()); }
+  catch (_) { _estBuildStore = false; }
+  return _estBuildStore;
+}
+
 async function refreshParentalStatus() {
   const statusEl = document.getElementById('parental-status');
   const toggleBtn = document.getElementById('parental-toggle');
   const lockIcon = document.getElementById('btn-parental-lock');
+
+  if (await _buildStore()) {
+    if (lockIcon) lockIcon.style.setProperty('display', 'none', 'important');
+    if (toggleBtn) toggleBtn.style.setProperty('display', 'none', 'important');
+    if (statusEl) statusEl.textContent = '';
+    const desc = document.querySelector('#parental-toggle')?.closest('.settings-box')?.querySelector('.settings-box-desc');
+    if (desc) desc.textContent = 'Blocks NSFW, violent and illegal content in prompts. Always on.';
+    return;
+  }
+
   if (!statusEl || !toggleBtn || !API.getParentalStatus) return;
   try {
     const r = await API.getParentalStatus();
@@ -20352,6 +20380,9 @@ async function refreshParentalStatus() {
 
 // Shared function: prompt for PIN and toggle parental control
 async function toggleParentalControl() {
+  // Meme garde que dans le processus principal : ni avertissement, ni
+  // demande de code PIN dans une livraison Store.
+  if (await _buildStore()) return;
   if (!API.getParentalStatus || !API.toggleUnrestricted) return;
   const status = await API.getParentalStatus();
 
@@ -24018,13 +24049,53 @@ window._applyRigAnimPills();
       // qu'un examinateur peut tester — envoyait dans le vide.
       // Cette boite-ci est celle declaree dans les mentions legales
       // (cloud/src/config/legal-identity.ts, supportEmail).
-      const lien = 'mailto:myfabmesh.contact@gmail.com'
+      const ADRESSE_SIGNALEMENT = 'myfabmesh.contact@gmail.com';
+      const lien = 'mailto:' + ADRESSE_SIGNALEMENT
                  + '?subject=' + encodeURIComponent('AI content report — ' + charge.reason)
                  + '&body=' + corps;
-      try { window.meshyAPI?.openExternal?.(lien) || window.open(lien); } catch (_) {}
+      /* Il ne suffit PAS d'appeler et d'esperer.
+       *
+       * `openExternal` rendait une PROMESSE — toujours vraie — donc le
+       * `|| window.open(...)` de secours ne s'executait jamais ; et le canal
+       * qu'elle emprunte refuse tout ce qui n'est pas https, donc le lien
+       * mailto: etait rejete en silence. Resultat : rien ne s'ouvrait et
+       * l'interface annoncait le contraire. On attend desormais le verdict,
+       * et si aucun client de messagerie ne s'ouvre on AFFICHE l'adresse
+       * pour que l'utilisateur puisse ecrire lui-meme. Un dispositif de
+       * signalement doit aboutir, meme dans le pire cas. */
+      let ouvert = false;
+      try {
+        const r = await (window.meshyAPI?.openMailto?.(lien));
+        ouvert = !!(r && r.ok);
+      } catch (_) { ouvert = false; }
+      if (!ouvert) {
+        try { ouvert = !!window.open(lien); } catch (_) { ouvert = false; }
+      }
       if (elStatus) {
         elStatus.style.color = '#ffcf6b';
-        elStatus.textContent = 'Could not reach the server — your e-mail app has been opened instead.';
+        elStatus.innerHTML = '';
+        const t = document.createElement('span');
+        t.textContent = ouvert
+          ? 'Could not reach the server — your e-mail app has been opened instead.'
+          : 'Could not reach the server. Please e-mail your report to ';
+        elStatus.appendChild(t);
+        if (!ouvert) {
+          const adr = document.createElement('strong');
+          adr.textContent = ADRESSE_SIGNALEMENT;
+          adr.style.userSelect = 'text';
+          elStatus.appendChild(adr);
+          const copier = document.createElement('button');
+          copier.className = 'ghost-btn';
+          copier.style.cssText = 'margin-left:8px; font-size:11px; padding:2px 8px;';
+          copier.textContent = 'Copy address';
+          copier.onclick = () => {
+            navigator.clipboard.writeText(ADRESSE_SIGNALEMENT).then(() => {
+              copier.textContent = '✓ Copied';
+              setTimeout(() => { copier.textContent = 'Copy address'; }, 1500);
+            }).catch(() => {});
+          };
+          elStatus.appendChild(copier);
+        }
       }
       btnSend.disabled = false;
       btnSend.textContent = 'Send report';

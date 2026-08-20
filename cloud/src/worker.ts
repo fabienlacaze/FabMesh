@@ -5646,12 +5646,31 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
         return json({ status: 'processing' });
       }
       const stableUrl = await persistModalGlb(env, id, status.glb_base64);
-      // Persist the raw KEY (not the expiring signed URL) so reads re-sign
-      // with a fresh TTL. persistModalGlb writes mesh/<id>.glb.
-      await sbm.from('jobs')
+      /* COURSE AVEC L'ANNULATION — la garde de statut est indispensable.
+       *
+       * La ligne etait lue au debut de la requete, puis Modal interroge et le
+       * fichier telecharge : plusieurs secondes s'ecoulent. Un utilisateur qui
+       * cliquait « Annuler » pendant ce laps obtenait ses credits rendus par
+       * la route d'annulation, ET ce `.update()` ecrasait ensuite le statut
+       * `canceled` par `succeeded` — il repartait donc avec le maillage.
+       * L'operation etait sans risque pour lui : perdue, il payait
+       * normalement ; gagnee, c'etait gratuit. Il suffisait de recommencer.
+       *
+       * `.eq('status', ...)` restreint l'ecriture aux etats non terminaux :
+       * si la ligne est passee a `canceled` ou `failed` entre-temps, aucune
+       * ligne n'est touchee et on rend le statut reel. */
+      const { data: maj } = await sbm.from('jobs')
         .update({ status: 'succeeded', mesh_url: `mesh/${id}.glb`,
                   finished_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .in('status', ['queued', 'processing', 'running', 'starting'])
+        .select('id');
+      if (!maj || maj.length === 0) {
+        const { data: apres } = await sbm.from('jobs').select('status,error').eq('id', id).maybeSingle();
+        const etat = (apres?.status as string) || 'canceled';
+        console.warn(`[modal] ${id} termine mais la ligne est en ${etat} — maillage NON livre`);
+        return json({ status: etat, error: (apres?.error as string) || 'cancelled' });
+      }
       const start = job.created_at ? new Date(job.created_at as string).getTime() : Date.now();
       return json({ status: 'succeeded', url: stableUrl,
                     duration_s: (Date.now() - start) / 1000 });
@@ -6410,18 +6429,36 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
     // Candidate R2 keys to try, in priority order. We attempt each and
     // delete whichever matches an actually-existing object.
     const candidates: string[] = [];
-    // 1. Caller passed the R2 key literally (e.g. "<uid>/rigged/...glb")
-    if (id.includes('/')) candidates.push(id.replace(/^\/+/, ''));
+    /* 1. L'appelant a fourni la cle R2 telle quelle (« <uid>/rigged/....glb »).
+     *
+     * ELLE DOIT APPARTENIR A L'APPELANT. Sans cette contrainte, n'importe
+     * quel compte gratuit supprimait n'importe quel objet du bucket avec une
+     * seule requete : `_meta/admin-totp.json` (le second facteur de
+     * l'administrateur disparaissait), `_meta/banned-users.json` (l'objet
+     * absent rend un ensemble vide, donc tous les bannis revenaient),
+     * `_meta/pricing.json`, et les maillages des autres clients. Le chemin
+     * voisin (lignes 6384-6409) verifiait bien la propriete ; celui-ci ne le
+     * faisait pas.
+     *
+     * On rejette aussi la remontee d'arborescence : un « .. » suffirait a
+     * sortir du prefixe apres normalisation par le stockage. */
+    if (id.includes('/')) {
+      const cle = id.replace(/^\/+/, '');
+      const propre = !cle.split('/').includes('..') && cle.startsWith(`${user.id}/`);
+      if (propre) candidates.push(cle);
+      else console.warn(`[meshes/delete] cle refusee (hors perimetre du compte) : ${cle} par ${user.id}`);
+    }
     // 2. Bare filename → try every folder we might have stored it in
     const filename = id.endsWith('.glb') ? id : `${id}.glb`;
     candidates.push(`${user.id}/mesh/${filename}`);
     candidates.push(`${user.id}/rigged/${filename}`);
     candidates.push(`${user.id}/animations/${filename}`);
-    candidates.push(`mesh/${filename}`);
+    // `mesh/<fichier>` est un emplacement HISTORIQUE, partage par tous les
+    // comptes : un nom de fichier devine y supprimait l'objet d'un autre.
+    // On ne le tente plus.
     // 3. handleListMeshes uses 'modal_<hex>.glb' under <uid>/rigged/
     if (filename.startsWith('modal_')) {
       candidates.push(`${user.id}/rigged/${filename}`);
-      candidates.push(`mesh/${filename}`);
     }
     let deleted = false;
     for (const key of candidates) {

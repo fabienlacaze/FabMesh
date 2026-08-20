@@ -22788,13 +22788,42 @@ showPage('projects');
       // qu'un examinateur peut tester — envoyait dans le vide.
       // Cette boite-ci est celle declaree dans les mentions legales
       // (cloud/src/config/legal-identity.ts, supportEmail).
-      const lien = 'mailto:myfabmesh.contact@gmail.com'
+      const ADRESSE_SIGNALEMENT = 'myfabmesh.contact@gmail.com';
+      const lien = 'mailto:' + ADRESSE_SIGNALEMENT
                  + '?subject=' + encodeURIComponent('AI content report — ' + charge.reason)
                  + '&body=' + corps;
-      try { window.open(lien); } catch (_) {}
+      /* Ne pas se contenter d'appeler. Dans un navigateur, `window.open`
+       * sur un lien mailto: peut etre bloque par le blocage des fenetres
+       * surgissantes et rendre null : on annoncerait alors l'ouverture d'un
+       * brouillon qui n'existe pas. Un dispositif de signalement doit
+       * aboutir meme dans le pire cas, donc on affiche l'adresse. */
+      let ouvert = false;
+      try { ouvert = !!window.open(lien); } catch (_) { ouvert = false; }
       if (elStatus) {
         elStatus.style.color = '#ffcf6b';
-        elStatus.textContent = 'Could not reach the server — your e-mail app has been opened instead.';
+        elStatus.innerHTML = '';
+        const t = document.createElement('span');
+        t.textContent = ouvert
+          ? 'Could not reach the server — your e-mail app has been opened instead.'
+          : 'Could not reach the server. Please e-mail your report to ';
+        elStatus.appendChild(t);
+        if (!ouvert) {
+          const adr = document.createElement('strong');
+          adr.textContent = ADRESSE_SIGNALEMENT;
+          adr.style.userSelect = 'text';
+          elStatus.appendChild(adr);
+          const copier = document.createElement('button');
+          copier.className = 'ghost-btn';
+          copier.style.cssText = 'margin-left:8px; font-size:11px; padding:2px 8px;';
+          copier.textContent = 'Copy address';
+          copier.onclick = () => {
+            navigator.clipboard.writeText(ADRESSE_SIGNALEMENT).then(() => {
+              copier.textContent = '✓ Copied';
+              setTimeout(() => { copier.textContent = 'Copy address'; }, 1500);
+            }).catch(() => {});
+          };
+          elStatus.appendChild(copier);
+        }
       }
       btnSend.disabled = false;
       btnSend.textContent = 'Send report';

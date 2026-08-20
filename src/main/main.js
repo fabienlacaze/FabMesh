@@ -296,7 +296,38 @@ const NSFW_KEYWORDS = [
   'build explosive', 'poison recipe',
 ];
 
+/* BUILD MICROSOFT STORE — detection.
+ *
+ * Electron pose `process.windowsStore = true` quand l'application tourne
+ * dans un conteneur MSIX. Repli sur le chemin d'installation, qui est
+ * toujours sous WindowsApps pour un paquet du Store. On ne teste PAS
+ * `app.isPackaged` : il vaut aussi vrai pour les livraisons itch.io et
+ * Gumroad, ou le mode sans restriction reste legitime. */
+function isStoreBuild() {
+  try {
+    if (process.windowsStore === true) return true;
+    const base = (typeof process.resourcesPath === 'string') ? process.resourcesPath : '';
+    return /[\/]WindowsApps[\/]/i.test(base);
+  } catch (_) { return false; }
+}
+
+/* MODE SANS RESTRICTION — INTERDIT DANS LE PAQUET DU STORE.
+ *
+ * Le controle parental ne protegeait rien : quand aucun code PIN n'existait,
+ * `toggle-unrestricted` laissait celui qui voulait lever le filtre CREER le
+ * code lui-meme (« First time: set PIN »). Quatre clics depuis le cadenas de
+ * la barre du haut suffisaient, sans aucun secret prealable. Une fois leve,
+ * `checkPromptSafety` laissait tout passer sauf le plancher illegal, et la
+ * fenetre Reglages annoncait noir sur blanc « unrestricted adult use » sur un
+ * produit vendu par Microsoft.
+ *
+ * Deux verrous independants : celui-ci neutralise le drapeau meme s'il etait
+ * pose par un autre chemin (variable d'environnement heritee du profil, par
+ * exemple) ; le second refuse le basculement. Le plancher illegal
+ * (`checkHardFloor`) reste evalue AVANT tout court-circuit, dans tous les
+ * cas et toutes les livraisons. */
 function isUnrestrictedMode() {
+  if (isStoreBuild()) return false;
   return process.env.FABMESH_UNRESTRICTED === '1';
 }
 
@@ -2704,7 +2735,18 @@ ipcMain.handle('verify-parental-pin', (_event, { pin }) => {
   return { success: true };
 });
 
+// Le rendu en a besoin pour ne PAS afficher un dispositif que le paquet du
+// Store refuse de toute facon (cadenas de la barre du haut, section
+// « Parental Control » des Reglages).
+ipcMain.handle('app:is-store-build', () => isStoreBuild());
+
 ipcMain.handle('toggle-unrestricted', (_event, { pin, enable }) => {
+  // VERROU 2 : dans le paquet du Store, le filtre ne se leve pas. Le
+  // re-verrouillage (`enable` faux) reste libre, il ne peut que renforcer.
+  if (enable && isStoreBuild()) {
+    delete process.env.FABMESH_UNRESTRICTED;
+    return { success: false, error: 'Not available in this build' };
+  }
   const config = loadConfig();
 
   if (!enable) {
@@ -9106,10 +9148,35 @@ ipcMain.handle('wizard:start-download', async (event, mode) => {
     // the failing model(s) to stderr) surfaces a MEANINGFUL message to the
     // wizard's Retry UI instead of Node's generic "Command failed". maxBuffer
     // bumped to 64 MB: a long download with retries emits many progress lines.
+    /* INTERPRETEUR IA, PAS CELUI D'AMORCAGE.
+     *
+     * `_bootstrapPython()` se documente lui-meme : « Python embarque, SANS
+     * torch ni dependances IA [...] Ne JAMAIS l'utiliser pour du travail IA ».
+     * Il etait pourtant employe ici. En developpement le defaut est INVISIBLE
+     * — il rend « python », l'interpreteur systeme du poste, qui a tout ce
+     * qu'il faut. Il n'existe que dans le produit livre, ou il rend
+     * `resources/python-embed/python.exe`, dont le site-packages est vide.
+     * C'est le mecanisme exact du refus du 2026-08-08 : une erreur Python
+     * brute affichee a l'utilisateur au bout de l'installation.
+     *
+     * `_aiPython()` leve quand le moteur n'est pas provisionne ; on l'attrape
+     * pour rendre un message de produit plutot qu'un « Command failed » de
+     * Node. */
     let stderrBuf = '';
-    const proc = execFile(_bootstrapPython(), [script, '--mode', mode], {
+    let pyTelechargement;
+    try { pyTelechargement = _aiPython(); }
+    catch (_) {
+      return reject(new Error('The local AI engine is not installed yet. Go back one step and let the engine install finish, then try again.'));
+    }
+    const proc = execFile(pyTelechargement, [script, '--mode', mode], {
       timeout: 0, maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
+      env: {
+        ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR,
+        HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub'),
+        ...(app.isPackaged
+          ? { FABMESH_TRELLIS2_SRC: path.join(process.resourcesPath, 'TRELLIS2_win', 'src') }
+          : {}),
+      },
     }, (err) => {
       if (err) {
         const detail = (stderrBuf.trim() || err.message || 'download failed');
@@ -9155,10 +9222,36 @@ ipcMain.handle('wizard:final-test', async (event, mode) => {
     // Buffer stderr (PyTorch warnings, CUDA path traces) instead of
     // streaming it live to the wizard — those leak internal model
     // identifiers and confuse the user. Only flush on failure.
+    /* INTERPRETEUR IA, PAS CELUI D'AMORCAGE.
+     *
+     * `_bootstrapPython()` se documente lui-meme : « Python embarque, SANS
+     * torch ni dependances IA [...] Ne JAMAIS l'utiliser pour du travail IA ».
+     * Il etait pourtant employe ici. En developpement le defaut est INVISIBLE
+     * — il rend « python », l'interpreteur systeme du poste, qui a tout ce
+     * qu'il faut. Il n'existe que dans le produit livre, ou il rend
+     * `resources/python-embed/python.exe`, dont le site-packages est vide.
+     * C'est le mecanisme exact du refus du 2026-08-08 : une erreur Python
+     * brute affichee a l'utilisateur au bout de l'installation.
+     *
+     * `_aiPython()` leve quand le moteur n'est pas provisionne ; on l'attrape
+     * pour rendre un message de produit plutot qu'un « Command failed » de
+     * Node. */
     let stderrBuf = '';
-    const proc = execFile(_bootstrapPython(), [script, '--mode', mode], {
+    let pyTest;
+    try { pyTest = _aiPython(); }
+    catch (_) {
+      return resolve({ success: false, duration_s: 0,
+        error: 'The local AI engine is not installed yet. Go back one step and let the engine install finish, then run the test again.' });
+    }
+    const proc = execFile(pyTest, [script, '--mode', mode], {
       timeout: 180000, maxBuffer: 5 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR, HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub') },
+      env: {
+        ...process.env, PYTHONUNBUFFERED: '1', HF_HOME: HF_CACHE_DIR,
+        HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE_DIR, 'hub'),
+        ...(app.isPackaged
+          ? { FABMESH_TRELLIS2_SRC: path.join(process.resourcesPath, 'TRELLIS2_win', 'src') }
+          : {}),
+      },
     }, (err) => {
       const duration_s = Math.round((Date.now() - t0) / 1000);
       if (err) {
@@ -9759,6 +9852,37 @@ function _isAllowedExternal(u) {
   } catch (_) { return false; }
 }
 
+/* OUVERTURE D'UN BROUILLON DE COURRIEL — canal SEPARE, et il le faut.
+ *
+ * `wizard:open-external` exige `protocol === 'https:'` : un lien `mailto:`
+ * y etait donc TOUJOURS refuse. Or c'est par la que passait le repli hors
+ * ligne du signalement de contenu IA — le seul chemin disponible quand le
+ * serveur est injoignable, et celui qu'un examinateur teste s'il coupe le
+ * reseau. Rien ne s'ouvrait, et l'interface annoncait « your e-mail app has
+ * been opened ». Le defaut a traverse les deux refus au titre de la
+ * politique 11.16.
+ *
+ * On n'elargit PAS la liste blanche generale : le rendu, s'il etait
+ * compromis par un contenu hostile, pourrait alors lancer des protocoles
+ * arbitraires. Ce canal-ci n'accepte que `mailto:` et que les boites du
+ * produit. */
+const _MAILTO_ALLOWLIST = ['myfabmesh.contact@gmail.com'];
+
+ipcMain.handle('app:open-mailto', async (_e, url) => {
+  try {
+    const u = new URL(String(url || ''));
+    if (u.protocol !== 'mailto:') return { ok: false, error: 'not a mailto url' };
+    // `pathname` porte l'adresse ; on la compare sans tenir compte de la casse.
+    const dest = decodeURIComponent(u.pathname || '').trim().toLowerCase();
+    if (!_MAILTO_ALLOWLIST.includes(dest)) return { ok: false, error: 'recipient not allowed' };
+    const { shell } = require('electron');
+    await shell.openExternal(u.toString());
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('wizard:open-external', async (_e, url) => {
   try {
     const u = new URL(url);
@@ -10287,14 +10411,27 @@ ipcMain.handle('delete-project', (event, { projectName }) => {
       }
     }
   } catch (e) { console.warn('delete-project: image folders failed:', e.message); }
-  // 2) Mesh files: any file in MESHES_DIR whose base name starts with projectName_
+  /* 2) Maillages : ceux dont le projet DERIVE est exactement celui-ci.
+   *
+   * Le test etait `entry.startsWith(projectName + '_')`. Supprimer « orc »
+   * emportait donc aussi les .glb, rigs et animations de « orc_marron » et
+   * « orc_rouge » : leurs fichiers commencent par « orc_ ». La modale de
+   * confirmation ne listant que les projets coches, rien n'avertissait — et
+   * comme les dossiers d'images survivaient, le projet restait visible dans
+   * la grille, ampute de son travail 3D.
+   *
+   * `_meshProjectBackend()` existe precisement pour ca, et son commentaire le
+   * dit : « NOT a naive prefix match — "orc" must not grab "orc_marron_*" ».
+   * C'est aussi la fonction qu'emploie le renommage, donc les deux operations
+   * s'accordent enfin sur ce qui appartient a un projet. */
   try {
     if (fs.existsSync(MESHES_DIR)) {
-      const prefix = projectName + '_';
       for (const entry of fs.readdirSync(MESHES_DIR)) {
-        if (entry === projectName || entry.startsWith(prefix) || entry.startsWith(projectName + '.')) {
-          try { fs.unlinkSync(path.join(MESHES_DIR, entry)); removed.meshes++; } catch (e) {}
-        }
+        let plein;
+        try { plein = path.join(MESHES_DIR, entry); if (fs.statSync(plein).isDirectory()) continue; }
+        catch (_) { continue; }
+        if (_meshProjectBackend(entry) !== projectName) continue;
+        try { fs.unlinkSync(plein); removed.meshes++; } catch (e) {}
       }
     }
   } catch (e) { console.warn('delete-project: meshes failed:', e.message); }

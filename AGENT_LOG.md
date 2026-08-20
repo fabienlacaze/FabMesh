@@ -20935,3 +20935,87 @@ RESTE A DECIDER (proprietaire) : acheter myfabmesh.ai, ou renoncer a le citer.
 `src/main/main.js:9747` le garde dans une liste blanche « future custom
 domain » — sans effet tant qu'il n'existe pas, mais a nettoyer si l'achat est
 abandonne.
+
+## 2026-08-20 — Audit de publication : 6 bloquants, 11 problemes importants
+
+Workflow de 29 agents sur 7 dimensions (certification Store, premier
+lancement, facturation, securite, conformite UE, parite et deploiement,
+robustesse a l'execution), chaque constat soumis a un refutateur, plus un
+critique de completude. 21 constats examines, 17 confirmes, 4 ecartes.
+
+VERDICT : NON PRETE. Corrections posees dans la foulee :
+
+1. MODE « CONTENU ADULTE SANS RESTRICTION » LIVRE DANS LE PAQUET STORE.
+   Le cadenas de la barre du haut menait, en quatre clics et SANS AUCUN
+   SECRET PREALABLE, a la levee du filtre : quand aucun code PIN n'existait,
+   `toggle-unrestricted` (main.js:2707) laissait celui qui voulait le lever
+   CREER le code (« First time: set PIN »). Le controle parental ne protegeait
+   donc rien. Et les Reglages annoncaient noir sur blanc « Disable with a PIN
+   code for unrestricted adult use » (index2.html:2202) sur un produit vendu
+   par Microsoft — alors meme que la politique 11.16 a deja valu deux refus.
+   CORRECTIF : `isStoreBuild()` (process.windowsStore, repli sur WindowsApps —
+   PAS `app.isPackaged`, qui vaut aussi vrai pour itch.io et Gumroad ou le
+   mode reste legitime). Deux verrous independants : `isUnrestrictedMode()`
+   rend faux, et le basculement est refuse. Cadenas et section masques, texte
+   remplace par « Always on ». Le plancher illegal (`checkHardFloor`) reste
+   evalue avant tout court-circuit, dans toutes les livraisons.
+
+2. LE TEST FINAL ET LE TELECHARGEMENT DES POIDS TOURNAIENT SUR L'INTERPRETEUR
+   D'AMORCAGE. `_bootstrapPython()` se documente « SANS torch [...] Ne JAMAIS
+   l'utiliser pour du travail IA » et etait employe en 9152 et 9201.
+   En DEVELOPPEMENT le defaut est invisible : il rend « python », celui du
+   poste, qui a torch. Il n'existe que dans le produit livre. C'est le
+   mecanisme exact du refus du 2026-08-08. Les deux appels repassent sur
+   `_aiPython()`, avec FABMESH_TRELLIS2_SRC et un message de produit au lieu
+   d'un « Command failed » de Node. Seul hw_detect.py (9061) reste sur
+   l'amorcage, a juste titre.
+
+3. SUPPRESSION ARBITRAIRE DANS LE BUCKET R2. `handleMeshesDelete`
+   (worker.ts:6414) poussait la cle fournie par l'appelant dans les candidats
+   SANS verifier qu'elle lui appartient. Un compte gratuit supprimait donc
+   `_meta/admin-totp.json` (le second facteur de l'administrateur),
+   `_meta/banned-users.json` (l'objet absent rend un ensemble vide : tous les
+   bannis revenaient), `_meta/pricing.json`, et les maillages des autres.
+   La cle doit desormais commencer par `<uid>/` et ne pas contenir « .. ».
+   Les candidats `mesh/<fichier>` (emplacement historique PARTAGE) sont
+   supprimes : un nom devine y atteignait l'objet d'un autre compte.
+
+4. MAILLAGES GRATUITS EN BOUCLE. Sur /api/jobs/:id branche Modal, le passage a
+   `succeeded` s'ecrivait sans garde de statut (`.eq('id', id)` seul), apres
+   plusieurs secondes de telechargement. Annuler pendant ce laps rendait les
+   credits ET livrait le maillage. Sans risque pour le fraudeur : perdue, il
+   paie ; gagnee, c'est gratuit. `.in('status', [...non terminaux])` ajoute ;
+   si la ligne a bascule, on rend le statut reel et le maillage n'est pas
+   livre.
+
+5. SUPPRIMER UN PROJET DETRUISAIT LES VOISINS. `delete-project` filtrait les
+   maillages par `entry.startsWith(projectName + '_')` : supprimer « orc »
+   emportait les .glb, rigs et animations de « orc_marron » et « orc_rouge ».
+   Les dossiers d'images survivaient, donc le projet restait visible, ampute.
+   `_meshProjectBackend()` existe precisement pour ca — son commentaire dit
+   « NOT a naive prefix match — "orc" must not grab "orc_marron_*" » — et
+   c'est deja la fonction du renommage. Verifie : orc_trellis2.glb et
+   orc_1234567890.glb supprimes, orc_marron_* et orc_rouge_* conserves.
+
+6. LE REPLI HORS LIGNE DU SIGNALEMENT N'OUVRAIT RIEN. Au-dela de l'adresse
+   morte corrigee plus tot : `meshyAPI.openExternal` passe par
+   `wizard:open-external`, dont la garde exige `protocol === 'https:'` — un
+   lien `mailto:` etait donc TOUJOURS refuse. Et comme la fonction rend une
+   PROMESSE, toujours vraie, le `|| window.open(lien)` de secours ne
+   s'executait jamais. Rien ne s'ouvrait, et l'interface affirmait
+   « your e-mail app has been opened ». A travers les deux refus 11.16.
+   CORRECTIF : canal `app:open-mailto` SEPARE (on n'elargit pas la liste
+   blanche generale : un rendu compromis pourrait alors lancer des protocoles
+   arbitraires), restreint au protocole mailto: et aux boites du produit. Le
+   rendu attend le verdict et, si rien ne s'ouvre, AFFICHE l'adresse avec un
+   bouton de copie. Meme traitement cote web, ou `window.open` peut etre
+   bloque par le navigateur.
+
+RESTE OUVERT — voir le rapport complet dans
+scratchpad/tasks/wm0ysku89.output : 6 problemes importants non traites
+(menu de qualite du web annoncant 1 credit pour 8 debites, remboursement
+partiel Stripe qui remet la ligne a zero, serveur HTTP 7555 ouvert dans le
+paquet livre, abonnements sans portail de resiliation, wizard.js qui ignore
+`{ok:false}`, killAllActiveProcs qui parcourt la mauvaise collection) et
+11 angles morts (telemetrie non declaree, accessibilite, mise a jour hors
+Store non signee, politique de confidentialite obsolete...).
