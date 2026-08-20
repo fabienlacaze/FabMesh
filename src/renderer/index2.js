@@ -19299,10 +19299,13 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
   });
 })();
 
-// Auto-update toast. Listens for events from the main process (sent
-// by electron-updater once a new release is downloaded) and shows a
-// non-blocking toast in the top-right. User clicks "Restart & install"
-// to apply.
+// Auto-update toast — non-blocking, top-right.
+//
+// Le telechargement n'est plus lance en tache de fond (voir _initAutoUpdate
+// dans main.js : sans binaires signes, l'installeur rapatrie n'est verifie
+// que par une empreinte servie par la meme release). La banniere s'affiche
+// donc des que la MISE A JOUR EXISTE, et c'est le clic de l'utilisateur qui
+// declenche le telechargement puis l'installation.
 (() => {
   if (!window.meshyAPI?.onUpdateDownloaded) return;
   const toast   = document.getElementById('update-toast');
@@ -19310,14 +19313,49 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
   const btnGo   = document.getElementById('update-toast-install');
   const btnX    = document.getElementById('update-toast-close');
   if (!toast || !btnGo) return;
-  window.meshyAPI.onUpdateDownloaded(({ version }) => {
-    if (version) versEl.textContent = `MyFabmesh.AI ${version} is downloaded and ready to install.`;
+  const T = (x) => (typeof _i18nT === 'function' ? _i18nT(x) : x);
+  let occupe = false;
+
+  window.meshyAPI.onUpdateAvailable?.(({ version }) => {
+    if (occupe) return;
+    versEl.textContent = version
+      ? `MyFabmesh.AI ${version} ${T('is available.')}`
+      : T('A new version is available.');
+    btnGo.textContent = T('Download & install');
     toast.classList.remove('hidden');
   });
+
+  window.meshyAPI.onUpdateDownloaded(({ version }) => {
+    if (occupe) return;   // le clic en cours gere deja son propre libelle
+    versEl.textContent = version
+      ? `MyFabmesh.AI ${version} ${T('is downloaded and ready to install.')}`
+      : T('A new version is downloaded and ready to install.');
+    btnGo.textContent = T('Restart & install');
+    toast.classList.remove('hidden');
+  });
+
+  window.meshyAPI.onUpdateProgress?.(({ percent }) => {
+    if (!occupe) return;
+    btnGo.textContent = `${T('Downloading')} ${percent}%`;
+  });
+
   btnGo.addEventListener('click', async () => {
+    occupe = true;
     btnGo.disabled = true;
-    btnGo.textContent = 'Restarting…';
-    try { await window.meshyAPI.installUpdateNow(); } catch (_) {}
+    btnGo.textContent = T('Downloading…');
+    let r = null;
+    try { r = await window.meshyAPI.installUpdateNow(); } catch (e) { r = { ok: false, error: String(e) }; }
+    // Si l'on arrive ici avec un echec, l'application ne redemarre pas : il
+    // faut le dire, sinon le bouton reste fige sur « Downloading… » et
+    // l'utilisateur croit la mise a jour en cours.
+    if (!r || r.ok !== true) {
+      occupe = false;
+      btnGo.disabled = false;
+      btnGo.textContent = T('Retry');
+      versEl.textContent = T('Update failed:') + ' ' + ((r && r.error) || T('unknown error'));
+    } else {
+      btnGo.textContent = T('Restarting…');
+    }
   });
   btnX.addEventListener('click', () => toast.classList.add('hidden'));
 })();

@@ -85,28 +85,54 @@ UTILS3D_ZIP = ('https://github.com/EasternJournalist/utils3d/archive/'
                '9a4eb15e4021b67b12c460c7057d642626897ec8.zip')
 
 # Pure-Python or pip-managed binaries — small + safe to grab from PyPI.
+#
+# BORNES HAUTES SUR TOUT (2026-08-20). Chaque entree n'avait qu'un plancher
+# `>=`, donc pip resolvait « la derniere version publiee le jour de
+# l'installation ». Deux consequences, toutes deux vues venir de loin :
+#   - le moteur d'un client n'est jamais celui qui a ete teste ici, et deux
+#     clients installes a un mois d'ecart n'ont pas le meme ;
+#   - le jour ou transformers passe en 5.x ou diffusers en 0.33, l'appli
+#     DEJA LIVREE cesse de s'installer chez les nouveaux, sans qu'une seule
+#     ligne de notre code ait bouge.
+# Les planchers sont desormais les versions REELLEMENT installees dans le
+# venv de developpement (relevees le 2026-08-20), et le plafond est la
+# prochaine version incompatible : majeure suivante, ou mineure suivante pour
+# les bibliotheques encore en 0.x, ou une mineure casse.
+#
+# numpy : la borne `<2.0` venait de kaolin 0.17, dont l'extension Cython
+# etait compilee pour l'ABI numpy 1. On installe kaolin 0.18.0 (voir
+# KAOLIN_PACKAGES), qui declare `numpy` sans plafond, et le venv de
+# developpement tourne en numpy 2.4.6 depuis des mois. La borne obligeait
+# donc les clients — et EUX SEULS — a un couple numpy 1.26 + kaolin 0.18 que
+# personne n'a jamais fait tourner. Verifie avant de la lever : basicsr,
+# realesrgan, rembg, pyrender, trimesh, kaolin, cv2 et scipy s'importent tous
+# sous numpy 2.4.6, et aucun script de scripts/ n'utilise les alias supprimes
+# par numpy 2 (np.float_, np.NaN, np.in1d, …).
 PYPI_PACKAGES = [
-    'diffusers>=0.30',
-    'transformers>=4.41',
-    'huggingface_hub>=0.24',
-    'accelerate>=0.30',
-    'safetensors>=0.4',
-    'pillow>=10',
-    'numpy>=1.26,<2.0',
-    'scipy>=1.13',
-    'trimesh>=4.4',
-    'pygltflib>=1.16',
-    'opencv-python>=4.9',
-    'pyrender>=0.1.45',
-    'rembg>=2.0',
-    'realesrgan>=0.3.0',
-    'basicsr>=1.4',
+    'diffusers>=0.32,<0.33',
+    'transformers>=4.56,<5',
+    'huggingface_hub>=0.36,<1',
+    'accelerate>=1.13,<2',
+    # Le venv de dev tourne sur 0.8.0rc0 ; un plancher `>=0.8` exclurait cette
+    # pre-version (PEP 440) et exigerait une 0.8.0 finale peut-etre pas encore
+    # publiee. On garde le plancher d'origine et on n'ajoute que le plafond.
+    'safetensors>=0.4,<0.9',
+    'pillow>=10,<13',
+    'numpy>=2.1,<3',
+    'scipy>=1.13,<2',
+    'trimesh>=4.4,<5',
+    'pygltflib>=1.16,<2',
+    'opencv-python>=4.9,<5',
+    'pyrender>=0.1.45,<0.2',
+    'rembg>=2.0,<3',
+    'realesrgan>=0.3.0,<0.4',
+    'basicsr>=1.4,<2',
     # TRELLIS-2 runtime deps (inference path only, no training extras):
-    'easydict>=1.13',
-    'einops>=0.8',
-    'plyfile>=1.0',
-    'zstandard>=0.22',
-    'tqdm>=4.66',
+    'easydict>=1.13,<2',
+    'einops>=0.8,<0.9',
+    'plyfile>=1.0,<2',
+    'zstandard>=0.22,<1',
+    'tqdm>=4.66,<5',
     UTILS3D_ZIP,
 ]
 

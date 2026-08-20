@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   installUpdateNow: () => ipcRenderer.invoke('app:install-update-now'),
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_e, info) => cb(info)),
   onUpdateDownloaded: (cb) => ipcRenderer.on('update-downloaded', (_e, info) => cb(info)),
+  onUpdateProgress: (cb) => ipcRenderer.on('update-progress', (_e, info) => cb(info)),
   generateFromPrompt: (opts) => ipcRenderer.invoke('generate-from-prompt', opts),
   generateFromImage: (opts) => ipcRenderer.invoke('generate-from-image', opts),
   generateImages: (opts) => ipcRenderer.invoke('generate-images', opts),

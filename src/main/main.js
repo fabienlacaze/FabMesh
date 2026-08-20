@@ -205,7 +205,24 @@ let _updateDownloaded = false;
     if (process.windowsStore) { _updater = null; return; }
     const { autoUpdater } = require('electron-updater');
     _updater = autoUpdater;
-    autoUpdater.autoDownload = true;
+    // TELECHARGEMENT SUR DEMANDE, PAS EN TACHE DE FOND.
+    //
+    // `verifyUpdateCodeSignature` est a false dans package.json parce que les
+    // binaires ne sont pas encore signes (voir la strategie de signature :
+    // certificat Azure Artifact Signing a acheter). Tant que c'est le cas,
+    // electron-updater ne verifie QUE l'empreinte sha512 publiee dans
+    // latest.yml — c'est-a-dire un fichier servi par la meme release GitHub
+    // que l'installeur. Cela detecte un telechargement corrompu ; cela ne
+    // protege pas d'une release compromise, puisque l'attaquant qui remplace
+    // l'un remplace l'autre.
+    //
+    // Avec autoDownload=true, un .exe non verifie etait donc rapatrie et
+    // depose sur le disque de l'utilisateur au demarrage, sans qu'il ait rien
+    // demande. On garde la VERIFICATION de version automatique (elle ne
+    // telecharge rien d'executable) et on n'apporte le binaire que si
+    // l'utilisateur clique. A rebasculer a true — avec
+    // verifyUpdateCodeSignature a true — le jour ou le certificat existe.
+    autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;  // we ask the user first
     autoUpdater.logger = null;  // keep Electron's console clean
     autoUpdater.on('update-available', (info) => {
@@ -213,6 +230,17 @@ let _updateDownloaded = false;
       // Tell the renderer so it can show a toast / banner.
       if (mainWindow && mainWindow.webContents) {
         try { mainWindow.webContents.send('update-available', { version: v }); } catch (_) {}
+      }
+    });
+    // Le telechargement n'est plus automatique : sans avancement affiche, le
+    // bouton resterait fige sur « Downloading… » le temps d'un installeur de
+    // plusieurs centaines de Mo.
+    autoUpdater.on('download-progress', (p) => {
+      if (mainWindow && mainWindow.webContents) {
+        try {
+          mainWindow.webContents.send('update-progress',
+            { percent: Math.round(p?.percent || 0) });
+        } catch (_) {}
       }
     });
     autoUpdater.on('update-downloaded', (info) => {
@@ -9434,9 +9462,18 @@ ipcMain.handle('app:check-for-update', async () => {
     return { ok: false, error: e.message };
   }
 });
-ipcMain.handle('app:install-update-now', () => {
-  if (!_updater || !_updateDownloaded) {
-    return { ok: false, error: 'no update downloaded yet' };
+ipcMain.handle('app:install-update-now', async () => {
+  if (!_updater) return { ok: false, error: 'updater not available' };
+  // autoDownload est desormais a false (rien d'executable n'est rapatrie sans
+  // que l'utilisateur le demande), donc ce clic PORTE le telechargement en
+  // plus de l'installation. C'est ce clic qui constitue la demande.
+  if (!_updateDownloaded) {
+    try {
+      await _updater.downloadUpdate();
+    } catch (e) {
+      return { ok: false, error: 'download failed: ' + (e && e.message ? e.message : String(e)) };
+    }
+    if (!_updateDownloaded) return { ok: false, error: 'download did not complete' };
   }
   // quitAndInstall closes the app, runs the installer, relaunches.
   setImmediate(() => _updater.quitAndInstall(false, true));

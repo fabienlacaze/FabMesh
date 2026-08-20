@@ -481,7 +481,7 @@ function register(deps) {
     // renderer par _applyCloudFeatureMask).
     if (_cloud()) {
       return { success: false,
-        error: 'Bibliothèque de mouvements indisponible en mode Cloud — utilisez le moteur génératif.' };
+        error: 'The motion library is not available in Cloud mode — use the generative engine instead.' };
     }
     const idx = _readOrBuildIndex();
     const motion = idx.motions.find((m) => m.id === motionId);
@@ -689,9 +689,17 @@ function register(deps) {
   };
   // Morphologie -> creatures CC0 candidates, de la plus proche a la plus
   // lointaine. Sert quand aucun clip perso ne correspond.
+  //
+  // HUMANOIDE : volontairement VIDE. La banque livree ne contient aucun clip
+  // humain (human-base/human-addon sont ecartes du paquet depuis la 1.0.16 :
+  // 11 Mo, et les humanoides passent par Kimodo). Tant qu'elle etait
+  // renseignee a ['kaiju'], demander « marche » sur un personnage humain
+  // rendait une demarche de kaiju — un monstre quadrupede de 10 clips —
+  // presentee comme le resultat demande, sans un mot. Mieux vaut dire qu'il
+  // n'y a rien et diriger vers le moteur qui, lui, sait animer un humain.
   const _CC0_PAR_CLASSE = {
     quadruped: ['fox', 'horse', 'kaiju'],
-    humanoid:  ['kaiju'],
+    humanoid:  [],
     bird:      ['bird', 'dragon'],
     dragon:    ['dragon', 'kaiju', 'bird'],
     insect:    ['spider'],
@@ -748,7 +756,18 @@ function register(deps) {
       const listes = await _listerBanque();
       const choix = _choisirClip(opts.action, opts.classe, listes);
       if (!choix) {
-        return { success: false, error: 'Aucun clip disponible pour « ' + opts.action + ' ».' };
+        // Le cas humanoide n'est pas un manque de chance : la banque n'a
+        // aucun clip humain par construction. On le dit, et on nomme la
+        // voie qui marche, au lieu de rendre « aucun clip disponible ».
+        const humain = String(opts.classe || '').toLowerCase() === 'humanoid';
+        return {
+          success: false,
+          error: humain
+            ? 'The bundled motion library has no human clips — it covers animals and creatures only. '
+              + 'For a humanoid character, use "Generate motion" (describe the movement in words), '
+              + 'or import your own FBX/GLB clips.'
+            : 'No clip available for "' + opts.action + '" in the bundled motion library.',
+        };
       }
       source = choix.source; creature = choix.creature || null;
       clip = choix.clip; clipPath = choix.clipPath || null;
@@ -775,9 +794,11 @@ function register(deps) {
     const py = process.env.FABMESH_ANIM_PY
       || (typeof aiPython === 'function' ? aiPython() : null);
     if (!py) {
+      // En anglais comme le reste : l'interface traduit depuis l'anglais, une
+      // chaine ecrite en francais ici s'affiche en francais pour tout le monde.
       return { success: false, needsLocalEngine: true, error:
-        'Le moteur local est introuvable. Passez en mode Cloud, ou '
-        + 'installez-le depuis les Réglages.' };
+        'The local engine was not found. Switch to Cloud mode, or install it '
+        + 'from Settings.' };
     }
     const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' };
     const dirM2M = _dossierClipsM2M();
