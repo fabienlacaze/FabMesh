@@ -1,0 +1,118 @@
+This is an UPDATE to a product already published in the Microsoft Store
+(version 1.0.23). It is not a resubmission after a failure. The changes
+below are almost entirely about privacy, consent and content safety.
+
+This app works on machines WITHOUT an NVIDIA GPU. On such devices the setup
+wizard detects the absence of an NVIDIA GPU and the app runs in Cloud mode:
+image generation, 3D meshes, rigging and animation all run on the MyFabmesh
+cloud service. No local AI model is downloaded or used.
+
+=======================================================================
+ WHAT CHANGED SINCE 1.0.23
+=======================================================================
+  * MATURE CONTENT SWITCH REMOVED FROM THIS PACKAGE. Earlier versions
+    let the user disable the content filter behind a PIN that the user
+    chose themselves. In a Store package the switch is now inert: the
+    padlock is hidden, the Settings section explains that the filter
+    cannot be lifted in the Store edition, and the underlying handler
+    refuses to enable it even if called directly. The filter that blocks
+    NSFW, violent and illegal prompts is always on here.
+
+  * CRASH REPORTS CAN NOW BE REFUSED. Settings > Privacy > Crash
+    reports. Our privacy policy had always said this control existed; it
+    did not. It does now, and switching it off stops reports at once.
+
+  * NO SILENT UPDATE DOWNLOAD. The app no longer fetches an installer in
+    the background. (Store packages are updated by Windows and the
+    "Check for updates" button is hidden in this edition entirely.)
+
+  * The bundled motion library no longer answers a request for a human
+    character with a monster animation; it says what it has instead.
+
+  * Privacy policy rewritten and reachable from inside the app
+    (About > Privacy policy, and Settings > Privacy).
+
+=======================================================================
+ REPORTING AI-GENERATED CONTENT (policy 11.16) - WHERE THE CONTROL IS
+=======================================================================
+Two earlier submissions were failed under 11.16. The reporting mechanism
+was present both times; it was not easy enough to find. This build offers
+FOUR entry points, and the first one needs no account, no project and no
+generated content:
+
+  1. TOP BAR, ALWAYS VISIBLE - the flag icon in the top-right corner of
+     the main window, between the refresh arrow and the padlock. It is
+     there on the very first launch, before signing in.
+     Tooltip: "Report inappropriate AI-generated content".
+
+  2. DIRECTLY UNDER EVERY GENERATED IMAGE - a button labelled
+     "Report", next to "Copy prompt", in the image preview area of
+     step 1 (Image).
+
+  3. IN THE TOOL PANELS - "Report content", in the FILE group of the
+     right-hand tool column, for both images (step 1) and 3D meshes
+     (step 2).
+
+  4. ABOUT DIALOG - "?" in the top bar, then "Report AI content".
+
+All four open the same form. It works WITHOUT an account and WITHOUT a
+network connection (it falls back to an e-mail draft addressed to
+myfabmesh.contact@gmail.com). The prompt used and a link to the generated
+file are attached automatically so the report can be reviewed. Reports are
+reviewed by an administrator.
+
+The AI notice required by 11.16 is shown in three places: on the setup
+wizard's mode page, in the About dialog, and on the progress panel of
+every cloud generation ("Generated on the MyFabmesh cloud").
+
+=======================================================================
+ IF ANYTHING FAILS, PLEASE SEND US ONE FILE
+=======================================================================
+This build writes a detailed diagnostics log. If the app crashes, hangs,
+or a feature does not work, please click "Export logs" (top-right of the
+setup wizard, and in Settings inside the app). It saves a single .txt
+file to the Desktop containing the hardware configuration, every setup
+step you went through, and the exact error. Attaching that file to the
+report would let us fix the issue in one pass.
+
+=======================================================================
+ ACCOUNT CREATION IS INSIDE THE APP
+=======================================================================
+Creating an account does not open a web browser. In the sign-in dialog,
+click "Create an account", enter an email and a password, then confirm
+with the 6-digit code sent to that address. Everything happens inside
+the app.
+
+Test account (already funded with credits):
+  email:    fabien65400+storetest@hotmail.fr
+  password: FabMeshTest17870491
+
+Second test account, if the first is exhausted:
+  email:    fabien65400+storetest2@hotmail.fr
+  password: FabMeshTest17870509
+
+Steps to test image generation:
+  1. Launch the app. The wizard shows "Cloud mode will be used on this
+     PC". Click "Continue in Cloud mode".
+  2. Sign in with the test account above. The signed-in account is shown
+     next to the credit balance in the top bar, so it is always clear
+     which account is being charged.
+  3. Create a project, type any prompt, click "Generate". The credit
+     cost is displayed on the button before you click it.
+  4. The FIRST generation after a period of inactivity can take up to
+     3 minutes while a GPU container boots - the progress bar and a
+     "Warming up cloud AI" notice are shown. This is expected, not a
+     failure. Later generations take about 30 seconds.
+
+First launch is slower: Windows verifies the ~200 MB package the first
+time it runs. A splash screen with a progress indicator is shown during
+this time.
+
+=======================================================================
+ PURCHASES
+=======================================================================
+Credits are sold on our website only
+(https://myfabmesh-cloud.fabien65400.workers.dev), never inside the app -
+declared under "This app allows users to make purchases, but does not
+use the Microsoft Store commerce system". No purchase is required to
+evaluate the app: the test accounts above are already funded.
