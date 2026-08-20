@@ -1,0 +1,141 @@
+FICHE STORE — FRANCAIS (France)
+Version 1.0.32 · a coller champ par champ dans Partner Center
+Submission 2 > Store listings > French (France)
+
+Regle suivie partout dans ce texte : ne rien promettre que l'application
+ne fasse. Deux refus de certification sont venus d'un ecart entre ce qui
+etait annonce et ce que l'examinateur a trouve.
+
+===============================================================
+ 1. DESCRIPTION   (champ « Description », obligatoire)
+===============================================================
+
+MyFabmesh.AI transforme une simple description ou une image en modele 3D
+texture, prêt pour votre moteur de jeu.
+
+Decrivez ce que vous voulez — « un casque de chevalier grave » — ou
+partez d'une image que vous avez deja. L'application genere l'image de
+reference, la convertit en maillage 3D texture, puis peut lui poser un
+squelette et l'animer. Export en GLB, FBX et OBJ, utilisable directement
+dans Unreal Engine, Unity ou Blender.
+
+DEUX FACONS DE L'UTILISER
+
+· Avec une carte NVIDIA : tout tourne sur votre machine. Aucune limite,
+  aucun abonnement, vos creations ne quittent pas votre ordinateur. Les
+  modeles d'IA (environ 15 a 22 Go selon le mode d'installation) se
+  telechargent au premier lancement.
+
+· Sans carte NVIDIA : l'application bascule automatiquement sur notre
+  service cloud. Un assistant le detecte au premier demarrage et vous
+  guide. Le cloud fonctionne avec des credits ; 50 credits vous sont
+  offerts a la creation du compte, de quoi produire vos premiers
+  modeles sans rien payer.
+
+CE QUE VOUS POUVEZ FAIRE
+
+· Generer une image de reference a partir d'une description
+· Convertir une image en maillage 3D texture
+· Retoucher l'image avant la 3D : detourage, retouche par zone,
+  agrandissement, vue arriere automatique
+· Poser un squelette automatiquement et animer le resultat
+· Retravailler le maillage : lissage, decimation, recentrage, UV
+· Exporter en GLB, FBX, OBJ
+· Suivre vos projets et revenir a n'importe quelle version anterieure
+
+CONTENU GENERE PAR INTELLIGENCE ARTIFICIELLE
+
+Les images et les modeles produits par cette application sont generes
+par IA. Un bouton de signalement est present en permanence dans la barre
+du haut, ainsi que sous chaque image generee : il permet de signaler un
+contenu inapproprie, avec ou sans compte, et meme sans connexion. Un
+filtre de contenu bloque les demandes a caractere sexuel, violent ou
+illegal ; dans la version du Microsoft Store, ce filtre ne peut pas etre
+desactive.
+
+ACHATS
+
+L'application ne vend rien en son sein. Les credits du service cloud
+s'achetent uniquement sur notre site. Aucun achat n'est necessaire pour
+utiliser le mode local, qui reste gratuit et sans limite.
+
+CONFIGURATION
+
+Windows 10 ou 11 (64 bits). Pour le mode local : carte NVIDIA avec 8 Go
+de memoire video au minimum, 12 Go recommandes, et environ 25 Go
+d'espace disque pour les modeles. Sans carte NVIDIA, seul le mode cloud
+est disponible.
+
+===============================================================
+ 2. NOUVEAUTES DE CETTE VERSION   (champ « What's new in this version »)
+===============================================================
+
+Version 1.0.32 — mise a jour consacree a la vie privee et a la
+transparence.
+
+· Les rapports d'erreur anonymes peuvent desormais etre refuses, dans
+  Parametres > Confidentialite. Notre politique annoncait ce reglage
+  depuis le debut ; il existe enfin.
+· L'application ne telecharge plus de mise a jour en arriere-plan sans
+  votre accord.
+· Dans la version du Microsoft Store, le filtre de contenu ne peut plus
+  etre desactive.
+· La bibliotheque de mouvements ne repond plus a une demande concernant
+  un personnage humain par une animation de creature : elle indique ce
+  dont elle dispose.
+· Politique de confidentialite reecrite et accessible depuis
+  l'application (A propos, et Parametres > Confidentialite).
+· Interface plus lisible pour les lecteurs d'ecran.
+
+===============================================================
+ 3. POINTS FORTS   (champ « Product features », un par ligne)
+===============================================================
+
+Texte vers 3D : decrivez un objet, obtenez un modele texture
+Image vers 3D : partez d'une image que vous avez deja
+Gratuit et sans limite si vous avez une carte NVIDIA
+Fonctionne aussi sans carte graphique, via notre service cloud
+Squelette automatique et animation du resultat
+Export GLB, FBX et OBJ pour Unreal, Unity et Blender
+Retouche d'image integree avant le passage en 3D
+Historique par projet : revenez a n'importe quelle version
+Filtre de contenu actif en permanence
+Interface en francais, anglais, espagnol, chinois et hindi
+
+===============================================================
+ 4. TERMES DE RECHERCHE   (champ « Search terms », 7 max, 30 car. max)
+===============================================================
+
+generateur 3D
+modelisation IA
+texte vers 3D
+image vers 3D
+assets jeu video
+rigging automatique
+modele 3D gratuit
+
+===============================================================
+ 5. DESCRIPTION COURTE   (champ « Short description » si propose)
+===============================================================
+
+Transformez une description ou une image en modele 3D texture, prêt pour
+Unreal, Unity et Blender. Gratuit et sans limite avec une carte NVIDIA ;
+sinon, un service cloud prend le relais.
+
+===============================================================
+ 6. CAPTURES D'ECRAN
+===============================================================
+
+Reutiliser celles de la fiche anglaise : l'interface capturee est la
+meme et Partner Center accepte de partager les visuels entre langues.
+Ne PAS refaire de captures avec l'interface en francais tant que les
+textes anglais n'ont pas ete revus — deux jeux de captures qui divergent
+sont une source d'incoherence a la certification.
+
+===============================================================
+ 7. COORDONNEES
+===============================================================
+
+Adresse de contact : myfabmesh.contact@gmail.com
+Politique de confidentialite : https://fabienlacaze.github.io/MyFabmesh/privacy.html
+Conditions : https://fabienlacaze.github.io/MyFabmesh/terms.html
