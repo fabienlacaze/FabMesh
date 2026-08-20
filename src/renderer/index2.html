@@ -2242,7 +2242,13 @@
         </div>
         <div class="settings-box" style="margin-top:8px;">
           <div class="settings-box-title">Uninstall MyFabmesh.AI</div>
-          <div class="settings-box-desc">Remove MyFabmesh.AI from your computer. You'll be asked whether to also delete the AI models (~17 GB) and your settings. Your generated meshes folder is never touched.</div>
+          <!-- Le texte annoncait « You'll be asked whether to also delete the
+               AI models (~17 GB) » : ces trois questions ne sont posees que par
+               le desinstalleur NSIS. Dans le paquet du Store, `app:uninstall`
+               renvoie vers les Parametres de Windows et ne demande rien. On
+               n'annonce donc plus une question qui ne sera pas posee ; le texte
+               exact est ajuste a l'execution selon la livraison. -->
+          <div class="settings-box-desc" id="set-uninstall-desc">Remove MyFabmesh.AI from your computer. Your generated meshes folder is never touched.</div>
           <div style="margin-top:8px;">
             <button id="set-uninstall" class="ghost-btn danger" style="width:100%; padding:6px 12px; font-size:12px;">&#128465;&#65039; Uninstall MyFabmesh.AI</button>
           </div>

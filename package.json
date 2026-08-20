@@ -172,7 +172,10 @@
       "displayName": "MyFabmesh.AI",
       "languages": [
         "en-US",
-        "fr-FR"
+        "fr-FR",
+        "zh-CN",
+        "es-ES",
+        "hi-IN"
       ],
       "showNameOnTiles": true,
       "addAutoLaunchExtension": false,
