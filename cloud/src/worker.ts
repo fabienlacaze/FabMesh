@@ -6778,7 +6778,7 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
  *
  *  Ne leve jamais : la comptabilite Supabase doit se faire meme si Modal
  *  est injoignable. Retourne l'issue pour que l'appelant puisse le dire. */
-async function _cancelModalJob(env: Env, jobId: string): Promise<{ cancelled: boolean; error: string | null }> {
+async function _cancelModalJob(env: Env, jobId: string, opType?: string): Promise<{ cancelled: boolean; error: string | null }> {
   if (!env.MODAL_SHARED_SECRET) {
     return { cancelled: false, error: 'Modal non configure' };
   }
@@ -6793,12 +6793,26 @@ async function _cancelModalJob(env: Env, jobId: string): Promise<{ cancelled: bo
   // Chacune de ces apps accepte le meme contrat `op_type: 'cancel'` (voir
   // _puppeteer_rig.py: /rig_data/<job_id>.call_id). On essaie donc les
   // endpoints configures jusqu'a ce que l'un reconnaisse le job.
+  // Quand le type de travail est connu, on interroge SON app d'abord.
+  // Le faucheur appelle cette fonction pour chaque job qu'il fauche, depuis
+  // le cron : essayer les quatre apps a chaque fois multipliait par quatre
+  // les sous-requetes d'un tick, qui a un plafond de 1000 chez Cloudflare.
+  // L'ordre n'enleve rien a la correction — les autres restent en repli.
+  const parType: Record<string, string | undefined> = {
+    mesh:        env.MODAL_MESH_START_URL,
+    rig:         _rigBaseUrl(env),
+    segment:     env.MODAL_SEGMENT_URL,
+    animate:     env.MODAL_ANYTOP_ANIM_URL,
+    animate_fbx: env.MODAL_FBX_RETARGET_URL,
+  };
+  const prefere = opType ? parType[opType] : undefined;
   const cibles = [
+    prefere,
     env.MODAL_MESH_START_URL,
     _rigBaseUrl(env),
     env.MODAL_SEGMENT_URL,
     env.MODAL_ANYTOP_ANIM_URL,
-  ].filter(Boolean) as string[];
+  ].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
   if (!cibles.length) return { cancelled: false, error: 'aucun endpoint Modal configure' };
 
   let derniereErreur: string | null = null;
@@ -14533,15 +14547,39 @@ async function preWarmModal(env: Env, opts: { imageOp?: boolean } = {}): Promise
   }
 }
 
-/** Cron entry point. Heartbeat-gated so an idle deployment never boots a
- *  GPU: without a /api/heartbeat in the last 5 min we assume nobody is
- *  online. NOTE (documented for the record): a 15-minute cron CANNOT keep
- *  the text2image container alive — scaledown_window is 300 s, so it is
- *  dead for 10 of every 15 minutes. Closing that gap with a 4-minute cron
- *  would cost ~$1400/month of idle L40S and was already tried + disabled (see
- *  the commented-out block in wrangler.toml). The cron is therefore a
- *  best-effort top-up only; the real coverage comes from the
- *  desktop-triggered POST /api/prewarm and from the 524 retries. */
+/** Cron entry point — N'ALLUME PLUS DE GPU depuis le 2026-08-20.
+ *
+ *  LE RAISONNEMENT ETAIT DEJA ECRIT ICI, LA CONCLUSION NE SUIVAIT PAS.
+ *  Le commentaire d'origine constatait qu'« un cron de 15 minutes NE PEUT
+ *  PAS garder le conteneur text2image vivant — scaledown_window vaut 300 s,
+ *  il est donc mort 10 minutes sur 15 » — puis appelait quand meme
+ *  preWarmModal a chaque tick, en le qualifiant de « best-effort top-up ».
+ *
+ *  Trois nombres suffisent a trancher, et ce ne sont pas des estimations :
+ *    cron        = 900 s
+ *    scaledown   = 300 s   (MyFabmeshPredictor, app.py)
+ *    garde fraicheur PREWARM_FRESH_MS = 240 s
+ *  La garde « deja chaud, on saute » ne peut donc JAMAIS s'appliquer au
+ *  cron (900 > 240), et le conteneur allume meurt 600 s avant le tick
+ *  suivant. Chaque tick payait un demarrage a froid plus 300 s de L40S au
+ *  ralenti — ~0,17 $ — pour un conteneur qui avait deux chances sur trois
+ *  d'etre re-mort au moment ou l'utilisateur cliquait enfin.
+ *
+ *  Mesure du 2026-08-20 (facture Modal croisee avec les jobs Supabase) :
+ *  les 2 et 3 aout ont coute 2,35 $ pour ZERO generation, et le 20 aout
+ *  1,94 $ pour 136 s de travail reel. A quatre ticks par heure, etre
+ *  simplement connecte coutait ~0,70 $/h.
+ *
+ *  CE QU'ON GARDE : POST /api/prewarm, appele par les deux clients quand
+ *  l'utilisateur montre une INTENTION (chargement de page, retour sur
+ *  l'onglet, focus du champ de prompt ou du selecteur de preset). Le
+ *  conteneur demarre alors pendant qu'il remplit son formulaire — ce qui
+ *  couvre exactement le cas que le cron visait, au moment ou ca sert.
+ *
+ *  Le squelette (coupe-circuit + battement de coeur) reste en place : si
+ *  quelqu'un veut re-allumer le prechauffage periodique un jour, il faudra
+ *  d'abord que scaledown_window depasse l'intervalle du cron, sans quoi on
+ *  repaie la meme chose pour rien. */
 async function preWarmTick(env: Env): Promise<void> {
   // LE COUPE-CIRCUIT S'APPLIQUE AUSSI AU CRON. Il n'etait verifie que sur
   // les requetes HTTP (MODAL_PATHS dans le routeur) : un administrateur
@@ -14560,8 +14598,8 @@ async function preWarmTick(env: Env): Promise<void> {
     console.log('[pre-warm] skipped — no recent heartbeat (nobody online)');
     return;
   }
-  if (env.MODAL_TEXT2IMAGE_URL) await preWarmModal(env);
-  else await preWarmCog(env);
+  console.log('[pre-warm] cron: aucun GPU allume — le prechauffage suit '
+            + "l'intention de l'utilisateur (POST /api/prewarm), pas l'horloge");
 }
 
 async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
@@ -14657,7 +14695,7 @@ const NON_TERMINAL_JOB_STATUSES = ['queued', 'starting', 'running', 'processing'
 // false when someone else had already finalised it. Callers use the return
 // value to decide whether to also refund the Modal $ budget / delete the R2
 // job record, so those side effects stay exactly-once too.
-async function _failAndRefundJob(env: Env, job: { id: unknown; user_id?: unknown; credit_cost?: unknown }, errMsg: string): Promise<boolean> {
+async function _failAndRefundJob(env: Env, job: { id: unknown; user_id?: unknown; credit_cost?: unknown; type?: unknown }, errMsg: string): Promise<boolean> {
   const sb = supabaseAdmin(env);
   const { data, error } = await sb.from('jobs')
     .update({ status: 'failed', error: String(errMsg).slice(0, 500), finished_at: new Date().toISOString() })
@@ -14671,8 +14709,45 @@ async function _failAndRefundJob(env: Env, job: { id: unknown; user_id?: unknown
   if (typeof job.user_id === 'string' && typeof job.credit_cost === 'number') {
     await addCredits(env, job.user_id, job.credit_cost);
   }
+  // ── ET ON ARRETE LE CONTENEUR. ──────────────────────────────────────
+  //
+  // Sans cette ligne, « faucher » un job ne faisait que mentir dans
+  // Supabase : la ligne passait a `failed`, les credits revenaient au
+  // client, et le GPU CONTINUAIT DE TOURNER aux frais de l'exploitant.
+  //
+  // Mesure du 2026-08-20 sur le mois d'aout : cinq maillages marques
+  // « reaped: unreachable after 20 min » avaient en realite tourne 179,
+  // 168, 149, 129 et 28 minutes — pres de 11 heures de L40S, soit ~21 $
+  // sur les 22,33 $ factures par l'app cloud ce mois-la. Le faucheur
+  // fabriquait donc precisement la depense qu'il etait cense arreter.
+  //
+  // `_cancelModalJob` existait deja et fait le bon travail (il relit le
+  // function_call ID persiste et appelle FunctionCall.cancel avec
+  // terminate_containers) — il n'etait branche QUE sur les annulations
+  // admin et utilisateur, jamais ici.
+  //
+  // Place APRES la reclamation conditionnelle a dessein : seul l'appel
+  // qui a reellement fait basculer la ligne annule, donc jamais deux fois
+  // en cas de course entre un sondage client et le cron. Ne leve jamais.
+  //
+  // Restreint aux familles ASYNCHRONES : elles seules ont un
+  // function_call spawn a arreter (un `/data/<job_id>.call_id` sur le
+  // volume de leur app). text2image, back-view et rectify sont
+  // synchrones — la requete HTTP EST l'execution, il n'y a rien a
+  // annuler apres coup, et les appeler ferait payer au faucheur des
+  // sous-requetes pour rien alors qu'il tourne deja pres du plafond de
+  // 1000 par invocation planifiee.
+  const type = typeof job.type === 'string' ? job.type : '';
+  if (TYPES_JOB_ASYNC.has(type)) {
+    await _cancelModalJob(env, String(job.id), type);
+  }
   return true;
 }
+
+/** Familles de travaux lancees en `spawn` sur Modal, donc annulables : elles
+ *  persistent un function_call ID que `op_type:'cancel'` sait relire. Les
+ *  autres operations sont synchrones et n'ont pas de conteneur survivant. */
+const TYPES_JOB_ASYNC = new Set(['mesh', 'rig', 'segment', 'animate', 'animate_fbx']);
 
 /** Reaper routing table: how to re-poll each async Modal op family, what its
  *  GPU $ estimate is, and which R2 job record to drop once it is reaped.
