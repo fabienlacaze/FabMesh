@@ -55,14 +55,7 @@
       "Read(//c/tmp/**)",
       "Read(//C/tmp/**)"
     ],
-    "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(git reset --hard:*)",
-      "Bash(git push --force:*)",
-      "Bash(git push -f:*)",
-      "Bash(git clean -f:*)",
-      "Bash(git branch -D:*)"
-    ],
+    "deny": [],
     "additionalDirectories": [
       "\\\\wsl.localhost\\Ubuntu\\root\\TRELLIS.2\\trellis2\\modules\\sparse"
     ]

@@ -466,7 +466,7 @@ function checkHardFloor(prompt) {
 let _nvidiaGpuCache = null;   // { hasNvidia: bool, name: string }
 function detectNvidiaGpu() {
   // FABMESH_FORCE_NO_GPU=1 : simule une machine sans GPU NVIDIA (test du
-  // fallback cloud sur la machine de dev, voir docs/STORE_RESUBMISSION.md).
+  // fallback cloud sur la machine de dev, voir store-cert/STORE_RESUBMISSION.md).
   if (process.env.FABMESH_FORCE_NO_GPU === '1') {
     _nvidiaGpuCache = { hasNvidia: false, name: '' };
   }
