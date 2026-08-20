@@ -879,7 +879,7 @@
           <input type="number" id="debuglogs-limit" value="50" min="1" max="200"
                  style="padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:12px; width:70px;" />
           <button class="btn" onclick="loadDebugLogs()">🔄 Fetch</button>
-          <button class="btn" onclick="fetchLatestAnonLog()" title="Get _logs/latest/_any.log (last global flush — dev only)">⚡ Latest</button>
+          <button class="btn" onclick="fetchLatestAnonLog()" title="Open the most recent diagnostic log (resolved via _logs/latest/_last_uid.txt)">⚡ Latest</button>
         </div>
       </div>
       <div id="debuglogs-result" style="display:none; margin-bottom:8px; padding:8px 10px; background:var(--bg-2); border:1px solid var(--border); border-radius:8px; font-size:12px; color:var(--text-2);"></div>
@@ -4128,8 +4128,27 @@
     }
 
     async function fetchLatestAnonLog() {
-      // Convenience shortcut: fetch _logs/latest/_any.log (last global flush).
-      await viewDebugLog('_logs/latest/_any.log');
+      // Convenience shortcut: the most recent flush, in two hops.
+      // `_logs/latest/_any.log` used to hold the log itself — one shared
+      // object overwritten by whichever user flushed last, so it mixed
+      // customers' consoles together. It now holds only a user id, and
+      // the log is read from that user's own path.
+      const viewer = document.getElementById('debuglogs-viewer');
+      try {
+        const r = await fetch('/api/admin/logs/get?key=' + encodeURIComponent('_logs/latest/_last_uid.txt'),
+                              { credentials: 'include' });
+        if (!r.ok) {
+          if (viewer) viewer.textContent = r.status === 404
+            ? 'No diagnostic log has been sent yet (they are opt-in).'
+            : `Lookup failed: HTTP ${r.status}`;
+          return;
+        }
+        const uid = (await r.text()).trim();
+        if (!uid) { if (viewer) viewer.textContent = 'No recent flush.'; return; }
+        await viewDebugLog(`_logs/latest/${uid}.log`);
+      } catch (e) {
+        if (viewer) viewer.textContent = `Fetch failed: ${e?.message || e}`;
+      }
     }
 
     function copyDebugLog() {

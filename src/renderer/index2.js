@@ -19136,6 +19136,51 @@ function _applyHardwareCardMask() {
 window._applyHardwareCardMask = _applyHardwareCardMask;
 document.getElementById('btn-settings')?.addEventListener('click', openSettings);
 
+/* Reglages > Privacy > Crash reports.
+ *
+ * La politique de confidentialite publiee ecrit « You can disable crash
+ * reporting in Settings » depuis la premiere version ; ce reglage n'existait
+ * nulle part. Les rapports partaient donc sans qu'on puisse les refuser,
+ * alors que la politique presentait le refus comme possible.
+ *
+ * Decocher agit tout de suite (beforeSend rend null) ; recocher demande un
+ * redemarrage, parce qu'a l'arret le SDK n'a pas ete demarre du tout — seul
+ * moyen d'arreter aussi l'envoi natif des minidumps, que beforeSend ne voit
+ * pas. On le dit au lieu de le taire.
+ *
+ * Bloc SEPARE de la fenetre « A propos » juste dessous : celle-ci sort par un
+ * `return` si son bouton manque, ce qui emporterait ce reglage avec elle. */
+(async () => {
+  const cb   = document.getElementById('set-crash-optin');
+  const hint = document.getElementById('set-crash-hint');
+  if (!cb) return;
+  const T = (x) => (typeof _i18nT === 'function' ? _i18nT(x) : x);
+  try {
+    const r = await window.meshyAPI?.getCrashReports?.();
+    cb.checked = r ? r.enabled !== false : true;
+  } catch (_) { /* garde la valeur par defaut de la case */ }
+  cb.addEventListener('change', async () => {
+    const on = cb.checked;
+    try {
+      const r = await window.meshyAPI?.setCrashReports?.(on);
+      if (r && r.success === false) throw new Error(r.error || 'save failed');
+    } catch (_) {
+      cb.checked = !on;
+      if (hint) hint.textContent = T('Could not save this setting.');
+      return;
+    }
+    if (hint) {
+      hint.textContent = on
+        ? T('Takes effect after you restart the app.')
+        : T('Stopped. No further report will be sent.');
+    }
+  });
+  document.getElementById('set-privacy-link')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    try { window.wizardAPI?.openExternal?.('https://fabienlacaze.github.io/MyFabmesh/privacy.html'); } catch (_) {}
+  });
+})();
+
 // About / Help modal — show version, links, update check.
 (() => {
   const btn       = document.getElementById('btn-about');

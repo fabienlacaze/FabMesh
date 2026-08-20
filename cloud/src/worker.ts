@@ -10221,15 +10221,40 @@ async function handleParentalToggle(req: Request, env: Env): Promise<Response> {
 }
 
 
-/** POST /api/client-log — stores browser console logs in R2 so they can
- *  be retrieved server-side for debug. Body: JSON {kind, status, job_id?,
+/** Retention applied to opt-in diagnostic logs. Announced in the privacy
+ *  policy — change both together. Enforced by purgeDiagLogs() on the
+ *  weekly cron. */
+const DIAG_LOG_RETENTION_DAYS = 30;
+
+/** POST /api/client-log — stores browser console logs in R2 so a support
+ *  session can be read server-side. Body: JSON {kind, status, job_id?,
  *  project?, ua?, url?, lines: string[]}. Stored under
- *  <uid>/logs/<ts>_<kind>_<status>.log (path returned in the response).
- *  Cap: 1 MB body. Anonymous calls are accepted too (logged under
- *  _anon/logs/) so a user who isn't logged in can still get a flush. */
+ *  _logs/diag/<uid>/<ts>_<kind>_<status>.log (path returned in the
+ *  response). Cap: 1 MB body.
+ *
+ *  THREE THINGS THIS ENDPOINT DELIBERATELY DOES NOT DO (2026-08-20):
+ *
+ *  1. It does not accept anonymous calls any more. It used to log them
+ *     under _anon/logs/, which made an UNAUTHENTICATED 1 MB R2 write
+ *     reachable by anyone who could reach the domain — a free way to
+ *     fill the bucket.
+ *  2. It does not write a shared `_logs/latest/_any.log` any more. That
+ *     object was overwritten by whichever user flushed last, so one
+ *     customer's console — prompts, project names, job ids — landed in
+ *     a path that had nothing to do with them. The code comment said
+ *     "racy for prod"; in prod it is a cross-user data mix, not a race.
+ *     The newest flush is now found via `_logs/latest/_last_uid.txt`,
+ *     which holds a user id and nothing else.
+ *  3. It is not reached at all unless the user turned diagnostics on in
+ *     Settings — the client (console-capture.js) refuses to POST
+ *     otherwise. The endpoint stays closed by default even so, because
+ *     a client-side gate is not a guarantee.
+ *
+ *  Logs are deleted after DIAG_LOG_RETENTION_DAYS. */
 async function handleClientLog(req: Request, env: Env): Promise<Response> {
   if (!env.MESHES) return err(500, 'R2 binding required');
   const user = await getSessionUser(req, env).catch(() => null);
+  if (!user) return err(401, 'unauthorized');
   let body: any;
   try {
     const text = await req.text();
@@ -10245,12 +10270,15 @@ async function handleClientLog(req: Request, env: Env): Promise<Response> {
   const project = String(body?.project || '').replace(/[^a-zA-Z0-9_\- ]/g, '').slice(0, 64);
   const job_id = String(body?.job_id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const dir = user ? `${user.id}/logs` : '_anon/logs';
-  const key = `${dir}/${ts}_${kind}_${status}${job_id ? `_${job_id}` : ''}.log`;
+  // Under a single top-level prefix (NOT `<uid>/logs/`) so retention can
+  // enumerate every diagnostic log with one list() instead of walking the
+  // whole bucket — and so console dumps stop sitting inside the same
+  // prefix as the user's own meshes.
+  const key = `_logs/diag/${user.id}/${ts}_${kind}_${status}${job_id ? `_${job_id}` : ''}.log`;
   // Build a header + body. Keep it text/plain for easy reading via curl.
   const header = [
     `# fabmesh client-log`,
-    `# user_id: ${user ? user.id : '(anon)'}`,
+    `# user_id: ${user.id}`,
     `# kind: ${kind}`,
     `# status: ${status}`,
     `# project: ${project || '(none)'}`,
@@ -10259,33 +10287,67 @@ async function handleClientLog(req: Request, env: Env): Promise<Response> {
     `# ua: ${String(body?.ua || '').slice(0, 256)}`,
     `# server_ts: ${ts}`,
     `# lines: ${lines.length}`,
+    `# retention: deleted after ${DIAG_LOG_RETENTION_DAYS} days`,
     ``,
   ].join('\n');
   const payload = header + lines.join('\n') + '\n';
   try {
     await env.MESHES.put(key, payload, {
       httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-      customMetadata: { kind, status, project: project || '', userId: user?.id || '' },
+      customMetadata: { kind, status, project: project || '', userId: user.id },
     });
-    // ALSO overwrite stable paths so Claude can fetch the latest log
-    // without having to discover the timestamped filename:
-    //   _logs/latest/<uid>.log      — per-user latest (anyone in solo dev)
-    //   _logs/latest/_any.log       — global latest (overwritten by ANY user;
-    //                                  fine for solo dev, racy for prod)
-    if (user) {
-      await env.MESHES.put(`_logs/latest/${user.id}.log`, payload, {
-        httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-        customMetadata: { kind, status, project: project || '', userId: user.id },
-      });
-    }
-    await env.MESHES.put(`_logs/latest/_any.log`, payload, {
+    // Stable per-user path so the newest log can be fetched without first
+    // discovering its timestamped filename.
+    await env.MESHES.put(`_logs/latest/${user.id}.log`, payload, {
       httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-      customMetadata: { kind, status, project: project || '', userId: user?.id || '' },
+      customMetadata: { kind, status, project: project || '', userId: user.id },
+    });
+    // Pointer to whoever flushed last — a user id, no log content. This
+    // replaces the old `_any.log`, which put one user's console in a
+    // shared object.
+    await env.MESHES.put('_logs/latest/_last_uid.txt', `${user.id}\n`, {
+      httpMetadata: { contentType: 'text/plain; charset=utf-8' },
     });
   } catch (e) {
     return err(500, `R2 put failed: ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, path: key, lines: lines.length });
+}
+
+/** Deletes opt-in diagnostic logs older than DIAG_LOG_RETENTION_DAYS.
+ *  Runs on the weekly cron. Everything lives under `_logs/diag/`, so one
+ *  paginated list() covers it; `_logs/latest/<uid>.log` is swept too, on
+ *  its own upload date, so a user who stops using the app doesn't leave a
+ *  console dump behind forever.
+ *
+ *  Bounded on purpose: at most MAX_DELETES objects per run, so the tick
+ *  stays far from Cloudflare's subrequest cap. What it had to leave is
+ *  reported, never silently dropped. */
+async function purgeDiagLogs(env: Env): Promise<{ scanned: number; deleted: number; left: number }> {
+  const out = { scanned: 0, deleted: 0, left: 0 };
+  if (!env.MESHES) return out;
+  const MAX_DELETES = 400;
+  const cutoff = Date.now() - DIAG_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const doomed: string[] = [];
+  for (const prefix of ['_logs/diag/', '_logs/latest/']) {
+    let cursor: string | undefined;
+    do {
+      const page: any = await env.MESHES.list({ prefix, cursor, limit: 1000 });
+      for (const o of page.objects || []) {
+        if (o.key.endsWith('_last_uid.txt')) continue;   // pointer, not a log
+        out.scanned++;
+        const uploaded = o.uploaded ? new Date(o.uploaded).getTime() : NaN;
+        if (!Number.isFinite(uploaded) || uploaded >= cutoff) continue;
+        if (doomed.length < MAX_DELETES) doomed.push(o.key); else out.left++;
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+  for (const key of doomed) {
+    try { await env.MESHES.delete(key); out.deleted++; }
+    catch { out.left++; }
+  }
+  return out;
 }
 
 /** POST /api/user-assets/delete — delete a single user_asset row
@@ -10657,10 +10719,10 @@ async function handleAdminLogsList(req: Request, env: Env): Promise<Response> {
     const { data } = await sb.from('profiles').select('id, email').eq('email', email).maybeSingle();
     if (data?.id) uid = data.id as string;
   }
-  // Prefix: per-user if uid known, otherwise scan everyone (will be slower).
-  const prefix = uid ? `${uid}/logs/` : '';
-  // For "everyone" path we want ALL <uid>/logs/* keys. R2 list doesn't
-  // support * wildcard so we list every user prefix from profiles instead.
+  // Since 2026-08-20 every diagnostic log lives under `_logs/diag/<uid>/`,
+  // so "everyone" is ONE list() instead of one per profile. The old layout
+  // needed a prefix per user and, past ~900 accounts, would have hit
+  // Cloudflare's subrequest cap on this very request.
   let uids: string[] = [];
   if (uid) {
     uids = [uid];
@@ -10680,20 +10742,41 @@ async function handleAdminLogsList(req: Request, env: Env): Promise<Response> {
     const { data } = await sb.from('profiles').select('id, email').in('id', uids);
     for (const row of (data ?? [])) emailByUid.set(row.id as string, (row.email as string) || null);
   }
-  for (const u of uids) {
-    const listed = await env.MESHES.list({ prefix: `${u}/logs/`, limit: Math.min(50, limit) });
+  const push = (obj: any, u: string) => collected.push({
+    key: obj.key,
+    uid: u,
+    uploaded: obj.uploaded?.toISOString?.() || null,
+    size: obj.size,
+    kind: obj.customMetadata?.kind || '',
+    status: obj.customMetadata?.status || '',
+    project: obj.customMetadata?.project || '',
+    email: emailByUid.get(u) ?? null,
+  });
+  // Current layout: one list, filtered by uid only when one was asked for.
+  {
+    const listed = await env.MESHES.list({
+      prefix: uid ? `_logs/diag/${uid}/` : '_logs/diag/',
+      limit: Math.min(1000, limit * 4),
+    });
     for (const obj of (listed.objects || [])) {
-      collected.push({
-        key: obj.key,
-        uid: u,
-        uploaded: obj.uploaded?.toISOString?.() || null,
-        size: obj.size,
-        kind: obj.customMetadata?.kind || '',
-        status: obj.customMetadata?.status || '',
-        project: obj.customMetadata?.project || '',
-        email: emailByUid.get(u) ?? null,
-      });
+      push(obj, obj.customMetadata?.userId || obj.key.split('/')[2] || '');
     }
+  }
+  // Legacy layout (`<uid>/logs/`), still present until retention clears it.
+  // Bounded to the 40 first profiles on the "everyone" path so this can
+  // never approach the subrequest cap; the current-layout list above is
+  // exhaustive, so nothing recent is missed.
+  const legacyUids = uid ? uids : uids.slice(0, 40);
+  if (!uid && uids.length > legacyUids.length) {
+    // Say what was skipped rather than let the list look complete.
+    collected.push({
+      key: `(legacy scan limited to ${legacyUids.length}/${uids.length} accounts)`,
+      uid: '', uploaded: null, size: 0, kind: 'notice', status: 'partial', project: '', email: null,
+    });
+  }
+  for (const u of legacyUids) {
+    const listed = await env.MESHES.list({ prefix: `${u}/logs/`, limit: Math.min(50, limit) });
+    for (const obj of (listed.objects || [])) push(obj, u);
   }
   // Newest first across all users.
   collected.sort((a, b) => (b.uploaded || '').localeCompare(a.uploaded || ''));
@@ -10734,9 +10817,16 @@ async function handleClientLogList(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(100, parseInt(url.searchParams.get('limit') || '20', 10)));
-  const prefix = `${user.id}/logs/`;
-  const list = await env.MESHES.list({ prefix, limit });
-  const objects = (list.objects || []).map(o => ({
+  const prefix = `_logs/diag/${user.id}/`;
+  // `<uid>/logs/` is where diagnostic logs lived before 2026-08-20. Still
+  // listed so logs written by an older deploy stay reachable until
+  // retention removes them.
+  const legacy = `${user.id}/logs/`;
+  const [list, old] = await Promise.all([
+    env.MESHES.list({ prefix, limit }),
+    env.MESHES.list({ prefix: legacy, limit }),
+  ]);
+  const objects = [...(list.objects || []), ...(old.objects || [])].map(o => ({
     key: o.key,
     size: o.size,
     uploaded: o.uploaded?.toISOString?.() || null,
@@ -14808,6 +14898,22 @@ export default {
     // Weekly keep-alive: one cheap Supabase read so the free-tier project never
     // auto-pauses (7-day inactivity). Cheap + safe — runs on every cron.
     ctx.waitUntil(keepAliveSupabase(env));
+    // Weekly tick also enforces the announced retention on opt-in
+    // diagnostic logs. Kept on the WEEKLY cron, not the 15-minute one:
+    // a full list() of `_logs/` every quarter hour would cost far more in
+    // R2 class-B operations than the retention is worth.
+    if (event.cron === '0 6 * * 1') {
+      ctx.waitUntil((async () => {
+        try {
+          const r = await purgeDiagLogs(env);
+          if (env.MESHES) {
+            await env.MESHES.put('_meta/cron/last_log_purge.json', JSON.stringify({
+              ts: new Date().toISOString(), retention_days: DIAG_LOG_RETENTION_DAYS, ...r,
+            }), { httpMetadata: { contentType: 'application/json' } });
+          }
+        } catch { /* best-effort — never fail the keep-alive over retention */ }
+      })());
+    }
     // Heavier maintenance (pre-warm / purge / reap) runs only on the frequent
     // heartbeat cron — NOT the weekly keep-alive ping (avoids any credit burn).
     if (event.cron !== '0 6 * * 1') {

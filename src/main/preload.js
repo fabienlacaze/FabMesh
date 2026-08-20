@@ -103,6 +103,10 @@ contextBridge.exposeInMainWorld('meshyAPI', {
    * sans ces deux entrees ici, ses appels tombent sur `undefined`. */
   openMailto: (url) => ipcRenderer.invoke('app:open-mailto', url),
   isStoreBuild: () => ipcRenderer.invoke('app:is-store-build'),
+  // Opt-out for Sentry crash reports (the switch the privacy policy
+  // promised long before it existed).
+  getCrashReports: () => ipcRenderer.invoke('app:get-crash-reports'),
+  setCrashReports: (on) => ipcRenderer.invoke('app:set-crash-reports', on),
   reconfigureFabmesh: () => ipcRenderer.invoke('wizard:reset-setup'),
   uninstallFabmesh: (opts) => ipcRenderer.invoke('app:uninstall', opts),
   openWebsite: () => ipcRenderer.invoke('app:open-website'),

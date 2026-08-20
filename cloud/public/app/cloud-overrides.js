@@ -319,6 +319,10 @@
     // and read by worker.ts:getSessionUser) so JS can delete them.
     installLogoutButton();
 
+    // Consent switch for the diagnostic log upload (console-capture.js).
+    // Off by default — see the header of that file for why.
+    installDiagnosticsBox();
+
     // Wire the live cost meter on the "Generate 3D" button so users
     // see the total credit cost change as they toggle options.
     installMeshCostMeter();
@@ -1959,6 +1963,70 @@
 
     firstHeader.parentNode.insertBefore(header, firstHeader);
     firstHeader.parentNode.insertBefore(box, firstHeader);
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Diagnostic logs — the consent switch for console-capture.js.
+   *
+   * Before this box existed the browser console was uploaded to R2 at
+   * every Generate, for everyone, silently. The upload is now off until
+   * the user turns it on here, and the wording says plainly what leaves
+   * the machine and for how long it is kept (30 days, matching
+   * DIAG_LOG_RETENTION_DAYS in worker.ts).
+   *
+   * "Save a copy" is the no-upload path: it writes the same, redacted,
+   * buffer to a local file the user can attach to an e-mail.
+   * ────────────────────────────────────────────────────────────────── */
+  function installDiagnosticsBox() {
+    if (document.querySelector('#cloud-diag-box')) return;
+    const cc = window.__consoleCapture;
+    if (!cc || typeof cc.setEnabled !== 'function') return;
+
+    // Sits right under the Account section installed just above.
+    const anchor = document.querySelector('#cloud-account-section');
+    if (!anchor || !anchor.parentNode) return;
+
+    const box = document.createElement('div');
+    box.className = 'settings-box';
+    box.id = 'cloud-diag-box';
+    box.innerHTML = `
+      <div class="settings-box-title">Diagnostic logs</div>
+      <div class="settings-box-desc">
+        Off. Turn this on only if support asks you to: it sends this tab's
+        console — including your prompts and project names — to MyFabmesh
+        so a problem can be reproduced. Passwords, tokens and e-mail
+        addresses are stripped before sending. Logs are deleted after 30
+        days. You can turn it back off at any time.
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:7px; cursor:pointer; font-size:12px;">
+          <input type="checkbox" id="cloud-diag-optin" style="width:15px; height:15px; cursor:pointer;">
+          <span>Send diagnostic logs to MyFabmesh</span>
+        </label>
+        <span style="flex:1;"></span>
+        <button id="cloud-diag-save" class="ghost-btn" type="button"
+                style="padding:4px 12px; font-size:11px;">Save a copy instead</button>
+      </div>
+    `;
+
+    // The Account section header + its box are two siblings; drop this
+    // after both so the order reads Session, then Diagnostic logs.
+    const sessionBox = anchor.nextElementSibling;
+    (sessionBox || anchor).insertAdjacentElement('afterend', box);
+
+    const cb = box.querySelector('#cloud-diag-optin');
+    const desc = box.querySelector('.settings-box-desc');
+    const majText = () => {
+      const on = cc.isEnabled();
+      if (cb) cb.checked = on;
+      if (desc) {
+        desc.firstChild.textContent = desc.firstChild.textContent.replace(/^\s*(On|Off)\./, on ? 'On.' : 'Off.');
+      }
+    };
+    majText();
+    if (cb) cb.addEventListener('change', () => { cc.setEnabled(cb.checked); majText(); });
+    const save = box.querySelector('#cloud-diag-save');
+    if (save) save.addEventListener('click', () => { try { cc.download(); } catch (_) {} });
   }
 
   /* ──────────────────────────────────────────────────────────────────

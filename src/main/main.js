@@ -112,7 +112,36 @@ _log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion 
 // DSN lives in build/sentry-dsn.txt (gitignored) so contributors
 // without access don't accidentally send their own crashes. Falls
 // back to a no-op transport in dev when the file is missing.
+// Opt-out for crash reporting. The published privacy policy has promised
+// "you can disable crash reporting in Settings" since day one; until
+// 2026-08-20 no such setting existed anywhere in the app, so the promise
+// was simply untrue and reports left the machine with no way to refuse.
+//
+// The flag lives in config.json as `crashReports: false`. It is read here
+// at boot, BEFORE Sentry.init, so opting out means the SDK is never
+// started at all — the only way to also stop the native (crashpad)
+// minidump upload, which beforeSend cannot filter. beforeSend checks it
+// too, so a mid-session opt-out takes effect immediately for JS errors
+// instead of waiting for a restart.
+//
+// Deliberately NOT using loadConfig()/CONFIG_PATH: both are defined ~600
+// lines below and Sentry has to initialise before anything else can throw.
+let _crashOptOut = null;   // null = not read yet
+function crashReportsDisabled() {
+  if (_crashOptOut === null) {
+    try {
+      const base = app.isPackaged ? app.getPath('userData') : path.join(__dirname, '..', '..');
+      const cfg = JSON.parse(fs.readFileSync(path.join(base, 'config.json'), 'utf-8'));
+      _crashOptOut = cfg.crashReports === false;
+    } catch (_) {
+      _crashOptOut = false;   // no config yet → default on, as announced
+    }
+  }
+  return _crashOptOut;
+}
+
 (function _initSentry() {
+  if (crashReportsDisabled()) return;
   let dsn = process.env.SENTRY_DSN || '';
   // Look in two places: the packaged location (resources/sentry-dsn.txt
   // copied by electron-builder's extraResources) and the dev box
@@ -145,6 +174,7 @@ _log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion 
       tracesSampleRate: 0.0,
       // Strip the user's machine name + Windows username from breadcrumbs.
       beforeSend(event) {
+        if (crashReportsDisabled()) return null;   // opted out mid-session
         if (event.user) delete event.user.username;
         if (event.server_name) delete event.server_name;
         return event;
@@ -2833,6 +2863,25 @@ ipcMain.handle('verify-parental-pin', (_event, { pin }) => {
 // Store refuse de toute facon (cadenas de la barre du haut, section
 // « Parental Control » des Reglages).
 ipcMain.handle('app:is-store-build', () => isStoreBuild());
+
+// Crash-reporting opt-out — the setting the privacy policy has always
+// promised. Reading it never touches Sentry; writing it takes effect
+// immediately for JS errors (beforeSend returns null) and, from the next
+// launch, prevents the SDK from starting at all.
+ipcMain.handle('app:get-crash-reports', () => ({ enabled: !crashReportsDisabled() }));
+
+ipcMain.handle('app:set-crash-reports', (_event, enabled) => {
+  const on = enabled !== false;
+  try {
+    const config = loadConfig();
+    config.crashReports = on;
+    saveConfig(config);
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+  _crashOptOut = !on;
+  return { success: true, enabled: on, restartRequiredToReenable: on };
+});
 
 ipcMain.handle('toggle-unrestricted', (_event, { pin, enable }) => {
   // VERROU 2 : dans le paquet du Store, le filtre ne se leve pas. Le

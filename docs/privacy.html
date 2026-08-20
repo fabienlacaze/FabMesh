@@ -96,7 +96,9 @@
       the error stack trace, the app version, the OS version (e.g. "Windows 11 26200"), and a randomly generated
       installation ID (UUID). <strong>We explicitly strip your Windows username and machine name</strong> before sending
       (see <code>main.js / beforeSend</code> in the open source code). Sentry stores reports for 90 days.
-      You can disable crash reporting in Settings → Privacy.
+      <strong>You can switch this off</strong> in <em>Settings → Privacy → Crash reports</em>. Unticking it
+      stops reports immediately; ticking it back on takes effect at the next launch, because when the option is
+      off the reporting SDK is not started at all.
     </li>
     <li>
       <strong>Update check.</strong>
@@ -105,14 +107,14 @@
     </li>
   </ul>
 
-  <h3>2.3 Third-party services the app talks to</h3>
+  <h3>2.4 Third-party services the app talks to</h3>
   <ul>
     <li><strong>Hugging Face Hub</strong> (huggingface.co): downloads ~15 GB of AI models on first run. Subject to <a href="https://huggingface.co/privacy">Hugging Face's own privacy policy</a>. We bundle a read-only public token so no personal account is needed on your side.</li>
     <li><strong>Sentry</strong> (sentry.io): receives the anonymous crash reports described above. Subject to <a href="https://sentry.io/privacy/">Sentry's privacy policy</a>.</li>
     <li><strong>GitHub Releases</strong> (api.github.com): version check + installer download. Subject to <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy policy</a>.</li>
   </ul>
 
-  <h3>2.4 What's stored on your computer</h3>
+  <h3>2.5 What's stored on your computer</h3>
   <ul>
     <li>App files in <code>%LOCALAPPDATA%\Programs\MyFabmesh.AI\</code> (about 200 MB).</li>
     <li>AI models cache in <code>%USERPROFILE%\.cache\huggingface\hub\</code> (about 15-22 GB depending on install mode).</li>
@@ -131,6 +133,15 @@
     <li>Reference images you upload are sent to Replicate (GPU provider) for processing and to Cloudflare R2 for the resulting GLB storage. We never use them for training.</li>
     <li>Payments are processed by Stripe; we never see your full card number.</li>
     <li>You can request deletion of your Cloud account at any time by emailing the address below — we delete everything within 30 days.</li>
+    <li>
+      <strong>Diagnostic logs — off unless you turn them on.</strong> The web app keeps a rolling copy of your
+      browser console in memory, which never leaves the tab. If support asks you to reproduce a problem, you can
+      tick <em>Settings → Diagnostic logs</em>; from then on that log — which includes your prompts, your project
+      names, the page address and your browser's user-agent — is uploaded after each generation. Passwords,
+      access tokens and e-mail addresses are removed before it is sent. Logs are deleted after 30 days.
+      Unticking the box stops it at once, and the same panel offers <em>“Save a copy instead”</em>, which writes
+      the log to a file on your computer and uploads nothing.
+    </li>
   </ul>
 
   <h2>4. Your rights (GDPR / RGPD)</h2>

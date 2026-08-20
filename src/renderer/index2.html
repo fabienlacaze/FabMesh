@@ -2207,6 +2207,27 @@
           </div>
         </div>
 
+        <!-- ═══ PRIVACY ═══ -->
+        <!-- La politique de confidentialite publiee promet ce reglage
+             depuis le premier jour ; il n'existait nulle part avant le
+             2026-08-20. Voir crashReportsDisabled() dans main.js. -->
+        <div class="settings-section-header">Privacy</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Crash reports</div>
+          <div class="settings-box-desc" id="set-crash-desc">When the app hits an unexpected error, an anonymous report is sent to our error tracker (Sentry): the stack trace, the app version, the Windows version, and a random installation id. Your Windows username and machine name are removed first. No prompt, image or mesh is ever included.</div>
+          <div style="display:flex; align-items:center; gap:10px; margin-top:9px; flex-wrap:wrap;">
+            <label style="display:flex; align-items:center; gap:7px; cursor:pointer; font-size:12px;">
+              <input type="checkbox" id="set-crash-optin" checked style="width:15px; height:15px; cursor:pointer;">
+              <span>Send anonymous crash reports</span>
+            </label>
+            <span style="flex:1;"></span>
+            <span id="set-crash-hint" style="font-size:11px; color:var(--text-2);"></span>
+          </div>
+          <div style="margin-top:8px;">
+            <a href="#" id="set-privacy-link" style="font-size:11px;">Read the privacy policy</a>
+          </div>
+        </div>
+
         <!-- ═══ SYSTEM ═══ -->
         <div class="settings-section-header">System</div>
         <div class="settings-box">

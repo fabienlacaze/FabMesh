@@ -56,6 +56,21 @@ export default function PrivacyPage() {
           rate-limiting), user-agent string, and short-lived Cloudflare access
           logs.
         </li>
+        <li>
+          <strong>Diagnostic logs — off unless you turn them on:</strong> the app
+          keeps a rolling copy of your browser console in memory. It is
+          <strong> never sent anywhere</strong> unless you tick &ldquo;Send
+          diagnostic logs to MyFabmesh&rdquo; in Settings, which you would
+          normally only do because support asked you to. When enabled, the log
+          — which includes your prompts, your project names, the page address
+          and your browser&apos;s user-agent — is uploaded after each
+          generation. Passwords, access tokens and e-mail addresses are
+          stripped out before it leaves your browser. It is kept for 30 days,
+          then deleted automatically. Turning the switch back off stops it
+          immediately, and Settings also offers &ldquo;Save a copy
+          instead&rdquo;, which writes the same log to a file on your computer
+          and uploads nothing.
+        </li>
       </ul>
 
       <h2>3. Why we collect it</h2>
@@ -64,6 +79,7 @@ export default function PrivacyPage() {
         <li>To run the generation pipeline you requested (contractual necessity).</li>
         <li>To bill you for credits used (contractual necessity).</li>
         <li>To protect the service from abuse — rate-limiting, ban lists, audit logs (legitimate interest).</li>
+        <li>To investigate a problem you reported, if — and only if — you switched diagnostic logs on (consent, Art. 6(1)(a); withdraw it by switching them back off).</li>
         <li>To comply with French and EU law where applicable (legal obligation).</li>
       </ul>
 
@@ -82,6 +98,7 @@ export default function PrivacyPage() {
         <li>Account + payment history: until you delete your account (GDPR Art. 17 — see below).</li>
         <li>Generated R2 assets: until you delete them, or until your account is deleted.</li>
         <li>Admin audit logs: 12 months.</li>
+        <li>Diagnostic logs (only if you enabled them): 30 days, then deleted automatically.</li>
         <li>Cloudflare technical logs: 24 hours (Cloudflare default).</li>
       </ul>
 
