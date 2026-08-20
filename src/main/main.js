@@ -1314,11 +1314,38 @@ function _migrateLegacySetupState() {
 }
 
 // Detect that the install is "already done" even without setup_state.json:
-// if the heavy AI models are present in the HuggingFace cache, the user
-// has clearly run the app before. Don't make them sit through the wizard
-// again — auto-mark the setup as completed and remember the choice.
+// the heavy AI models are in the HuggingFace cache AND this installation has
+// an engine able to use them. Both halves are required.
+//
+// POURQUOI LES DEUX (corrige le 2026-08-20, defaut constate en production).
+// Cette fonction ne regardait QUE le cache HuggingFace. Or ce cache vit dans
+// le dossier personnel de l'utilisateur, PAS dans l'installation : il survit
+// a une desinstallation, et il est partage entre toutes les installations de
+// la machine. Sur un poste ayant deja eu la version NSIS, le paquet du Store
+// y trouvait 16 Go de poids, en concluait « installation faite », ecrivait
+// lui-meme un setup_state.json et SAUTAIT L'ASSISTANT — alors qu'il n'avait
+// aucun interpreteur Python a lui. L'utilisateur atterrissait directement
+// dans l'interface, cliquait « generer », et recevait « Image generation
+// failed : the local AI engine is not installed on this device ».
+//
+// Le degat ne s'arrete pas la : l'assistant est le SEUL endroit qui propose
+// le MODE CLOUD. Le sauter prive donc de toute voie de sortie l'utilisateur
+// sans carte NVIDIA — exactement la population que le mode cloud existe pour
+// servir, et le scenario que l'examinateur du Store deroule.
+//
+// La presence de poids quelque part dans le dossier personnel ne dit rien de
+// ce que CETTE installation sait executer. `_aiPythonReady()` le dit, lui :
+// il verifie torch dans le python de l'installation courante.
 function _detectAlreadyInstalled() {
   try {
+    // Moteur utilisable ICI ? Sinon l'assistant doit s'afficher, quels que
+    // soient les modeles presents ailleurs sur la machine.
+    //
+    // La condition SUIT `_aiPython()` : en paquet, seul le python provisionne
+    // compte ; hors paquet, cette fonction retombe sur le python systeme, donc
+    // le moteur est considere disponible. Sans ce second cas, l'assistant
+    // reapparaitrait a chaque lancement sur une machine de developpement.
+    if (app.isPackaged && !_aiPythonReady()) return false;
     const hub = path.join(require('os').homedir(), '.cache', 'huggingface', 'hub');
     // TRELLIS-2 is the largest required model; if it's there, we're set.
     const trellisDir = path.join(hub, 'models--microsoft--TRELLIS.2-4B');
@@ -1362,6 +1389,25 @@ function isSetupComplete() {
       return false;
     }
     const s = JSON.parse(fs.readFileSync(SETUP_STATE_FILE, 'utf-8'));
+    // REPARATION DES MARQUEURS DEJA POSES A TORT (2026-08-20).
+    //
+    // Corriger _detectAlreadyInstalled ne sauve que les installations
+    // NEUVES : les machines ou le marqueur a deja ete ecrit gardent un
+    // fichier qui affirme « setup termine » alors que rien n'est
+    // installe, et l'assistant resterait saute pour toujours.
+    //
+    // On ne desavoue QUE nos propres marqueurs automatiques
+    // (`mode: 'auto-detected'`, ecrit uniquement quelques lignes plus
+    // haut) et seulement si le moteur est bel et bien absent. Un
+    // utilisateur ayant reellement termine l'assistant — y compris en
+    // mode cloud, qui n'installe aucun python — porte un autre mode et
+    // n'est jamais concerne.
+    if (s && s.mode === 'auto-detected' && app.isPackaged && !_aiPythonReady()) {
+      log.warn('main', 'setup_state auto-detecte mais aucun moteur local : '
+        + "l'assistant est reaffiche (marqueur pose a tort avant la 1.0.33)");
+      try { fs.renameSync(SETUP_STATE_FILE, SETUP_STATE_FILE + '.invalide'); } catch (_) {}
+      return false;
+    }
     return !!(s && s.completed_at);
   } catch (_) { return false; }
 }
