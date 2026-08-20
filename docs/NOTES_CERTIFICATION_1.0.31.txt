@@ -41,8 +41,9 @@ FOUR entry points, and the first one needs no account, no project and no
 generated content:
 
   1. TOP BAR, ALWAYS VISIBLE - the flag icon in the top-right corner of
-     the main window, between the refresh arrow and the padlock. It is
-     there on the very first launch, before signing in.
+     the main window, immediately to the right of the circular refresh
+     arrow and left of the "?" button. It is there on the very first
+     launch, before signing in.
      Tooltip: "Report inappropriate AI-generated content".
 
   2. DIRECTLY UNDER EVERY GENERATED IMAGE - a button labelled
