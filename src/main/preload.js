@@ -99,6 +99,10 @@ contextBridge.exposeInMainWorld('__fabmeshTest', {
 });
 
 contextBridge.exposeInMainWorld('meshyAPI', {
+  /* Le rendu principal (index2.js) parle a `meshyAPI`, pas a `wizardAPI` :
+   * sans ces deux entrees ici, ses appels tombent sur `undefined`. */
+  openMailto: (url) => ipcRenderer.invoke('app:open-mailto', url),
+  isStoreBuild: () => ipcRenderer.invoke('app:is-store-build'),
   reconfigureFabmesh: () => ipcRenderer.invoke('wizard:reset-setup'),
   uninstallFabmesh: (opts) => ipcRenderer.invoke('app:uninstall', opts),
   openWebsite: () => ipcRenderer.invoke('app:open-website'),

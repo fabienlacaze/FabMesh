@@ -1,0 +1,38 @@
+{"t":"2026-08-16T18:47:33.582Z","type":"session","ms":0,"etape":"welcome","ecran":"2560x1440@1","fenetre":"1384x861","langue":"en-GB","langues":["en-GB","fr-FR"],"plateforme":"Win32","ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) myfabmesh-ai/1.0.18 Chrome/126.0.6478.234 Electron/31.7.7 Safari/537.36","enLigne":true}
+{"t":"2026-08-16T18:47:33.582Z","type":"etape","ms":1,"etape":"welcome","de":"welcome","vers":"welcome"}
+{"t":"2026-08-16T18:47:33.595Z","type":"version","ms":8,"etape":"welcome","version":"1.0.18"}
+{"t":"2026-08-16T18:47:54.317Z","type":"clic","ms":20736,"etape":"welcome","id":null,"libelle":"Get started","inactif":false,"cible":"detect"}
+{"t":"2026-08-16T18:47:54.318Z","type":"etape","ms":20736,"etape":"welcome","de":"welcome","vers":"detect"}
+{"t":"2026-08-16T18:47:54.952Z","type":"config","ms":21370,"etape":"detect","gpu":{"vendeur":"NVIDIA","modele":"NVIDIA GeForce RTX 5080","vram_mo":16303,"pilote":"610.88"},"ram_mo":32524,"disque_libre_go":49,"mode_recommande":"standard","pilote_ok":true,"avertissements":[],"parcours_cloud":false}
+{"t":"2026-08-16T18:47:54.953Z","type":"verdict","ms":21370,"etape":"detect","critere":"gpu","valeur":"NVIDIA GeForce RTX 5080","statut":"PASS"}
+{"t":"2026-08-16T18:47:54.953Z","type":"verdict","ms":21370,"etape":"detect","critere":"vram","valeur":"15.9 GB","statut":"PASS"}
+{"t":"2026-08-16T18:47:54.953Z","type":"verdict","ms":21370,"etape":"detect","critere":"driver","valeur":"610.88","statut":"PASS"}
+{"t":"2026-08-16T18:47:54.954Z","type":"verdict","ms":21370,"etape":"detect","critere":"ram","valeur":"31.8 GB","statut":"PASS"}
+{"t":"2026-08-16T18:47:54.954Z","type":"verdict","ms":21371,"etape":"detect","critere":"disk","valeur":"49 GB","statut":"PASS"}
+{"t":"2026-08-16T18:47:56.915Z","type":"clic","ms":23334,"etape":"detect","id":"btn-detect-next","libelle":"Continue","inactif":false,"cible":"mode"}
+{"t":"2026-08-16T18:47:56.915Z","type":"etape","ms":23334,"etape":"detect","de":"detect","vers":"mode"}
+{"t":"2026-08-16T18:47:56.916Z","type":"mode","ms":23335,"etape":"mode","choisi":"standard","par":"recommandation"}
+{"t":"2026-08-16T18:47:59.501Z","type":"mode","ms":25920,"etape":"mode","choisi":"cloud","par":"utilisateur"}
+{"t":"2026-08-16T18:48:00.103Z","type":"clic","ms":26522,"etape":"mode","id":"btn-mode-next","libelle":"Continue","inactif":false,"cible":"download"}
+{"t":"2026-08-16T18:48:00.103Z","type":"etape","ms":26522,"etape":"mode","de":"mode","vers":"no-gpu"}
+{"t":"2026-08-16T18:48:02.702Z","type":"clic","ms":29121,"etape":"no-gpu","id":"btn-launch-cloud","libelle":"Continue in Cloud mode","inactif":false,"cible":null}
+{"t":"2026-08-16T18:48:02.712Z","type":"fin","ms":29131,"etape":"no-gpu","sortie":"lancement_cloud","mode":"cloud"}
+{"t":"2026-08-18T13:19:01.019Z","type":"session","ms":1,"etape":"welcome","ecran":"2560x1440@1","fenetre":"1384x861","langue":"en-GB","langues":["en-GB","fr-FR"],"plateforme":"Win32","ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) myfabmesh-ai/1.0.24 Chrome/126.0.6478.234 Electron/31.7.7 Safari/537.36","enLigne":true}
+{"t":"2026-08-18T13:19:01.021Z","type":"etape","ms":2,"etape":"welcome","de":"welcome","vers":"welcome"}
+{"t":"2026-08-18T13:19:01.031Z","type":"version","ms":13,"etape":"welcome","version":"1.0.24"}
+{"t":"2026-08-18T13:19:03.711Z","type":"clic","ms":2693,"etape":"welcome","id":null,"libelle":"Get started","inactif":false,"cible":"detect"}
+{"t":"2026-08-18T13:19:03.712Z","type":"etape","ms":2694,"etape":"welcome","de":"welcome","vers":"detect"}
+{"t":"2026-08-18T13:19:04.325Z","type":"config","ms":3307,"etape":"detect","gpu":{"vendeur":"NVIDIA","modele":"NVIDIA GeForce RTX 5080","vram_mo":16303,"pilote":"610.88"},"ram_mo":32524,"disque_libre_go":29,"mode_recommande":"standard","pilote_ok":true,"avertissements":[],"parcours_cloud":false}
+{"t":"2026-08-18T13:19:04.325Z","type":"verdict","ms":3307,"etape":"detect","critere":"gpu","valeur":"NVIDIA GeForce RTX 5080","statut":"PASS"}
+{"t":"2026-08-18T13:19:04.326Z","type":"verdict","ms":3307,"etape":"detect","critere":"vram","valeur":"15.9 GB","statut":"PASS"}
+{"t":"2026-08-18T13:19:04.326Z","type":"verdict","ms":3307,"etape":"detect","critere":"driver","valeur":"610.88","statut":"PASS"}
+{"t":"2026-08-18T13:19:04.326Z","type":"verdict","ms":3307,"etape":"detect","critere":"ram","valeur":"31.8 GB","statut":"PASS"}
+{"t":"2026-08-18T13:19:04.327Z","type":"verdict","ms":3307,"etape":"detect","critere":"disk","valeur":"29 GB","statut":"PASS"}
+{"t":"2026-08-18T13:19:06.310Z","type":"clic","ms":5293,"etape":"detect","id":"btn-detect-next","libelle":"Continue","inactif":false,"cible":"mode"}
+{"t":"2026-08-18T13:19:06.311Z","type":"etape","ms":5293,"etape":"detect","de":"detect","vers":"mode"}
+{"t":"2026-08-18T13:19:06.311Z","type":"mode","ms":5294,"etape":"mode","choisi":"standard","par":"recommandation"}
+{"t":"2026-08-18T13:19:08.906Z","type":"mode","ms":7889,"etape":"mode","choisi":"cloud","par":"utilisateur"}
+{"t":"2026-08-18T13:19:09.509Z","type":"clic","ms":8491,"etape":"mode","id":"btn-mode-next","libelle":"Continue","inactif":false,"cible":"download"}
+{"t":"2026-08-18T13:19:09.509Z","type":"etape","ms":8492,"etape":"mode","de":"mode","vers":"no-gpu"}
+{"t":"2026-08-18T13:19:12.110Z","type":"clic","ms":11093,"etape":"no-gpu","id":"btn-launch-cloud","libelle":"Continue in Cloud mode","inactif":false,"cible":null}
+{"t":"2026-08-18T13:19:12.120Z","type":"fin","ms":11103,"etape":"no-gpu","sortie":"lancement_cloud","mode":"cloud"}

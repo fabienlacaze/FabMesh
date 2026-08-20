@@ -19165,6 +19165,13 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
       if (r && !r.ok) showToast('Could not open document (' + (r.error || 'missing') + ')', 'error');
     });
   };
+  /* Politique de confidentialite — exigee DANS l'application par la regle
+   * 10.5.1 du Store. L'hote est deja dans la liste blanche des ouvertures
+   * externes (fabienlacaze.github.io), donc rien d'autre a autoriser. */
+  document.getElementById('about-link-privacy')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    open('https://fabienlacaze.github.io/MyFabmesh/privacy.html');
+  });
   document.getElementById('about-link-licenses')?.addEventListener('click', (e) => { e.preventDefault(); openLegal('licenses'); });
   document.getElementById('about-link-eula')?.addEventListener('click', (e) => { e.preventDefault(); openLegal('eula'); });
 
@@ -24055,14 +24062,19 @@ window._applyRigAnimPills();
                  + '&body=' + corps;
       /* Il ne suffit PAS d'appeler et d'esperer.
        *
-       * `openExternal` rendait une PROMESSE — toujours vraie — donc le
-       * `|| window.open(...)` de secours ne s'executait jamais ; et le canal
-       * qu'elle emprunte refuse tout ce qui n'est pas https, donc le lien
-       * mailto: etait rejete en silence. Resultat : rien ne s'ouvrait et
-       * l'interface annoncait le contraire. On attend desormais le verdict,
-       * et si aucun client de messagerie ne s'ouvre on AFFICHE l'adresse
-       * pour que l'utilisateur puisse ecrire lui-meme. Un dispositif de
-       * signalement doit aboutir, meme dans le pire cas. */
+       * Ce que faisait l'ancien code : `window.meshyAPI?.openExternal?.(lien)
+       * || window.open(lien)`. `meshyAPI` n'expose PAS openExternal, donc
+       * l'expression tombait sur `window.open`, que `setWindowOpenHandler`
+       * autorise pour mailto: — le brouillon s'ouvrait donc bel et bien.
+       * Le defaut reel etait ailleurs : l'adresse pointait sur un domaine
+       * inexistant.
+       *
+       * Reste que le code n'avait AUCUN filet : si l'ouverture echoue — pas
+       * de client de messagerie configure, gestionnaire modifie, navigateur
+       * qui bloque la fenetre cote web — l'interface affirmait quand meme
+       * qu'un brouillon etait ouvert. On attend desormais le verdict et, a
+       * defaut, on AFFICHE l'adresse avec un bouton de copie. Un dispositif
+       * exige par la certification doit aboutir dans tous les cas. */
       let ouvert = false;
       try {
         const r = await (window.meshyAPI?.openMailto?.(lien));

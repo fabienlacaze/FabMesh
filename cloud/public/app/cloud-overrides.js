@@ -1049,7 +1049,28 @@
       if (target.includes(':')) {
         const [selectId, optVal] = target.split(':');
         const opt = document.querySelector(`#${selectId} option[value="${optVal}"]`);
-        if (opt) opt.dataset.credits = String(v);
+        if (opt) {
+          opt.dataset.credits = String(v);
+          /* LE LIBELLE PORTE LE PRIX : il doit suivre la grille lui aussi.
+           *
+           * Seul `dataset.credits` etait reecrit. Le TEXTE reste, lui, celui
+           * fige dans le HTML : « Fast … 1 cr » alors que le serveur debite 8,
+           * « Balanced … 2 cr » pour 10. Le client lisait donc un prix et s'en
+           * voyait prelever jusqu'a huit fois plus — en droit francais, une
+           * pratique commerciale trompeuse. C'est exactement le defaut deja
+           * corrige ailleurs : un chiffre duplique dans le balisage au lieu
+           * d'etre lu a la source.
+           *
+           * `labelBase` memorise la partie sans prix au premier passage, pour
+           * que les rappels (toutes les 5 minutes) restent idempotents. */
+          if (opt.dataset.labelBase === undefined) {
+            opt.dataset.labelBase = opt.textContent.replace(/\s*[·)]?\s*\d+\s*cr\s*\)?\s*$/, '').replace(/\s*\)\s*$/, '');
+          }
+          const base = opt.dataset.labelBase;
+          opt.textContent = base.includes('(') && !base.endsWith(')')
+            ? `${base} · ${v} cr)`
+            : `${base} · ${v} cr`;
+        }
       } else {
         const el = document.getElementById(target);
         if (el) el.dataset.credits = String(v);
@@ -1341,7 +1362,7 @@
       // Relabel the lone remaining option so the user sees what the
       // cloud actually does, not the desktop "in one shot, local" copy.
       if (eng3d.options.length === 1) {
-        eng3d.options[0].textContent = 'MyFabmesh.AI 3D Native (cloud GPU · ~100s · 1 credit)';
+        eng3d.options[0].textContent = 'MyFabmesh.AI 3D Native (cloud GPU · ~100s)';
         eng3d.value = 'native_3d';
       }
     }
@@ -1356,7 +1377,7 @@
         if (!keep) opt.remove();
       });
       if (engImg.options.length >= 1) {
-        engImg.options[0].textContent = 'MyFabmesh.AI Image Engine (cloud GPU · 1 credit/image)';
+        engImg.options[0].textContent = 'MyFabmesh.AI Image Engine (cloud GPU)';
       }
     }
   }

@@ -444,7 +444,24 @@ async function renderDataLocation() {
 })();
 
 // ---------- STEP 4: download ----------
+/* VERROU DE RE-ENTRANCE.
+ *
+ * `startDownload()` enchaine trois phases longues (pip, poids HuggingFace,
+ * moteur de rig). Les liens « Retry » la rappelaient depuis le debut sans
+ * annuler ce qui courait, sans verrou et sans se desactiver : deux chaines pip
+ * pouvaient ecrire dans le meme environnement en meme temps. */
+let _telechargementEnCours = false;
 async function startDownload() {
+  if (_telechargementEnCours) {
+    console.warn('[wizard] startDownload deja en cours — appel ignore');
+    try { journal('dl_reentrance', {}); } catch (_) {}
+    return;
+  }
+  _telechargementEnCours = true;
+  try { return await _startDownloadInterne(); }
+  finally { _telechargementEnCours = false; }
+}
+async function _startDownloadInterne() {
   // Only block "Continue" until the download is done — Back stays
   // enabled so the user can never get stuck on this step. If they
   // navigate away mid-download, the next time they hit Continue the
@@ -474,7 +491,8 @@ async function startDownload() {
       if (freeGb < neededGb) {
         list.innerHTML = `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Not enough free space on ${_fs0.drive || 'your data drive'}: about <b>${neededGb.toFixed(0)} GB</b> is needed but only <b>${freeGb.toFixed(1)} GB</b> is free.<br>Free up space (or change the data folder to a bigger drive), then <a href="#" id="retry-dl">Retry</a>.</span></div>`;
         document.getElementById('retry-dl')?.addEventListener('click', () => {
-          initialized.delete('download');
+          // Meme raison que les trois autres boutons de reprise : ne pas
+          // desarmer la garde, sinon `goto()` autorise une seconde chaine.
           startDownload();
         });
         return;  // btn-dl-next stays disabled — can't proceed until space is freed
@@ -521,13 +539,43 @@ async function startDownload() {
   });
   console.log('[wizard] Phase 1: installing AI engine (torch/diffusers)…');
   try {
-    await window.wizardAPI.installDeps();
+    /* LIRE CE QUE LA POIGNEE REND, pas seulement attraper ce qu'elle jette.
+     *
+     * `wizard:install-deps` signale ses deux echecs les plus probables par une
+     * promesse RESOLUE : la copie de l'interpreteur qui echoue rend
+     * { ok:false, error:'copy failed…' }, et surtout le controle qui suit pip
+     * rend { ok:false, error:'The installer finished but the AI engine is
+     * still missing (torch was not installed)…' }. Ce dernier a ete ajoute
+     * expres, avec quatorze lignes de commentaire expliquant qu'il corrige le
+     * refus du 2026-08-08 — mais personne ne regardait sa valeur. L'assistant
+     * affichait donc « AI engine ready ✓ » sur une installation ratee, et
+     * l'utilisateur ne decouvrait le probleme qu'a la premiere generation. */
+    const r = await window.wizardAPI.installDeps();
+    if (!r || r.ok !== true) {
+      throw new Error((r && r.error) || 'The AI engine installation did not complete.');
+    }
     console.log('[wizard] Phase 1: AI engine install OK');
   } catch (e) {
     console.error('[wizard] AI engine install FAILED:', (e && e.message) || e);
+    /* La coche « AI engine ready ✓ » est posee par le flux de progression
+     * AVANT ce catch, et le bloc ci-dessous fait `+=` et non `=` : sans ce
+     * retrait, l'erreur s'affiche SOUS une ligne verte qui affirme le
+     * contraire. */
+    try {
+      const ligne = document.querySelector('.wiz-dl-row[data-id="__aienv"]');
+      if (ligne) {
+        ligne.classList.remove('done', 'in-progress');
+        ligne.classList.add('failed');
+        const nom = ligne.querySelector('.name');
+        if (nom) nom.style.color = 'var(--error)';
+      }
+    } catch (_) {}
     list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">AI engine install failed: ${e.message}. <a href="#" id="retry-dl">Retry</a></span></div>`;
     document.getElementById('retry-dl')?.addEventListener('click', () => {
-      initialized.delete('download');
+      // NE PAS faire `initialized.delete('download')` : cela re-arme aussi
+      // `goto()` pour le reste de la session, si bien que revenir en arriere
+      // puis cliquer Continue lancait une DEUXIEME chaine complete par-dessus
+      // la premiere, encore en attente. `startDownload()` suffit.
       startDownload();
     });
     return;
@@ -591,7 +639,10 @@ async function startDownload() {
     console.error('[wizard] Model download FAILED:', (e && e.message) || e);
     list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Download failed: ${e.message}. <a href="#" id="retry-dl">Retry</a></span></div>`;
     document.getElementById('retry-dl')?.addEventListener('click', () => {
-      initialized.delete('download');
+      // NE PAS faire `initialized.delete('download')` : cela re-arme aussi
+      // `goto()` pour le reste de la session, si bien que revenir en arriere
+      // puis cliquer Continue lancait une DEUXIEME chaine complete par-dessus
+      // la premiere, encore en attente. `startDownload()` suffit.
       startDownload();
     });
     return;
@@ -633,13 +684,38 @@ async function startDownload() {
   });
   console.log('[wizard] Phase 3: installing rig engine (Puppeteer)…');
   try {
-    await window.wizardAPI.installRig();
-    console.log('[wizard] Phase 3: rig engine install OK');
+    const r = await window.wizardAPI.installRig();
+    /* Le moteur de rig n'est PAS embarque dans le paquet (licence GPL-3.0 +
+     * NVIDIA-NC) : le processus principal rend alors { skipped:true } sans
+     * rien telecharger. Il faut le DIRE, au lieu d'afficher « Rig engine
+     * ready ✓ » sur une etape qui n'a pas eu lieu — l'utilisateur croirait
+     * disposer de l'auto-rig et ne comprendrait pas son absence ensuite. */
+    if (r && r.skipped) {
+      const ligne = document.querySelector('.wiz-dl-row[data-id="__rigenv"]');
+      if (ligne) {
+        ligne.classList.remove('in-progress', 'done');
+        const nom = ligne.querySelector('#rigenv-name');
+        if (nom) {
+          nom.textContent = 'Auto-rigging is not included in this edition — skipped.';
+          nom.style.color = 'var(--text-2)';
+        }
+        const taille = ligne.querySelector('.size');
+        if (taille) taille.textContent = '0 GB';
+        const barre = ligne.querySelector('.bar');
+        if (barre) barre.style.display = 'none';
+      }
+      console.log('[wizard] Phase 3: rig engine not bundled — skipped');
+    } else {
+      console.log('[wizard] Phase 3: rig engine install OK');
+    }
   } catch (e) {
     console.error('[wizard] Rig engine install FAILED:', (e && e.message) || e);
     list.innerHTML += `<div class="wiz-dl-row"><span class="name" style="color:var(--error)">Rig engine install failed: ${e.message}.<br>You can continue — 3D generation works without it, but auto-rigging will be unavailable until you re-run setup (Settings → Reconfigure). <a href="#" id="retry-rig">Retry now</a></span></div>`;
     document.getElementById('retry-rig')?.addEventListener('click', () => {
-      initialized.delete('download');
+      // NE PAS faire `initialized.delete('download')` : cela re-arme aussi
+      // `goto()` pour le reste de la session, si bien que revenir en arriere
+      // puis cliquer Continue lancait une DEUXIEME chaine complete par-dessus
+      // la premiere, encore en attente. `startDownload()` suffit.
       startDownload();
     });
   }

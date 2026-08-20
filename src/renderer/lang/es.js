@@ -3,6 +3,7 @@
  * translations, add an <option> in index.html and a flag in i18n.js. */
 (function () {
   var dict = {
+      'Privacy policy': 'Política de privacidad',
       'Open the MyFabmesh website': 'Abrir el sitio de MyFabmesh',
       'Signed in as': 'Sesion iniciada como',
       'click to top up': 'haz clic para recargar',

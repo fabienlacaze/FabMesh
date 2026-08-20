@@ -4935,12 +4935,32 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
         return json({ received: true, unmatched: true });
       }
 
-      // Reprise des credits. Proportionnelle sur un remboursement
-      // partiel, totale sur un litige.
-      let aReprendre = paiement?.credits ?? 0;
-      if (!total && ch.amount && ch.amount_refunded && ch.amount > 0) {
-        aReprendre = Math.ceil(aReprendre * (ch.amount_refunded / ch.amount));
-      }
+      /* REPRISE DES CREDITS — le cumul de Stripe impose de raisonner sur la
+       * dotation D'ORIGINE, pas sur ce qui reste.
+       *
+       * `ch.amount_refunded` est CUMULATIF : Stripe emet un evenement par
+       * remboursement, avec le total rembourse depuis le debut. Le calcul
+       * partait pourtant de `paiement.credits`, puis la ligne etait ecrasee
+       * a zero un peu plus bas — y compris sur un remboursement PARTIEL. Un
+       * second remboursement relisait donc `credits = 0`, calculait une
+       * reprise nulle, et ne reprenait plus rien : le client gardait des
+       * credits deja rembourses.
+       *
+       * On repart de la dotation d'origine (`credits_origine` si la colonne
+       * la porte, sinon la valeur courante au premier passage), on calcule la
+       * CIBLE cumulative, et on ne reprend que la difference avec ce qui a
+       * deja ete repris. */
+      const creditsCourants = Number(paiement?.credits ?? 0);
+      const origine = Number(
+        (paiement as { credits_origine?: number } | null)?.credits_origine ?? creditsCourants);
+      const ratio = total
+        ? 1
+        : (ch.amount && ch.amount_refunded && ch.amount > 0
+            ? Math.min(1, ch.amount_refunded / ch.amount)
+            : 1);
+      const cibleCumulee = Math.ceil(origine * ratio);
+      const dejaRepris = Math.max(0, origine - creditsCourants);
+      let aReprendre = Math.max(0, cibleCumulee - dejaRepris);
       if (aReprendre > 0) {
         // BORNAGE A 0 COTE WORKER. La RPC `add_credits` fait un simple
         // `credits = credits + p_amount` SANS plancher (verifie dans
@@ -4966,10 +4986,34 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
         }
       } catch { /* le marqueur sera de toute facon reevalue */ }
 
+      /* La ligne doit refleter CE QUI RESTE, pas zero.
+       *
+       * Elle etait remise a zero meme sur un remboursement partiel, ce qui
+       * effacait la seule information dont depend le calcul ci-dessus. On
+       * conserve donc la dotation d'origine et on n'ecrit que le reliquat.
+       * `credits_origine` est renseignee au PREMIER remboursement seulement,
+       * pour ne pas ecraser une valeur deja juste. */
       if (paiement) {
-        await sb.from('payments')
-          .update({ credits: 0, amount_eur: 0 })
-          .eq('id', paiement.id);
+        const restant = Math.max(0, origine - cibleCumulee);
+        const montantRestant = ratio >= 1
+          ? 0
+          : Math.max(0, Number(paiement.amount_eur ?? 0) * (1 - ratio));
+        const maj: Record<string, unknown> = {
+          credits: restant,
+          amount_eur: Math.round(montantRestant * 100) / 100,
+        };
+        if ((paiement as { credits_origine?: number }).credits_origine == null) {
+          maj.credits_origine = origine;
+        }
+        const { error: errMaj } = await sb.from('payments').update(maj).eq('id', paiement.id);
+        if (errMaj) {
+          /* La colonne `credits_origine` peut ne pas exister encore : on
+           * retente sans elle plutot que de laisser la ligne intacte, ce qui
+           * ferait reprendre les memes credits au prochain evenement. */
+          delete maj.credits_origine;
+          await sb.from('payments').update(maj).eq('id', paiement.id);
+          console.warn('[stripe] credits_origine absente de la table payments — reprise cumulative degradee');
+        }
       }
     } catch (e) {
       console.error('[stripe] traitement du remboursement echoue:', e);

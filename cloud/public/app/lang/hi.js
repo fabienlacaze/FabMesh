@@ -2,6 +2,7 @@
  * Load AFTER i18n.js. */
 (function () {
   var dict = {
+      'Privacy policy': 'गोपनीयता नीति',
       'Open the MyFabmesh website': 'MyFabmesh वेबसाइट खोलें',
       'Signed in as': 'इस रूप में साइन इन',
       'click to top up': 'रिचार्ज के लिए क्लिक करें',

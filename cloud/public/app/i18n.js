@@ -563,6 +563,7 @@
       'Signed in as': 'Connecté en tant que',
       'click to top up': 'cliquez pour recharger',
       'Open the MyFabmesh website': 'Ouvrir le site MyFabmesh',
+      'Privacy policy': 'Politique de confidentialité',
       'Report content': 'Signaler le contenu',
       // « Report » seul : le repli automatique l'avait rendu par
       // « Rapport annuel » sur le bouton place sous l'image.

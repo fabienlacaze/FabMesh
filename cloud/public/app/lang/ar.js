@@ -2,6 +2,7 @@
  * Load AFTER i18n.js. The app sets dir=rtl when ar is active. */
 (function () {
   var dict = {
+      'Privacy policy': 'سياسة الخصوصية',
       'Open the MyFabmesh website': 'فتح موقع MyFabmesh',
       'Signed in as': 'تم تسجيل الدخول باسم',
       'click to top up': 'انقر للشحن',

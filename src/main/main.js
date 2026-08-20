@@ -2160,9 +2160,33 @@ app.whenReady().then(() => {
   // 2026-06-13: resume any jobs the user paused on the last quit.
   try { resumePausedJobs(); } catch (e) { log.warn('main', `resumePausedJobs failed: ${e.message}`); }
 
-  // MCP Bridge HTTP server — always started (headless or not) so Claude
-  // can dispatch commands whether FabMesh is visible or hidden.
-  try { startMcpBridge(); } catch (e) { log.warn('main', `startMcpBridge failed: ${e.message}`); }
+  /* PONT MCP — OUTILLAGE DE DEVELOPPEMENT, PAS DU PRODUIT.
+   *
+   * Il ouvrait un serveur HTTP en ecoute permanente sur 127.0.0.1:7555 dans
+   * le paquet livre, routant vers des `execFile` de Python (generation
+   * d'images, image vers 3D, rig, detourage). Le module voisin
+   * `control_api.js` porte exactement le garde inverse, pose deliberement,
+   * avec ce motif ecrit noir sur blanc : « an always-listening localhost HTTP
+   * control plane is exactly the kind of thing a Store reviewer / static
+   * analyzer flags ».
+   *
+   * Et dans une livraison empaquetee, AUCUNE fonction du produit ne s'en
+   * sert : `scripts/mcp_server.py` cherche le jeton dans
+   * `PROJECT_ROOT/.mcp_bridge_token` alors que le pont l'ecrit dans le
+   * dossier de donnees utilisateur — le client ne peut meme pas
+   * s'authentifier. C'etait donc de la surface d'attaque pour zero benefice.
+   *
+   * Deux echappatoires conservees : le mode --headless, ou le pont EST la
+   * seule interface (opt-in par argument, jamais emprunte par un
+   * examinateur), et FABMESH_MCP_BRIDGE=1 pour le depannage. */
+  const _pontForce = process.env.FABMESH_MCP_BRIDGE === '1';
+  const _pontCoupe = process.env.FABMESH_MCP_BRIDGE === '0';
+  const _pontAutorise = !_pontCoupe && (_pontForce || HEADLESS || !app.isPackaged);
+  if (_pontAutorise) {
+    try { startMcpBridge(); } catch (e) { log.warn('main', `startMcpBridge failed: ${e.message}`); }
+  } else {
+    log.info('main', 'pont MCP non demarre (livraison empaquetee) — FABMESH_MCP_BRIDGE=1 pour le forcer');
+  }
 
   // Trigger an update check 30 seconds after launch so we don't compete
   // with the heavy first-paint of the main app. Silent if already
@@ -2208,15 +2232,40 @@ function ensureSdxlServer() {
   });
 }
 // Kill all tracked Python subprocesses (cancel-job map) on exit
+/* TUER LES SOUS-PROCESSUS A LA FERMETURE.
+ *
+ * Cette fonction parcourait `activeProcs`, la Map indexee par identifiant de
+ * tache — remplie a TROIS endroits seulement. La collection reellement
+ * alimentee pour CHAQUE enfant lance est `allActiveProcs`, nourrie
+ * automatiquement par l'interception de `child_process`. Elle n'etait jamais
+ * parcourue. Sous Windows, Node ne rattache pas ses enfants a un job object
+ * (le code le dit lui-meme plus bas) : rien ne les tuait donc a la sortie.
+ * Un utilisateur qui fermait l'application laissait des interpreteurs Python
+ * tenir la carte graphique et des gigaoctets de memoire, jusqu'au
+ * redemarrage. Sur une machine de certification, c'est un processus orphelin
+ * apres desinstallation.
+ *
+ * On balaie desormais les DEUX collections, avec `killProcTree` — qui tue
+ * l'arbre entier, pas seulement le pere. Le serveur SDXL est exclu :
+ * `stopSdxlServer()` s'en occupe proprement de son cote. */
 function killAllActiveProcs() {
-  for (const [jobId, proc] of activeProcs.entries()) {
-    try {
-      if (process.platform === 'win32') {
-        execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], () => {});
-      } else {
-        proc.kill('SIGKILL');
-      }
-    } catch (e) {}
+  const pidSdxl = (sdxlProc && sdxlProc.pid) ? sdxlProc.pid : -1;
+  /* `allActiveProcs` est un `const` declare PLUS BAS dans le fichier. A la
+   * fermeture normale le module est entierement evalue, donc l'acces est sur ;
+   * mais si un plantage precoce declenche le nettoyage avant cette ligne, la
+   * zone morte temporelle leverait une ReferenceError qui masquerait l'erreur
+   * d'origine. On protege donc la lecture. */
+  let tous = [];
+  try { tous = Array.from(allActiveProcs || []); } catch (_) { tous = []; }
+  // Instantane : le gestionnaire 'exit' mute le Set pendant qu'on le parcourt.
+  for (const proc of tous) {
+    if (!proc || !proc.pid || proc.pid === pidSdxl) continue;
+    try { killProcTree(proc); } catch (_) {}
+    try { allActiveProcs.delete(proc); } catch (_) {}
+  }
+  for (const [, proc] of activeProcs.entries()) {
+    if (!proc || !proc.pid || proc.pid === pidSdxl) continue;
+    try { killProcTree(proc); } catch (_) {}
   }
   activeProcs.clear();
 }
@@ -9588,6 +9637,28 @@ ipcMain.handle('wizard:install-deps', async (event) => {
 // from resources, download the 3 checkpoints (~9.6 GB) from HuggingFace.
 // Streams JSONL progress via wizard:rig-progress.
 ipcMain.handle('wizard:install-rig', async (event) => {
+  /* LE MOTEUR DE RIG NE PEUT PAS S'INSTALLER DEPUIS UN PAQUET.
+   *
+   * La source du code est cherchee dans `resources/Puppeteer`, or
+   * `package.json` INTERDIT explicitement de l'embarquer (licence
+   * GPL-3.0 + NVIDIA-NC) et `extraResources` n'en contient aucune entree.
+   * Le script partait quand meme : torch 2.7 cu128, torch_scatter,
+   * flash_attn — plusieurs gigaoctets telecharges — puis levait a la
+   * derniere etape « reinstall the app (resources/Puppeteer missing) ».
+   * L'utilisateur payait le telechargement complet pour s'entendre dire
+   * de reinstaller un produit qui ne pourra jamais aboutir.
+   *
+   * On sort donc AVANT le moindre pip quand la source est absente, en
+   * annoncant l'etape comme ignoree et non comme reussie. */
+  const codeSrcTest = app.isPackaged
+    ? path.join(process.resourcesPath, 'Puppeteer')
+    : path.join(__dirname, '..', '..', 'external', 'Puppeteer');
+  if (!fs.existsSync(codeSrcTest)) {
+    log.warn('main', 'install-rig: source absente (' + codeSrcTest + ') — phase ignoree, aucun telechargement lance');
+    event.sender.send('wizard:rig-progress', { step: 'rig-skip', pct: 100, done: true, skipped: true });
+    return { ok: true, skipped: true, reason: 'rig-engine-not-bundled' };
+  }
+
   const destPy = path.join(RIG_PYTHON_DIR, 'python.exe');
   log.info('main', 'install-rig: START. RIG_PYTHON_DIR=' + RIG_PYTHON_DIR + ' destPy exists=' + fs.existsSync(destPy));
   if (!fs.existsSync(destPy)) {

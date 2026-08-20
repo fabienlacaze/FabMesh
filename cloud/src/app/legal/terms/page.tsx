@@ -40,7 +40,10 @@ export default function TermsPage() {
       <h2>3. Credits and subscriptions</h2>
       <ul>
         <li>One-shot credit packs (Starter / Pro / Studio) never expire.</li>
-        <li>Monthly subscriptions auto-renew until you cancel them. Credits from a subscription month do not roll over.</li>
+        <li>Monthly subscriptions auto-renew until you cancel them. To cancel, e-mail{' '}
+          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> — the renewal is
+          stopped within one business day and no further charge is made. Credits from a
+          subscription month do not roll over.</li>
         <li>Refunds: prepaid credits are non-refundable once they have been spent. Unspent credits are refundable within 14 days of purchase for EU buyers (right of withdrawal — Code de la consommation Art. L221-18 et seq.), unless you have already started consuming them.</li>
         <li>Pricing is shown on <a href="/buy">/buy</a> and can change with 30 days&apos; notice. Prior purchases keep their original credit values.</li>
         <li>All consumer prices are shown <strong>inclusive of tax (TTC)</strong>. Any applicable VAT is included and computed according to your country of residence.</li>
@@ -69,7 +72,51 @@ export default function TermsPage() {
           <strong>What remains refundable.</strong> Credits that you have neither
           spent nor started to consume remain refundable within the 14-day period.
         </li>
+        {/* COMMENT EXERCER LE DROIT — l'article L221-18 et suivants impose de
+            donner les modalites, pas seulement le principe. La section
+            annoncait le droit et sa renonciation sans jamais dire par quel
+            canal l'exercer, a partir de quand courent les 14 jours, ni sous
+            quel delai le remboursement intervient. */}
+        <li>
+          <strong>How to withdraw.</strong> Send us any unambiguous statement of
+          your decision — an e-mail to{' '}
+          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> is enough,
+          and you may also write to {id.registeredOffice}. You can use the model
+          withdrawal form below, but you are not required to.
+        </li>
+        <li>
+          <strong>When the 14 days start.</strong> For a supply of digital
+          content, the period runs from the <strong>day the contract is
+          concluded</strong> — that is, the day of your purchase — not from a
+          delivery date (Art. L221-18, 1°).
+        </li>
+        <li>
+          <strong>When you are refunded.</strong> At the latest{' '}
+          <strong>14 days after we receive your decision</strong>, using the same
+          payment method you used, at no cost to you (Art. L221-24).
+        </li>
       </ul>
+
+      <h3>Model withdrawal form</h3>
+      <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
+        Complete and return this form only if you wish to withdraw from the
+        contract. Copying the text into an e-mail is sufficient.
+      </p>
+      <pre style={{
+        whiteSpace: 'pre-wrap', padding: '14px 16px', borderRadius: 8,
+        border: '1px solid var(--border, #333)', fontSize: 13, lineHeight: 1.6,
+      }}>{`To ${id.operator} — ${id.registeredOffice} — ${id.supportEmail}
+
+I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract of
+sale for the supply of the following digital content:
+
+  Order reference / date of order: ......................................
+  Name of consumer(s): ..................................................
+  Address of consumer(s): ...............................................
+  Signature of consumer(s) (only if this form is notified on paper): .....
+  Date: .................................................................
+
+(*) Delete as appropriate.`}</pre>
 
       <h2>4. Acceptable use</h2>
       <p>You agree NOT to:</p>

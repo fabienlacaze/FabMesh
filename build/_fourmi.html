@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fourmi animée — résultats</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0d1117; color:#e6edf3; padding:26px 30px 60px;
+         font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .lic { background:#1f6f3f; color:#d7ffe6; border-radius:6px; padding:2px 9px;
+         font-size:12px; font-weight:700; margin-left:9px; vertical-align:3px; }
+  .sous { color:#8b949e; margin:0 0 26px; max-width:900px; }
+  h2 { font-size:17px; margin:34px 0 12px; padding-bottom:7px; border-bottom:1px solid #30363d; }
+  .g { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:16px; }
+  figure { margin:0; border:1px solid #30363d; border-radius:10px; overflow:hidden;
+           background:#0f141b; }
+  img { display:block; width:100%; height:auto; }
+  figcaption { padding:9px 13px; font-size:13.5px; border-top:1px solid #30363d;
+               display:flex; justify-content:space-between; align-items:center; }
+  em { color:#6e7681; font-style:normal; font-variant-numeric:tabular-nums; }
+  .ko { color:#ff9c8a; } .ok { color:#7ee2a8; }
+</style>
+
+<h1>Fourmi animée<span class="lic">SkinTokens MIT + Mesh2Motion CC0</span></h1>
+<p class="sous">Ton maillage de fourmi, riggé par SkinTokens, animé par des clips
+  d'araignée CC0. Aucun maillon sous licence restrictive, tout tourne en local.
+  Rendu du squelette hors navigateur — vues profil et dessus.</p>
+
+<h2>Ce que le réglage d'atténuation changeait</h2>
+<div class="g">
+  <figure>
+    <img src="_fourmi_avant.gif" alt="marche, atténuation 0,25">
+    <figcaption><b class="ko">Avant — atténuation 0,25</b><em>amplitude 9,9 %</em></figcaption>
+  </figure>
+  <figure>
+    <img src="_fourmi_apres.gif" alt="marche, atténuation 1,0">
+    <figcaption><b class="ok">Après — atténuation 1,0</b><em>amplitude 33,6 %</em></figcaption>
+  </figure>
+</div>
+<p class="sous" style="margin-top:14px">La valeur 0,25 venait du cas dragon (142 os → 47),
+  où le mouvement complet fragmentait le maillage. Sur araignée 56 os → fourmi 58 os,
+  les échelles sont comparables : rien ne justifiait de brider le mouvement aux trois quarts.</p>
+
+<h2>Autres clips, à pleine amplitude</h2>
+<div class="g">
+  <figure><img src="_fourmi_Attack.gif" alt="attaque">
+    <figcaption><b>Attack</b><em>amplitude 47,4 %</em></figcaption></figure>
+  <figure><img src="_fourmi_Jump.gif" alt="saut">
+    <figcaption><b>Jump</b><em>amplitude 37,0 %</em></figcaption></figure>
+  <figure><img src="_fourmi_Idle.gif" alt="repos actif">
+    <figcaption><b>Idle</b><em>amplitude 9,9 % — mouvement volontairement discret</em></figcaption></figure>
+</div>
+
+<h2>Le rig lui-même</h2>
+<div class="g">
+  <figure><img src="_ant_apercu_p.png" alt="rig d'origine">
+    <figcaption><b>À la sortie de SkinTokens</b><em>asymétrie médiane 2,7 %</em></figcaption></figure>
+  <figure><img src="_ant_sym_apercu_p.png" alt="rig symétrisé">
+    <figcaption><b>Après symétrisation</b><em>asymétrie médiane 0,0 %</em></figcaption></figure>
+</div>
+<p class="sous" style="margin-top:14px">La symétrisation atteint son but mesurable, mais
+  <b>n'a rien changé à l'animation</b> (9,9 % → 10,0 %) : ce n'était pas elle le plafond.
+  Il reste par ailleurs un défaut que la géométrie ne peut pas corriger — <b>19 os à gauche
+  contre 15 à droite</b>, donc des pattes qui n'ont pas le même nombre d'articulations
+  selon le côté.</p>

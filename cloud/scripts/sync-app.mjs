@@ -24,9 +24,24 @@ function log(msg, kind = 'info') {
   console.log(`${colors[kind]}${msg}\x1b[0m`);
 }
 
+/* CE SCRIPT NE COPIE PLUS index2.js NI index2.html.
+ *
+ * Il se presentait comme « a lancer apres toute modification de l'interface
+ * dans src/renderer/ » et ecrasait la destination sans regarder. Or les deux
+ * arborescences ont DIVERGE : le fichier web porte une soixantaine de
+ * fonctions qui n'existent pas cote bureau (openPaintMesh, _prixVariante,
+ * _renderLicenceSellable...), et son index.html charge des scripts propres au
+ * cloud (meshyAPI-cloud.js, cloud-overrides.js) que la copie brute effacait —
+ * le script n'en re-injectait qu'un seul.
+ *
+ * Le lancer aujourd'hui detruirait l'application web. Ces deux fichiers se
+ * portent desormais a la main, changement par changement : c'est plus lent,
+ * mais c'est reversible.
+ *
+ * Les entrees restantes sont celles qui n'ont pas diverge. Avant d'en
+ * ajouter une, verifier avec `git diff --no-index` que la destination ne
+ * porte rien d'unique. */
 const FILES = [
-  ['index2.html',              'index.html'],
-  ['index2.js',                'index2.js'],
   ['index2-edit-tools.js',     'index2-edit-tools.js'],
   ['canvas-utils.js',          'canvas-utils.js'],
   ['styles/main.css',          'styles/main.css'],
@@ -35,6 +50,11 @@ const FILES = [
   ['lib/three.module.js',      'lib/three.module.js'],
 ];
 
+/* Filet : si la destination a diverge depuis la derniere copie, on refuse
+ * plutot que d'ecraser. Un fichier reecrit sans le vouloir se remarque des
+ * semaines plus tard ; un script qui s'arrete se remarque tout de suite. */
+const DIVERGENCE_INTERDITE = new Set(['index2.js', 'index.html']);
+
 log('\n┌─ Syncing desktop renderer → cloud/public/app/ ─', 'ok');
 
 mkdirSync(join(DEST, 'styles'), { recursive: true });
@@ -42,6 +62,11 @@ mkdirSync(join(DEST, 'lib'), { recursive: true });
 
 let copied = 0;
 for (const [src, dest] of FILES) {
+  if (DIVERGENCE_INTERDITE.has(dest)) {
+    log(`  REFUS : ${dest} a diverge du bureau — a porter a la main, jamais par copie`, 'err');
+    process.exitCode = 1;
+    continue;
+  }
   const s = join(SRC, src);
   const d = join(DEST, dest);
   if (!existsSync(s)) { log(`  ✗ missing source: ${src}`, 'warn'); continue; }

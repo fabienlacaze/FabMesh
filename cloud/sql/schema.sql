@@ -49,9 +49,20 @@ create table if not exists public.payments (
   user_id            uuid not null references auth.users(id) on delete cascade,
   pack_id            text not null,
   credits            integer not null,
+  -- Dotation d'ORIGINE, figee au premier remboursement partiel.
+  --
+  -- `credits` porte le reliquat, qui diminue a chaque remboursement. Sans
+  -- memoire de la valeur de depart, un second remboursement ne pouvait plus
+  -- calculer combien reprendre : Stripe cumule `amount_refunded`, donc la
+  -- reprise doit se calculer sur le montant initial. NULL tant qu'aucun
+  -- remboursement n'a eu lieu.
+  credits_origine    integer,
   amount_eur         numeric(8,2),
   created_at         timestamptz not null default now()
 );
+
+-- Migration pour les bases deja creees : la colonne peut manquer.
+alter table public.payments add column if not exists credits_origine integer;
 
 -- 4. ATOMIC CREDIT RPCs --------------------------------------------------
 -- spend_credits: returns new balance, or NULL if insufficient.

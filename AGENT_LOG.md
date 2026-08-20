@@ -20997,13 +20997,20 @@ VERDICT : NON PRETE. Corrections posees dans la foulee :
    c'est deja la fonction du renommage. Verifie : orc_trellis2.glb et
    orc_1234567890.glb supprimes, orc_marron_* et orc_rouge_* conserves.
 
-6. LE REPLI HORS LIGNE DU SIGNALEMENT N'OUVRAIT RIEN. Au-dela de l'adresse
-   morte corrigee plus tot : `meshyAPI.openExternal` passe par
-   `wizard:open-external`, dont la garde exige `protocol === 'https:'` — un
-   lien `mailto:` etait donc TOUJOURS refuse. Et comme la fonction rend une
-   PROMESSE, toujours vraie, le `|| window.open(lien)` de secours ne
-   s'executait jamais. Rien ne s'ouvrait, et l'interface affirmait
-   « your e-mail app has been opened ». A travers les deux refus 11.16.
+6. LE REPLI HORS LIGNE DU SIGNALEMENT — CONSTAT A RECTIFIER.
+   L'audit affirmait que rien ne s'ouvrait, parce que `wizard:open-external`
+   exige `protocol === 'https:'`. VERIFICATION FAITE, C'EST FAUX :
+   `meshyAPI` n'expose PAS `openExternal` (seul `wizardAPI` le fait), donc
+   l'expression `window.meshyAPI?.openExternal?.(lien) || window.open(lien)`
+   tombait sur `window.open` — et `setWindowOpenHandler` (main.js:1501)
+   autorise explicitement `mailto:` en le passant a `shell.openExternal`.
+   Le brouillon s'ouvrait donc. Le defaut reel etait celui deja consigne :
+   l'adresse pointait sur un domaine inexistant. J'ai repris l'affirmation de
+   l'audit sans la verifier, et je l'ai transmise au proprietaire.
+   Ce qui MANQUAIT vraiment : aucun filet. Si l'ouverture echoue — pas de
+   client de messagerie, gestionnaire modifie, navigateur qui bloque la
+   fenetre cote web — l'interface affirmait quand meme qu'un brouillon etait
+   ouvert.
    CORRECTIF : canal `app:open-mailto` SEPARE (on n'elargit pas la liste
    blanche generale : un rendu compromis pourrait alors lancer des protocoles
    arbitraires), restreint au protocole mailto: et aux boites du produit. Le
@@ -21019,3 +21026,100 @@ paquet livre, abonnements sans portail de resiliation, wizard.js qui ignore
 `{ok:false}`, killAllActiveProcs qui parcourt la mauvaise collection) et
 11 angles morts (telemetrie non declaree, accessibilite, mise a jour hors
 Store non signee, politique de confidentialite obsolete...).
+
+## 2026-08-20 — Les onze problemes importants de l'audit
+
+Sauvegarde poussee avant intervention :
+`backup-avant-patch-audit-20260820-190409`.
+
+BUREAU
+  * PONT MCP EN ECOUTE DANS LE PAQUET LIVRE. `startMcpBridge()` ouvrait un
+    serveur HTTP permanent sur 127.0.0.1:7555, routant vers des `execFile` de
+    Python, sans aucun garde. Le module voisin `control_api.js` porte
+    exactement le garde inverse, pose deliberement, avec ce motif : « an
+    always-listening localhost HTTP control plane is exactly the kind of thing
+    a Store reviewer / static analyzer flags ». Et dans un paquet, RIEN ne
+    s'en sert : `mcp_server.py` cherche le jeton dans PROJECT_ROOT alors que
+    le pont l'ecrit dans le dossier utilisateur — le client ne peut meme pas
+    s'authentifier. Surface d'attaque pure. Garde pose, avec deux
+    echappatoires : --headless (le pont y EST l'interface) et
+    FABMESH_MCP_BRIDGE=1.
+
+  * LA FERMETURE NE TUAIT AUCUN PROCESSUS PYTHON. `killAllActiveProcs()`
+    parcourait `activeProcs` (Map remplie a trois endroits) au lieu de
+    `allActiveProcs` (Set nourri automatiquement pour CHAQUE enfant). Sous
+    Windows, Node ne rattache pas ses enfants a un job object — le code le dit
+    lui-meme — donc rien ne les tuait. Fermer l'application laissait des
+    interpreteurs tenir la carte graphique jusqu'au redemarrage. Les deux
+    collections sont desormais balayees avec `killProcTree`, avec une garde de
+    zone morte (`allActiveProcs` est declare plus bas dans le fichier).
+
+  * L'ASSISTANT IGNORAIT L'ECHEC DE L'INSTALLATION. `installDeps()` etait
+    appele sans regarder sa valeur ; or la poignee signale ses deux echecs les
+    plus probables par une promesse RESOLUE — dont le controle post-pip ajoute
+    expres, avec quatorze lignes de commentaire, pour corriger le refus du
+    2026-08-08. « AI engine ready » s'affichait sur une installation ratee. La
+    valeur est lue, et la coche verte est retiree avant d'ecrire l'erreur —
+    sans quoi les deux s'affichaient l'une sous l'autre.
+
+  * LE MOTEUR DE RIG NE POUVAIT JAMAIS ABOUTIR. `wizard:install-rig` cherche
+    le code dans `resources/Puppeteer`, que `package.json` INTERDIT d'embarquer
+    (GPL-3.0 + NVIDIA-NC). Le script partait quand meme : torch 2.7 cu128,
+    torch_scatter, flash_attn — plusieurs gigaoctets — puis « reinstall the
+    app ». Sortie anticipee AVANT le moindre pip, et l'assistant annonce la
+    phase comme IGNOREE, pas comme reussie.
+
+  * « RETRY » RELANCAIT TOUT PAR-DESSUS CE QUI TOURNAIT. Les quatre liens
+    faisaient `initialized.delete('download')`, ce qui re-armait aussi
+    `goto()` pour le reste de la session : revenir en arriere puis continuer
+    lancait une DEUXIEME chaine pip dans le meme environnement. Ligne
+    supprimee des quatre, plus un verrou de re-entrance.
+
+  * AUCUNE POLITIQUE DE CONFIDENTIALITE DANS L'APPLICATION, alors qu'elle
+    transmet adresse e-mail, images, signalements et rapports de plantage
+    (Sentry initialise avant toute fenetre). La regle 10.5.1 l'exige DANS
+    l'application. Lien ajoute dans « A propos », traduit dans les 5 langues ;
+    l'hote etait deja dans la liste blanche. Page verifiee : HTTP 200.
+
+CLOUD
+  * LE MENU DE QUALITE ANNONCAIT 1 CREDIT POUR 8 DEBITES. Les libelles etaient
+    figes dans le HTML ; `syncLivePricing` ne reecrivait que
+    `dataset.credits`, jamais le texte. Jusqu'a 3,25x d'ecart entre le prix lu
+    et le prix preleve — meme defaut que celui deja corrige ailleurs, un
+    chiffre duplique dans le balisage au lieu d'etre lu a la source. Le
+    libelle suit desormais la grille (`labelBase` memorise la partie sans prix
+    pour rester idempotent). Les deux libelles de moteur qui portaient
+    « 1 credit » en dur sont nettoyes.
+
+  * UN REMBOURSEMENT PARTIEL BLOQUAIT LES SUIVANTS. `ch.amount_refunded` est
+    CUMULATIF, mais la ligne `payments` etait remise a zero des le premier
+    remboursement — y compris partiel. Le second relisait `credits = 0` et ne
+    reprenait plus rien. On raisonne desormais sur la dotation d'origine
+    (colonne `credits_origine` ajoutee au schema + migration), avec une cible
+    cumulative moins ce qui a deja ete repris. Verifie : 120 credits / 20 EUR,
+    remboursements de 5 puis 12 puis 20 EUR -> 30, 42, 48 credits repris.
+    Ancien comportement : 30 puis 0.
+
+  * ABONNEMENTS A RECONDUCTION SANS MOYEN DE RESILIER. La page promettait
+    « Cancel anytime from your Stripe customer portal » — aucune route
+    billing_portal n'existe, /account n'a pas de section abonnement. Promesse
+    retiree, remplacee par un canal reel ; l'entete et la phrase disparaissent
+    avec les cartes ; le filtre passe en refus par defaut (`?? false`) pour ne
+    plus afficher d'abonnement quand la disponibilite n'a pas repondu.
+
+  * DROIT DE RETRACTATION SANS MODALITES. Les CGV annoncaient le principe et
+    la renonciation sans dire COMMENT l'exercer, a partir de QUAND courent les
+    14 jours, ni sous quel delai le remboursement intervient. Les trois
+    manques sont combles et le formulaire type est ajoute.
+
+  * `npm run sync-app` AURAIT DETRUIT L'APPLICATION WEB. Il se presente comme
+    « a lancer apres toute modification de l'interface » et faisait un
+    copyFileSync brut. Mesure : 451 fonctions cote bureau, 388 cote web, dont
+    57 n'existent QUE cote web. Les deux entrees divergentes sont retirees,
+    avec un garde-fou qui refuse si on les remet.
+
+VERIFIE PAR PILOTAGE CDP sur l'application reelle : rendu complet (1038
+boutons), lien de confidentialite present et traduit, `isStoreBuild()` rend
+faux en developpement, cadenas conserve hors Store, canal mailto qui refuse un
+destinataire etranger et un protocole non conforme, bouton de signalement sous
+l'image, ZERO erreur console.

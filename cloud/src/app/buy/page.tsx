@@ -56,8 +56,16 @@ export default function BuyPage() {
       .catch(() => setAvailability({}));
   }, []);
 
+  /* Les abonnements ne s'affichent QUE si le serveur les declare disponibles.
+   *
+   * Le defaut etait `?? true` : un appel a /api/pricing/availability qui
+   * echoue, ou qui n'a pas encore repondu, faisait apparaitre des cartes
+   * d'abonnement. Sur un plan sans identifiant de prix configure, le client
+   * partait au paiement pour recevoir un 503 — et surtout, tant qu'aucun
+   * portail de resiliation n'existe, on ne doit vendre AUCUNE reconduction
+   * automatique. En cas de doute, on n'affiche pas. */
   const visibleSubs = Object.values(PACKS).filter(
-    p => p.mode === 'subscription' && (availability?.[p.id] ?? true),
+    p => p.mode === 'subscription' && (availability?.[p.id] ?? false),
   );
 
   return (
@@ -114,15 +122,22 @@ export default function BuyPage() {
         ))}
       </div>
 
-      <h3 style={{ marginTop: 36, marginBottom: 4, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>Monthly subscriptions</h3>
-      <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 16 }}>
-        Credits drop in automatically every month. Cancel anytime from your Stripe customer portal.
-      </p>
-      {visibleSubs.length === 0 ? (
-        <p style={{ color: 'var(--text-2)', fontSize: 13, fontStyle: 'italic' }}>
-          Monthly subscription plans coming soon — top-ups available above.
+      {/* L'ENTETE ET LA PHRASE DISPARAISSENT AVEC LES CARTES.
+          Ils restaient affiches meme sans aucun abonnement en vente, et
+          annoncaient « Cancel anytime from your Stripe customer portal » —
+          un portail qui N'EXISTE PAS dans ce produit : aucune route
+          billing_portal, aucune section abonnement sur /account. Promettre
+          une resiliation en un clic qu'on ne fournit pas, sur un contrat a
+          reconduction automatique, est une information precontractuelle
+          fausse. */}
+      {visibleSubs.length > 0 && (
+        <>
+        <h3 style={{ marginTop: 36, marginBottom: 4, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>Monthly subscriptions</h3>
+        <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 16 }}>
+          Credits drop in automatically every month. To cancel, e-mail us at{' '}
+          <a href="mailto:myfabmesh.contact@gmail.com">myfabmesh.contact@gmail.com</a>{' '}
+          — we stop the renewal within one business day, and you keep the credits already delivered.
         </p>
-      ) : (
         <div className="pricing-grid" style={{ padding: 0 }}>
           {visibleSubs.map((p) => (
             <div key={p.id} className={`price-card ${p.id === 'sub_pro' ? 'featured' : ''}`}>
@@ -137,6 +152,7 @@ export default function BuyPage() {
             </div>
           ))}
         </div>
+        </>
       )}
 
       <div className="card" style={{ marginTop: 32 }}>
