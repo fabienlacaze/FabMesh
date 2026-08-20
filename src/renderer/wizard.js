@@ -193,6 +193,23 @@ function renderNoGpuPage() {
   if (!title || !lead) return;
   const gpu = hwReport && hwReport.gpu;
   const isNvidia = !!(gpu && String(gpu.vendor || '').toUpperCase() === 'NVIDIA');
+
+  // CHOIX VOLONTAIRE — cette page s'affiche AUSSI quand l'utilisateur retient
+  // « Cloud » sur la page Mode alors que sa machine peut tout faire en local
+  // (goto() reroute 'download' vers 'no-gpu' dans ce cas). On lui disait alors
+  // que son GPU etait insuffisant : constate le 2026-08-18 sur une RTX 5080 de
+  // 16 Go, a qui la page reprochait d'etre « below the 12 GB ». C'est faux, et
+  // c'est le genre d'incoherence qu'un testeur releve.
+  if (!needsCloudPath()) {
+    title.textContent = 'Cloud mode selected';
+    lead.innerHTML = 'You chose to generate in the MyFabmesh cloud'
+      + (gpu && gpu.model ? ` rather than on your <b>${gpu.model}</b>` : '')
+      + '. <b>Everything works the same</b> — images, 3D meshes, rigs and animations are '
+      + 'generated on our servers and downloaded straight into your projects. You can switch '
+      + 'back to local mode at any time from the settings.';
+    return;
+  }
+
   if (isNvidia) {
     const gb = Math.round((gpu.vram_mb || 0) / 1024);
     title.textContent = 'Cloud mode will be used on this PC';

@@ -20905,3 +20905,33 @@ NON DEPLOYE : `npm run build` reste bloque par les 9 champs vides de
 `cloud/src/config/legal-identity.ts` (LCEN art. 6-III + Code conso. art.
 L612-1). Verification faite avec ALLOW_UNFILLED_LEGAL=1 uniquement. Le
 deploiement attend que le proprietaire renseigne son identite et son mediateur.
+
+## 2026-08-20 — Le signalement hors ligne envoyait a un domaine inexistant
+
+En redigeant les notes de certification 1.0.30, controle de chaque affirmation
+avant de l'ecrire. Le repli hors ligne du signalement pointait sur
+`report@myfabmesh.ai`. Verification DNS :
+
+    Resolve-DnsName myfabmesh.ai -Type MX  ->  DNS name does not exist
+    Resolve-DnsName myfabmesh.ai -Type A   ->  aucun enregistrement
+
+LE DOMAINE N'EXISTE PAS. Or ce repli est le SEUL chemin de signalement quand le
+serveur est injoignable — donc precisement celui qu'un examinateur teste s'il
+coupe le reseau, et le seul disponible en generation locale sans compte. Il
+ouvrait un brouillon vers une boite qui n'a jamais pu recevoir un message.
+Deux refus 11.16 ont deja ete prononces sur ce dispositif.
+
+Remplace par `myfabmesh.contact@gmail.com`, la boite declaree dans
+`cloud/src/config/legal-identity.ts` (contactEmail et supportEmail). Bureau et
+web.
+
+MEME ORIGINE, AUTRE MENSONGE : l'infobulle du logo annoncait « Open
+myfabmesh.ai » alors que le clic ouvre `fabienlacaze.github.io/MyFabmesh`
+(main.js:9801, app:open-website). Remplacee par « Open the MyFabmesh website »,
+curatee dans les 5 langues pour que le traducteur automatique ne reinvente pas
+un domaine.
+
+RESTE A DECIDER (proprietaire) : acheter myfabmesh.ai, ou renoncer a le citer.
+`src/main/main.js:9747` le garde dans une liste blanche « future custom
+domain » — sans effet tant qu'il n'existe pas, mais a nettoyer si l'achat est
+abandonne.

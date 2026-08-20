@@ -3,6 +3,7 @@
  * translations, add an <option> in index.html and a flag in i18n.js. */
 (function () {
   var dict = {
+      'Open the MyFabmesh website': 'Abrir el sitio de MyFabmesh',
       'Signed in as': 'Sesion iniciada como',
       'click to top up': 'haz clic para recargar',
       // ---- Signalement de contenu IA (politique 11.16 du Store) ----

@@ -19155,7 +19155,11 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
   const brand = document.querySelector('#topbar .brand');
   if (!brand) return;
   brand.style.cursor = 'pointer';
-  brand.title = 'Open myfabmesh.ai';
+  // L'infobulle annoncait « Open myfabmesh.ai », un domaine qui n'existe
+  // PAS (ni A ni MX, verifie le 2026-08-20). Le clic ouvre en realite
+  // fabienlacaze.github.io/MyFabmesh (main.js, app:open-website).
+  // On ne nomme donc plus un domaine qu'on ne possede pas.
+  brand.title = 'Open the MyFabmesh website';
   brand.addEventListener('click', async () => {
     try { await window.meshyAPI.openWebsite(); } catch (_) {}
   });
@@ -22777,7 +22781,14 @@ showPage('projects');
         'Prompt: ' + charge.prompt + '\n' +
         'File: ' + charge.asset_url + '\n\n' +
         'Details:\n' + charge.details + '\n');
-      const lien = 'mailto:report@myfabmesh.ai'
+      // ADRESSE REELLE, verifiee. `report@myfabmesh.ai` etait utilisee
+      // ici : le domaine myfabmesh.ai n'a NI enregistrement A NI MX
+      // (verifie le 2026-08-20). Le repli hors ligne — le seul chemin
+      // de signalement quand le serveur est injoignable, et donc celui
+      // qu'un examinateur peut tester — envoyait dans le vide.
+      // Cette boite-ci est celle declaree dans les mentions legales
+      // (cloud/src/config/legal-identity.ts, supportEmail).
+      const lien = 'mailto:myfabmesh.contact@gmail.com'
                  + '?subject=' + encodeURIComponent('AI content report — ' + charge.reason)
                  + '&body=' + corps;
       try { window.open(lien); } catch (_) {}

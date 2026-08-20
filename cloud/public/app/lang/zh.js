@@ -2,6 +2,7 @@
  * Load AFTER i18n.js. */
 (function () {
   var dict = {
+      'Open the MyFabmesh website': '打开 MyFabmesh 网站',
       'Signed in as': '当前登录账号',
       'click to top up': '点击充值',
       // ---- Signalement de contenu IA (politique 11.16 du Store) ----
