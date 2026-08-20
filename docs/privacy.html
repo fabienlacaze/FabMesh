@@ -35,7 +35,7 @@
 <main class="legal">
 
   <h1>Privacy Policy</h1>
-  <div class="meta">Last updated: 2026-05-24 · MyFabmesh.AI Desktop &amp; Cloud · Published by Ayros Studio (Fabien Lacaze, France)</div>
+  <div class="meta">Last updated: 2026-08-20 · MyFabmesh.AI Desktop &amp; Cloud · Published by Ayros Studio (Fabien Lacaze, France)</div>
 
   <h2>TL;DR <span class="pill pill-good">user-friendly</span></h2>
   <ul>
@@ -49,20 +49,46 @@
   <h2>1. Who we are</h2>
   <p>
     MyFabmesh.AI is published by <strong>Ayros Studio</strong>, a French sole proprietorship operated by Fabien Lacaze.
-    Contact: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
+    Contact: <a href="mailto:myfabmesh.contact@gmail.com">myfabmesh.contact@gmail.com</a>.
   </p>
 
-  <h2>2. Desktop application <span class="pill pill-info">local-first</span></h2>
+  <h2>2. Desktop application</h2>
 
-  <h3>2.1 What we don't collect</h3>
+  <p>
+    The desktop app runs in one of <strong>two modes</strong>, and what leaves your
+    computer depends entirely on which one is active. The app tells you which mode
+    it is in, on the setup screen and next to the Generate button.
+  </p>
+
+  <h3>2.1 Local mode <span class="pill pill-info">needs an NVIDIA GPU</span></h3>
+  <p>Everything happens on your machine. In this mode:</p>
   <ul>
-    <li>No account creation, no login.</li>
-    <li>No tracking of how you use the app (no analytics SDK, no Google Analytics, no telemetry beyond crash reports).</li>
-    <li>No upload of your reference images, prompts, masks, or generated meshes — all generation runs locally on your NVIDIA GPU.</li>
-    <li>No collection of your machine's MAC address, hardware IDs, or any persistent identifier.</li>
+    <li>No account is required and no sign-in is offered.</li>
+    <li>No reference image, prompt, mask or generated mesh leaves your computer — generation runs on your own GPU.</li>
+    <li>No tracking of how you use the app (no analytics SDK, no advertising identifier).</li>
+    <li>No collection of your MAC address, hardware IDs, or any persistent identifier beyond the crash-report installation ID described in 2.3.</li>
   </ul>
 
-  <h3>2.2 What we do collect (and why)</h3>
+  <h3>2.2 Cloud mode <span class="pill pill-info">used automatically when no NVIDIA GPU is present</span></h3>
+  <p>
+    On a computer without a supported NVIDIA GPU, local generation is impossible, so the
+    app uses our cloud service instead. <strong>This requires an account, and your content
+    is sent to our servers.</strong> Concretely, in cloud mode:
+  </p>
+  <ul>
+    <li>You create an account (e-mail address and password) or sign in, from inside the app. Credentials are handled by Supabase Auth, hosted in the EU (Frankfurt).</li>
+    <li>Your prompts and reference images are uploaded to our worker and processed on rented GPUs; results are stored in Cloudflare R2 and downloaded back to your PC.</li>
+    <li>Your credit balance, payment history and generation history are stored against your account.</li>
+    <li>We never use your content to train models.</li>
+    <li>Section 3 below describes the cloud service in full — it applies to cloud mode of the desktop app too.</li>
+  </ul>
+  <p>
+    If you would rather not use the cloud, do not sign in: the app remains usable for
+    importing, editing and exporting meshes you already have.
+  </p>
+
+  <h3>2.3 What we collect in both modes</h3>
+
   <ul>
     <li>
       <strong>Anonymous crash reports via Sentry.</strong>
@@ -94,9 +120,11 @@
     <li>App settings in <code>%APPDATA%\fabmesh\</code> (preferences, logs, setup state).</li>
   </ul>
 
-  <h2>3. Cloud application (when launched)</h2>
+  <h2>3. Cloud service <span class="pill pill-info">live</span></h2>
   <p>
-    The Cloud version (planned, separate sign-up) requires an email-based login. When you use Cloud:
+    The cloud service is in operation. It is reached either from the web app or from
+    cloud mode of the desktop application (section 2.2). It requires an e-mail based
+    account. When you use it:
   </p>
   <ul>
     <li>We store your email, hashed password (handled by Supabase Auth), credit balance, payment history, and generation job history in a Supabase Postgres database hosted in the EU (Frankfurt).</li>
@@ -106,7 +134,7 @@
   </ul>
 
   <h2>4. Your rights (GDPR / RGPD)</h2>
-  <p>You can, at any time, by emailing <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>:</p>
+  <p>You can, at any time, by emailing <a href="mailto:myfabmesh.contact@gmail.com">myfabmesh.contact@gmail.com</a>:</p>
   <ul>
     <li>Ask what personal data we hold about you (typically: nothing for Desktop, account + history for Cloud).</li>
     <li>Request correction or deletion of that data.</li>
@@ -128,7 +156,7 @@
 
   <h2>7. Contact</h2>
   <p>
-    For any question: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a><br>
+    For any question: <a href="mailto:myfabmesh.contact@gmail.com">myfabmesh.contact@gmail.com</a><br>
     Ayros Studio · [À_COMPLÉTER: nom du directeur de la publication] · [À_COMPLÉTER: adresse postale complète du siège — valeur unique, identique aux Mentions légales]
   </p>
 

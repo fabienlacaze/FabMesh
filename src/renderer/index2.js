@@ -19192,6 +19192,42 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
     if (!modal.classList.contains('hidden') && e.key === 'Escape') hide();
   });
 
+  /* DANS LE PAQUET DU STORE, C'EST WINDOWS QUI MET A JOUR.
+   *
+   * `_initAutoUpdate()` sort immediatement sous MSIX, et la poignee rend
+   * alors { ok:false, error:'updater not available' } — que l'interface
+   * affichait tel quel : « Update check failed: updater not available ». Or
+   * c'est la fenetre « A propos » qu'on demande explicitement a l'examinateur
+   * d'ouvrir pour y trouver le dispositif de signalement. Il y voyait donc
+   * une fonction visiblement cassee, en anglais technique.
+   *
+   * On masque le bouton et on dit ce qui est vrai. */
+  (async () => {
+    try {
+      if (await window.meshyAPI?.isStoreBuild?.()) {
+        if (checkBtn) checkBtn.style.setProperty('display', 'none', 'important');
+        if (statusEl) {
+          const T = (x) => (typeof _i18nT === 'function' ? _i18nT(x) : x);
+          statusEl.textContent = T('Updates are delivered automatically through the Microsoft Store.');
+        }
+      }
+    } catch (_) {}
+  })();
+
+  /* Le texte de la fiche « Uninstall » depend de la livraison : seul le
+   * desinstalleur NSIS pose les trois questions (modeles, contenu genere,
+   * reglages). Sous MSIX, on renvoie vers les Parametres de Windows. */
+  (async () => {
+    try {
+      const d = document.getElementById('set-uninstall-desc');
+      if (!d) return;
+      const T = (x) => (typeof _i18nT === 'function' ? _i18nT(x) : x);
+      d.textContent = (await window.meshyAPI?.isStoreBuild?.())
+        ? T('Opens Windows Settings, where you can remove MyFabmesh.AI. Downloaded AI models can be deleted first from the Storage section above. Your generated meshes folder is never touched.')
+        : T('Remove MyFabmesh.AI from your computer. You will be asked whether to also delete the AI models and your settings. Your generated meshes folder is never touched.');
+    } catch (_) {}
+  })();
+
   checkBtn?.addEventListener('click', async () => {
     if (!window.meshyAPI?.checkForUpdate) {
       statusEl.textContent = 'Update check not available in this build.';
@@ -24113,4 +24149,115 @@ window._applyRigAnimPills();
       btnSend.textContent = 'Send report';
     }
   });
+})();
+
+/* ============================================================
+   ACCESSIBILITE — nom accessible, annonces, fenetres modales.
+
+   Constat de l'audit du 2026-08-20 : 470 boutons pour 6 `aria-label`, aucun
+   `role`, aucune region live. Un lecteur d'ecran annonce « bouton » sur les
+   boutons a glyphe — dont le drapeau de signalement, celui-la meme qu'exige
+   la certification — et ne dit jamais qu'une generation est terminee.
+
+   On ne peut pas annoter 470 balises a la main sans en oublier, et une
+   annotation figee se desynchroniserait des cinq traductions. On DERIVE donc
+   le nom accessible de l'infobulle, a l'execution, et on rejoue le balayage
+   apres chaque changement de langue et a chaque mutation du document.
+   ============================================================ */
+(() => {
+  const estGlyphe = (t) => {
+    const s = (t || '').trim();
+    if (!s) return true;
+    // Un libelle « reel » contient au moins deux caracteres latins ou
+    // ideographiques a la suite ; « ⚑ », « ↻ », « ? » n'en contiennent pas.
+    return !/[A-Za-zÀ-ɏЀ-ӿ؀-ۿऀ-ॿ一-鿿]{2,}/.test(s);
+  };
+
+  // Croix de fermeture : le glyphe « ✕ » n'a pas d'infobulle et se lit
+  // « bouton » tout court. Elles sont nombreuses et toutes identiques.
+  const CROIX = /^[×✕✖❌ＸxX]$/;
+
+  function nommer(racine) {
+    let poses = 0;
+    for (const b of (racine || document).querySelectorAll('button, [role="button"]')) {
+      if (b.getAttribute('aria-label')) continue;
+      if (!estGlyphe(b.textContent)) continue;      // le texte suffit deja
+      let t = b.getAttribute('title') || b.dataset.tooltip || '';
+      if (!t) {
+        const brut = (b.textContent || '').trim();
+        const classes = String(b.className || '');
+        if (CROIX.test(brut) || /close-x|about-close/.test(classes)) {
+          t = (typeof _i18nT === 'function' ? _i18nT('Close') : 'Close');
+        }
+      }
+      if (!t) continue;
+      b.setAttribute('aria-label', t);
+      poses++;
+    }
+    return poses;
+  }
+
+  function annoncer(racine) {
+    /* Regions dont le contenu change SEUL : sans `aria-live`, un lecteur
+     * d'ecran ne dit jamais qu'une generation est terminee.
+     *
+     * On vise par MOTIF plutot que par liste : le produit compte une
+     * vingtaine d'elements « ...-status » (step1-status, ws-anim-status,
+     * pe-status, set-calib-status...) et une liste figee en aurait oublie a
+     * chaque nouvelle fonction. */
+    const cibles = (racine || document).querySelectorAll(
+      '[id$="-status"], [id$="-progress-label"], #toast-container, #cl-err');
+    for (const el of cibles) {
+      if (el.getAttribute('aria-live')) continue;
+      el.setAttribute('aria-live', 'polite');
+      el.setAttribute('aria-atomic', 'true');
+    }
+  }
+
+  function modales(racine) {
+    for (const m of (racine || document).querySelectorAll('.modal-overlay')) {
+      if (!m.getAttribute('role')) {
+        m.setAttribute('role', 'dialog');
+        m.setAttribute('aria-modal', 'true');
+        const titre = m.querySelector('h2, h3');
+        if (titre) {
+          if (!titre.id) titre.id = 'titre-' + Math.random().toString(36).slice(2, 9);
+          m.setAttribute('aria-labelledby', titre.id);
+        }
+      }
+    }
+  }
+
+  function balayer(racine) { try { nommer(racine); annoncer(racine); modales(racine); } catch (_) {} }
+
+  const lancer = () => {
+    balayer(document);
+    // Le contenu est construit dynamiquement : on rejoue, en le laissant
+    // respirer (regroupement des mutations).
+    let attente = null;
+    try {
+      new MutationObserver(() => {
+        if (attente) return;
+        attente = setTimeout(() => { attente = null; balayer(document); }, 400);
+      }).observe(document.body, { childList: true, subtree: true });
+    } catch (_) {}
+    // Apres un changement de langue, les infobulles changent : on repart de
+    // zero pour que le nom accessible suive.
+    try {
+      const appliquer = window.FabI18n && window.FabI18n.applyLang;
+      if (appliquer) {
+        window.FabI18n.applyLang = function (lang) {
+          const r = appliquer.apply(this, arguments);
+          try {
+            document.querySelectorAll('button[aria-label]').forEach((b) => b.removeAttribute('aria-label'));
+            balayer(document);
+          } catch (_) {}
+          return r;
+        };
+      }
+    } catch (_) {}
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lancer);
+  else lancer();
 })();

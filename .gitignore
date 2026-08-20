@@ -5,6 +5,8 @@ history/
 previews/
 scripts/_*.py
 config.json
+config.json.bak
+config.json.tmp
 *.glb
 *.fbx
 *.obj

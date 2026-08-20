@@ -997,15 +997,60 @@ function addVersion(projectName, { prompt, scriptContent, meshPath, meshFilename
   return data;
 }
 
+/* CONFIG.JSON — ECRITURE ATOMIQUE ET LECTURE TOLERANTE.
+ *
+ * Le fichier etait ecrit par un `writeFileSync` direct et relu par un
+ * `JSON.parse` sans filet, alors qu'il est reecrit tres souvent (langue,
+ * reglages GPU, noms d'affichage des projets, code PIN...). Une coupure de
+ * courant, un disque plein ou un antivirus qui intercepte l'ecriture laisse
+ * un fichier tronque — et au redemarrage `HEAVY_DIR` retombe en silence sur
+ * l'emplacement par defaut. Un utilisateur qui avait installe ses modeles sur
+ * un autre disque se voyait proposer de re-telecharger DIX-SEPT GIGAOCTETS,
+ * les siens etant toujours la mais introuvables.
+ *
+ * Trois mesures : ecriture dans un temporaire puis `renameSync` (atomique sur
+ * NTFS), copie de secours de la version precedente, et lecture qui se rabat
+ * sur la copie de secours plutot que de lever. */
+const CONFIG_BAK = () => CONFIG_PATH + '.bak';
+
 function loadConfig() {
-  if (fs.existsSync(CONFIG_PATH)) {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  const lire = (chemin) => {
+    const brut = fs.readFileSync(chemin, 'utf-8');
+    const o = JSON.parse(brut);
+    if (!o || typeof o !== 'object') throw new Error('config: racine non objet');
+    return o;
+  };
+  try {
+    if (fs.existsSync(CONFIG_PATH)) return lire(CONFIG_PATH);
+  } catch (e) {
+    _log('warn', 'config.json illisible (' + (e && e.message) + ') — tentative sur la copie de secours');
+    try {
+      if (fs.existsSync(CONFIG_BAK())) {
+        const secours = lire(CONFIG_BAK());
+        // On restaure tout de suite : sans ca, la prochaine ecriture ecrase
+        // la copie de secours avec le fichier corrompu.
+        try { fs.copyFileSync(CONFIG_BAK(), CONFIG_PATH); } catch (_) {}
+        _log('warn', 'config.json restaure depuis la copie de secours');
+        return secours;
+      }
+    } catch (e2) {
+      _log('warn', 'copie de secours illisible elle aussi : ' + (e2 && e2.message));
+    }
   }
   return { blenderPath: '' };
 }
 
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  const tmp = CONFIG_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
+    try { if (fs.existsSync(CONFIG_PATH)) fs.copyFileSync(CONFIG_PATH, CONFIG_BAK()); } catch (_) {}
+    fs.renameSync(tmp, CONFIG_PATH);   // atomique sur NTFS
+  } catch (e) {
+    _log('warn', 'saveConfig: ecriture atomique impossible (' + (e && e.message) + ') — ecriture directe');
+    try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2)); } catch (_) {}
+    try { fs.unlinkSync(tmp); } catch (_) {}
+  }
 }
 
 let mainWindow;
