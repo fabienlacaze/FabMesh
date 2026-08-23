@@ -61,6 +61,19 @@ export default function PrivacyPage() {
           journaux d&apos;accès Cloudflare de courte durée.
         </li>
         <li>
+          <strong>Pays et type d&apos;application&nbsp;:</strong> pour chaque
+          génération, nous conservons le <strong>pays</strong> d&apos;où la
+          requête a été émise (tel que notre hébergeur Cloudflare nous le
+          communique) et si elle provient de l&apos;application de bureau ou
+          d&apos;un navigateur. Cela nous sert uniquement à savoir quels marchés
+          utilisent le service et à repérer une panne qui ne toucherait qu&apos;un
+          pays ou qu&apos;une plateforme. Nous ne conservons <strong>ni la ville,
+          ni la région, ni l&apos;adresse IP</strong> associées à ces
+          statistiques, et elles ne servent jamais à du ciblage publicitaire.
+          Base légale&nbsp;: intérêt légitime (art. 6.1.f) à comprendre et à
+          maintenir notre propre service.
+        </li>
+        <li>
           <strong>
             Journaux de diagnostic &mdash; désactivés sauf si vous les activez&nbsp;:
           </strong>{' '}

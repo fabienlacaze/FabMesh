@@ -1957,6 +1957,35 @@ const MODAL_COST_USD: Record<string, number> = {
  *  Aucun changement cote client n'est necessaire : Electron met « Electron/ »
  *  dans son User-Agent, pas un navigateur. On enregistre donc simplement ce
  *  qu'on sait deja, au lieu de le jeter. */
+/** Pays d'ou vient la requete, tel que Cloudflare le fournit.
+ *
+ *  AJOUTE LE 2026-08-23, A LA DEMANDE DU USER, POUR POUVOIR FAIRE DES
+ *  STATISTIQUES. Le 20 aout, le premier vrai visiteur du Store a echoue sept
+ *  fois et n'est jamais revenu — et il a ete IMPOSSIBLE de savoir d'ou il
+ *  venait : rien dans les lignes `jobs`, journal d'audit Supabase VIDE (0
+ *  entree, verifie en SQL direct), aucun journal Cloudflare conserve.
+ *
+ *  `request.cf.country` est fourni par Cloudflare a chaque requete, sans
+ *  appel a un tiers et sans cout. On enregistre le PAYS seul — pas la ville,
+ *  pas la region, et JAMAIS l'adresse IP : le pays suffit a savoir quels
+ *  marches convertissent, et c'est la donnee la moins intrusive qui reponde
+ *  a la question.
+ *
+ *  DECLARE dans la politique de confidentialite (section 2, « Donnees
+ *  techniques ») EN MEME TEMPS que ce code. Les deux vont ensemble : ajouter
+ *  une donnee de localisation sans l'annoncer serait exactement la faute
+ *  corrigee le matin meme sur les journaux de console. */
+function _paysRequete(req?: Request | null): string | null {
+  try {
+    const cf = (req as unknown as { cf?: { country?: string } })?.cf;
+    const p = cf?.country;
+    // 'T1' = reseau Tor, 'XX' = inconnu chez Cloudflare : on ne les retient
+    // pas comme des pays, ils fausseraient les statistiques.
+    if (!p || p === 'XX' || p === 'T1') return null;
+    return String(p).slice(0, 2).toUpperCase();
+  } catch { return null; }
+}
+
 function _provenance(req?: Request | null): 'desktop' | 'web' | 'inconnu' {
   try {
     const ua = req?.headers.get('user-agent') ?? '';
@@ -2021,6 +2050,7 @@ async function logOperation(
         // `meta.req`. Voir _provenance — sans elle, on ne sait pas quel canal
         // perd ses clients.
         provenance: _provenance((meta as { req?: Request }).req),
+        pays: _paysRequete((meta as { req?: Request }).req),
         ...meta,
         req: undefined,
       },
@@ -6260,6 +6290,12 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         // can show it as the mesh thumbnail (each mesh version gets
         // the image it was generated FROM, not the project's default).
         sourceImage: sourceImageStore,
+        // Provenance et pays — la generation de maillage n'ecrit PAS sa
+        // ligne via logOperation, elle l'insere ici. Sans ces deux champs
+        // l'operation la plus chere du produit serait la seule absente des
+        // statistiques.
+        provenance: _provenance(req),
+        pays: _paysRequete(req),
       },
       created_at: new Date().toISOString(),
     });
@@ -13475,6 +13511,83 @@ async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> 
 /** GET /api/admin/stats.json — ADMIN ONLY. Aggregated business metrics
  *  for the monitoring dashboard. Returns counts + revenue/margin totals
  *  across the whole user base, plus 7/30-day series. */
+/** GET /api/admin/audience.json — ADMIN ONLY. Repartition par PAYS et par
+ *  PROVENANCE (application de bureau / navigateur), sur une fenetre glissante.
+ *
+ *  POURQUOI CET ECRAN EXISTE. Le 20 aout 2026, le premier vrai visiteur venu
+ *  du Microsoft Store a lance huit generations, en a vu sept echouer, et
+ *  n'est jamais revenu. Impossible de savoir d'ou il venait ni par quel
+ *  canal : rien dans les lignes `jobs`, journal d'audit Supabase vide,
+ *  aucun journal Cloudflare conserve. On ne pouvait donc pas savoir quel
+ *  canal venait de perdre son premier client.
+ *
+ *  Les deux champs sont ecrits depuis le 2026-08-23 ; les lignes anterieures
+ *  n'en ont pas et sont comptees comme « inconnu » plutot que reparties au
+ *  hasard. Query: ?jours=30 (1 a 365).
+ *
+ *  Le TAUX D'ECHEC par pays est la colonne qui compte : c'est elle qui aurait
+ *  montre le probleme du 20 aout le jour meme. */
+async function handleAdminAudience(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const url = new URL(req.url);
+  const jours = Math.max(1, Math.min(365, parseInt(url.searchParams.get('jours') || '30', 10) || 30));
+  const depuis = new Date(Date.now() - jours * 24 * 3600 * 1000).toISOString();
+
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('jobs')
+    .select('status, credit_cost, created_at, options, user_id')
+    .gte('created_at', depuis)
+    .limit(5000);
+  if (error) return err(500, error.message);
+
+  type Case = { total: number; reussis: number; echecs: number; credits: number; comptes: Set<string> };
+  const neuf = (): Case => ({ total: 0, reussis: 0, echecs: 0, credits: 0, comptes: new Set() });
+  const parPays = new Map<string, Case>();
+  const parProvenance = new Map<string, Case>();
+
+  for (const j of ((data ?? []) as Array<{
+    status: string; credit_cost: number | null; user_id: string | null;
+    options: Record<string, unknown> | null;
+  }>)) {
+    const pays = (j.options?.pays as string | undefined) || 'inconnu';
+    const prov = (j.options?.provenance as string | undefined) || 'inconnu';
+    for (const [carte, cle] of [[parPays, pays], [parProvenance, prov]] as Array<[Map<string, Case>, string]>) {
+      const c = carte.get(cle) ?? neuf();
+      c.total++;
+      if (j.status === 'succeeded') c.reussis++;
+      else if (j.status === 'failed') c.echecs++;
+      c.credits += Number(j.credit_cost ?? 0);
+      if (j.user_id) c.comptes.add(j.user_id);
+      carte.set(cle, c);
+    }
+  }
+
+  const rendre = (carte: Map<string, Case>) => [...carte.entries()]
+    .map(([cle, c]) => ({
+      cle,
+      travaux: c.total,
+      reussis: c.reussis,
+      echecs: c.echecs,
+      // La colonne qui compte : un taux d'echec eleve sur un pays ou un
+      // canal signale un probleme que les totaux masquent.
+      taux_echec_pct: c.total ? Math.round((c.echecs / c.total) * 1000) / 10 : 0,
+      credits: c.credits,
+      comptes: c.comptes.size,
+    }))
+    .sort((a, b) => b.travaux - a.travaux);
+
+  return json({
+    ok: true,
+    fenetre_jours: jours,
+    depuis,
+    note: 'Les lignes anterieures au 2026-08-23 ne portent ni pays ni provenance '
+        + 'et apparaissent en « inconnu ».',
+    par_pays: rendre(parPays),
+    par_provenance: rendre(parProvenance),
+  });
+}
+
 async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const userOrResp = await _requireAdmin(req, env);
   if (userOrResp instanceof Response) return userOrResp;
@@ -16258,6 +16371,7 @@ export default {
         if (pathname === '/api/admin/history.csv'     && method === 'GET')  return await handleAdminHistoryCsv(req, env);
         if (pathname === '/api/admin/history.xlsx'    && method === 'GET')  return await handleAdminHistoryXls(req, env);
         if (pathname === '/api/admin/stats.json'      && method === 'GET')  return await handleAdminStats(req, env);
+        if (pathname === '/api/admin/audience.json'   && method === 'GET')  return await handleAdminAudience(req, env);
         if (pathname === '/api/admin/jobs/active'     && method === 'GET')  return await handleAdminActiveJobs(req, env);
         if (pathname === '/api/admin/jobs/cancel'     && method === 'POST') return await handleAdminCancelJob(req, env);
         if (pathname === '/api/admin/users'           && method === 'GET')  return await handleAdminListUsers(req, env);
