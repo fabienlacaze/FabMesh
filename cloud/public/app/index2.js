@@ -8669,12 +8669,27 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
       projectName: meshProjectName,
       assetKind: meshAssetKind,
     });
+    /* L'IDENTIFIANT DOIT ARRIVER AU DEBUT, PAS A LA FIN.
+     *
+     * `job.workerJobId` n'etait renseigne qu'au RETOUR de imageTo3D —
+     * c'est-a-dire une fois la generation terminee. Pendant les ~10
+     * minutes ou le bouton « Annuler » sert reellement, il valait donc
+     * undefined : le clic ne partait pas au worker, le GPU continuait
+     * aux frais de l'exploitant, et aucun credit n'etait rendu, alors
+     * que /api/jobs/cancel sait faire les deux.
+     *
+     * Le shim emet l'identifiant des la creation du travail ; on s'y
+     * abonne le temps de l'operation. */
+    let desabonne = null;
+    try {
+      desabonne = window.__meshyOn?.('ai3d-progress', (m) => {
+        if (m && typeof m === 'object' && m.jobId && !job.workerJobId) {
+          job.workerJobId = m.jobId;
+        }
+      }) || null;
+    } catch (_) {}
     try {
       const r = await API.imageTo3D(params);
-      // Capture the REAL worker-side job id so cancelJob can
-      // forward it to /api/jobs/cancel. Without this, the renderer
-      // was sending its local UI counter (state.jobIdCounter), which
-      // the Worker has no row for — every cancel was a silent no-op.
       if (r?.jobId) job.workerJobId = r.jobId;
       if (r?.success) {
         // Show mesh stats in the job details before completing
@@ -8695,6 +8710,9 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     } catch (e) {
       completeJob(job.id, false, e?.error || e?.message || String(e));
       if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), '3D generation error');
+    } finally {
+      // Un abonnement par generation, sinon ils s'empilent a chaque clic.
+      try { if (desabonne) desabonne(); } catch (_) {}
     }
   });
 });

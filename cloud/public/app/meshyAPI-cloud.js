@@ -101,6 +101,20 @@
   window.__meshyEmit = (channel, payload) => {
     bus.dispatchEvent(new CustomEvent(channel, { detail: payload }));
   };
+  /* S'ABONNER depuis l'exterieur du shim.
+   *
+   * Le bus n'exposait que l'emission. Le rendu ne pouvait donc pas
+   * ecouter un canal qu'il ne recevait pas deja par `meshyAPI.onXxx`,
+   * et l'identifiant de travail emis des la creation
+   * (`ai3d-progress` {stage:'queued', jobId}) etait perdu : l'ecouteur
+   * historique de index2.js commence par `typeof msg !== 'string'` —
+   * il jette tous les objets. D'ou un bouton « Annuler » inerte pendant
+   * les dix minutes ou il sert. */
+  window.__meshyOn = (channel, cb) => {
+    const h = (e) => { try { cb(e.detail); } catch (_) {} };
+    bus.addEventListener(channel, h);
+    return () => bus.removeEventListener(channel, h);
+  };
 
   /* ──────────────────────────────────────────────────────────────────
    * Poll a Replicate prediction and emit progress events the desktop
@@ -120,12 +134,14 @@
   async function pollPrediction(jobId, { onProgress, channel = 'ai3d-progress' } = {}) {
     const start = Date.now();
     let consecutiveErrors = 0;
+    let premierEchec = 0;
+    const TOLERANCE_ERREURS_MS = 3 * 60 * 1000;
     while (Date.now() - start < POLL_TIMEOUT_MS) {
       await new Promise((r) => setTimeout(r, 2500));
       let j;
       try {
         j = await getJSON(`/api/jobs/${jobId}`);
-        consecutiveErrors = 0;
+        consecutiveErrors = 0; premierEchec = 0;
       } catch (e) {
         // 503 = kill-switch on, 401 = banned, 5xx = worker issue.
         // Bail with a clear message instead of polling forever.
@@ -135,10 +151,22 @@
         if (e.status === 401) {
           throw new Error('Generation aborted: session expired or account banned.');
         }
-        // Transient network glitch — let up to 5 in a row pass before bailing.
+        /* TOLERANCE MESUREE EN TEMPS, PAS EN NOMBRE DE TENTATIVES.
+         *
+         * La regle etait « 5 echecs d'affilee » avec un sondage toutes les
+         * 2,5 s : soit DOUZE SECONDES ET DEMIE de reseau instable pour
+         * abandonner une generation qui dure dix minutes. Un tunnel, un
+         * changement de wifi, une mise en veille de l'onglet suffisaient.
+         * Le travail continuait cote serveur, les credits restaient
+         * debites, et l'utilisateur voyait un echec.
+         *
+         * On tolere desormais trois minutes d'erreurs consecutives. Les
+         * causes non transitoires (503 maintenance, 401 session expiree)
+         * sortent toujours immediatement, juste au-dessus. */
         consecutiveErrors++;
-        if (consecutiveErrors >= 5) {
-          throw new Error('Generation aborted after 5 consecutive poll failures: ' + (e.message || e));
+        if (premierEchec === 0) premierEchec = Date.now();
+        if (Date.now() - premierEchec > TOLERANCE_ERREURS_MS) {
+          throw new Error('Generation aborted after 3 minutes of failed polls: ' + (e.message || e));
         }
         continue;
       }
@@ -384,13 +412,31 @@
         const result = await pollPrediction(created.jobId);
         // Trigger credit pill refresh — mesh gen costs 1-2 credits.
         if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        _removePendingJob(created.jobId);
         return {
           ok: true, success: true,
           meshPath: result.url, meshUrl: result.url,
           jobId: created.jobId, duration_s: result.duration_s,
         };
+      } catch (e) {
+        /* L'ENTREE DE REPRISE SURVIT A UN ECHEC DE SONDAGE.
+         *
+         * Le `finally` la supprimait dans TOUS les cas — y compris quand
+         * le sondage abandonnait alors que le travail continuait cote
+         * serveur. L'utilisateur perdait alors toute trace de sa
+         * generation, meme apres rechargement de la page, alors qu'elle
+         * aboutissait quelques minutes plus tard.
+         *
+         * On ne la retire donc que sur une fin REELLE (succes, echec ou
+         * annulation renvoyes par le serveur) ; un abandon de sondage la
+         * laisse en place pour que resumePendingJobs() la reprenne. */
+        const finDuServeur = /Generation failed|cancelled by an administrator|maintenance mode|session expired/i
+          .test(String(e && e.message || ''));
+        if (finDuServeur) _removePendingJob(created.jobId);
+        throw e;
       } finally {
-        _removePendingJob(created.jobId);
+        // Le succes retire toujours l'entree (voir le return ci-dessus,
+        // qui passe par ce bloc apres avoir livre le resultat).
       }
     },
     imageToTrellis: function (opts) { return this.imageTo3D(opts); },

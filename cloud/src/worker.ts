@@ -673,8 +673,32 @@ async function _sendAdminAlertEmail(env: Env, subject: string, text: string): Pr
  *  Returns the remaining call budget, or null if over. */
 async function checkAndIncrementUserCalls(env: Env, userId: string): Promise<number | null> {
   const maxCalls = parseInt(env.MAX_USER_DAILY_CALLS ?? '', 10) || DEFAULT_MAX_USER_DAILY_CALLS;
+  /* UN CLIENT PAYANT N'EST PAS RATIONNE — comme pour le plafond en dollars.
+   *
+   * L'exemption existait sur `checkAndIncrementModalSpend` mais PAS ici :
+   * un client ayant achete 350 credits (pack Studio, 50 EUR) se faisait
+   * refuser au 40e appel de la journee, alors qu'il lui restait de quoi
+   * generer. Le compteur ne distingue meme pas les operations gratuites
+   * (une previsualisation de segmentation compte comme une generation),
+   * donc le plafond tombait bien avant les 40 « vraies » generations.
+   *
+   * Ce plafond est un garde anti-abus pour les comptes GRATUITS ; le solde
+   * de credits borne deja ce qu'un client payant peut consommer, et chaque
+   * credit a ete vendu avec une marge positive. On continue de COMPTER pour
+   * garder la mesure, mais on ne refuse plus. */
   const next = await _casIncrementCounter(env, `_meta/userdaily/${userId}/${todayUTC()}`, 1, maxCalls);
-  return next == null ? null : maxCalls - next;
+  if (next == null) {
+    if (await _isPaidAccount(env, userId)) {
+      try {
+        const cle = `_meta/userdaily/${userId}/${todayUTC()}`;
+        const cur = parseFloat((await r2GetText(env, cle)) || '0') || 0;
+        await env.MESHES.put(cle, String(cur + 1));
+      } catch { /* comptage seul */ }
+      return maxCalls;   // non borne pour un compte payant
+    }
+    return null;
+  }
+  return maxCalls - next;
 }
 
 /* ─────────────────────────── Turnstile (captcha) ────────────────────────
@@ -5089,6 +5113,50 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   // `_meta/paid/<uid>` exempte les comptes payants de TOUS les plafonds de
   // depense GPU. Il n'etait jamais retire — un compte rembourse gardait
   // donc A VIE un acces GPU illimite.
+  /* LITIGE GAGNE = LES CREDITS DOIVENT REVENIR.
+   *
+   * `charge.dispute.created` reprend 100 % des credits, ce qui est juste :
+   * l'argent est retenu des l'ouverture. Mais rien n'ecoutait
+   * `charge.dispute.closed`. Quand le vendeur GAGNE, Stripe lui rend les
+   * fonds — et le client, lui, restait sans ses 350 credits. On encaissait
+   * la vente et on retenait la marchandise.
+   *
+   * A la cloture avec `status: 'won'`, on rend ce qui avait ete repris. Les
+   * autres issues (`lost`, `warning_closed`) laissent la reprise en place. */
+  if (event.type === 'charge.dispute.closed') {
+    const d = (event.data?.object ?? {}) as {
+      status?: string; metadata?: Record<string, string>;
+      payment_intent?: string; charge?: string;
+    };
+    if (d.status !== 'won') return json({ received: true, dispute: d.status ?? 'unknown' });
+    const sb = supabaseAdmin(env);
+    const refs = [d.payment_intent, d.charge].filter(Boolean) as string[];
+    /* Type NOMME, pas `typeof ligne` : sur une variable initialisee a
+     * `null`, `typeof` se reduit a `null` et le cast efface les colonnes.
+     * C'est exactement la forme qui a produit le bug de remboursement. */
+    type LigneLitige = { id: number; user_id: string; credits: number; credits_origine?: number | null };
+    let ligne: LigneLitige | null = null;
+    for (const ref of refs) {
+      const { data } = await sb.from('payments')
+        .select('id, user_id, credits, credits_origine')
+        .eq('stripe_session_id', ref).maybeSingle();
+      if (data) { ligne = data as unknown as LigneLitige; break; }
+    }
+    if (!ligne) {
+      console.warn('[stripe] dispute.closed gagne mais paiement introuvable — a traiter a la main');
+      return json({ received: true, unmatched: true });
+    }
+    const origine = Number(ligne.credits_origine ?? 0);
+    const rendus = Math.max(0, origine - Number(ligne.credits ?? 0));
+    if (rendus > 0) {
+      await addCredits(env, ligne.user_id, rendus);
+      await sb.from('payments').update({ credits: origine }).eq('user_id', ligne.user_id)
+        .eq('stripe_session_id', refs[0]);
+      console.log(`[stripe] litige gagne : ${rendus} credits rendus a ${ligne.user_id}`);
+    }
+    return json({ received: true, restored: rendus });
+  }
+
   if (event.type === 'charge.refunded' || event.type === 'charge.dispute.created') {
     const ch = event.data.object as {
       payment_intent?: string; id?: string;
@@ -15028,6 +15096,9 @@ async function _pollModalOpStatus(
 interface ReapResult {
   scanned: number;
   reaped: number;
+  /** Travaux TERMINES que le faucheur a livres lui-meme, faute de sondage
+   *  client (onglet ferme pendant les ~10 min d'une generation). */
+  delivered?: number;
   credits_refunded: number;
   skipped: number;
   errors: string[];
@@ -15130,7 +15201,37 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
           : { ready: false } as ModalMeshStatusResp;
         let claimed = false;
         if (status.error) claimed = await _failAndRefundJob(env, job, status.error);
-        else if (status.ready && status.glb_base64) { /* finished; a client/admin poll persists it */ }
+        else if (status.ready && status.glb_base64) {
+          /* LE FAUCHEUR LIVRE, AU LIEU D'ATTENDRE UN SONDAGE.
+           *
+           * Cette branche etait vide, avec le commentaire « finished; a
+           * client/admin poll persists it ». Elle supposait donc qu'un
+           * client reste devant son ecran. Une generation de maillage dure
+           * environ dix minutes : celui qui ferme l'onglet ne sonde plus
+           * jamais. Resultat — credits debites, GLB REELLEMENT PRODUIT ET
+           * PAYE cote GPU, jamais livre, jamais rembourse, et la ligne
+           * restait non terminale donc le travail reapparaissait en
+           * « Resumed » a chaque chargement de page, indefiniment.
+           *
+           * On persiste et on finalise ici, avec la MEME garde de statut
+           * que le sondage client (`.in(...)`) pour ne pas ecraser une
+           * annulation gagnee entre-temps. */
+          try {
+            await persistModalGlb(env, id, status.glb_base64);
+            const { data: maj } = await sb.from('jobs')
+              .update({ status: 'succeeded', mesh_url: `mesh/${id}.glb`,
+                        finished_at: new Date().toISOString() })
+              .eq('id', id)
+              .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
+              .select('id');
+            if (maj && maj.length) {
+              out.delivered = (out.delivered ?? 0) + 1;
+              console.log(`[reaper] ${id} termine sans sondage client — maillage livre`);
+            }
+          } catch (e) {
+            noteErr(`${id}: livraison impossible: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
         else if (age > GRACE_MS) claimed = await _failAndRefundJob(env, job, `reaped: no result after ${GRACE_LABEL}`);
         if (claimed) {
           out.reaped++; out.credits_refunded += creditCost;
@@ -15248,6 +15349,7 @@ export default {
           reaped: 0,
           credits_refunded: 0,
           skipped: 0,
+          delivered: 0,
           errors: [] as string[],
         };
         try { await preWarmTick(env); } catch (e) { rec.errors.push('preWarm: ' + emsg(e)); }
@@ -15256,6 +15358,10 @@ export default {
           const r = await reapStuckJobs(env);
           rec.scanned = r.scanned; rec.reaped = r.reaped;
           rec.credits_refunded = r.credits_refunded; rec.skipped = r.skipped;
+          // Livraisons de rattrapage : un chiffre non nul signale des clients
+          // qui ferment l'onglet avant la fin. C'est une mesure utile, pas
+          // une anomalie — mais elle doit etre visible dans le recu.
+          rec.delivered = r.delivered ?? 0;
           rec.errors.push(...r.errors.map((m) => 'reaper: ' + m));
         } catch (e) { rec.errors.push('reaper: ' + emsg(e)); }
         rec.duration_ms = Date.now() - t0;
@@ -15345,7 +15451,17 @@ export default {
           // Stripe kill: block new checkouts but NEVER block the
           // webhook — Stripe has already charged the card; if we 503
           // the webhook the user pays and gets zero credits.
-          if (!flags.stripe_enabled && pathname === '/api/checkout') {
+          /* LA CAISSE BOUTIQUE EST AUSSI UNE CAISSE.
+           *
+           * Le coupe-circuit ne visait que `/api/checkout` : un
+           * administrateur qui coupait les paiements — parce qu'un
+           * probleme de facturation venait d'etre constate, par exemple —
+           * laissait `/api/market/checkout` encaisser tranquillement. Un
+           * interrupteur qui n'eteint qu'une moitie n'en est pas un.
+           * `/api/checkout/reconcile` reste ouvert a dessein : il ne
+           * declenche aucun paiement, il repare ceux deja encaisses. */
+          if (!flags.stripe_enabled
+              && (pathname === '/api/checkout' || pathname === '/api/market/checkout')) {
             return err(503, 'purchases temporarily disabled by admin');
           }
         }
