@@ -1957,6 +1957,42 @@ def mesh_router():
         return {"ready": True, "glb_base64": base64.b64encode(glb).decode("ascii"),
                 "bytes": len(glb)}
 
+    @api.post("/mesh_fetch")
+    async def mesh_fetch(request: Request):
+        """Renvoie les octets BRUTS du GLB, sans base64.
+
+        POURQUOI (2026-08-23). `/mesh_status` renvoie le maillage encode en
+        base64 dans du JSON. Cote worker Cloudflare, cela materialise
+        simultanement : la chaine JSON base64 (2 octets par caractere en
+        memoire JS, soit ~2,7x la taille du GLB), la chaine rendue par
+        atob(), puis le Uint8Array. Pour un prereglage Quality ou Ultra, on
+        depasse la limite dure de 128 Mo et l'isolat est tue — le client
+        recoit alors des 5xx en boucle sur le meme job_id, et le maillage
+        n'est jamais livre alors qu'il EXISTE sur le volume.
+
+        La meme lecon avait deja ete payee sur l'app de rig, qui expose
+        `/rig-fetch` depuis (voir _skintokens_rig.py) : le worker pipe le
+        ReadableStream directement dans R2 et les octets ne passent jamais
+        par sa memoire. On aligne le maillage sur ce motif.
+
+        `/mesh_status` reste inchange pour ne rien casser : le worker essaie
+        cette route d'abord et retombe sur le base64 si elle est absente,
+        c'est-a-dire tant que cette version n'est pas deployee."""
+        payload = await _read_json(request)
+        _check_auth(payload)
+        job_id = (payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="job_id required")
+        mesh_output_volume.reload()
+        if os.path.isfile(f"/data/{job_id}.err"):
+            raise HTTPException(status_code=410, detail="mesh failed")
+        chemin = f"/data/{job_id}.glb"
+        if not os.path.isfile(chemin):
+            raise HTTPException(status_code=404, detail="not ready")
+        from fastapi.responses import Response as _Reponse
+        with open(chemin, "rb") as f:
+            return _Reponse(content=f.read(), media_type="model/gltf-binary")
+
     @api.post("/mesh_convert")
     async def mesh_convert(request: Request):
         """Export-format conversion, separate from /mesh_start on purpose.

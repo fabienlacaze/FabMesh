@@ -487,6 +487,46 @@ function _rigBaseUrl(env: Env): string | undefined {
   return env.MODAL_RIG_URL;
 }
 
+/** Signale que l'arret dur adosse a la facture Modal est INACTIF.
+ *
+ *  `_budgetReelEpuise` echoue volontairement en mode ouvert quand
+ *  `_meta/modal_real_usage.json` manque ou a plus de 26 h : un poller tombe
+ *  ne doit pas arreter le service. Encore faut-il le SAVOIR — sans quoi on
+ *  croit avoir un plafond adosse a la facture reelle alors qu'il ne reste
+ *  que le compteur d'estimations, qui sous-evalue d'un facteur ~4,6.
+ *
+ *  `scripts/modal_usage_push.py` ecrit ce fichier ; au 2026-08-23 aucune
+ *  tache planifiee ne l'execute (verifie : aucune reference dans un cron,
+ *  un workflow ou un .ps1). Cette alerte est la premiere chose qui rendra
+ *  le trou visible.
+ *
+ *  Debouncee a une fois par jour : ce chemin est traverse a chaque
+ *  generation, on ne veut pas une alerte par clic. */
+async function _alerteUsageReelMuet(env: Env, raison: string): Promise<void> {
+  if (!env.MESHES) return;
+  try {
+    const cle = `_meta/alerte_usage_muet/${todayUTC()}`;
+    if (await r2GetText(env, cle)) return;             // deja alerte aujourd'hui
+    await env.MESHES.put(cle, new Date().toISOString());
+    console.error(`[budget] ARRET DUR INACTIF — usage reel ${raison}`);
+    await _sendAdminAlertEmail(
+      env,
+      'MyFabmesh — le plafond adosse a la facture Modal est INACTIF',
+      [
+        `Le fichier _meta/modal_real_usage.json est ${raison}.`,
+        '',
+        "Tant qu'il n'est pas rafraichi, la seule limite restante est le compteur",
+        "d'ESTIMATIONS du worker, qui sous-evalue la depense reelle d'un facteur",
+        "d'environ 4,6 (mesure du 2026-08-04 : 2,50 $ annonces pour 11,59 $",
+        'factures). Le plafond journalier affiche autorise donc en pratique',
+        'plusieurs fois son montant.',
+        '',
+        'A faire : planifier scripts/modal_usage_push.py, toutes les heures.',
+        'Cette alerte ne se repete qu une fois par jour.',
+      ].join(String.fromCharCode(10)));
+  } catch (_) { /* best-effort */ }
+}
+
 async function _budgetReelEpuise(env: Env): Promise<boolean> {
   if (!env.MESHES) return false;
   try {
@@ -494,12 +534,25 @@ async function _budgetReelEpuise(env: Env): Promise<boolean> {
     if (budget <= 0) budget = parseFloat(env.MODAL_BUDGET_USD ?? '') || 0;
     if (budget <= 0) return false;                     // aucun budget defini
     const txt = await r2GetText(env, '_meta/modal_real_usage.json');
-    if (!txt) return false;                            // pas de donnee : on laisse passer
+    if (!txt) {
+      await _alerteUsageReelMuet(env, 'jamais publie');
+      return false;                                    // pas de donnee : on laisse passer
+    }
     const real = JSON.parse(txt) as { usage?: number; ts?: string };
     if (typeof real.usage !== 'number' || !real.ts) return false;
     const ageMs = Date.now() - Date.parse(real.ts);
     if (!(ageMs < 26 * 3600 * 1000)) {
-      console.warn('[budget] usage reel perime — arret dur inactif, on laisse passer');
+      /* L'ALERTE PROMISE PLUS HAUT N'EXISTAIT PAS.
+       *
+       * Le commentaire de cette fonction annonce « si le poller tombe, on
+       * veut une alerte, pas un service a l'arret ». Il n'y avait qu'un
+       * `console.warn`, dans un journal que personne ne lit. Or le seul
+       * arret dur adosse a la facture REELLE depend entierement de ce
+       * fichier : sans lui, il ne reste que le compteur d'estimations, qui
+       * sous-evalue d'un facteur ~4,6 (mesure du 2026-08-04 : 2,50 $
+       * annonces pour 11,59 $ factures). Le service tournait donc sans
+       * plafond credible, et rien ne le signalait. */
+      await _alerteUsageReelMuet(env, `perime de ${Math.round(ageMs / 3600000)} h`);
       return false;                                    // perimee : on laisse passer
     }
     if (real.usage >= budget) {
@@ -8059,11 +8112,48 @@ async function callModalMeshStatus(env: Env, jobId: string): Promise<ModalMeshSt
 }
 
 /** Save a base64-encoded GLB to R2 and return the public URL. */
+/** Ecrit le GLB dans R2 en le PIPANT depuis Modal, sans le materialiser.
+ *
+ *  Meme lecon que l'app de rig, deja payee la-bas : un GLB de 60 Mo renvoye
+ *  en base64 dans du JSON fait coexister dans la memoire du worker la chaine
+ *  base64 (2 octets par caractere cote JS), la chaine rendue par atob() puis
+ *  le Uint8Array — largement au-dela des 128 Mo de limite dure. L'isolat est
+ *  tue, le client recoit des 5xx en boucle, et le maillage n'est jamais livre
+ *  alors qu'il EXISTE sur le volume Modal.
+ *
+ *  On tente donc `/mesh_fetch` (octets bruts, ajoute a modal_app/app.py le
+ *  2026-08-23) et on pipe son flux directement dans R2. TANT QUE L'APP MODAL
+ *  N'EST PAS REDEPLOYEE, cette route repond 404 et on retombe sur le base64 :
+ *  rien ne casse, le correctif s'active au prochain `modal deploy`. */
+async function _persistDepuisMeshFetch(env: Env, jobId: string): Promise<string | null> {
+  const base = env.MODAL_MESH_STATUS_URL;
+  if (!base || !env.MODAL_SHARED_SECRET || !env.MESHES) return null;
+  const url = base.replace(/\/mesh_status\/?$/, '/mesh_fetch');
+  if (url === base) return null;                 // forme d'URL inattendue
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!r.ok || !r.body) return null;           // 404 = app pas encore redeployee
+    const key = `mesh/${jobId}.glb`;
+    await env.MESHES.put(key, r.body, { httpMetadata: { contentType: 'model/gltf-binary' } });
+    _writeLastWarmMs(env, '_meta/last_warm_mesh.txt').catch(() => {});
+    return await signedR2Url(env, key, 'mesh');
+  } catch {
+    return null;                                 // repli silencieux sur le base64
+  }
+}
+
 async function persistModalGlb(env: Env, jobId: string, glbBase64: string): Promise<string> {
   if (!env.MESHES || !env.R2_PUBLIC_URL) {
     throw new Error('R2 bucket unavailable; cannot persist Modal mesh');
   }
-  // Decode base64 → ArrayBuffer.
+  const parFlux = await _persistDepuisMeshFetch(env, jobId);
+  if (parFlux) return parFlux;
+  // Repli : decodage base64 en memoire (voir l'avertissement ci-dessus).
   const bin = atob(glbBase64);
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
