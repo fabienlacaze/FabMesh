@@ -17,6 +17,7 @@ import Stripe from 'stripe';
 import Replicate from 'replicate';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { checkPromptSafety } from './nsfw_filter';
+import { legalIdentityUnfilledFields } from './config/legal-identity';
 
 /* ──────────────────────────── env binding ──────────────────────────── */
 
@@ -194,6 +195,10 @@ export interface Env {
    * se rabattait sur un joker `*.r2.cloudflarestorage.com` acceptant
    * le compte de n'importe qui (voir isTrustedAssetHost). */
   R2_ACCOUNT_ID?: string;
+  /** '1' laisse ouvrir une vente malgre des mentions legales vides.
+   *  A poser DELIBEREMENT, pour des essais uniquement — voir
+   *  _venteBloqueeParMentions. */
+  ALLOW_UNFILLED_LEGAL?: string;
 }
 
 /* `R2Bucket` vient desormais des types d'execution generes par
@@ -4661,6 +4666,8 @@ function _stripeForm(obj: Record<string, unknown>): URLSearchParams {
  *  cart. Returns { url } for the client to redirect to. Free listings
  *  are filtered out server-side (downloads via /api/market/download). */
 async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
+  const bloque = _venteBloqueeParMentions(env);
+  if (bloque) return bloque;
   const gate = await _marketGate(env);
   if (gate) return gate;
   const user = await getSessionUser(req, env);
@@ -5209,7 +5216,39 @@ async function handlePricingAvailability(_req: Request, env: Env): Promise<Respo
   return json({ ok: true, available, fonctions });
 }
 
+/** Refuse d'OUVRIR UNE VENTE tant que les mentions legales obligatoires sont
+ *  vides.
+ *
+ *  POURQUOI FERMER PLUTOT QU'AFFICHER DES CROCHETS (2026-08-23). Les pages
+ *  /legal/mentions et /legal/terms montrent aujourd'hui « [A_COMPLETER: forme
+ *  juridique] », le SIRET, le RCS, le siege et le mediateur — parce que
+ *  l'exploitant ne les a pas encore fournis. Un controle de deploiement les
+ *  signale deja, mais il se contourne avec ALLOW_UNFILLED_LEGAL=1, et c'est ce
+ *  qui a ete fait pour livrer des correctifs de securite.
+ *
+ *  Le probleme n'est donc pas l'affichage : c'est qu'on peut ENCAISSER dans
+ *  cet etat. Or la LCEN (art. 6-III) et le code de la consommation
+ *  (art. L221-5) exigent ces informations AVANT la conclusion du contrat a
+ *  distance. Vendre sans elles n'est pas un defaut cosmetique.
+ *
+ *  On refuse donc la vente, avec un message honnete, plutot que de la
+ *  conclure. Un service qui dit « pas encore ouvert » vaut mieux qu'un service
+ *  qui prend l'argent sans dire qui l'encaisse. `ALLOW_UNFILLED_LEGAL=1` reste
+ *  accepte pour les essais, mais il faut le poser DELIBEREMENT. */
+function _venteBloqueeParMentions(env: Env): Response | null {
+  if (env.ALLOW_UNFILLED_LEGAL === '1') return null;
+  const manquants = legalIdentityUnfilledFields();
+  if (!manquants.length) return null;
+  console.error(`[legal] vente refusee : ${manquants.length} mention(s) legale(s) `
+              + `non remplie(s) — ${manquants.slice(0, 6).join(', ')}`);
+  return err(503, 'Sales are not open yet: this service is still missing legally '
+                + 'required seller information. No payment can be taken until it '
+                + 'is published. Please contact us if you need access.');
+}
+
 async function handleCheckout(req: Request, env: Env): Promise<Response> {
+  const bloque = _venteBloqueeParMentions(env);
+  if (bloque) return bloque;
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   const corps = await req.json() as { packId: PackId; consent?: boolean; consentedAt?: string };
@@ -13945,6 +13984,98 @@ async function _comptesAyantPaye(env: Env): Promise<Set<string>> {
   return out;
 }
 
+/** GET /api/admin/sante.json — ADMIN. Ce qui est CONFIGURE et ce qui manque.
+ *
+ *  POURQUOI. Trois protections de ce service sont aujourd'hui inertes, et
+ *  AUCUNE ne le dit : l'alerte de budget n'a pas de cle Resend, le poller
+ *  d'usage n'est declenche par rien, et la caisse tourne sur une cle Stripe de
+ *  TEST. Chacune echoue en silence, par conception — une alerte qui bloque le
+ *  service serait pire. Mais « echouer en silence » ne doit pas vouloir dire
+ *  « etre invisible » : c'est exactement ce qui a permis a la collecte du pays
+ *  de tourner sans declaration, et au plafond adosse a la facture de ne jamais
+ *  se declencher.
+ *
+ *  Cet ecran ne corrige rien. Il rend l'etat REGARDABLE. */
+async function handleAdminSante(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+
+  const mentionsManquantes = legalIdentityUnfilledFields();
+  const cleStripeTest = /^sk_test_/.test(env.STRIPE_SECRET_KEY ?? '');
+  const abosConfigures = ['SUB_STARTER', 'SUB_PRO', 'SUB_STUDIO']
+    .filter((k) => !!(env as unknown as Record<string, string | undefined>)[`STRIPE_PRICE_${k}`]);
+
+  // Fraicheur de l'usage reel : c'est lui qui arme l'arret dur.
+  let usageReel: { ts?: string; usage?: number } | null = null;
+  try {
+    const t = await r2GetText(env, '_meta/modal_real_usage.json');
+    usageReel = t ? JSON.parse(t) : null;
+  } catch { /* absent */ }
+  const ageUsageH = usageReel?.ts
+    ? Math.round((Date.now() - Date.parse(usageReel.ts)) / 3600000) : null;
+
+  const points = [
+    {
+      cle: 'stripe_mode',
+      ok: !cleStripeTest,
+      etat: cleStripeTest ? 'cle de TEST' : 'cle live',
+      consequence: cleStripeTest
+        ? "Aucun paiement reel ne peut aboutir. Les deux caisses refusent d'ouvrir une session."
+        : null,
+      action: cleStripeTest ? 'npx wrangler secret put STRIPE_SECRET_KEY (sk_live_...)' : null,
+    },
+    {
+      cle: 'mentions_legales',
+      ok: mentionsManquantes.length === 0,
+      etat: `${mentionsManquantes.length} champ(s) non rempli(s)`,
+      consequence: mentionsManquantes.length
+        ? 'La vente est REFUSEE (503) tant que ces mentions manquent : les publier est '
+          + 'une obligation prealable a la conclusion du contrat (LCEN 6-III, conso. L221-5).'
+        : null,
+      action: mentionsManquantes.length ? 'cloud/src/config/legal-identity.ts' : null,
+      details: mentionsManquantes,
+    },
+    {
+      cle: 'abonnements',
+      ok: abosConfigures.length === 3,
+      etat: `${abosConfigures.length}/3 prix configures`,
+      consequence: abosConfigures.length < 3
+        ? 'Les cartes d abonnement sont MASQUEES sur /buy — aucun revenu recurrent possible.'
+        : null,
+      action: abosConfigures.length < 3
+        ? 'node scripts/stripe-create-sub-prices.mjs --apply --live' : null,
+    },
+    {
+      cle: 'alerte_admin',
+      ok: !!env.RESEND_API_KEY,
+      etat: env.RESEND_API_KEY ? 'configuree' : 'AUCUNE cle Resend',
+      consequence: env.RESEND_API_KEY ? null
+        : "Les alertes admin (budget epuise, arret dur inactif) ne partent nulle part.",
+      action: env.RESEND_API_KEY ? null : 'npx wrangler secret put RESEND_API_KEY',
+    },
+    {
+      cle: 'usage_reel',
+      ok: ageUsageH != null && ageUsageH < 26,
+      etat: ageUsageH == null ? 'JAMAIS publie' : `${ageUsageH} h`,
+      consequence: (ageUsageH == null || ageUsageH >= 26)
+        ? "L'arret dur adosse a la facture Modal est INACTIF. Seul reste le compteur "
+          + "d'estimations, qui sous-evalue d'un facteur ~4,6."
+        : null,
+      action: (ageUsageH == null || ageUsageH >= 26)
+        ? 'Declarer MODAL_TOKEN_ID / MODAL_TOKEN_SECRET / MODAL_USAGE_SECRET dans les '
+          + 'secrets GitHub Actions (workflow modal-usage-push.yml)' : null,
+    },
+  ];
+
+  return json({
+    ok: true,
+    pret_a_vendre: points.every((p) => p.ok),
+    points,
+    note: 'Chacun de ces points echoue EN SILENCE par conception. Cet ecran est le '
+        + 'seul endroit qui les rend visibles.',
+  });
+}
+
 async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const userOrResp = await _requireAdmin(req, env);
   if (userOrResp instanceof Response) return userOrResp;
@@ -16735,6 +16866,7 @@ export default {
         if (pathname === '/api/admin/history.xlsx'    && method === 'GET')  return await handleAdminHistoryXls(req, env);
         if (pathname === '/api/admin/stats.json'      && method === 'GET')  return await handleAdminStats(req, env);
         if (pathname === '/api/admin/audience.json'   && method === 'GET')  return await handleAdminAudience(req, env);
+        if (pathname === '/api/admin/sante.json'      && method === 'GET')  return await handleAdminSante(req, env);
         if (pathname === '/api/admin/jobs/active'     && method === 'GET')  return await handleAdminActiveJobs(req, env);
         if (pathname === '/api/admin/jobs/cancel'     && method === 'POST') return await handleAdminCancelJob(req, env);
         if (pathname === '/api/admin/users'           && method === 'GET')  return await handleAdminListUsers(req, env);
