@@ -23,6 +23,9 @@ Write-Host "[2/3] Setting MODAL_RECTIFY_URL..." -ForegroundColor Cyan
     npx wrangler secret put MODAL_RECTIFY_URL
 
 Write-Host "[3/3] Deploying Worker..." -ForegroundColor Cyan
-npx wrangler deploy
+# npm run deploy, PAS npx wrangler deploy : les garde-fous (r2-public,
+# mentions legales, fraicheur de out/) sont branches sur predeploy, que
+# npm ne declenche que pour "npm run deploy".
+npm run deploy
 
 Write-Host "Wave 1 deploy done." -ForegroundColor Green

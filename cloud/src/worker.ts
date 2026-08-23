@@ -745,6 +745,19 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userI
       // perdaient — et l'alerte de budget lit ces compteurs.
       await _incrementAtomique(env, `_meta/modal_spend/${todayUTC()}`, estimatedUsd);
       await _incrementAtomique(env, '_meta/modal_spend_total.txt', estimatedUsd);
+      /* LE COMPTEUR PERSONNEL AUSSI, meme si le plafond ne s'applique pas.
+       *
+       * Cette branche ne l'incrementait pas, alors que `refundModalSpend`
+       * le DECREMENTE sans condition. Une generation payante ratee faisait
+       * donc baisser un compteur qu'elle n'avait jamais fait monter :
+       * borne a zero, il finissait par desserrer le plafond anti-abus des
+       * comptes gratuits partageant le meme compteur, et les statistiques
+       * de depense par compte mentaient. Le plafond n'est toujours pas
+       * applique ici — on ne fait que dire la verite sur ce qui a ete
+       * depense. */
+      if (userId) {
+        await _incrementAtomique(env, `_meta/userspend/${userId}/${todayUTC()}`, estimatedUsd);
+      }
       await _maybeAlertModalBudget(env);
     } catch { /* accounting only — never block a paid call on it */ }
     return maxUsd;
@@ -828,8 +841,15 @@ async function _maybeAlertModalBudget(env: Env): Promise<void> {
     budget = parseFloat(env.MODAL_BUDGET_USD ?? '') || 0;
   }
   if (budget <= 0) {
-    console.warn('[budget] ALARME INACTIVE : ni _meta/modal_budget_total.txt '
-               + 'ni MODAL_BUDGET_USD ne sont definis — aucune alerte ne sera envoyee');
+    // Deux causes tres differentes, deux messages : un fichier VALANT zero
+    // est une consigne d'arret (l'arret dur refuse deja tout, il n'y a rien
+    // a alerter) ; un fichier ABSENT est un trou de configuration.
+    if (budgetR2Alerte === 0) {
+      console.log('[budget] budget pose a 0 — arret dur actif, aucune alerte necessaire');
+    } else {
+      console.warn('[budget] ALARME INACTIVE : ni _meta/modal_budget_total.txt '
+                 + 'ni MODAL_BUDGET_USD ne sont definis — aucune alerte ne sera envoyee');
+    }
     return;
   }
   // Prefer the REAL Modal workspace usage pushed by the billing poller (fresh
@@ -4630,25 +4650,98 @@ type LignePaiement = {
    apparait dans l'ecran de sante. Un marqueur R2 suffit — meme mecanique
    que `_meta/paid/<uid>`, aucune migration a faire courir.
    ═══════════════════════════════════════════════════════════════════════ */
-async function _lireDette(env: Env, uid: string): Promise<number> {
+/* UNE ENTREE PAR PAIEMENT, EN VALEUR ABSOLUE — et non un cumul.
+ *
+ * Ma premiere version faisait `_ecrireDette(dejaDu + manque)` AVANT la mise
+ * a jour de la ligne `payments`. Si la suite echouait, le gestionnaire
+ * repondait 500, Stripe rejouait — il redelivre « au moins une fois » — et
+ * la dette etait RE-ADDITIONNEE : le client se voyait retenir deux fois le
+ * meme montant sur son prochain achat. Aucun journal d'evenements traites
+ * n'existe en base pour l'en empecher.
+ *
+ * En ecrivant le manque ABSOLU sous la cle du paiement, un rejeu ecrit
+ * exactement la meme valeur au lieu de s'ajouter. L'idempotence vient de la
+ * forme de la donnee, pas d'un verrou qu'on pourrait oublier de poser. */
+function _prefixeDette(uid: string): string { return `_meta/dette/${uid}/`; }
+
+async function _detteTotale(env: Env, uid: string): Promise<number> {
+  if (!env.MESHES) return 0;
+  let total = 0;
   try {
-    if (!env.MESHES) return 0;
-    const o = await env.MESHES.get(`_meta/dette/${uid}`);
-    if (!o) return 0;
-    const n = parseFloat(await o.text());
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-  } catch { return 0; }
+    // Ancienne cle plate, au cas ou une dette y aurait ete posee avant ce
+    // correctif. Elle est reprise puis ignoree ensuite.
+    const plat = await env.MESHES.get(`_meta/dette/${uid}`);
+    if (plat) {
+      const n = parseFloat(await plat.text());
+      if (Number.isFinite(n) && n > 0) total += Math.floor(n);
+    }
+  } catch { /* lecture d'appoint */ }
+  try {
+    let curseur: string | undefined;
+    do {
+      const l = await env.MESHES.list({ prefix: _prefixeDette(uid), cursor: curseur, limit: 200 });
+      for (const o of l.objects) {
+        const v = await env.MESHES.get(o.key);
+        if (!v) continue;
+        const n = parseFloat(await v.text());
+        if (Number.isFinite(n) && n > 0) total += Math.floor(n);
+      }
+      curseur = l.truncated ? l.cursor : undefined;
+    } while (curseur);
+  } catch (e) {
+    console.error(`[stripe] lecture de la dette de ${uid} impossible :`, (e as Error).message);
+  }
+  return total;
 }
 
-async function _ecrireDette(env: Env, uid: string, credits: number): Promise<void> {
+/** Pose le manque ABSOLU d'un paiement. Un rejeu reecrit la meme valeur. */
+async function _poserDette(
+  env: Env, uid: string, idPaiement: number | string, credits: number,
+): Promise<void> {
   try {
     if (!env.MESHES) return;
-    if (credits <= 0) { await env.MESHES.delete(`_meta/dette/${uid}`); return; }
-    await env.MESHES.put(`_meta/dette/${uid}`, String(Math.floor(credits)));
+    const cle = `${_prefixeDette(uid)}${idPaiement}`;
+    if (credits <= 0) { await env.MESHES.delete(cle); return; }
+    await env.MESHES.put(cle, String(Math.floor(credits)));
   } catch (e) {
     console.error(`[stripe] dette de ${credits} credits NON enregistree pour ${uid}:`,
       (e as Error).message);
   }
+}
+
+/** Retient jusqu'a `montant` credits sur la dette. Rend ce qui a ete retenu. */
+async function _consommerDette(env: Env, uid: string, montant: number): Promise<number> {
+  if (!env.MESHES || montant <= 0) return 0;
+  let reste = Math.floor(montant);
+  let retenu = 0;
+  const cles: string[] = [`_meta/dette/${uid}`];
+  try {
+    let curseur: string | undefined;
+    do {
+      const l = await env.MESHES.list({ prefix: _prefixeDette(uid), cursor: curseur, limit: 200 });
+      for (const o of l.objects) cles.push(o.key);
+      curseur = l.truncated ? l.cursor : undefined;
+    } while (curseur);
+  } catch (e) {
+    console.error(`[stripe] liste de la dette de ${uid} impossible :`, (e as Error).message);
+    return 0;
+  }
+  for (const cle of cles) {
+    if (reste <= 0) break;
+    try {
+      const o = await env.MESHES.get(cle);
+      if (!o) continue;
+      const n = Math.floor(parseFloat(await o.text()));
+      if (!Number.isFinite(n) || n <= 0) { await env.MESHES.delete(cle); continue; }
+      const pris = Math.min(n, reste);
+      reste -= pris; retenu += pris;
+      if (n - pris > 0) await env.MESHES.put(cle, String(n - pris));
+      else await env.MESHES.delete(cle);
+    } catch (e) {
+      console.error(`[stripe] consommation de dette impossible sur ${cle} :`, (e as Error).message);
+    }
+  }
+  return retenu;
 }
 
 async function _retrouverPaiement(
@@ -5763,22 +5856,24 @@ async function _traiterPaiement(env: Env, opts: {
   try {
     if (env.MESHES) await env.MESHES.delete(`_meta/paidcheck/${opts.userId}/${todayUTC()}`);
   } catch { /* le cache expire de toute facon a minuit UTC */ }
-  /* RETENUE DE LA DETTE — voir `_lireDette`.
+  /* RETENUE DE LA DETTE — voir `_detteTotale`.
    *
    * Un remboursement anterieur a pu ne pas reprendre tous les credits,
    * faute de solde. Cet ecart est retenu ici, avant creditement : sans
    * quoi il suffisait de depenser puis de se faire rembourser en boucle. */
-  const dette = await _lireDette(env, opts.userId);
-  const retenue = Math.min(dette, opts.credits);
+  const dette = await _detteTotale(env, opts.userId);
+  const retenue = dette > 0 ? await _consommerDette(env, opts.userId, opts.credits) : 0;
   if (retenue > 0) {
-    await _ecrireDette(env, opts.userId, dette - retenue);
     console.log(`[stripe] ${retenue} credits retenus sur l'achat de `
               + `${opts.userId} au titre d'un remboursement anterieur `
               + `(reste du: ${dette - retenue})`);
   }
   const credited = await addCredits(env, opts.userId, opts.credits - retenue);
   if (credited === null) {
-    if (retenue > 0) await _ecrireDette(env, opts.userId, dette);  // on rend la dette : le credit n'a pas eu lieu
+    /* Le credit n'a pas eu lieu : on REND la dette consommee, sinon un
+     * rejeu la retiendrait une seconde fois. La cle porte l'identifiant de
+     * la session, donc deux paiements distincts ne se marchent pas dessus. */
+    if (retenue > 0) await _poserDette(env, opts.userId, `rendu_${opts.sessionOrInvoiceId}`, retenue);
     // RPC failed; placeholder stays at credits=0 so the next retry
     // hits state 2 and re-attempts. Tell Stripe to retry by returning
     // retry:true → handler answers with a 500 so Stripe re-delivers.
@@ -6082,17 +6177,50 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
      * pouvait RIEN trouver. Le gagnant d'un litige ne recuperait donc
      * jamais ses credits, et la correction apportee trois fois au
      * remboursement n'avait jamais traverse ces quinze lignes. */
-    const ligne = await _retrouverPaiement(env, sb, d);
+    /* UN LITIGE N'EST PAS UNE CHARGE — corrige le 2026-08-23 (3e tour).
+     *
+     * Ma premiere version passait l'objet LITIGE tel quel. Or son `id` est
+     * un `dp_...`, et `_retrouverPaiement` fait `ch.id ?? ch.charge` : la
+     * relecture partait donc sur `/v1/charges/dp_...`, soit un 404. La
+     * seule voie qui couvrait les abonnements etait morte le jour meme ou
+     * je l'ai ecrite. On lui donne la CHARGE, pas le litige. */
+    const ligne = await _retrouverPaiement(env, sb, {
+      payment_intent: d.payment_intent, id: d.charge,
+    });
     if (!ligne) {
-      console.warn('[stripe] dispute.closed gagne mais paiement introuvable — a traiter a la main');
+      console.warn(`[stripe] dispute.closed gagne mais paiement introuvable `
+                 + `(refs=${refs.join(',')}) — a traiter a la main`);
       return json({ received: true, unmatched: true });
     }
     const origine = Number(ligne.credits_origine ?? 0);
     const rendus = Math.max(0, origine - Number(ligne.credits ?? 0));
     if (rendus > 0) {
+      /* ON RECLAME LA LIGNE AVANT DE CREDITER, PAS APRES.
+       *
+       * L'ancienne mise a jour filtrait sur `stripe_session_id = refs[0]`,
+       * c'est-a-dire un `pi_...`, alors que la colonne ne contient que des
+       * `cs_...`/`in_...` — mesure : 3 lignes sur 3 en `cs_`. Elle ne
+       * touchait donc AUCUNE ligne. Stripe redelivrant « au moins une
+       * fois », le rejeu recalculait `origine - credits` sur des valeurs
+       * inchangees et RECREDITAIT a chaque fois.
+       *
+       * On met a jour par la cle primaire, et on ne credite que si la mise
+       * a jour a bien reclame la ligne : elle devient le verrou. */
+      const { data: reclamee, error: errMaj } = await sb.from('payments')
+        .update({ credits: origine })
+        .eq('id', ligne.id)
+        .lt('credits', origine)          // rejeu : plus rien a rendre
+        .select('id');
+      if (errMaj) {
+        console.error('[stripe] litige gagne : mise a jour impossible, credits NON rendus :',
+          errMaj.message);
+        return err(500, 'dispute update failed');
+      }
+      if (!reclamee || !reclamee.length) {
+        console.log(`[stripe] litige gagne deja traite pour ${ligne.user_id} — rien a refaire`);
+        return json({ received: true, restored: 0, deja_traite: true });
+      }
       await addCredits(env, ligne.user_id, rendus);
-      await sb.from('payments').update({ credits: origine }).eq('user_id', ligne.user_id)
-        .eq('stripe_session_id', refs[0]);
       console.log(`[stripe] litige gagne : ${rendus} credits rendus a ${ligne.user_id}`);
     }
     return json({ received: true, restored: rendus });
@@ -6232,12 +6360,18 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
          * credits gardait donc les maillages ET l'argent, sans trace. On
          * reporte l'ecart sur son prochain achat. */
         const manque = Math.max(0, aReprendre - repris);
-        if (manque > 0) {
-          const dejaDu = await _lireDette(env, uid);
-          await _ecrireDette(env, uid, dejaDu + manque);
+        if (manque > 0 && paiement) {
+          /* VALEUR ABSOLUE sous la cle du paiement : un rejeu Stripe
+           * reecrit la meme chose au lieu de s'ajouter. `aReprendre` et
+           * `repris` sont deja cumulatifs, donc `manque` l'est aussi. */
+          await _poserDette(env, uid, paiement.id, manque);
           console.error(`[stripe] ${event.type}: ${manque} credits NON reprenables `
-                      + `(solde ${solde} < du ${aReprendre}) — reportes en dette `
-                      + `pour ${uid} (total du: ${dejaDu + manque})`);
+                      + `(solde ${solde} < du ${aReprendre}) — portes en dette `
+                      + `pour ${uid} sur le paiement ${paiement.id}`);
+        } else if (manque > 0) {
+          console.error(`[stripe] ${event.type}: ${manque} credits NON reprenables pour `
+                      + `${uid} et AUCUNE ligne payments retrouvee — dette non `
+                      + 'enregistrable, a traiter a la main.');
         }
         console.log(`[stripe] ${event.type}: ${repris} credits repris a ${uid} `
                   + `(du: ${aReprendre}, solde: ${solde})`);
@@ -8310,7 +8444,7 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
     // lignes tombaient donc dans des seaux differents et le tableau
     // d'audience affichait 100 % d'echec sur cette operation.
     await logOperation(env, user.id, 'remove-bg', COST_PER, opDebut, Date.now(),
-                       'succeeded', { req });
+                       'succeeded', { req, projectName });
     return json({ ok: true, success: true, url, path: url, newPath: url });
   } catch (e: unknown) {
     // Refund the credit + roll back the daily-spend counters on failure.
@@ -10209,7 +10343,13 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     // `req` porte le pays et la provenance (voir _paysRequete /
     // _provenance) : sans lui, mesh-op restait a « inconnu » dans les
     // statistiques d'audience alors que son echec, lui, etait attribue.
-    const logCtx: Record<string, unknown> = { req, op_type: op, mesh_url_in: finalUrl };
+    // `projectName` ICI AUSSI : ma passe d'injection ne visait que les metas
+    // ecrites en clair `{ req, ... }`. Les deux formes qu'elle a manquees —
+    // ce `logCtx` nomme et le `{ req }` de remove-bg — etaient justement les
+    // chemins de SUCCES, alors que les echecs, eux, portaient le projet. La
+    // colonne etait donc renseignee pour les ratages et vide pour les
+    // reussites : exactement l'inverse de ce qu'on veut lire.
+    const logCtx: Record<string, unknown> = { req, projectName, op_type: op, mesh_url_in: finalUrl };
     if (data.stats) {
       const s = data.stats as Record<string, unknown>;
       if (s.verdict) logCtx.verdict = s.verdict;
@@ -11530,6 +11670,14 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
       asset_type: 'segment', mode: 'segment', seed: 0,
       credit_cost: SEGMENT_COST, status: 'processing',
       type: 'segment',
+      /* LA COLONNE, PAS SEULEMENT `options` — les quatre autres insertions
+       * asynchrones l'ecrivent, celle-ci ne la posait que dans le JSON.
+       * Or la SUPPRESSION D'UN PROJET filtre sur la colonne : les GLB de
+       * segmentation survivaient donc a une demande d'effacement (donnee
+       * non effacee, et stockage facture), et le projet pouvait
+       * reapparaitre. Mesure : 1 ligne `segment`, colonne NULL, JSON
+       * renseigne. */
+      project_name: projectName ?? null,
       cost_usd: ESTIMATED_USD_SEGMENT,
       options: {
         // Pays et provenance : ces insertions n'ont pas le meme chemin que
@@ -14332,7 +14480,48 @@ async function handleAdminSante(req: Request, env: Env): Promise<Response> {
   const ageUsageH = usageReel?.ts
     ? Math.round((Date.now() - Date.parse(usageReel.ts)) / 3600000) : null;
 
+  /* DETTES DE CREDITS EN COURS — le commentaire de `_poserDette` promettait
+   * qu'elles apparaissent ici ; elles n'apparaissaient nulle part. Une
+   * creance qu'aucun ecran ne montre est une creance qu'on oubliera. */
+  const dettes: Array<{ compte: string; credits: number }> = [];
+  try {
+    if (env.MESHES) {
+      let curseur: string | undefined;
+      do {
+        const l = await env.MESHES.list({ prefix: '_meta/dette/', cursor: curseur, limit: 500 });
+        for (const o of l.objects) {
+          const reste = o.key.slice('_meta/dette/'.length);
+          const compte = reste.split('/')[0];
+          if (!compte) continue;
+          const v = await env.MESHES.get(o.key);
+          if (!v) continue;
+          const n = Math.floor(parseFloat(await v.text()));
+          if (!Number.isFinite(n) || n <= 0) continue;
+          const dejaLa = dettes.find((d) => d.compte === compte);
+          if (dejaLa) dejaLa.credits += n; else dettes.push({ compte, credits: n });
+        }
+        curseur = l.truncated ? l.cursor : undefined;
+      } while (curseur);
+    }
+  } catch { /* l'ecran de sante ne doit jamais echouer sur un detail */ }
+  const detteTotale = dettes.reduce((a2, d) => a2 + d.credits, 0);
+
   const points = [
+    {
+      cle: 'dettes_credits',
+      ok: detteTotale === 0,
+      etat: detteTotale === 0
+        ? 'aucune'
+        : `${detteTotale} credit(s) dus par ${dettes.length} compte(s)`,
+      consequence: detteTotale === 0 ? null
+        : 'Un remboursement n a pas pu reprendre tous les credits (solde deja '
+        + 'depense). Le manque est retenu automatiquement sur le prochain achat '
+        + 'du compte ; sans achat, il reste du.',
+      action: detteTotale === 0 ? null
+        : 'Rien a faire automatiquement. Pour effacer une creance : supprimer '
+        + 'l objet _meta/dette/<compte>/<paiement> dans R2.',
+      detail: dettes.slice(0, 20),
+    },
     {
       cle: 'stripe_mode',
       ok: !cleStripeTest,
@@ -16619,8 +16808,11 @@ const _REAP_BACKENDS: Record<string, {
   path: string;
   /** Route de recuperation, pour la livraison tardive du faucheur. */
   fetchPath: string;
-  /** Dossier R2 d'arrivee, aligne sur celui du sondage client. */
-  dossier: string;
+  /** Fiche du travail (porte le projet et l'actif source). */
+  lireFiche?: (env: Env, id: string) => Promise<Record<string, unknown> | null>;
+  /** Cle R2 d'arrivee — DOIT suivre la convention du sondage client,
+   *  sinon l'actif est ecrit mais n'apparait dans aucune liste. */
+  cle: (uid: string, id: string, fiche: Record<string, unknown> | null) => string;
   usd: number;
   delRecord?: (env: Env, id: string) => Promise<void>;
 }> = {
@@ -16628,11 +16820,53 @@ const _REAP_BACKENDS: Record<string, {
   // `_rigBaseUrl`. Il sondait donc l'ancien moteur pendant que la production
   // riggait sur SkinTokens : jamais le meme travail, d'ou des taches jamais
   // finalisees. Corrige avec le retrait de Puppeteer (2026-08-08).
-  rig:         { envKey: 'MODAL_RIG_URL',           path: '/rig-status',          fetchPath: '/rig-fetch',           dossier: 'rigged',     usd: ESTIMATED_USD_RIG,     delRecord: deleteRigJobRecord },
-  segment:     { envKey: 'MODAL_SEGMENT_URL',       path: '/segment-status',      fetchPath: '/segment-fetch',       dossier: 'mesh-op',    usd: ESTIMATED_USD_SEGMENT, delRecord: deleteSegmentJobRecord },
-  animate:     { envKey: 'MODAL_ANYTOP_ANIM_URL',   path: '/anim-status',         fetchPath: '/anim-fetch',          dossier: 'animations', usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
-  animate_fbx: { envKey: 'MODAL_FBX_RETARGET_URL',  path: '/fbx-retarget-status', fetchPath: '/fbx-retarget-fetch',  dossier: 'animations', usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
+  rig: {
+    envKey: 'MODAL_RIG_URL', path: '/rig-status', fetchPath: '/rig-fetch',
+    usd: ESTIMATED_USD_RIG, delRecord: deleteRigJobRecord,
+    lireFiche: (e, i) => getRigJobRecord(e, i) as Promise<Record<string, unknown> | null>,
+    // `_rigged_` EST OBLIGATOIRE : la liste des rigs filtre sur /_rigged_/i
+    // (worker.ts ~7590). Sans lui l'actif part dans « _orphans » comme un
+    // simple maillage, et le client ne le retrouve jamais.
+    cle: (uid, id, f) => `${uid}/rigged/${_baseDepuisUrl(f?.mesh_url, 'mesh')}_rigged_puppeteer_${Date.now()}.glb`,
+  },
+  segment: {
+    envKey: 'MODAL_SEGMENT_URL', path: '/segment-status', fetchPath: '/segment-fetch',
+    usd: ESTIMATED_USD_SEGMENT, delRecord: deleteSegmentJobRecord,
+    lireFiche: (e, i) => getSegmentJobRecord(e, i) as Promise<Record<string, unknown> | null>,
+    // Le SLUG DU PROJET REEL, pas « untitled » : la reconstruction des
+    // projets ecarte les prefixes qui ne correspondent a aucun projet.
+    cle: (uid, id, f) => `${uid}/mesh-op/${_slugProjet(f?.project_name)}/${Date.now()}_segment.glb`,
+  },
+  animate: {
+    envKey: 'MODAL_ANYTOP_ANIM_URL', path: '/anim-status', fetchPath: '/anim-fetch',
+    usd: ESTIMATED_USD_ANIM, delRecord: deleteAnimJobRecord,
+    lireFiche: (e, i) => getAnimJobRecord(e, i) as Promise<Record<string, unknown> | null>,
+    cle: (uid, id, f) => `${uid}/animations/${_baseDepuisUrl(f?.rig_url, 'rig')}_`
+                       + `${String(f?.anim_type || 'clip').replace(/[^A-Za-z0-9_-]/g, '_')}_${Date.now()}.glb`,
+  },
+  animate_fbx: {
+    envKey: 'MODAL_FBX_RETARGET_URL', path: '/fbx-retarget-status', fetchPath: '/fbx-retarget-fetch',
+    usd: ESTIMATED_USD_ANIM, delRecord: deleteAnimJobRecord,
+    lireFiche: (e, i) => getAnimJobRecord(e, i) as Promise<Record<string, unknown> | null>,
+    cle: (uid, id, f) => `${uid}/animations/${_baseDepuisUrl(f?.rig_url, 'rig')}_fbxref_${Date.now()}.glb`,
+  },
 };
+
+/** Radical d'un nom de fichier depuis une URL — meme regle que le sondage client. */
+function _baseDepuisUrl(url: unknown, defaut: string): string {
+  const u = typeof url === 'string' ? url : '';
+  if (!u) return defaut;
+  try {
+    const dernier = new URL(u).pathname.split('/').pop() || '';
+    return dernier.replace(/\.(glb|gltf)$/i, '')
+                  .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || defaut;
+  } catch { return defaut; }
+}
+
+function _slugProjet(nom: unknown): string {
+  const n = typeof nom === 'string' ? nom : '';
+  return (n.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)) || 'untitled';
+}
 
 /** One generic status poll against any of the four async Modal op apps. */
 async function _pollModalOpStatus(
@@ -16867,14 +17101,33 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
             });
             if (fr.ok && fr.body && env.MESHES) {
               const uid = typeof job.user_id === 'string' ? job.user_id : 'inconnu';
-              const cle = cfg.dossier === 'mesh-op'
-                ? `${uid}/mesh-op/untitled/${Date.now()}_segment.glb`
-                : `${uid}/${cfg.dossier}/reaped_${id}_${Date.now()}.glb`;
+              /* LA CLE DOIT SUIVRE LA CONVENTION DU SONDAGE CLIENT.
+               *
+               * Ma premiere version ecrivait `reaped_<id>_<ts>.glb` sous un
+               * projet « untitled ». L'objet partait bien dans R2, mais :
+               * la liste des rigs filtre sur /_rigged_/i, donc un rig sans
+               * ce marqueur atterrissait dans « _orphans » comme un simple
+               * maillage ; et le slug « untitled » ne correspond a aucun
+               * projet reel, donc la segmentation etait ecartee. Le travail
+               * passait pourtant a `succeeded`, ce qui INTERDIT ensuite tout
+               * remboursement — le client ne voyait rien et ne pouvait plus
+               * rien recuperer. Pire que la branche vide d'origine. */
+              const fiche = cfg.lireFiche ? await cfg.lireFiche(env, id).catch(() => null) : null;
+              const cle = cfg.cle(uid, id, fiche);
               await env.MESHES.put(cle, fr.body, {
                 httpMetadata: { contentType: 'model/gltf-binary' },
               });
+              /* On ECRIT d'abord, on RECLAME ensuite. Si une annulation
+               * concurrente a deja rendu les credits, la garde de statut
+               * refuse la reclamation — et on efface l'objet, sinon le
+               * client garderait l'actif ET son remboursement. Les
+               * prefixes rigged/ et animations/ sont listes directement
+               * depuis R2, sans consulter `jobs` : un objet orphelin y
+               * serait visible. */
               const { data: maj } = await sb.from('jobs')
                 .update({ status: 'succeeded', mesh_url: cle,
+                          project_name: typeof fiche?.project_name === 'string'
+                            ? fiche.project_name : undefined,
                           finished_at: new Date().toISOString() })
                 .eq('id', id)
                 .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
@@ -16883,6 +17136,12 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
                 livre = true;
                 out.delivered = (out.delivered ?? 0) + 1;
                 console.log(`[reaper] ${id} (${opType}) termine sans sondage client — livre en ${cle}`);
+                if (cfg.delRecord) await cfg.delRecord(env, id).catch(() => {});
+              } else {
+                await env.MESHES.delete(cle).catch(() => {});
+                console.log(`[reaper] ${id} (${opType}) deja terminal (annule ?) — `
+                          + 'objet efface, aucun double gain');
+                livre = true;   // rien de plus a faire : la ligne est deja tranchee
               }
             } else if (!fr.ok) {
               noteErr(`${id}: ${cfg.fetchPath} HTTP ${fr.status}`);

@@ -57,7 +57,19 @@ l'ancien `out/` est re-publié et les changements UI ne sortent pas.
 Symptôme: `curl https://…/app/index2.js | wc -c` montre une taille
 < que le fichier source.
 
-Pattern: `cd cloud && npm run build && npx wrangler deploy`.
+Pattern: `cd cloud && npm run build && npm run deploy`.
+
+**`npm run deploy`, PAS `npx wrangler deploy`.** Les garde-fous
+(`check-r2-public`, `check-legal-identity`, `check-out-frais`) sont
+branchés sur `predeploy`, que npm ne déclenche que pour `npm run deploy` ;
+`npx wrangler deploy` les court-circuite tous.
+
+Et ne jamais mettre un `| tail` entre le build et le `&&` : le code de
+sortie d'un tube est celui de la DERNIÈRE commande, donc un build en
+échec passe pour un succès et wrangler republie l'ancien `out/` en
+affichant « deployed ». C'est arrivé le 23/08/2026 — trois correctifs
+vérifiés en local étaient absents de la production. `check-out-frais.mjs`
+refuse désormais un `out/` plus vieux que les sources.
 
 ## Commits sûrs / risqués
 - **Sûr (commit auto OK)**: fix bug ciblé, ajout d'un slider/bouton,

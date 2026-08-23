@@ -60,6 +60,7 @@ const ATTENDUS = [
   'charge.dispute.closed',
   'charge.dispute.created',
   'charge.refunded',
+  'checkout.session.async_payment_failed',
   'checkout.session.async_payment_succeeded',
   'checkout.session.completed',
   'invoice.paid',

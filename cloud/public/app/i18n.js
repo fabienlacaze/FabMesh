@@ -922,10 +922,31 @@
     return 'en';
   }
 
+  /* « ENREGISTRE » NE VEUT PAS DIRE « CHOISI » — corrige le 2026-08-23.
+   *
+   * `applyLang` ecrit `fabmesh.lang` a CHAQUE appel, y compris a l'ouverture.
+   * Tout navigateur ayant ouvert l'application avant le correctif ci-dessus
+   * a donc 'en' fige, et la detection ne s'executerait jamais pour lui : le
+   * correctif ne servait qu'aux nouveaux visiteurs.
+   *
+   * On note desormais separement le choix EXPLICITE de l'utilisateur (via le
+   * selecteur). En son absence, un 'en' herite est reevalue une fois — mais
+   * seulement si le navigateur ne demande PAS l'anglais, sinon rien ne
+   * change. Le seul cas touche est donc exactement celui que le defaut
+   * lesait, et il reste rattrapable d'un clic sur le selecteur. */
+  const CLE_CHOIX = 'fabmesh.lang.choisi';
+
   let _lang = 'en';
   try {
-    const choisi = localStorage.getItem('fabmesh.lang');
-    _lang = choisi || _langueDuNavigateur();
+    const explicite = localStorage.getItem(CLE_CHOIX);
+    const enregistre = localStorage.getItem('fabmesh.lang');
+    if (explicite) {
+      _lang = explicite;
+    } else if (enregistre && enregistre !== 'en') {
+      _lang = enregistre;
+    } else {
+      _lang = _langueDuNavigateur();
+    }
   } catch (_) { _lang = _langueDuNavigateur(); }
 
   const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'CODE', 'PRE', 'MODEL-VIEWER', 'CANVAS', 'svg', 'SVG']);
@@ -1245,7 +1266,11 @@
     const sel = document.getElementById('lang-select');
     if (sel) {
       sel.value = _lang;
-      sel.addEventListener('change', () => applyLang(sel.value));
+      sel.addEventListener('change', () => {
+        // Choix EXPLICITE : il prime a jamais sur la detection.
+        try { localStorage.setItem(CLE_CHOIX, sel.value); } catch (_) {}
+        applyLang(sel.value);
+      });
       _buildLangDropdown();
     }
     applyLang(_lang);

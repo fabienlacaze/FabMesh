@@ -190,7 +190,20 @@ async function uploadClientMeshResult(bytes, opType, extra = {}) {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ opType, glbBase64: b64, ...extra }),
+    /* LE PROJET, PRIS ICI PLUTOT QU'A CHAQUE APPELANT.
+     *
+     * Le serveur sait ecrire `project_name` sur cette route, mais aucun des
+     * trois appelants ne passait `extra` : la colonne restait NULL. On le
+     * lit au seul endroit commun, comme dans postJSON — un appelant peut
+     * toujours le surcharger via `extra`. Ce fetch n'utilise pas postJSON
+     * (encodage base64 volumineux), d'ou cette reprise explicite. */
+    body: JSON.stringify({
+      opType,
+      glbBase64: b64,
+      projectName: (window.state && window.state.currentProject
+                    && window.state.currentProject.name) || undefined,
+      ...extra,
+    }),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok || !data?.success) {
@@ -15044,6 +15057,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // pushJob with startedAt=p.createdAt so the elapsed timer continues
   // from the real launch time) and a poll loop drives the bar to done
   // or error.
+  /* CE BLOC EST ENFERME DANS UNE FONCTION — sinon son `return` tue la
+   * reprise SERVEUR qui le suit.
+   *
+   * `if (pending.length === 0) return;` sortait du callback DOMContentLoaded
+   * TOUT ENTIER, pas seulement de la reprise des rigs. Or c'est le cas
+   * COURANT : sans rig orphelin en localStorage, /api/me/active-jobs
+   * n'etait jamais appele, et une generation lancee depuis un autre onglet
+   * ou avant un rafraichissement perdait definitivement son indicateur de
+   * progression. Le second bloc etait donc du code mort la plupart du
+   * temps. Il y avait deux `return` dans ce bloc : les deux sont desormais
+   * confines ici. */
+  (() => {
   try {
     const raw = localStorage.getItem('fabmesh_pending_rigs') || '[]';
     const pending = JSON.parse(raw);
@@ -15066,6 +15091,13 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     fresh.forEach((p) => {
+      // On declare ce rig comme DEJA sonde : sans cela la reprise serveur
+      // qui suit le repousserait une seconde fois, avec deux barres de
+      // progression et deux boucles de sondage pour un seul travail.
+      try {
+        window.__rigsRepris = window.__rigsRepris || new Set();
+        window.__rigsRepris.add(String(p.jobId));
+      } catch (_) {}
       const projectLabel = p.projectName || p.jobId;
       // Re-create the live progress popup. pushJob computes the initial
       // progress from (Date.now() - startedAt) / expectedMs so the bar
@@ -15163,6 +15195,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(tick, 1000);
     });
   } catch (e) { /* localStorage parse fail, ignore */ }
+  })();
 
   // 2026-06-02: SERVER-SIDE resume of in-flight jobs. The localStorage
   // path above only knows about rigs that THIS browser launched —
@@ -15206,6 +15239,10 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (_) { return null; }
     };
     const _resumeOne = (row) => {
+      // Deja repris par la voie localStorage ci-dessus : on ne double pas.
+      try {
+        if (window.__rigsRepris && window.__rigsRepris.has(String(row.id))) return;
+      } catch (_) {}
       const kind = _kindFromAssetType(row.asset_type, '');
       const project = row.project_name || (row.options && row.options.project_name) || null;
       const startedAt = row.created_at ? Date.parse(row.created_at) : Date.now();
