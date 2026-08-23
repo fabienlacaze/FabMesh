@@ -10798,12 +10798,32 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   // Also persist in the jobs table so the event appears in
   // 'My usage history'. status=processing, options.sourceMesh=meshUrl
   // lets the detail modal show a 'Source mesh' link back to its origin.
+  /* LE PROJET EST DEDUIT DU MAILLAGE, FAUTE D'ETRE TRANSMIS.
+   *
+   * Ni cette route ni la vue arriere ne recoivent de `projectName` du client :
+   * on ne peut donc pas l'ecrire directement, et les lignes `rig` restaient a
+   * project_name NULL. Mais un rig porte TOUJOURS sur un maillage, dont la
+   * ligne connait son projet — une seule requete suffit a retablir le lien.
+   *
+   * Best-effort : si le maillage source est introuvable (import externe,
+   * ligne purgee), on laisse null plutot que d'inventer un rattachement. */
+  let projetDeduit: string | null = null;
+  try {
+    const { data: parent } = await supabaseAdmin(env).from('jobs')
+      .select('project_name').eq('user_id', user.id)
+      .eq('mesh_url', String(meshUrl).replace(/^https?:\/\/[^/]+\//, ''))
+      .not('project_name', 'is', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    projetDeduit = (parent as { project_name?: string | null } | null)?.project_name ?? null;
+  } catch { /* le lien est un confort, pas une condition */ }
+
   try {
     await supabaseAdmin(env).from('jobs').insert({
       id: jobId, user_id: user.id,
       asset_type: 'rig', mode: 'rig', seed: 0,
       credit_cost: RIG_COST, status: 'processing',
       type: 'rig',
+      project_name: projetDeduit,
       cost_usd: ESTIMATED_USD_RIG,
       options: {
         // Pays et provenance : ces insertions n'ont pas le meme chemin que
