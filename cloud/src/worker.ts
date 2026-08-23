@@ -4112,23 +4112,20 @@ async function handleMarketAuthorPage(_req: Request, env: Env, authorId: string)
   const ratingsByListing = await _loadAllRatingsByListing(env);
   const listings = approved.map((l) => {
     const r = ratingsByListing.get(l.id) || { avg: 0, count: 0 };
-    return {
-      id: l.id,
-      title: l.title,
-      description: l.description,
-      price_cents: l.price_cents,
-      currency: l.currency,
-      licence: l.licence,
-      asset_kind: l.asset_kind || (l.mesh_url ? 'mesh' : 'image'),
-      asset_type: l.asset_type,
-      asset_url: l.asset_url || l.mesh_url,
-      mesh_url: l.mesh_url,
-      author_display: l.author_display,
-      created_at: l.created_at,
-      downloads: l.downloads,
-      rating_avg: r.avg,
-      rating_count: r.count,
-    };
+    /* TROISIEME ROUTE DE LA VITRINE — elle avait ete oubliee.
+     *
+     * `/api/market/list` et `/api/market/<id>` avaient ete passees par
+     * `_ficheVitrine`, mais pas la page d'AUTEUR : mesure du 2026-08-23 sur
+     * la production, elle rendait `asset_url` et `mesh_url` en clair pour
+     * des maillages a 3,00 $ et 2,00 $. Le paywall etait donc toujours
+     * ouvert, par une porte de derriere.
+     *
+     * Lecon : la projection publique doit passer par UNE seule fonction.
+     * Trois copies, c'est trois occasions d'en oublier une — et c'est
+     * exactement ce qui s'est produit. */
+    return { ..._ficheVitrine(l as unknown as Record<string, unknown>),
+             author_display: l.author_display,
+             rating_avg: r.avg, rating_count: r.count };
   });
 
   // Emit a flat shape matching the page contract (AuthorProfile).
@@ -13765,8 +13762,17 @@ async function _comptesAyantPaye(env: Env): Promise<Set<string>> {
   const out = new Set<string>();
   try {
     const { data } = await supabaseAdmin(env).from('payments')
-      .select('user_id').gt('credits', 0).limit(5000);
-    for (const p of ((data ?? []) as Array<{ user_id: string | null }>)) {
+      .select('user_id, stripe_session_id').gt('credits', 0).limit(5000);
+    for (const p of ((data ?? []) as Array<{ user_id: string | null; stripe_session_id: string | null }>)) {
+      /* LES SESSIONS DE TEST NE SONT PAS DES VENTES.
+       *
+       * Les trois seules lignes `payments` en base sont des `cs_test_...`
+       * (carte 4242, mode test Stripe). Sans ce filtre, leurs titulaires
+       * comptaient comme des clients payants et le tableau de bord
+       * affichait 60,00 EUR « encaisses » qui n'ont jamais existe — le
+       * defaut meme qu'on pretendait corriger. */
+      const ref = String(p.stripe_session_id ?? '');
+      if (/^(cs_test_|in_test_|pi_test_)/.test(ref)) continue;
       if (p.user_id) out.add(p.user_id);
     }
   } catch { /* en cas d'echec on rend un ensemble vide : aucun revenu attribue,

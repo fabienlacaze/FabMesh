@@ -733,7 +733,28 @@ function MarketPageInner() {
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={url} alt={l.title} style={{ width: '100%', height: 200, objectFit: 'cover', background: '#0a0a0e', display: 'block' }} />
                 ) : !mounted || !url ? (
-                  <div style={{ width: '100%', height: 200, background: '#0a0a0e' }} />
+                  /* CARRE NOIR -> APERCU EXPLIQUE.
+                   *
+                   * Depuis que la vitrine ne publie plus l'URL des fiches
+                   * PAYANTES (le fichier etait telechargeable sans achat),
+                   * `url` est absent pour celles-ci et cette branche affichait
+                   * un rectangle noir muet. Le paywall est juste ; l'ecran, lui,
+                   * laissait croire a une fiche cassee.
+                   *
+                   * On dit ce qu'il en est : le modele est visible apres
+                   * l'achat. Les fiches GRATUITES gardent leur apercu 3D. */
+                  <div style={{
+                    width: '100%', height: 200, background: '#0a0a0e',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', gap: 6, color: 'var(--text-2)',
+                  }}>
+                    <div style={{ fontSize: 30, opacity: 0.5 }}>🔒</div>
+                    <div style={{ fontSize: 12, textAlign: 'center', padding: '0 12px' }}>
+                      {l.price_cents > 0
+                        ? 'Aperçu 3D disponible après achat'
+                        : 'Aperçu indisponible'}
+                    </div>
+                  </div>
                 ) : (
                   // @ts-expect-error model-viewer is a custom element
                   <model-viewer src={url} camera-controls auto-rotate shadow-intensity="1" exposure="1" style={{ width: '100%', height: 200, background: '#0a0a0e' }} />
