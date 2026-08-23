@@ -2144,6 +2144,22 @@ async function logOperation(
       seed: 0,
       credit_cost: credits,
       status,
+      /* LE PROJET, QUAND L'APPELANT LE CONNAIT.
+       *
+       * `logOperation` n'ecrivait JAMAIS `project_name` : sur 327 travaux du
+       * 2026-08-23, les 144 text2image, les 23 rig, les 21 back-view et
+       * toutes les autres operations avaient la colonne a NULL, alors que
+       * les 85 maillages sur 96 la portaient — ceux-la inserent leur ligne
+       * par un autre chemin. Les deux clients transmettent pourtant
+       * `projectName` (verifie : index2.js:4964 et main.js:7245) ; il etait
+       * simplement jete a l'ecriture.
+       *
+       * Consequence concrete : impossible de savoir a quel projet appartient
+       * une image, ni de repondre a « il a genere huit fois sans creer de
+       * projet ? » autrement qu'a tort. */
+      project_name: (meta as { projectName?: unknown }).projectName
+        ? String((meta as { projectName?: unknown }).projectName).slice(0, 128)
+        : null,
       /* LE MOTIF D'ECHEC DOIT ETRE DANS LA COLONNE, PAS SEULEMENT DANS
        * `options`.
        *
@@ -9109,7 +9125,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     const debut = opStart + i * trancheMs;
     await logOperation(env, user.id, opType,
                        COST_PER_IMAGE, debut, debut + trancheMs, 'succeeded',
-                       { req, asset_type, asset_style, batch_index: i, batch_size: n });
+                       { req, projectName, asset_type, asset_style, batch_index: i, batch_size: n });
   }
   // Persist in user_assets so /api/cloud-projects can list these
   // without the client needing to cache R2 paths in localStorage.
