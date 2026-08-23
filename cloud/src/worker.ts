@@ -1943,6 +1943,30 @@ const MODAL_COST_USD: Record<string, number> = {
  *  history CSV can show it. Mesh inserts happen inline in handleGenerate
  *  (they already need a job row for status polling). Fire-and-forget —
  *  a logging failure must never bubble up to the user-visible response. */
+/** Deduit la PROVENANCE d'une requete : application de bureau ou navigateur.
+ *
+ *  POURQUOI (2026-08-23). Le 20 aout, jour de la publication sur le Microsoft
+ *  Store, un visiteur s'inscrit, confirme son adresse en 38 secondes, lance
+ *  huit generations en trois minutes, en voit sept echouer et ne revient
+ *  jamais. Question evidente : etait-il venu par le Store ou par le web ?
+ *  IMPOSSIBLE A DIRE. Ni les lignes `jobs`, ni le journal d'authentification
+ *  Supabase, ni aucun autre enregistrement ne portaient cette information.
+ *  On ne pouvait donc pas savoir lequel des deux canaux venait de perdre son
+ *  premier client.
+ *
+ *  Aucun changement cote client n'est necessaire : Electron met « Electron/ »
+ *  dans son User-Agent, pas un navigateur. On enregistre donc simplement ce
+ *  qu'on sait deja, au lieu de le jeter. */
+function _provenance(req?: Request | null): 'desktop' | 'web' | 'inconnu' {
+  try {
+    const ua = req?.headers.get('user-agent') ?? '';
+    if (!ua) return 'inconnu';
+    if (/Electron\//i.test(ua) || /MyFabmesh/i.test(ua)) return 'desktop';
+    if (/Mozilla\/|Chrome\/|Safari\/|Firefox\//i.test(ua)) return 'web';
+    return 'inconnu';
+  } catch { return 'inconnu'; }
+}
+
 async function logOperation(
   env: Env,
   userId: string,
@@ -1974,11 +1998,31 @@ async function logOperation(
       seed: 0,
       credit_cost: credits,
       status,
+      /* LE MOTIF D'ECHEC DOIT ETRE DANS LA COLONNE, PAS SEULEMENT DANS
+       * `options`.
+       *
+       * Les echecs d'operation ecrivaient leur message dans
+       * `options.error` en laissant la colonne `error` a NULL. Consequence
+       * constatee le 2026-08-23 : en cherchant pourquoi le premier
+       * visiteur du Store avait echoue sept fois, la requete evidente
+       * (`select error from jobs where status='failed'`) rendait des
+       * lignes VIDES — le motif etait pourtant enregistre, deux niveaux
+       * plus bas dans un JSON. Un diagnostic range la ou personne ne le
+       * cherche equivaut a pas de diagnostic. Les tableaux de bord et le
+       * faucheur lisent tous la colonne. */
+      error: status === 'failed'
+        ? String((meta as { error?: unknown }).error ?? '').slice(0, 500) || null
+        : null,
       options: {
         operation_type: opType,
         cost_usd: cost,
         duration_ms: endTs - startTs,
+        // Provenance : renseignee quand l'appelant transmet la requete dans
+        // `meta.req`. Voir _provenance — sans elle, on ne sait pas quel canal
+        // perd ses clients.
+        provenance: _provenance((meta as { req?: Request }).req),
         ...meta,
+        req: undefined,
       },
       created_at: new Date(startTs).toISOString(),
       finished_at: new Date(endTs).toISOString(),
@@ -7712,7 +7756,7 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
     // facture. Un echec silencieux, c'est de la depense qui n'apparait nulle
     // part. Credits a 0 puisqu'ils sont rendus, mais la ligne existe.
     await logOperation(env, user.id, 'remove-bg', 0, opDebut, Date.now(), 'failed',
-                       { error: e instanceof Error ? e.message : String(e) });
+                       { req, error: e instanceof Error ? e.message : String(e) });
     return err(502, 'background-remover failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 }
@@ -7880,10 +7924,77 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
     }
     throw new Error(`Cloud GPU HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
-  const buf = await r.arrayBuffer();
+  let buf = await r.arrayBuffer();
   console.log(`[modal] text2image dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
   _writeLastWarmMs(env, '_meta/last_warm_text2image.txt').catch(() => {});
-  _assertImageBytes(buf, 'Modal text2image');
+
+  /* FAUX POSITIF DU FILTRE DE CONTENU : ON REESSAIE AU LIEU D'ECHOUER.
+   *
+   * Constate en production le 2026-08-20. Un visiteur arrive le jour de la
+   * publication du Store, lance HUIT generations en trois minutes, en voit
+   * SEPT echouer, et ne revient jamais. Cause enregistree : Modal renvoie
+   * une image de remplacement de ~26 Ko a la place de la generation, son
+   * classifieur NSFW interne ayant signale le prompt — un `character`
+   * parfaitement anodin. Le message du produit reconnaissait deja le
+   * phenomene : « common false-positive on animals ».
+   *
+   * Le fait decisif est dans le journal : sa SIXIEME tentative a REUSSI,
+   * avec le meme type de demande. Le blocage n'est donc pas deterministe —
+   * il depend du bruit de la generation, donc de la graine. Demander a
+   * l'utilisateur de « re-run » revenait a lui faire faire a la main, sans
+   * le savoir, ce que le serveur peut faire tout seul en quelques secondes.
+   *
+   * On rejoue donc jusqu'a deux fois avec une graine differente. Chaque
+   * reprise est une execution GPU reelle : elle est imputee au budget,
+   * comme les reprises apres 524. */
+  for (let reprise = 1; reprise <= 2; reprise++) {
+    let placeholder = false;
+    try { _assertImageBytes(buf, 'Modal text2image'); } catch { placeholder = true; }
+    if (!placeholder) break;
+    console.warn(`[modal] text2image : image de remplacement du filtre de contenu `
+               + `(${(buf.byteLength / 1024).toFixed(1)} Ko) — reprise ${reprise}/2 avec une autre graine`);
+    const graine = Math.floor(Math.random() * 1e9);
+    const r2 = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: secret,
+        prompt: input.prompt,
+        asset_type: input.asset_type,
+        asset_style: input.asset_style,
+        seed: graine,
+        steps: input.steps,
+        unrestricted: !!input.unrestricted,
+        turbo: !!input.turbo,
+      }),
+      signal: AbortSignal.timeout(600_000),
+    });
+    try {
+      await _incrementAtomique(env, `_meta/modal_spend/${todayUTC()}`, COUT_REPRISE_IMAGE_USD);
+      await _incrementAtomique(env, '_meta/modal_spend_total.txt', COUT_REPRISE_IMAGE_USD);
+    } catch { /* comptabilite seule */ }
+    if (!r2.ok) break;                       // on laisse l'assertion finale trancher
+    buf = await r2.arrayBuffer();
+  }
+  /* Si les trois passages ont donne une image de remplacement, le prompt est
+   * reellement signale. On le dit A L'UTILISATEUR, en clair et en lui
+   * indiquant quoi faire — l'ancien message parlait de « Modal's internal
+   * NSFW classifier », ce qui ne veut rien dire pour lui et ne lui donne
+   * aucune prise. */
+  try {
+    _assertImageBytes(buf, 'Modal text2image');
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/placeholder|content-filter|content filter/i.test(m)) {
+      throw new Error(
+        'Our image provider blocked this description, and three attempts did not '
+        + 'get through. This is often a false alarm on animals, creatures and '
+        + 'weapons. Try rewording it — describe the shape and material rather '
+        + 'than the action, avoid words like blood, wound, kill or naked, and '
+        + 'add a style such as "stylised" or "toy". Your credits were not charged.');
+    }
+    throw e;
+  }
 
   // Mirror to R2 (same key shape as the Cog path so downstream stays uniform).
   if (env.MESHES && env.R2_PUBLIC_URL) {
@@ -7971,6 +8082,8 @@ async function _journaliserAppelAux<T>(
   const t0 = Date.now();
   try {
     const r = await appel();
+    // Pas de `req` en portee ici (auxiliaire generique) : la provenance
+    // restera « inconnu » pour ces appels, ce qui est exact.
     await logOperation(env, userId, opType, 0, t0, Date.now(), 'succeeded', { auto: true });
     return r;
   } catch (e) {
@@ -8806,7 +8919,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     // Log the failure so the history CSV reflects the refunded attempt.
     await logOperation(env, user.id, opType,
                        0, opStart, Date.now(), 'failed',
-                       { error: e instanceof Error ? e.message : String(e), n, asset_type });
+                       { req, error: e instanceof Error ? e.message : String(e), n, asset_type });
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   // Success path — record each generation as a separate row so the
@@ -8827,7 +8940,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     const debut = opStart + i * trancheMs;
     await logOperation(env, user.id, opType,
                        COST_PER_IMAGE, debut, debut + trancheMs, 'succeeded',
-                       { asset_type, asset_style, batch_index: i, batch_size: n });
+                       { req, asset_type, asset_style, batch_index: i, batch_size: n });
   }
   // Persist in user_assets so /api/cloud-projects can list these
   // without the client needing to cache R2 paths in localStorage.
@@ -8932,7 +9045,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
     else await refundDailySpend(env, estimatedTotal);
     await logOperation(env, user.id, 'back-view', 0, opStart, Date.now(),
-                       'failed', { error: e instanceof Error ? e.message : String(e), n });
+                       'failed', { req, error: e instanceof Error ? e.message : String(e), n });
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   // Meme decoupage que la generation d'images : sans lui, les n lignes
@@ -8943,7 +9056,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     const debut = opStart + i * bvTranche;
     await logOperation(env, user.id, 'back-view',
                        COST_PER_BACK, debut, debut + bvTranche, 'succeeded',
-                       { asset_type, batch_index: i, batch_size: n });
+                       { req, asset_type, batch_index: i, batch_size: n });
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
@@ -9025,11 +9138,11 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { error: e instanceof Error ? e.message : String(e), op: 'modify' });
+                       'failed', { req, error: e instanceof Error ? e.message : String(e), op: 'modify' });
     return err(502, `modify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
-                     'succeeded', { op: 'modify', strength });
+                     'succeeded', { req, op: 'modify', strength });
   return json({ ok: true, success: true, path: url, newPath: url, creditsRemaining: remaining });
 }
 
@@ -9084,12 +9197,12 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
       // le credit ET le compteur de depense — l'operation disparaissait des
       // deux surfaces comptables a la fois.
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                         'failed', { op: 'segment', target: targetText, raison: 'masque vide' });
+                         'failed', { req, op: 'segment', target: targetText, raison: 'masque vide' });
       return json({ ok: false, success: false,
         error: `"${targetText}" not found in the image (credit refunded)` }, { status: 422 });
     }
     await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
-                       'succeeded', { op: 'segment', target: targetText });
+                       'succeeded', { req, op: 'segment', target: targetText });
     return json({ ok: true, success: true, maskUrl: result.url, url: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, cost);
@@ -9098,7 +9211,7 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
     // de reprise sur 524 peut bruler plusieurs minutes de GPU avant de lever.
     // C'est precisement celui qui ne laissait aucune trace.
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { op: 'segment', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, op: 'segment', error: e instanceof Error ? e.message : String(e) });
     return err(502, `mask preview failed (credit refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -9171,18 +9284,18 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
       await addCredits(env, user.id, cost);
       await refundModalSpend(env, estimatedTotal, user.id);
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                         'failed', { op: 'auto_inpaint', reason: 'mask_empty', target: targetText });
+                         'failed', { req, op: 'auto_inpaint', reason: 'mask_empty', target: targetText });
       return json({ ok: false, success: false,
         error: `auto-inpaint: "${targetText}" not found in the image (credits refunded)` }, { status: 422 });
     }
     await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
-                       'succeeded', { op: 'auto_inpaint', target: targetText });
+                       'succeeded', { req, op: 'auto_inpaint', target: targetText });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { op: 'auto_inpaint', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, op: 'auto_inpaint', error: e instanceof Error ? e.message : String(e) });
     return err(502, `auto-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -9280,13 +9393,13 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
       throw new Error('unexpected mask_empty from mask_inpaint');
     }
     await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
-                       'succeeded', { op: 'mask_inpaint' });
+                       'succeeded', { req, op: 'mask_inpaint' });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { op: 'mask_inpaint', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, op: 'mask_inpaint', error: e instanceof Error ? e.message : String(e) });
     return err(502, `mask-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -9335,18 +9448,18 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
       await addCredits(env, user.id, COST_PER);
       await refundModalSpend(env, estimatedTotal, user.id);
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                         'failed', { op: 'face_fix_image', reason: 'no_face' });
+                         'failed', { req, op: 'face_fix_image', reason: 'no_face' });
       return json({ ok: false, success: false,
         error: 'no face detected in image (credits refunded)' }, { status: 422 });
     }
     await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
-                       'succeeded', { op: 'face_fix_image' });
+                       'succeeded', { req, op: 'face_fix_image' });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
     return err(502, `face-fix failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -9495,7 +9608,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     const errMsg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'mesh-op',
                        0, opStart, Date.now(), 'failed',
-                       { op_type: op, error: errMsg });
+                       { req, op_type: op, error: errMsg });
     console.error('[mesh-op]', op, errMsg, e);
     // Don't leak upstream stack/URLs to the client.
     return err(502, `mesh ${op} failed (credits refunded)`);
@@ -9625,7 +9738,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
 
     await logOperation(env, user.id, 'construction3d',
                        COST_PER, opStart, Date.now(), 'succeeded',
-                       { op_type: 'construction3d', stages: start.count });
+                       { req, op_type: 'construction3d', stages: start.count });
     return json({
       ok: true, success: true,
       versionMeshPath: versionUrl || finalUrl,
@@ -9640,7 +9753,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
     const errMsg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'construction3d',
                        0, opStart, Date.now(), 'failed',
-                       { op_type: 'construction3d', error: errMsg });
+                       { req, op_type: 'construction3d', error: errMsg });
     console.error('[construction-stages-3d]', errMsg, e);
     return err(502, 'construction stages failed (credits refunded)');
   }
@@ -9767,12 +9880,12 @@ async function handleMeshConvert(req: Request, env: Env): Promise<Response> {
 
     await logOperation(env, user.id, 'mesh-convert',
                        0, started, Date.now(), 'succeeded',
-                       { format: fmt, ext, bytes: bytes.length });
+                       { req, format: fmt, ext, bytes: bytes.length });
     return json({ ok: true, url, ext, format: fmt, bytes: bytes.length });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'mesh-convert',
-                       0, started, Date.now(), 'failed', { format: fmt, error: msg });
+                       0, started, Date.now(), 'failed', { req, format: fmt, error: msg });
     return err(502, `conversion failed: ${msg}`);
   }
 }
@@ -9824,12 +9937,12 @@ async function handleMeshOpClientResult(req: Request, env: Env): Promise<Respons
     // free client-side op at $0.060 a pop.
     await logOperation(env, user.id, 'mesh-op-client',
                        0, opStart, Date.now(), 'succeeded',
-                       { op_type: op, client_side: true, size_bytes: bytes.length });
+                       { req, op_type: op, client_side: true, size_bytes: bytes.length });
     return json({ ok: true, success: true, path: url, newPath: url, mesh_url: url });
   } catch (e) {
     await logOperation(env, user.id, 'mesh-op-client',
                        0, opStart, Date.now(), 'failed',
-                       { op_type: op, client_side: true,
+                       { req, op_type: op, client_side: true,
                          error: e instanceof Error ? e.message : String(e) });
     return err(502, `client-side mesh op upload failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -12523,13 +12636,13 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
     }, 'upscale');
     if ('maskEmpty' in result) throw new Error('unexpected mask_empty from upscale');
     await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
-                       'succeeded', { op: 'upscale', scale: factor });
+                       'succeeded', { req, op: 'upscale', scale: factor });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { op: 'upscale', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, op: 'upscale', error: e instanceof Error ? e.message : String(e) });
     return err(502, `upscale failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -12669,11 +12782,11 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'rectify', 0, opStart, Date.now(),
-                       'failed', { error: e instanceof Error ? e.message : String(e), mode, nSeeds });
+                       'failed', { req, error: e instanceof Error ? e.message : String(e), mode, nSeeds });
     return err(502, `rectify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   await logOperation(env, user.id, 'rectify', cost, opStart, Date.now(),
-                     'succeeded', { mode, nSeeds });
+                     'succeeded', { req, mode, nSeeds });
   return json({ ok: true, success: true, path, creditsRemaining: remaining });
 }
 
