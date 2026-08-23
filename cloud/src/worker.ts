@@ -1996,6 +1996,123 @@ function _provenance(req?: Request | null): 'desktop' | 'web' | 'inconnu' {
   } catch { return 'inconnu'; }
 }
 
+/** Enregistre le contexte TECHNIQUE d'une generation, pour pouvoir
+ *  diagnostiquer un echec apres coup.
+ *
+ *  POURQUOI DEUX ENDROITS PLUTOT QU'UN. Le pays et la provenance vivent dans
+ *  `jobs.options` : ils ne designent personne, ils servent aux statistiques,
+ *  et ils sont conserves aussi longtemps que la ligne. Tout le reste — IP,
+ *  user-agent, ville, region, texte du prompt — DESIGNE ou DECRIT
+ *  l'utilisateur. Ces champs-la vont dans un objet separe, sous le prefixe
+ *  `_logs/diag/`, DEJA balaye par `purgeDiagLogs()` : ils disparaissent donc
+ *  automatiquement au bout de DIAG_LOG_RETENTION_DAYS jours, sans que
+ *  personne ait a y penser.
+ *
+ *  C'est la difference entre garder une statistique et garder un dossier.
+ *  Melanger les deux dans `jobs` aurait rendu la purge impossible sans
+ *  toucher a la comptabilite, et aurait fait vieillir des donnees
+ *  personnelles au meme rythme que des ecritures comptables conservees six
+ *  ans — ce qui n'est pas defendable.
+ *
+ *  Ne leve jamais : un diagnostic n'a pas le droit de faire echouer une
+ *  generation que le client a payee. */
+/** Tronque une adresse IP pour ne garder que le reseau : dernier octet a
+ *  zero en IPv4, /48 en IPv6. Assez pour situer et depanner, plus assez pour
+ *  designer un abonne. */
+function _tronquerIp(ip: string | null): string | null {
+  if (!ip) return null;
+  if (ip.includes('.')) {
+    const p = ip.split('.');
+    if (p.length !== 4) return null;
+    return `${p[0]}.${p[1]}.${p[2]}.0`;
+  }
+  if (ip.includes(':')) {
+    const p = ip.split(':').filter(Boolean);
+    return p.length >= 3 ? `${p[0]}:${p[1]}:${p[2]}::/48` : null;
+  }
+  return null;
+}
+
+/** Empreinte SALEE d'une adresse IP : permet de reconnaitre un visiteur qui
+ *  revient, sans conserver son adresse. Le sel est un secret deja deploye ;
+ *  sans lui, l'empreinte serait reversible par force brute et equivaudrait a
+ *  stocker l'adresse en clair. */
+async function _empreinteIp(env: Env, ip: string): Promise<string | null> {
+  const sel = env.R2_URL_SIGNING_SECRET;
+  if (!sel) return null;
+  try {
+    const data = new TextEncoder().encode(`${sel}|ip|${ip}`);
+    const h = await crypto.subtle.digest('SHA-256', data);
+    return [...new Uint8Array(h)].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch { return null; }
+}
+
+async function _enregistrerDiagnostic(env: Env, req: Request | null | undefined, opts: {
+  userId: string; jobId: string; operation: string;
+  statut: 'succeeded' | 'failed'; prompt?: string | null; erreur?: string | null;
+}): Promise<void> {
+  if (!env.MESHES || !req) return;
+  try {
+    const cf = (req as unknown as {
+      cf?: { country?: string; city?: string; region?: string; asOrganization?: string; colo?: string };
+    }).cf ?? {};
+    /* IP TRONQUEE + EMPREINTE, PAS L'ADRESSE COMPLETE.
+     *
+     * Le principe de MINIMISATION (RGPD art. 5.1.c) veut qu'on ne conserve
+     * que ce qui est necessaire a la finalite poursuivie. La finalite ici est
+     * de diagnostiquer un echec et de comprendre l'audience — pas
+     * d'identifier une personne. Or :
+     *   - pour situer et depanner, le RESEAU suffit : on tronque le dernier
+     *     octet en IPv4 et on garde le /48 en IPv6 ;
+     *   - pour savoir si c'est LE MEME visiteur qui revient, une empreinte
+     *     salee suffit : elle correle sans conserver l'identifiant.
+     * On obtient donc tout ce que le user a demande — d'ou vient la requete,
+     * et reconnaitre un revenant — sans detenir une adresse qui designe
+     * quelqu'un.
+     *
+     * Le sel est R2_URL_SIGNING_SECRET, deja deploye : sans lui l'empreinte
+     * serait reversible par force brute (l'espace des IPv4 se parcourt en
+     * quelques minutes), ce qui reviendrait a stocker l'adresse en clair.
+     *
+     * Si un besoin de SECURITE (fraude, abus) exigeait un jour l'adresse
+     * complete, ce serait une autre finalite, a declarer separement. */
+    const ipBrute = req.headers.get('cf-connecting-ip')
+                 ?? req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+                 ?? null;
+    const ip = _tronquerIp(ipBrute);
+    const empreinteIp = ipBrute ? await _empreinteIp(env, ipBrute) : null;
+    const enr = {
+      ts: new Date().toISOString(),
+      job_id: opts.jobId,
+      user_id: opts.userId,
+      operation: opts.operation,
+      statut: opts.statut,
+      provenance: _provenance(req),
+      pays: _paysRequete(req),
+      region: cf.region ?? null,
+      ville: cf.city ?? null,
+      reseau: cf.asOrganization ?? null,
+      point_presence: cf.colo ?? null,
+      // Reseau, pas personne : « 203.0.113.0 » et non « 203.0.113.47 ».
+      ip_reseau: ip,
+      // Correle les visites d'un meme reseau sans conserver son adresse.
+      ip_empreinte: empreinteIp,
+      user_agent: (req.headers.get('user-agent') ?? '').slice(0, 300) || null,
+      // Le prompt est ce qui manquait le plus le 2026-08-23 : sans lui, on ne
+      // pouvait pas savoir quel texte declenchait le faux positif du filtre
+      // de contenu, donc pas traiter la cause.
+      prompt: opts.prompt ? String(opts.prompt).slice(0, 1000) : null,
+      erreur: opts.erreur ? String(opts.erreur).slice(0, 500) : null,
+      retention_jours: DIAG_LOG_RETENTION_DAYS,
+    };
+    const cle = `_logs/diag/${opts.userId}/${enr.ts.replace(/[:.]/g, '-')}_${opts.operation}_${opts.statut}.json`;
+    await env.MESHES.put(cle, JSON.stringify(enr, null, 1),
+                         { httpMetadata: { contentType: 'application/json' } });
+  } catch (e) {
+    console.warn('[diag] enregistrement impossible:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function logOperation(
   env: Env,
   userId: string,
@@ -2525,6 +2642,22 @@ async function handleMeDelete(req: Request, env: Env): Promise<Response> {
                        `_market/sellers/${user.id}.json`]) { // lien Stripe Connect
       await env.MESHES.delete(cle).catch(() => {});
     }
+    /* LES DIAGNOSTICS TECHNIQUES PARTENT AVEC LE COMPTE (art. 17 du RGPD).
+     *
+     * `_logs/diag/<uid>/` contient l'IP tronquee, l'empreinte reseau, le
+     * user-agent, la ville et le texte des prompts. Ces objets vivent HORS du
+     * prefixe `<uid>/` balaye plus haut : sans cette boucle, une demande de
+     * suppression les aurait laisses en place jusqu'a l'expiration des 30
+     * jours de retention. Un droit a l'effacement qui laisse trainer un mois
+     * de donnees personnelles n'est pas respecte, il est differe. */
+    let curseurDiag: string | undefined;
+    let pagesDiag = 0;
+    do {
+      const l = await env.MESHES.list({ prefix: `_logs/diag/${user.id}/`, cursor: curseurDiag, limit: 1000 });
+      await Promise.all((l.objects || []).map((o) => env.MESHES.delete(o.key).catch(() => {})));
+      curseurDiag = l.truncated ? l.cursor : undefined;
+      pagesDiag++;
+    } while (curseurDiag && pagesDiag < 20);
     // Les fiches marketplace stockent `author_email` EN CLAIR — il n'est
     // masqué qu'à la lecture publique, donc l'e-mail restait sur disque après
     // la fermeture du compte. Elles resteraient en plus en vente au nom d'un

@@ -704,11 +704,17 @@
               <th class="col-num   sortable" data-sort="fail_rate" role="button" tabindex="0" title="Failed / total ops">% fail <span class="sort-arrow"></span></th>
               <th class="col-num   sortable" data-sort="rigs_count" role="button" tabindex="0">Rigs <span class="sort-arrow"></span></th>
               <th class="col-tight sortable" data-sort="created_at" role="button" tabindex="0">Joined <span class="sort-arrow"></span></th>
-              <th class="col-tight">Status</th>
+              <!-- « Status » affichait `banned ? BANNED : active`. Tout le monde
+                   etait donc « active », y compris un compte n'ayant jamais rien
+                   genere ou disparu depuis trois mois : le mot decrivait l'ACCES,
+                   pas l'activite, et se lisait comme le contraire. Deux colonnes
+                   distinctes desormais, chacune disant ce qu'elle mesure. -->
+              <th class="col-tight">Activite</th>
+              <th class="col-tight">Acces</th>
               <th class="col-actions">Actions</th>
             </tr>
           </thead>
-          <tbody><tr><td colspan="11" style="color:var(--text-2)">Loading…</td></tr></tbody>
+          <tbody><tr><td colspan="12" style="color:var(--text-2)">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -2053,7 +2059,29 @@
           ? '<span class="muted">—</span>'
           : `<span${rate > 20 ? ' style="color:var(--err); font-weight:700;"' : ''} title="${failed} failed / ${Number(u.ops_total) || 0} ops">${rate.toFixed(rate >= 10 ? 0 : 1)}%</span>`;
         const rigs = Number(u.rigs_count) || 0;
-        const imgLabel = assetsOn ? `🖼 Images (${u.images_count ?? 0})` : '🖼 Images';
+        /* ACTIVITE REELLE, derivee de la derniere operation.
+         *
+         * C'est l'information qu'on croyait lire dans « Status ». Un compte
+         * sans aucune operation n'a jamais rien produit ; un compte dont la
+         * derniere operation date de plus de 30 jours dort. Les deux comptent
+         * autrement dans une decision commerciale, et « active » les
+         * confondait tous. */
+        const derniere = u.last_activity ? Date.parse(u.last_activity) : NaN;
+        const joursDepuis = Number.isFinite(derniere)
+          ? Math.floor((Date.now() - derniere) / 86400000) : null;
+        const activiteCell = (Number(u.ops_total) || 0) === 0
+          ? '<span class="muted" title="Compte cree, aucune operation lancee">jamais utilise</span>'
+          : joursDepuis === null
+            ? '<span class="muted">—</span>'
+            : joursDepuis <= 7
+              ? `<span style="color:var(--ok)" title="Derniere operation il y a ${joursDepuis} j">actif</span>`
+              : joursDepuis <= 30
+                ? `<span title="Derniere operation il y a ${joursDepuis} j">recent</span>`
+                : `<span class="muted" title="Derniere operation il y a ${joursDepuis} j">dormant (${joursDepuis} j)</span>`;
+        // Sans le balayage R2 (case « Load asset counts »), le nombre est
+        // INCONNU et non nul : on met « ? » plutot que rien, sinon le bouton
+        // se lit comme « zero image » a cote de « Meshes (6) ».
+        const imgLabel = assetsOn ? `🖼 Images (${u.images_count ?? 0})` : '🖼 Images (?)';
         const imgTitle = assetsOn ? 'Browse this user\'s images' : 'Asset counts not loaded — tick \'Load asset counts\'';
         return `
         <tr>
@@ -2066,7 +2094,8 @@
           <td class="col-num">${rateCell}</td>
           <td class="col-num">${rigs}</td>
           <td class="col-tight">${escapeHtml(fmtDate(u.created_at))}</td>
-          <td class="col-tight">${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNED</span>' : '<span style="color:var(--ok)">active</span>'}</td>
+          <td class="col-tight">${activiteCell}</td>
+          <td class="col-tight">${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNI</span>' : '<span class="muted">ouvert</span>'}</td>
           <td class="col-actions">
             <button class="btn btn-user-projects"
                     data-uid="${escapeHtml(uid)}"
@@ -2078,11 +2107,15 @@
             <button class="btn btn-user-meshes"
                     data-uid="${escapeHtml(uid)}"
                     data-uwho="${escapeHtml(who)}">🧊 Meshes (${u.meshes_count ?? 0})</button>
-            <!-- Compteur retiré du libellé : il a sa propre colonne triable. -->
+            <!-- Le compte figure DANS le libelle, comme pour Projects et
+                 Meshes. Il avait ete retire au motif qu'une colonne triable
+                 l'affichait deja, mais l'oeil compare les trois boutons cote a
+                 cote : deux avec un nombre et un sans se lit comme une donnee
+                 manquante, pas comme un choix. La colonne reste, pour le tri. -->
             <button class="btn btn-user-rigs"
                     data-uid="${escapeHtml(uid)}"
                     data-uwho="${escapeHtml(who)}"
-                    title="Browse this user's rigs (${rigs})">🦴 Rigs</button>
+                    title="Browse this user's rigs">🦴 Rigs (${rigs})</button>
             <button class="btn btn-user-credits"
                     data-uid="${escapeHtml(uid)}"
                     data-uwho="${escapeHtml(who)}"
