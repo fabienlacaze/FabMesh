@@ -13553,6 +13553,9 @@ async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
 async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> {
   const userOrResp = await _requireAdmin(req, env);
   if (userOrResp instanceof Response) return userOrResp;
+  // Comptes ayant reellement paye : sans eux, chaque credit OFFERT
+  // etait compte comme du chiffre d'affaires. Voir _comptesAyantPaye.
+  const payeurs = await _comptesAyantPaye(env);
 
   const sb = supabaseAdmin(env);
   const { data, error } = await sb
@@ -13610,7 +13613,7 @@ async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> 
           ? new Date(j.finished_at).getTime() - new Date(j.created_at).getTime()
           : 0);
     const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
-    const revenueEur = credits * EUR_PER_CREDIT_NET;
+    const revenueEur = payeurs.has(j.user_id) ? credits * EUR_PER_CREDIT_NET : 0;  // credit OFFERT != chiffre d'affaires — voir _comptesAyantPaye
     const costEur = costUsd * USD_TO_EUR;
     const marginEur = revenueEur - costEur;
 
@@ -13721,9 +13724,46 @@ async function handleAdminAudience(req: Request, env: Env): Promise<Response> {
   });
 }
 
+/** Ensemble des comptes ayant REELLEMENT paye au moins une fois.
+ *
+ *  POURQUOI CETTE FONCTION EXISTE (2026-08-23, signale par le user). Trois
+ *  ecrans d'administration — le tableau « Par type », l'export CSV et l'export
+ *  Excel — calculaient `revenu = credits_consommes x EUR_PER_CREDIT_NET`, sans
+ *  jamais distinguer un credit ACHETE d'un credit OFFERT a l'inscription. Or,
+ *  a ce jour, AUCUN compte n'a jamais paye : les seuls paiements en base sont
+ *  des sessions Stripe de test. Ces ecrans affichaient donc un chiffre
+ *  d'affaires entierement imaginaire, et c'est sur eux qu'on decide d'un prix.
+ *
+ *  Les credits sont fongibles : un solde ne dit pas lequel a ete achete. On
+ *  attribue donc au niveau du COMPTE, la regle la plus proche de la realite
+ *  sans tenir un grand livre : un compte qui n'a jamais paye ne produit aucun
+ *  chiffre d'affaires, sa consommation est un COUT d'acquisition. Un compte
+ *  ayant paye voit sa consommation valorisee.
+ *
+ *  Approximation assumee : le client qui a paye apres avoir brule sa dotation
+ *  gratuite voit aussi cette dotation valorisee. Elle surestime donc encore un
+ *  peu — mais de quelques dizaines de credits par client, au lieu de la
+ *  totalite. Le grand livre FIFO serait exact ; il n'existe pas, et son
+ *  absence ne justifie pas de compter zero euro comme du revenu. */
+async function _comptesAyantPaye(env: Env): Promise<Set<string>> {
+  const out = new Set<string>();
+  try {
+    const { data } = await supabaseAdmin(env).from('payments')
+      .select('user_id').gt('credits', 0).limit(5000);
+    for (const p of ((data ?? []) as Array<{ user_id: string | null }>)) {
+      if (p.user_id) out.add(p.user_id);
+    }
+  } catch { /* en cas d'echec on rend un ensemble vide : aucun revenu attribue,
+                ce qui est le sens PRUDENT de l'erreur. */ }
+  return out;
+}
+
 async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const userOrResp = await _requireAdmin(req, env);
   if (userOrResp instanceof Response) return userOrResp;
+  // Comptes ayant reellement paye : sans eux, chaque credit OFFERT
+  // etait compte comme du chiffre d'affaires. Voir _comptesAyantPaye.
+  const payeurs = await _comptesAyantPaye(env);
 
   const sb = supabaseAdmin(env);
 
@@ -13787,7 +13827,7 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
                           ?? 0);
     const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
-    const revenueEur = credits * EUR_PER_CREDIT_NET;
+    const revenueEur = payeurs.has(j.user_id) ? credits * EUR_PER_CREDIT_NET : 0;  // credit OFFERT != chiffre d'affaires — voir _comptesAyantPaye
     const costEur = costUsd * USD_TO_EUR;
     const marginEur = revenueEur - costEur;
 
@@ -13825,7 +13865,6 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   // CHAQUE credit consomme comme du CA, y compris les 50 credits OFFERTS
   // a l'inscription. Un compte qui n'a jamais rien paye generait donc du
   // « revenu » qui n'a jamais existe.
-  const payeurs = new Set<string>();
   try {
     const { data: pays } = await sb
       .from('payments')
@@ -15482,6 +15521,9 @@ async function handleAdminDeleteMesh(req: Request, env: Env, userId: string, job
 async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> {
   const userOrResp = await _requireAdmin(req, env);
   if (userOrResp instanceof Response) return userOrResp;
+  // Comptes ayant reellement paye : sans eux, chaque credit OFFERT
+  // etait compte comme du chiffre d'affaires. Voir _comptesAyantPaye.
+  const payeurs = await _comptesAyantPaye(env);
 
   const sb = supabaseAdmin(env);
   const { data, error } = await sb
@@ -15530,7 +15572,7 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
           ? new Date(j.finished_at).getTime() - new Date(j.created_at).getTime()
           : 0);
     const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
-    const revenueEur = credits * EUR_PER_CREDIT_NET;
+    const revenueEur = payeurs.has(j.user_id) ? credits * EUR_PER_CREDIT_NET : 0;  // credit OFFERT != chiffre d'affaires — voir _comptesAyantPaye
     const costEur = costUsd * USD_TO_EUR;
     const marginEur = revenueEur - costEur;
     totalMargin += marginEur;
