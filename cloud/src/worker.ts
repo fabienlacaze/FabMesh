@@ -347,14 +347,63 @@ async function _casIncrementCounter(env: Env, key: string, delta: number, max: n
   return null;  // sustained contention — fail safe rather than risk a cap bypass
 }
 
+/** Incremente un compteur R2 de facon atomique, SANS plafond.
+ *
+ *  `_casIncrementCounter` refuse au-dela d'un maximum ; pour un compte
+ *  PAYANT il n'y a rien a refuser, seulement a compter juste. Le code
+ *  faisait donc un `get` puis un `put` nu sur la meme cle — une
+ *  lecture-modification-ecriture sans verrou. Avec plusieurs clients
+ *  payants generant en parallele, les increments se perdent : le compteur
+ *  journalier et le cumul budgetaire SOUS-ESTIMENT la depense, et c'est
+ *  precisement sur eux que reposent l'alerte de budget et le tableau de
+ *  bord. Un compteur qui ment vers le bas est pire qu'absent.
+ *
+ *  Meme boucle de comparaison-echange que le compteur plafonne, sans le
+ *  refus. En cas de contention soutenue on renonce a l'increment plutot
+ *  que d'ecraser la valeur d'un autre : perdre une mesure vaut mieux que
+ *  d'en effacer six. */
+async function _incrementAtomique(env: Env, key: string, delta: number): Promise<number | null> {
+  if (!env.MESHES) return null;
+  for (let essai = 0; essai < 6; essai++) {
+    const existing = await env.MESHES.get(key);
+    const cur = existing ? (parseFloat(await existing.text()) || 0) : 0;
+    const next = cur + delta;
+    const res = existing
+      ? await env.MESHES.put(key, String(next), { onlyIf: { etagMatches: existing.etag } })
+      : await env.MESHES.put(key, String(next), { onlyIf: { etagDoesNotMatch: '*' } });
+    if (res) return next;
+  }
+  return null;
+}
+
 /** Anti-DoS per-account daily $ cap. CAS-atomic. Returns remaining $ for the
  *  user today, or null if this call would push the account over its personal
  *  daily budget. Counter lives at `_meta/userspend/<userId>/<YYYY-MM-DD>` and
  *  resets at UTC midnight. Soft cap: NOT refunded on downstream failure (same
  *  policy as checkAndIncrementUserCalls) so a failure-spamming attacker still
  *  burns their own budget. */
+/** Lit un plafond numerique depuis l'environnement EN RESPECTANT LE ZERO.
+ *
+ *  Le motif employe partout etait `parseFloat(env.X ?? '') || DEFAUT`. En
+ *  JavaScript, `0 || 2` vaut 2 : mettre un plafond a zero pour couper la
+ *  depense en urgence le remettait donc SILENCIEUSEMENT a sa valeur par
+ *  defaut. Un gerant qui constate une fuite un dimanche soir, fait
+ *  `wrangler secret put MAX_DAILY_MODAL_SPEND_USD` = 0 et voit le
+ *  deploiement reussir croit avoir ferme le robinet ; il l'a laisse ouvert
+ *  a 10 $/jour.
+ *
+ *  Ici, seule une valeur ABSENTE ou non numerique retombe sur le defaut.
+ *  Zero est une consigne, et elle est respectee. Les negatifs sont ramenes
+ *  a zero plutot qu'ignores : ils expriment la meme intention. */
+function _plafond(brut: string | undefined, defaut: number): number {
+  if (brut == null || String(brut).trim() === '') return defaut;
+  const n = Number(brut);
+  if (!Number.isFinite(n)) return defaut;
+  return Math.max(0, n);
+}
+
 async function checkAndIncrementUserDailySpend(env: Env, userId: string, estimatedUsd: number): Promise<number | null> {
-  const maxUsd = parseFloat(env.MAX_USER_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_USER_DAILY_SPEND_USD;
+  const maxUsd = _plafond(env.MAX_USER_DAILY_SPEND_USD, DEFAULT_MAX_USER_DAILY_SPEND_USD);
   const next = await _casIncrementCounter(env, `_meta/userspend/${userId}/${todayUTC()}`, estimatedUsd, maxUsd);
   return next == null ? null : maxUsd - next;
 }
@@ -365,7 +414,7 @@ async function checkAndIncrementUserDailySpend(env: Env, userId: string, estimat
  *  too; if the account is over budget we roll back the global increment so the
  *  shared counter stays accurate. */
 async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number, userId?: string): Promise<number | null> {
-  const maxUsd = parseFloat(env.MAX_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_DAILY_SPEND_USD;
+  const maxUsd = _plafond(env.MAX_DAILY_SPEND_USD, DEFAULT_MAX_DAILY_SPEND_USD);
   const next = await _casIncrementCounter(env, `_meta/spend/${todayUTC()}`, estimatedUsd, maxUsd);
   if (next == null) return null;
   if (userId && (await checkAndIncrementUserDailySpend(env, userId, estimatedUsd)) == null) {
@@ -443,7 +492,7 @@ async function _spendRefusalMessage(env: Env, userId?: string): Promise<string> 
   const GENERIC = 'The service is temporarily at capacity — your credits are safe and you were not charged. Please try again shortly.';
   if (!userId || !env.MESHES) return GENERIC;
   try {
-    const maxUser = parseFloat(env.MAX_USER_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_USER_DAILY_SPEND_USD;
+    const maxUser = _plafond(env.MAX_USER_DAILY_SPEND_USD, DEFAULT_MAX_USER_DAILY_SPEND_USD);
     const cur = parseFloat((await r2GetText(env, `_meta/userspend/${userId}/${todayUTC()}`)) || '0') || 0;
     // Within 20% of the personal cap => it is almost certainly the one
     // that refused. Below that, the global cap is the culprit and the
@@ -570,7 +619,7 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userI
   // une fois le budget du workspace epuise, Modal refuse de lancer les apps.
   // Mieux vaut un message clair qu'un echec technique cote GPU.
   if (await _budgetReelEpuise(env)) return null;
-  const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
+  const maxUsd = _plafond(env.MAX_DAILY_MODAL_SPEND_USD, DEFAULT_MAX_MODAL_SPEND_USD);
   // Paying customers are never refused. Their spend still lands on the
   // SAME daily counter — deliberately, so refundModalSpend stays
   // symmetric without having to thread a userId through ~50 call sites
@@ -581,12 +630,11 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userI
   const paid = !!userId && await _isPaidAccount(env, userId);
   if (paid) {
     try {
-      const key = `_meta/modal_spend/${todayUTC()}`;
-      const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
-      await env.MESHES.put(key, String(cur + estimatedUsd));
-      const tk = '_meta/modal_spend_total.txt';
-      const total = (parseFloat((await r2GetText(env, tk)) || '0') || 0) + estimatedUsd;
-      await env.MESHES.put(tk, String(total));
+      // Atomique : voir _incrementAtomique. C'etait un get + put nu, donc
+      // les increments concurrents de plusieurs clients payants se
+      // perdaient — et l'alerte de budget lit ces compteurs.
+      await _incrementAtomique(env, `_meta/modal_spend/${todayUTC()}`, estimatedUsd);
+      await _incrementAtomique(env, '_meta/modal_spend_total.txt', estimatedUsd);
       await _maybeAlertModalBudget(env);
     } catch { /* accounting only — never block a paid call on it */ }
     return maxUsd;
@@ -725,7 +773,7 @@ async function _sendAdminAlertEmail(env: Env, subject: string, text: string): Pr
 /** Check the per-user daily call cap. Increments on success.
  *  Returns the remaining call budget, or null if over. */
 async function checkAndIncrementUserCalls(env: Env, userId: string): Promise<number | null> {
-  const maxCalls = parseInt(env.MAX_USER_DAILY_CALLS ?? '', 10) || DEFAULT_MAX_USER_DAILY_CALLS;
+  const maxCalls = Math.round(_plafond(env.MAX_USER_DAILY_CALLS, DEFAULT_MAX_USER_DAILY_CALLS));
   /* UN CLIENT PAYANT N'EST PAS RATIONNE — comme pour le plafond en dollars.
    *
    * L'exemption existait sur `checkAndIncrementModalSpend` mais PAS ici :
@@ -3431,6 +3479,43 @@ async function handleMarketListingUpdate(req: Request, env: Env, id: string): Pr
 
 /** GET /api/market/list — PUBLIC. Approved listings only. Browse-only;
  *  no auth required so search engines + anonymous users can land here. */
+/** Le paywall de la boutique tient dans cette fonction.
+ *
+ *  `/api/market/list` et `/api/market/<id>` renvoyaient `asset_url` et
+ *  `mesh_url` pour TOUTES les fiches approuvees, y compris payantes : la
+ *  cle du fichier vendu etait donc publique avant tout achat. La vitrine
+ *  livrait la marchandise.
+ *
+ *  On ne publie plus ces champs des que `price_cents > 0`. Le rendu n'en a
+ *  pas besoin : il ne s'en servait que pour DEVINER le type quand
+ *  `asset_kind` manquait (fiches anciennes), donc on resout `asset_kind`
+ *  ici, une bonne fois.
+ *
+ *  RESERVE HONNETE : pour une fiche IMAGE payante, l'apercu EST le produit
+ *  (`thumbnail_url` vaut la meme URL que l'actif au moment de la
+ *  publication). Retirer `asset_url` ne suffit donc pas a proteger une
+ *  image vendue — il faudrait un filigrane ou une version basse
+ *  definition, ce qui n'existe pas dans le produit. Les maillages, eux,
+ *  n'ont pas de miniature separee et sont reellement proteges. */
+function _ficheVitrine(l: Record<string, unknown>): Record<string, unknown> {
+  const prix = Number(l.price_cents ?? 0);
+  const kind = (l.asset_kind as string) || (l.mesh_url ? 'mesh' : 'image');
+  const base: Record<string, unknown> = {
+    id: l.id, title: l.title, description: l.description,
+    price_cents: l.price_cents, currency: l.currency, licence: l.licence,
+    asset_kind: kind,
+    asset_type: l.asset_type,
+    author_display: l.author_display,
+    user_id: l.user_id,
+    created_at: l.created_at,
+    downloads: l.downloads,
+  };
+  if (prix > 0) return base;                       // payante : pas d'URL
+  base.asset_url = l.asset_url || l.mesh_url;      // gratuite : telechargeable
+  base.mesh_url = l.mesh_url;
+  return base;
+}
+
 async function handleMarketList(_req: Request, env: Env): Promise<Response> {
   const all = await _loadAllListings(env);
   // One bulk pass over _market/ratings/ so we don't N+1 per listing.
@@ -3438,24 +3523,10 @@ async function handleMarketList(_req: Request, env: Env): Promise<Response> {
   const visible = all.filter((l) => l.status === 'approved')
     .map((l) => {
       const r = ratingsByListing.get(l.id) || { avg: 0, count: 0 };
-      return {  // strip the author_email — public surface
-        id: l.id,
-        title: l.title,
-        description: l.description,
-        price_cents: l.price_cents,
-        currency: l.currency,
-        licence: l.licence,
-        asset_kind: l.asset_kind || (l.mesh_url ? 'mesh' : 'image'),
-        asset_type: l.asset_type,
-        asset_url: l.asset_url || l.mesh_url,
-        mesh_url: l.mesh_url,
-        author_display: l.author_display,
-        user_id: l.user_id,
-        created_at: l.created_at,
-        downloads: l.downloads,
-        rating_avg: r.avg,
-        rating_count: r.count,
-      };
+      // author_email retire : surface publique. asset_url retire aussi
+      // quand la fiche est payante — voir _ficheVitrine.
+      return { ..._ficheVitrine(l as unknown as Record<string, unknown>),
+               rating_avg: r.avg, rating_count: r.count };
     });
   // Surface the killswitch state so the UI can grey out buy/publish
   // affordances. Read still returns listings, write routes return 503.
@@ -3491,16 +3562,7 @@ async function handleMarketGet(_req: Request, env: Env, id: string): Promise<Res
       }
     }
     return json({ ok: true, listing: {
-      id: parsed.id, title: parsed.title, description: parsed.description,
-      price_cents: parsed.price_cents, currency: parsed.currency, licence: parsed.licence,
-      asset_kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
-      asset_type: parsed.asset_type,
-      asset_url: parsed.asset_url || parsed.mesh_url,
-      mesh_url: parsed.mesh_url,
-      author_display: parsed.author_display,
-      user_id: parsed.user_id,
-      created_at: parsed.created_at,
-      downloads: parsed.downloads,
+      ..._ficheVitrine(parsed as Record<string, unknown>),
       rating_avg: stats.avg,
       rating_count: stats.count,
       my_rating: myRating,
@@ -5057,7 +5119,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   const ok = await verifyStripeSignature(raw, sig, secret);
   if (!ok) return err(400, 'bad signature');
 
-  let event: { type: string; livemode?: boolean; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> }; charges_enabled?: boolean; payouts_enabled?: boolean; details_submitted?: boolean; country?: string; requirements?: { currently_due?: string[] } } } };
+  let event: { type: string; livemode?: boolean; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; payment_status?: string; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> }; charges_enabled?: boolean; payouts_enabled?: boolean; details_submitted?: boolean; country?: string; requirements?: { currently_due?: string[] } } } };
   try { event = JSON.parse(raw); } catch { return err(400, 'bad json'); }
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -5138,6 +5200,24 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     // Subscriptions handled by invoice.paid below (covers both the
     // first cycle and every renewal). Skip here to avoid double-credit.
     if (sess.metadata?.is_subscription === 'true') return json({ received: true });
+    /* ON NE CREDITE QUE SI C'EST PAYE.
+     *
+     * `checkout.session.completed` signifie « le client est alle au bout du
+     * tunnel », PAS « l'argent est arrive ». Avec une carte, les deux
+     * coincident et le defaut ne se voit pas. Des qu'un moyen a
+     * notification differee sera active — prelevement SEPA, Bancontact,
+     * Sofort, ou simplement un paiement en attente de verification — la
+     * session se completerait avec `payment_status: 'unpaid'` et les
+     * credits partiraient avant l'encaissement. Stripe emet
+     * `checkout.session.async_payment_succeeded` pour ces cas.
+     *
+     * Mine desamorcee avant activation plutot qu'apres. */
+    if (sess.payment_status && sess.payment_status !== 'paid'
+        && sess.payment_status !== 'no_payment_required') {
+      console.log(`[stripe] session ${sess.id} completee mais payment_status=`
+                + `${sess.payment_status} — aucun credit accorde`);
+      return json({ received: true, deferred: sess.payment_status });
+    }
     const userId = sess.metadata?.user_id;
     const packId = sess.metadata?.pack_id ?? 'unknown';
     const rawCredits = parseInt(sess.metadata?.credits ?? '0', 10);
@@ -5264,6 +5344,36 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
       // On demande donc a Stripe la session rattachee au payment_intent.
       // Aucune migration necessaire : cela fonctionne sur les lignes
       // existantes.
+      /* ABONNEMENTS : LA LIGNE EST INDEXEE SUR UN IDENTIFIANT DE FACTURE.
+       *
+       * `_traiterPaiement` enregistre `stripe_session_id = inv.id` pour un
+       * abonnement, soit un `in_...`. La recherche ci-dessus n'essaie que
+       * le payment_intent (`pi_...`) et la charge (`ch_...`), et celle par
+       * session Checkout ne rend que des `cs_...` : AUCUN des trois ne peut
+       * egaler un `in_...`. Rembourser un abonne ne reprenait donc jamais
+       * ses credits — il gardait 100 credits et son argent.
+       *
+       * Stripe rattache la facture au payment_intent : on la demande. */
+      if (!paiement && ch.payment_intent) {
+        try {
+          const rf = await _stripeRest(
+            env,
+            'https://api.stripe.com/v1/invoices?limit=3&payment_intent='
+              + encodeURIComponent(String(ch.payment_intent)),
+            null, 'GET');
+          const factures = (rf.ok && Array.isArray((rf.data as { data?: unknown[] }).data))
+            ? (rf.data as { data: Array<{ id?: string }> }).data : [];
+          for (const f of factures) {
+            if (!f?.id) continue;
+            const { data } = await sb.from('payments')
+              .select(COLONNES_PAIEMENT)
+              .eq('stripe_session_id', f.id).maybeSingle();
+            if (data) { paiement = data as unknown as LignePaiement; break; }
+          }
+        } catch (e) {
+          console.warn('[stripe] resolution de la facture impossible:', (e as Error).message);
+        }
+      }
       if (!paiement && ch.payment_intent) {
         try {
           const r = await _stripeRest(
@@ -8350,7 +8460,20 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // 5-10× cheaper than Replicate, so the per-image estimate is split.
   // T-pose runs on the heavier back-view container (RealVisXL + CN +
   // IPAdapter) — costs about as much as a back-view (~$0.10).
-  const ESTIMATED_USD_PER_IMAGE = useTpose ? 0.10 : (useModal ? 0.06 : 0.30);
+  /* 0,06 $ VENAIT D'UNE ESTIMATION, PAS D'UNE MESURE.
+   *
+   * Le meme fichier documente `'text2image': 0.003` comme MESURE sur 44
+   * travaux (mediane 6 s sur L40S) — soit un facteur VINGT avec la valeur
+   * utilisee ici. Comme cette estimation est ce qu'on impute au plafond
+   * global de 10 $/jour, trente-trois utilisateurs ne faisant QUE des
+   * images epuisaient la journee entiere du service pour 0,50 $ de GPU
+   * reellement consomme.
+   *
+   * On aligne sur la mesure, avec une marge de securite de ~2x plutot que
+   * de 20x : mieux vaut un garde-fou qui mord un peu tot qu'un garde-fou
+   * qui ferme le service pour rien. La t-pose garde une valeur plus haute,
+   * son pipeline etant plus long (rectification + rendu). */
+  const ESTIMATED_USD_PER_IMAGE = useTpose ? 0.02 : (useModal ? 0.006 : 0.30);
   const estimatedTotal = ESTIMATED_USD_PER_IMAGE * n;
 
   // Hard daily spend cap — refund the estimate if the call fails.
@@ -13225,7 +13348,7 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   try { budgetTotalUsd = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0; } catch {}
   try { budgetSpentUsd = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0; } catch {}
   try { todaySpendUsd  = parseFloat(await r2GetText(env, `_meta/modal_spend/${todayUTC()}`) || '0') || 0; } catch {}
-  const dailyCapUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
+  const dailyCapUsd = _plafond(env.MAX_DAILY_MODAL_SPEND_USD, DEFAULT_MAX_MODAL_SPEND_USD);
   // Prefer the REAL Modal usage when it is fresh (<26h), same rule as
   // handleAdminModalCredits, so the runway isn't computed off a stale estimate.
   const realFresh = realUsageTs ? (Date.now() - Date.parse(realUsageTs)) < 26 * 3600 * 1000 : false;
