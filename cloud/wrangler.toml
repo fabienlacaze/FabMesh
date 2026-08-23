@@ -19,6 +19,20 @@ main = "src/worker.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Journaux durables.
+#
+# Sans cette section, les `console.error` des chemins d'argent — un
+# remboursement qui ne retrouve pas sa ligne, une dette non enregistrable,
+# une annulation Modal en echec — ne sont lisibles qu'en `wrangler tail`,
+# c'est-a-dire uniquement si quelqu'un regarde AU MOMENT MEME. Constat du
+# 2026-08-23 : tout le travail de la journee a consiste a rendre visibles
+# des defaillances silencieuses, alors que le journal qui les porte
+# n'etait conserve nulle part. Une alerte que personne ne peut relire est
+# une alerte qui n'existe pas.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Static assets (the `next export` output).
 [assets]
 directory = "out"
