@@ -1,0 +1,82 @@
+# Remonte l'usage REEL du workspace Modal vers le worker, toutes les heures.
+#
+# POURQUOI CE FICHIER EXISTE
+# --------------------------
+# `_budgetReelEpuise` (cloud/src/worker.ts) est le SEUL plafond adosse a la
+# facture reelle. Il lit `_meta/modal_real_usage.json`, ecrit par
+# `scripts/modal_usage_push.py`. Au 2026-08-23, ce script n'etait planifie
+# NULLE PART : le fichier n'existait pas, l'arret dur ne pouvait donc jamais
+# se declencher, et la seule limite restante etait le compteur d'ESTIMATIONS
+# du worker — qui sous-evalue d'un facteur ~4,6 (mesure du 2026-08-04 :
+# 2,50 $ annonces pour 11,59 $ reellement factures). Un plafond affiche a
+# 10 $/jour en autorisait donc environ 46.
+#
+# POURQUOI ICI ET PAS EN TACHE PLANIFIEE WINDOWS
+# ----------------------------------------------
+# Une tache locale ne tourne que si le PC est allume. L'audit avait releve
+# exactement ce trou : « PC du gerant eteint 26 h = plus aucun plafond sur
+# les comptes payants ». GitHub execute ce workflow que la machine soit
+# allumee ou non.
+#
+# CE QU'IL RESTE A FAIRE (une seule fois) : declarer trois secrets dans
+#   Settings > Secrets and variables > Actions
+#     MODAL_TOKEN_ID       \\ jetons Modal : https://modal.com/settings/tokens
+#     MODAL_TOKEN_SECRET   /  (« New token », profil fabienlacaze)
+#     MODAL_USAGE_SECRET      la MEME valeur que le secret Worker du meme nom
+#                             (deja deploye ; sinon `npx wrangler secret list`)
+#
+# Tant qu'ils sont absents, le workflow s'arrete proprement en le disant,
+# plutot que d'echouer avec une trace illisible.
+
+name: Usage Modal -> worker
+
+on:
+  schedule:
+    # Toutes les heures. Le worker considere la donnee fraiche moins de 26 h,
+    # donc meme plusieurs executions manquees ne desarment rien.
+    - cron: '17 * * * *'
+  workflow_dispatch:        # declenchement manuel, pour verifier tout de suite
+
+concurrency:
+  group: modal-usage-push
+  cancel-in-progress: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verifier les secrets
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_USAGE_SECRET: ${{ secrets.MODAL_USAGE_SECRET }}
+        run: |
+          manquants=""
+          [ -z "$MODAL_TOKEN_ID" ]     && manquants="$manquants MODAL_TOKEN_ID"
+          [ -z "$MODAL_TOKEN_SECRET" ] && manquants="$manquants MODAL_TOKEN_SECRET"
+          [ -z "$MODAL_USAGE_SECRET" ] && manquants="$manquants MODAL_USAGE_SECRET"
+          if [ -n "$manquants" ]; then
+            echo "::warning::Secrets absents :$manquants — rien envoye."
+            echo "Declare-les dans Settings > Secrets and variables > Actions."
+            echo "ignorer=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Installer la CLI Modal
+        if: env.ignorer != '1'
+        run: pip install --quiet modal
+
+      - name: Remonter l'usage
+        if: env.ignorer != '1'
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_USAGE_SECRET: ${{ secrets.MODAL_USAGE_SECRET }}
+          FABMESH_WORKER_URL: https://myfabmesh-cloud.fabien65400.workers.dev
+        run: python scripts/modal_usage_push.py
