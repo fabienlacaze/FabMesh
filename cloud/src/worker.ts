@@ -334,16 +334,44 @@ async function readListingDownloads(env: Env, listingId: string): Promise<number
  *  conditional-PUT pattern in bumpListingDownloads. */
 async function _casIncrementCounter(env: Env, key: string, delta: number, max: number): Promise<number | null> {
   if (!env.MESHES) return null;
-  for (let attempt = 0; attempt < 6; attempt++) {
+  /* ATTENTE ENTRE LES TENTATIVES — sans elle, reessayer ne servait a rien.
+   *
+   * La boucle enchainait six comparaisons-echanges SANS LE MOINDRE DELAI :
+   * sous contention, les six echouaient en quelques microsecondes sur le
+   * meme etag, et la fonction rendait `null`. Or `null` veut dire « budget
+   * epuise » pour l'appelant : un client se voyait donc refuser sa
+   * generation avec « service at capacity » alors que le budget etait
+   * intact — il suffisait que deux requetes tombent en meme temps.
+   *
+   * Le probleme est structurel : `_meta/modal_spend/<jour>` est UNE SEULE
+   * cle, ecrite par CHAQUE requete GPU du service, et R2 ne soutient qu'a
+   * peu pres une ecriture par seconde et par cle. Le partitionnement (N
+   * fragments additionnes a la lecture) serait la vraie reponse, mais il
+   * couterait N sous-requetes a chaque verification de plafond.
+   *
+   * Ici on se contente de rendre la reprise REELLE : attente croissante et
+   * bruitee, jusqu'a ~700 ms au total, sur des operations qui durent des
+   * minutes. On CONSERVE le choix de fermer en cas de doute — c'est un
+   * garde-fou de depense, il doit se tromper du bon cote — mais on trace
+   * la difference, sans quoi une contention passe pour un budget epuise. */
+  const ATTENTES_MS = [0, 25, 60, 110, 180, 280];
+  for (let attempt = 0; attempt < ATTENTES_MS.length; attempt++) {
+    if (ATTENTES_MS[attempt] > 0) {
+      const bruit = ATTENTES_MS[attempt] * (0.5 + (attempt * 37 % 100) / 100);
+      await new Promise((r) => setTimeout(r, bruit));
+    }
     const existing = await env.MESHES.get(key);
     const cur = existing ? (parseFloat(await existing.text()) || 0) : 0;
-    if (cur + delta > max) return null;
+    if (cur + delta > max) return null;          // vrai depassement de budget
     const next = cur + delta;
     const res = existing
       ? await env.MESHES.put(key, String(next), { onlyIf: { etagMatches: existing.etag } })
       : await env.MESHES.put(key, String(next), { onlyIf: { etagDoesNotMatch: '*' } });
     if (res) return next;
   }
+  console.warn(`[budget] contention soutenue sur ${key} — requete refusee alors `
+             + `que le budget n'est PAS epuise. Si cela se repete, il faut `
+             + `partitionner ce compteur.`);
   return null;  // sustained contention — fail safe rather than risk a cap bypass
 }
 
@@ -2416,10 +2444,36 @@ async function handleMeDelete(req: Request, env: Env): Promise<Response> {
       console.warn('[rgpd] anonymisation des fiches:', (e as Error).message);
     }
   }
-  // Drop rows. payments + jobs cascade via FK on auth.users when we
-  // delete the auth.users row, but doing them explicitly here ensures
-  // a partial-failure state still leaves an empty account.
-  await sb.from('payments').delete().eq('user_id', user.id);
+  /* LES PAIEMENTS SONT ANONYMISES, PAS EFFACES.
+   *
+   * `delete()` sur `payments` detruisait la preuve comptable d'une vente
+   * reelle. Deux consequences : le chiffre d'affaires du mois perdait le
+   * montant (les tableaux de bord additionnent cette table), et en cas de
+   * controle ou de litige bancaire il ne restait RIEN a produire. Or les
+   * pieces justificatives de recettes doivent etre conservees six ans
+   * (art. L102 B du livre des procedures fiscales) — une obligation legale
+   * que l'article 17.3.b du RGPD reconnait expressement comme superieure au
+   * droit a l'effacement.
+   *
+   * Le fichier applique DEJA ce raisonnement aux fiches de la boutique,
+   * anonymisees et conservees quelques lignes plus haut ; il n'avait pas
+   * ete etendu aux paiements. On delie donc la ligne du compte plutot que
+   * de la supprimer : plus d'identifiant utilisateur, mais le montant, la
+   * date et la reference Stripe restent.
+   *
+   * Si la colonne n'accepte pas NULL (contrainte NOT NULL heritee), on
+   * retombe sur la suppression pour ne pas bloquer un droit RGPD — et on
+   * le trace, parce que c'est une perte comptable qu'il faut savoir. */
+  {
+    const anonyme = await sb.from('payments')
+      .update({ user_id: null, anonymise_le: new Date().toISOString() })
+      .eq('user_id', user.id).select('id');
+    if (anonyme.error) {
+      console.warn('[rgpd] anonymisation des paiements impossible, suppression : '
+                 + anonyme.error.message);
+      await sb.from('payments').delete().eq('user_id', user.id);
+    }
+  }
   await sb.from('jobs').delete().eq('user_id', user.id);
   // user_assets n'était PAS effacée : elle garde r2_path, project et meta,
   // soit l'arborescence nominative des projets du compte.
@@ -3288,7 +3342,25 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
   const title = String(body.title ?? '').trim().slice(0, 120);
   const description = String(body.description ?? '').trim().slice(0, 4000);
   const price_cents = Math.max(0, Math.min(1_000_000, Math.round(Number(body.price_cents ?? 0))));
-  const currency = String(body.currency ?? 'USD').trim().toUpperCase().slice(0, 3) || 'USD';
+  /* DEVISE : LISTE BLANCHE, ET UNE SEULE POUR TOUT LE CATALOGUE.
+   *
+   * La valeur etait prise telle quelle du vendeur — n'importe quelle chaine
+   * de trois caracteres — puis reinjectee dans les `line_items` du Checkout
+   * et dans le virement Stripe Connect. Trois echecs en decoulaient : une
+   * devise inventee faisait rejeter la session par Stripe au moment de
+   * payer, un panier melangeant deux devises etait IMPOSSIBLE a payer (une
+   * session Checkout n'en accepte qu'une), et un virement partait dans une
+   * devise arbitraire vers le compte du vendeur.
+   *
+   * Le produit affiche ses prix en EUR et la caisse credits est en EUR :
+   * la boutique s'aligne. Un vendeur qui envoie autre chose voit sa fiche
+   * refusee avec un message clair, plutot qu'une erreur Stripe au moment
+   * ou un acheteur essaie de payer. */
+  const DEVISES_ADMISES = new Set(['EUR']);
+  const currency = String(body.currency ?? 'EUR').trim().toUpperCase().slice(0, 3) || 'EUR';
+  if (!DEVISES_ADMISES.has(currency)) {
+    return err(400, `currency ${currency} not supported — listings are priced in EUR`);
+  }
   const licence = String(body.licence ?? 'personal').trim().toLowerCase();
   if (kind !== 'mesh' && kind !== 'image') return err(400, 'asset_kind must be mesh or image');
   if (!title) return err(400, 'title required');
@@ -4854,6 +4926,57 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
     const priceId = (env[envKey] as string | undefined) ?? '';
     if (!priceId) {
       return err(503, `subscription plan ${pack.id} not yet configured (missing ${envKey})`);
+    }
+    /* DEUX GARDES AVANT D'OUVRIR UNE SESSION D'ABONNEMENT.
+     *
+     * 1. LE PRIX REELLEMENT PRELEVE DOIT CORRESPONDRE AU PRIX AFFICHE.
+     *    /buy affiche le montant de la constante `PACKS` ; le debit vient
+     *    du Price Stripe designe par le secret. Rien ne verifiait que les
+     *    deux coincidaient : une erreur de saisie dans le tableau de bord
+     *    Stripe, et le client voyait « 15 EUR/mois » et payait autre chose,
+     *    en recevant de toute facon les credits du pack. On compare, et on
+     *    refuse plutot que de prelever un montant non annonce.
+     *
+     * 2. PAS DEUX ABONNEMENTS POUR LE MEME COMPTE. La session etait creee
+     *    sans verifier s'il en existait deja un actif : un client qui
+     *    clique deux fois (double onglet, retour arriere, impatience) se
+     *    retrouvait avec DEUX abonnements Stripe et deux prelevements
+     *    mensuels, sans aucun moyen d'en resilier un depuis le site. */
+    try {
+      const rp = await _stripeRest(env,
+        `https://api.stripe.com/v1/prices/${encodeURIComponent(priceId)}`, null, 'GET');
+      const prix = rp.data as { unit_amount?: number; currency?: string; active?: boolean };
+      const attendu = pack.euros * 100;
+      if (!rp.ok || prix?.active === false) {
+        return err(503, 'subscription price unavailable — please try again later');
+      }
+      if (typeof prix?.unit_amount === 'number' && prix.unit_amount !== attendu) {
+        console.error(`[stripe] Price ${priceId} vaut ${prix.unit_amount} alors que `
+                    + `PACKS annonce ${attendu} — session refusee`);
+        return err(503, 'subscription price mismatch — purchase blocked, please contact support');
+      }
+      if (prix?.currency && prix.currency.toLowerCase() !== 'eur') {
+        return err(503, 'subscription price is not in EUR — purchase blocked');
+      }
+    } catch (e) {
+      console.warn('[stripe] verification du Price impossible:', (e as Error).message);
+      return err(503, 'subscription price could not be verified — please try again later');
+    }
+    if (user.email) {
+      try {
+        const rs = await _stripeRest(env,
+          'https://api.stripe.com/v1/subscriptions?status=active&limit=100', null, 'GET');
+        const abos = (rs.ok && Array.isArray((rs.data as { data?: unknown[] }).data))
+          ? (rs.data as { data: Array<{ metadata?: Record<string, string> }> }).data : [];
+        if (abos.some((a) => a?.metadata?.user_id === user.id)) {
+          return err(409, 'You already have an active subscription. '
+                        + 'Write to us to change or cancel it.');
+        }
+      } catch (e) {
+        // Verification impossible : on laisse passer plutot que de bloquer
+        // une vente sur une panne d'API, mais on le trace.
+        console.warn('[stripe] controle d abonnement existant impossible:', (e as Error).message);
+      }
     }
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -7555,6 +7678,12 @@ async function resolveMyfabmeshCogVersion(token: string): Promise<string> {
  * NO POLLING means no subrequest-limit risk for this call path (we use
  * ~5 subrequests total per image instead of ~25 for Replicate).
  * ──────────────────────────────────────────────────────────────── */
+/** Cout impute a une REPRISE apres 524. Aligne sur la mesure documentee plus
+ *  haut (`'text2image': 0.003`, n=44) avec la meme marge ~2x que
+ *  l'estimation nominale : une reprise fait tourner un conteneur FROID, donc
+ *  plutot plus cher qu'une generation nominale. */
+const COUT_REPRISE_IMAGE_USD = 0.006;
+
 async function callModalText2Image(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
   const url = env.MODAL_TEXT2IMAGE_URL;
   const secret = env.MODAL_SHARED_SECRET;
@@ -7605,6 +7734,25 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
     console.log(`[modal] text2image 524 — cold start retry after ${delay / 1000}s`);
     await new Promise((res) => setTimeout(res, delay));
     r = await doFetch();
+    /* CHAQUE REPRISE EST UNE EXECUTION GPU DE PLUS, ET ELLE SE PAIE.
+     *
+     * Le commentaire ci-dessus le dit lui-meme : « A 524 does NOT cancel
+     * the Modal request — FastAPI keeps running it to completion ». La
+     * premiere generation, abandonnee cote worker, va donc jusqu'au bout
+     * sur le GPU et est facturee. Avec deux reprises, jusqu'a TROIS
+     * executions payees — pour UNE seule imputee au plafond journalier.
+     * Le garde-fou de depense se trompait donc d'un facteur 3 exactement
+     * les jours de demarrage a froid, c'est-a-dire les jours de faible
+     * trafic ou il compte le plus.
+     *
+     * On impute la reprise sans jamais REFUSER a ce stade : le client a
+     * deja attendu deux minutes, l'abandonner ici serait le punir d'une
+     * lenteur qui n'est pas la sienne. Le plafond mordra sur la requete
+     * SUIVANTE, avec un compteur enfin juste. */
+    try {
+      await _incrementAtomique(env, `_meta/modal_spend/${todayUTC()}`, COUT_REPRISE_IMAGE_USD);
+      await _incrementAtomique(env, '_meta/modal_spend_total.txt', COUT_REPRISE_IMAGE_USD);
+    } catch { /* comptabilite seule */ }
   }
   if (!r.ok) {
     if (r.status === 524) {
@@ -13310,12 +13458,26 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const debutDuMois = new Date();
   debutDuMois.setUTCDate(1);
   debutDuMois.setUTCHours(0, 0, 0, 0);
+  /* LE REVENU VIENT DES PAIEMENTS, PAS DES CREDITS CONSOMMES.
+   *
+   * On additionnait `credit_cost x EUR_PER_CREDIT_NET` sur tous les travaux
+   * reussis du mois, sans distinguer un credit ACHETE d'un credit OFFERT a
+   * l'inscription. Cinquante inscrits venus du Store, qui consomment
+   * uniquement leur dotation gratuite, affichaient donc plus de cent euros
+   * de « revenu reel » pour zero euro encaisse — et c'est la carte sur
+   * laquelle on decide d'augmenter les prix ou d'ouvrir les vannes.
+   *
+   * On lit desormais la table `payments`, c'est-a-dire l'argent reellement
+   * recu. Les credits consommes restent affiches ailleurs comme mesure
+   * d'ACTIVITE, ce qu'ils sont ; ils ne sont plus presentes comme du
+   * chiffre d'affaires. */
   let revenuDuMoisEur = 0;
   try {
-    for (const j of ((jobs ?? []) as Array<{ status: string; credit_cost: number; created_at: string }>)) {
-      if (j.status !== 'succeeded') continue;
-      if (new Date(j.created_at).getTime() < debutDuMois.getTime()) continue;
-      revenuDuMoisEur += (j.credit_cost ?? 0) * EUR_PER_CREDIT_NET;
+    const { data: encaisse } = await supabaseAdmin(env).from('payments')
+      .select('amount_eur, created_at')
+      .gte('created_at', debutDuMois.toISOString());
+    for (const p of ((encaisse ?? []) as Array<{ amount_eur: number | null }>)) {
+      revenuDuMoisEur += Number(p.amount_eur ?? 0);
     }
   } catch { /* on retombe sur 0, la marge sera simplement negative */ }
   const realMarginEur = realCostEur == null ? null

@@ -195,9 +195,13 @@ du contrat de vente portant sur la fourniture du contenu numérique suivant :
         <li><strong>Médiateur de la consommation désigné :</strong> {id.mediator.name} — {id.mediator.postalAddress} — <a href={id.mediator.url} target="_blank" rel="noopener">{id.mediator.url}</a></li>
       </ul>
       <p>
-        Les consommateurs de l&rsquo;UE peuvent également recourir à la plateforme de
-        règlement en ligne des litiges de la Commission européenne, à l&rsquo;adresse{' '}
-        <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener">ec.europa.eu/consumers/odr</a>.
+        {/* La plateforme RLL de la Commission europeenne a ete SUPPRIMEE par le
+            reglement (UE) 2024/3228 et ne traite plus aucune saisine depuis le
+            20 juillet 2025. La citer envoyait le consommateur vers une adresse
+            morte en croyant lui offrir un recours. */}
+        La médiation est facultative et gratuite pour le consommateur&nbsp;; elle ne
+        prive pas du droit de saisir les juridictions compétentes. Une réclamation
+        écrite doit avoir été adressée au préalable à notre service client.
         Les coordonnées complètes du médiateur figurent également dans les{' '}
         <a href="/legal/mentions">mentions légales</a>.
       </p>

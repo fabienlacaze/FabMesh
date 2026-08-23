@@ -13,6 +13,8 @@ export const metadata: Metadata = {
   },
 };
 
+import { legalIdentity as id } from '@/config/legal-identity';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
@@ -27,7 +29,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div style={{ display: 'flex', gap: 16 }}>
             <a href="/legal/terms">Terms</a>
             <a href="/legal/privacy">Privacy</a>
-            <a href="/legal/mentions">Legal Notice</a>
+            <a href="/legal/mentions">Mentions légales</a>
+            {/* Un visiteur bloque a l'inscription n'avait AUCUN moyen d'ecrire :
+                le pied de page ne proposait que des pages juridiques, et le
+                formulaire de contact est derriere la session — precisement ce
+                qu'il n'arrive pas a obtenir. */}
+            <a href={`mailto:${id.supportEmail}`}>Contact</a>
             <a href="https://fabienlacaze.github.io/MyFabmesh" target="_blank">Desktop app</a>
           </div>
         </footer>

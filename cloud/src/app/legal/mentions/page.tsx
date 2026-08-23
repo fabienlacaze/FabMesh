@@ -100,10 +100,8 @@ export default function LegalNoticePage() {
         <li><strong>Coordonnées postales &amp; en ligne du médiateur :</strong> {id.mediator.postalAddress} — <a href={id.mediator.url} target="_blank" rel="noopener">{id.mediator.url}</a></li>
       </ul>
       <p>
-        Pour les consommateurs résidant dans l&apos;Union européenne, la
-        Commission européenne met également à disposition une plateforme de
-        règlement en ligne des litiges à l&apos;adresse{' '}
-        <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener">ec.europa.eu/consumers/odr</a>.
+        {/* Ancienne mention de la plateforme RLL europeenne : supprimee par le
+            reglement (UE) 2024/3228, hors service depuis le 20 juillet 2025. */}
         Le recours à la médiation est facultatif ; le consommateur reste libre de
         porter le litige devant les juridictions compétentes.
       </p>
