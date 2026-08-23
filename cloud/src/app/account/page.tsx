@@ -67,6 +67,38 @@ export default function AccountPage() {
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search);
     setPaidBanner(qs.get('paid') === '1');
+    /* RATTRAPAGE D'UN WEBHOOK PERDU.
+     *
+     * Le bandeau « vos credits arrivent » interrogeait /api/me quinze fois
+     * puis abandonnait en silence. Tant que le webhook Stripe arrivait, ca
+     * marchait ; quand il n'arrivait pas — secret errone, URL non declaree,
+     * indisponibilite — le client avait paye, ne recevait rien, et la vente
+     * n'apparaissait nulle part.
+     *
+     * Stripe nous renvoie desormais l'identifiant de session. On le presente
+     * a /api/checkout/reconcile, qui verifie aupres de Stripe que la session
+     * est payee et nous appartient, puis credite par la MEME machine a etats
+     * idempotente que le webhook. Si le webhook a deja fait son travail,
+     * l'appel ne fait rien. */
+    const sessionId = qs.get('session_id');
+    if (sessionId) {
+      void (async () => {
+        try {
+          const rc = await fetch('/api/checkout/reconcile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+          });
+          if (rc.ok) {
+            const j = await rc.json() as { credited?: boolean };
+            if (j?.credited) {
+              const me2 = await fetch('/api/me');
+              if (me2.ok) setUser(((await me2.json()) as { user: User }).user);
+            }
+          }
+        } catch { /* le sondage ci-dessus reste le filet suivant */ }
+      })();
+    }
     if (qs.get('stripe_return') === '1') setStripeReturn('return');
     else if (qs.get('stripe_refresh') === '1') setStripeReturn('refresh');
     (async () => {

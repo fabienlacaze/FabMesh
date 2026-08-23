@@ -4739,7 +4739,7 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
       automatic_tax: { enabled: true },
       // Let B2B customers enter a VAT/tax ID (reverse-charge handling).
       tax_id_collection: { enabled: true },
-      success_url: `${SITE}/account?paid=1`,
+      success_url: `${SITE}/account?paid=1&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${SITE}/buy?canceled=1`,
     });
     return json({ url: session.url });
@@ -4765,14 +4765,210 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
       },
       quantity: 1,
     }],
-    metadata: { user_id: user.id, pack_id: pack.id, credits: String(pack.credits) },
+    /* LE CONSENTEMENT DOIT ETRE HORODATE ICI AUSSI.
+     *
+     * La branche abonnement estampillait `withdrawal_waiver` et
+     * `withdrawal_waiver_at`, pas celle-ci — alors que les abonnements
+     * sont indisponibles et que 100 % des achats passent donc par ce
+     * chemin. La case « je renonce a mon droit de retractation » etait
+     * bien exigee cote client, mais rien ne gardait la preuve qu'elle
+     * avait ete cochee : en cas de contestation, la charge de la preuve
+     * incombe au professionnel (art. L221-28 13 du code de la
+     * consommation), et nous n'avions rien a produire. */
+    metadata: {
+      user_id: user.id, pack_id: pack.id, credits: String(pack.credits),
+      withdrawal_waiver: 'accepted', withdrawal_waiver_at: consentementLe,
+    },
+    /* FACTURE ET RECU — obligation, pas confort.
+     *
+     * Aucune des deux sessions ne demandait de justificatif. Un client
+     * payant 50 EUR n'avait donc RIEN : ni recu, ni facture, ni trace
+     * dans sa boite mail. Au-dela de 25 EUR TTC la note est due, et
+     * surtout le contrat doit etre confirme sur un SUPPORT DURABLE
+     * (art. L221-13) — sans quoi la renonciation ci-dessus n'est pas
+     * opposable et le remboursement reste du, credits consommes compris.
+     *
+     * Stripe emet les deux, sans qu'on ait a monter un canal e-mail :
+     * `invoice_creation` produit la facture PDF, `receipt_email` envoie
+     * le recu a l'adresse du compte. */
+    invoice_creation: { enabled: true },
+    payment_intent_data: { receipt_email: user.email ?? undefined },
     // EU VAT / sales-tax auto-collection (see subscription branch above).
     automatic_tax: { enabled: true },
     tax_id_collection: { enabled: true },
-    success_url: `${SITE}/account?paid=1`,
+    /* `{CHECKOUT_SESSION_ID}` EST LE FILET SI LE WEBHOOK TOMBE.
+     *
+     * Le retour ne portait aucun identifiant : quand Stripe echouait a
+     * livrer son evenement, le client voyait « vos credits arrivent »,
+     * n'etait jamais credite, et RIEN cote exploitant ne permettait
+     * meme de savoir qu'une vente avait eu lieu. La page /account
+     * renvoie desormais cet identifiant a /api/checkout/reconcile, qui
+     * credite par le meme chemin idempotent que le webhook. */
+    success_url: `${SITE}/account?paid=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${SITE}/buy?canceled=1`,
   });
   return json({ url: session.url });
+}
+
+/* Encaissement idempotent — SORTI de handleStripeWebhook le 2026-08-23.
+ *
+ * Cette machine a etats etait imbriquee dans le gestionnaire de webhook,
+ * donc inaccessible a tout autre appelant. Or il en faut un second : quand
+ * Stripe n'arrive pas a livrer son evenement, le client a paye et n'est
+ * JAMAIS credite, sans que rien ne le rattrape. La reconciliation au retour
+ * de paiement (/api/checkout/reconcile) doit crediter exactement de la meme
+ * facon — dupliquer cette logique, c'est garantir que les deux chemins
+ * divergeront un jour sur le calcul de l'argent.
+ *
+ * Rien d'autre ne change : meme corps, meme garantie d'idempotence,
+ * `env` passe en argument au lieu d'etre capture par fermeture. */
+async function _traiterPaiement(env: Env, opts: {
+  sessionOrInvoiceId: string;
+  userId: string;
+  credits: number;
+  packId: string;
+  amountEur: number;
+}): Promise<{ ok: true } | { ok: false; retry: boolean }> {
+  // Atomic-ish processing with self-healing on retry.
+  //
+  // Three states for the payments row:
+  //   1. Not present       → first delivery, full flow below.
+  //   2. credits === 0     → previous attempt died mid-flow (after
+  //                         placeholder INSERT, before addCredits or
+  //                         before the patch). Resume from addCredits.
+  //   3. credits > 0       → already finalised, idempotent return.
+  //
+  // The state machine: probe → if (state 3) bail, if (state 2)
+  // resume, if (state 1) INSERT placeholder THEN proceed. Single
+  // path for the credit+patch step regardless of entry state, so
+  // a retry that crashed AT ANY point converges to a finalised row.
+  const sb = supabaseAdmin(env);
+  const { data: existing } = await sb.from('payments')
+    .select('id, credits').eq('stripe_session_id', opts.sessionOrInvoiceId).maybeSingle();
+  if (existing && (existing as { credits: number }).credits > 0) {
+    return { ok: true }; // already credited
+  }
+  if (!existing) {
+    const ins = await sb.from('payments').insert({
+      stripe_session_id: opts.sessionOrInvoiceId,
+      user_id: opts.userId, pack_id: opts.packId, credits: 0,
+      amount_eur: 0,
+      created_at: new Date().toISOString(),
+    });
+    if (ins.error) {
+      // Only Postgres duplicate-key (23505) means another delivery beat
+      // us — their finalisation is independent, bail ok. Any other error
+      // (RLS, network, schema) is a real failure: ask Stripe to retry.
+      const code = (ins.error as { code?: string }).code;
+      if (code === '23505') {
+        return { ok: true };
+      }
+      console.error('[stripe] payments insert failed:',
+        opts.sessionOrInvoiceId, ins.error.message);
+      return { ok: false, retry: true };
+    }
+  }
+  // State 1 (just inserted) and state 2 (resuming) converge here.
+  /* LE CLIENT QUI VIENT DE PAYER N'EST PLUS « NON PAYANT ».
+   *
+   * `_isPaidAccount` met en cache une reponse NEGATIVE pour la journee
+   * entiere (`_meta/paidcheck/<uid>/<jour>`), afin de ne pas interroger
+   * Supabase a chaque appel. Ce cache n'etait efface nulle part : un
+   * client qui epuisait ses credits offerts le matin, puis achetait un
+   * pack Studio a 50 EUR l'apres-midi, restait rationne a ~5 generations
+   * par le plafond de 2 $/jour JUSQU'A MINUIT UTC — le jour meme de son
+   * achat, et sans aucune explication a l'ecran.
+   *
+   * On efface le cache negatif au moment ou les credits arrivent. Le
+   * marqueur positif, lui, sera pose paresseusement au prochain appel. */
+  try {
+    if (env.MESHES) await env.MESHES.delete(`_meta/paidcheck/${opts.userId}/${todayUTC()}`);
+  } catch { /* le cache expire de toute facon a minuit UTC */ }
+  const credited = await addCredits(env, opts.userId, opts.credits);
+  if (credited === null) {
+    // RPC failed; placeholder stays at credits=0 so the next retry
+    // hits state 2 and re-attempts. Tell Stripe to retry by returning
+    // retry:true → handler answers with a 500 so Stripe re-delivers.
+    return { ok: false, retry: true };
+  }
+  const patch = await sb.from('payments')
+    .update({ credits: opts.credits, amount_eur: opts.amountEur })
+    .eq('stripe_session_id', opts.sessionOrInvoiceId);
+  if (patch.error) {
+    // The credits landed; only the accounting row update failed.
+    // Tell Stripe to retry: the next call will see state-3 (credits
+    // already on the user) ONLY if we already patched, otherwise
+    // state-2 and we re-credit (DOUBLE CREDIT). Mitigation: bump
+    // the placeholder to the real credits in a single transaction
+    // with addCredits via an RPC — future TODO. For now we accept
+    // the at-most-one-extra-credit risk on a rare DB blip.
+    console.warn('[stripe] payments patch failed but credits added:',
+      opts.sessionOrInvoiceId, patch.error.message);
+  }
+  return { ok: true };
+}
+
+/** POST /api/checkout/reconcile — filet quand le webhook Stripe n'arrive pas.
+ *
+ *  Body: { session_id: "cs_..." }.
+ *
+ *  POURQUOI (audit du 2026-08-23). Le tunnel d'achat reposait ENTIEREMENT
+ *  sur la livraison du webhook. Stripe reessaie, mais pas indefiniment : un
+ *  secret de webhook errone, une URL non declaree ou une indisponibilite
+ *  prolongee, et le client a paye pour rien. Il voyait « vos credits
+ *  arrivent », ne recevait rien, et cote exploitant AUCUNE trace ne
+ *  signalait la vente — meme pas de quoi le rembourser a la main.
+ *
+ *  Cette route est appelee par /account au retour de paiement. Elle
+ *  n'invente aucune regle : elle interroge Stripe, verifie que la session
+ *  est payee ET qu'elle appartient bien a l'appelant, puis credite par
+ *  `_traiterPaiement` — la meme machine a etats idempotente que le webhook.
+ *  Si le webhook a deja fait son travail, l'appel ne fait rien.
+ *
+ *  Le montant et les credits ne sont JAMAIS lus depuis le client : les
+ *  credits viennent de PACKS via l'identifiant du pack, le montant de
+ *  Stripe. */
+async function handleCheckoutReconcile(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
+  let corps: { session_id?: string };
+  try { corps = await req.json() as typeof corps; } catch { return err(400, 'bad json'); }
+  const sessionId = String(corps.session_id || '').trim();
+  if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId)) return err(400, 'session_id invalide');
+
+  const r = await _stripeRest(
+    env, `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`,
+    null, 'GET');
+  if (!r.ok) return err(502, 'session introuvable chez Stripe');
+  const sess = r.data as {
+    payment_status?: string; status?: string; amount_total?: number;
+    metadata?: Record<string, string>;
+  };
+
+  // La session doit appartenir a l'appelant. Sans ce controle, n'importe
+  // quel client pourrait faire crediter SON compte avec la session d'un
+  // autre en devinant un identifiant.
+  if (sess.metadata?.user_id !== user.id) return err(403, 'session rattachee a un autre compte');
+  if (sess.payment_status !== 'paid') {
+    return json({ ok: true, credited: false, reason: 'paiement non abouti' });
+  }
+
+  const packId = sess.metadata?.pack_id;
+  const pack = packId ? (PACKS as Record<string, { credits: number } | undefined>)[packId] : undefined;
+  if (!pack) return err(400, 'pack inconnu sur cette session');
+
+  const res = await _traiterPaiement(env, {
+    sessionOrInvoiceId: sessionId,
+    userId: user.id,
+    credits: pack.credits,
+    packId: packId as string,
+    amountEur: Math.round((sess.amount_total ?? 0)) / 100,
+  });
+  if (!res.ok) return err(500, 'credit impossible, reessayez dans un instant');
+  const { data: prof } = await supabaseAdmin(env).from('profiles')
+    .select('credits').eq('id', user.id).maybeSingle();
+  return json({ ok: true, credited: true, credits: (prof as { credits?: number } | null)?.credits ?? null });
 }
 
 async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
@@ -4838,91 +5034,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   // addCredits and we'd double-credit ONCE. Workaround below: do the
   // existence probe AFTER addCredits too, so a retried webhook detects
   // the prior credit attempt via the payments row even if insert raced.
-  async function _processPayment(opts: {
-    sessionOrInvoiceId: string;
-    userId: string;
-    credits: number;
-    packId: string;
-    amountEur: number;
-  }): Promise<{ ok: true } | { ok: false; retry: boolean }> {
-    // Atomic-ish processing with self-healing on retry.
-    //
-    // Three states for the payments row:
-    //   1. Not present       → first delivery, full flow below.
-    //   2. credits === 0     → previous attempt died mid-flow (after
-    //                         placeholder INSERT, before addCredits or
-    //                         before the patch). Resume from addCredits.
-    //   3. credits > 0       → already finalised, idempotent return.
-    //
-    // The state machine: probe → if (state 3) bail, if (state 2)
-    // resume, if (state 1) INSERT placeholder THEN proceed. Single
-    // path for the credit+patch step regardless of entry state, so
-    // a retry that crashed AT ANY point converges to a finalised row.
-    const sb = supabaseAdmin(env);
-    const { data: existing } = await sb.from('payments')
-      .select('id, credits').eq('stripe_session_id', opts.sessionOrInvoiceId).maybeSingle();
-    if (existing && (existing as { credits: number }).credits > 0) {
-      return { ok: true }; // already credited
-    }
-    if (!existing) {
-      const ins = await sb.from('payments').insert({
-        stripe_session_id: opts.sessionOrInvoiceId,
-        user_id: opts.userId, pack_id: opts.packId, credits: 0,
-        amount_eur: 0,
-        created_at: new Date().toISOString(),
-      });
-      if (ins.error) {
-        // Only Postgres duplicate-key (23505) means another delivery beat
-        // us — their finalisation is independent, bail ok. Any other error
-        // (RLS, network, schema) is a real failure: ask Stripe to retry.
-        const code = (ins.error as { code?: string }).code;
-        if (code === '23505') {
-          return { ok: true };
-        }
-        console.error('[stripe] payments insert failed:',
-          opts.sessionOrInvoiceId, ins.error.message);
-        return { ok: false, retry: true };
-      }
-    }
-    // State 1 (just inserted) and state 2 (resuming) converge here.
-    /* LE CLIENT QUI VIENT DE PAYER N'EST PLUS « NON PAYANT ».
-     *
-     * `_isPaidAccount` met en cache une reponse NEGATIVE pour la journee
-     * entiere (`_meta/paidcheck/<uid>/<jour>`), afin de ne pas interroger
-     * Supabase a chaque appel. Ce cache n'etait efface nulle part : un
-     * client qui epuisait ses credits offerts le matin, puis achetait un
-     * pack Studio a 50 EUR l'apres-midi, restait rationne a ~5 generations
-     * par le plafond de 2 $/jour JUSQU'A MINUIT UTC — le jour meme de son
-     * achat, et sans aucune explication a l'ecran.
-     *
-     * On efface le cache negatif au moment ou les credits arrivent. Le
-     * marqueur positif, lui, sera pose paresseusement au prochain appel. */
-    try {
-      if (env.MESHES) await env.MESHES.delete(`_meta/paidcheck/${opts.userId}/${todayUTC()}`);
-    } catch { /* le cache expire de toute facon a minuit UTC */ }
-    const credited = await addCredits(env, opts.userId, opts.credits);
-    if (credited === null) {
-      // RPC failed; placeholder stays at credits=0 so the next retry
-      // hits state 2 and re-attempts. Tell Stripe to retry by returning
-      // retry:true → handler answers with a 500 so Stripe re-delivers.
-      return { ok: false, retry: true };
-    }
-    const patch = await sb.from('payments')
-      .update({ credits: opts.credits, amount_eur: opts.amountEur })
-      .eq('stripe_session_id', opts.sessionOrInvoiceId);
-    if (patch.error) {
-      // The credits landed; only the accounting row update failed.
-      // Tell Stripe to retry: the next call will see state-3 (credits
-      // already on the user) ONLY if we already patched, otherwise
-      // state-2 and we re-credit (DOUBLE CREDIT). Mitigation: bump
-      // the placeholder to the real credits in a single transaction
-      // with addCredits via an RPC — future TODO. For now we accept
-      // the at-most-one-extra-credit risk on a rare DB blip.
-      console.warn('[stripe] payments patch failed but credits added:',
-        opts.sessionOrInvoiceId, patch.error.message);
-    }
-    return { ok: true };
-  }
+
 
   // Resolve credits from server-side PACKS rather than trusting the
   // value Stripe carries in metadata — if our metadata was ever tampered
@@ -4954,7 +5066,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     const rawCredits = parseInt(sess.metadata?.credits ?? '0', 10);
     const credits = _packCredits(packId, rawCredits);
     if (userId && credits > 0) {
-      const res = await _processPayment({
+      const res = await _traiterPaiement(env, {
         sessionOrInvoiceId: sess.id, userId, credits, packId,
         amountEur: (sess.amount_total ?? 0) / 100,
       });
@@ -5179,7 +5291,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     const rawCredits = parseInt(meta.credits ?? '0', 10);
     const credits = _packCredits(packId, rawCredits);
     if (userId && credits > 0) {
-      const res = await _processPayment({
+      const res = await _traiterPaiement(env, {
         sessionOrInvoiceId: inv.id, userId, credits, packId,
         amountEur: (inv.amount_paid ?? 0) / 100,
       });
@@ -15334,6 +15446,7 @@ export default {
         if (pathname === '/api/report-content'        && method === 'POST') return await handleReportContent(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);
+        if (pathname === '/api/checkout/reconcile'    && method === 'POST') return await handleCheckoutReconcile(req, env);
         if (pathname === '/api/pricing/availability'  && method === 'GET')  return await handlePricingAvailability(req, env);
         if (pathname === '/api/stripe-webhook'        && method === 'POST') return await handleStripeWebhook(req, env);
         if (pathname === '/api/generate'              && method === 'POST') return await handleGenerate(req, env);
