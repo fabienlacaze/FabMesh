@@ -14,7 +14,7 @@ export default function PrivacyPage() {
   return (
     <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px', lineHeight: 1.65 }}>
       <h1>Politique de confidentialité</h1>
-      <p style={{ color: 'var(--text-2)' }}>Dernière mise à jour&nbsp;: 2026-05-27</p>
+      <p style={{ color: 'var(--text-2)' }}>Dernière mise à jour&nbsp;: 2026-08-23</p>
 
       <p>
         Cette page explique quelles données à caractère personnel MyFabmesh.AI
@@ -102,6 +102,91 @@ export default function PrivacyPage() {
         <li><strong>Modal Labs</strong> &mdash; calcul GPU pour la génération d&apos;images / de maillages. Reçoit l&apos;image source que vous avez téléversée, pour la durée de la tâche.</li>
         <li><strong>Replicate</strong> &mdash; calcul GPU de secours. Même périmètre que Modal.</li>
       </ul>
+
+      {/*
+        CE QUI MANQUAIT : la liste ci-dessus nommait les sous-traitants mais ne
+        disait nulle part que plusieurs d'entre eux sont établis HORS de l'Union
+        européenne (Modal Labs et Replicate sont américains ; l'image source de
+        l'utilisateur leur est transmise). Le chapitre V du RGPD (art. 44 à 49)
+        impose d'informer la personne concernée de ces transferts ET d'indiquer
+        la garantie qui les encadre — l'information était donc incomplète au
+        sens de l'art. 13.1.f.
+
+        POURQUOI UN MARQUEUR PLUTÔT QU'UNE GARANTIE ÉCRITE : nous ne savons pas
+        si des clauses contractuelles types (art. 46.2.c) ont été signées avec
+        chaque prestataire, ni lesquels sont certifiés au titre de l'EU-US Data
+        Privacy Framework (décision d'adéquation, art. 45). Affirmer une
+        garantie non vérifiée serait une déclaration fausse dans un document
+        opposable — pire qu'une lacune. Les points à trancher sont donc laissés
+        sous forme de marqueurs « À COMPLÉTER », comme dans
+        @/config/legal-identity. (Le marqueur littéral n'est pas recopié ici :
+        scripts/check-legal-identity.mjs compte les occurrences pour refuser la
+        construction tant qu'il en reste, et un exemple en commentaire fausserait
+        son décompte.)
+      */}
+      <h3>4.1 Transferts hors de l&apos;Union européenne</h3>
+      <p>
+        Une partie des prestataires ci-dessus est établie en dehors de
+        l&apos;Union européenne. Les traitements qu&apos;ils effectuent pour
+        notre compte constituent donc des <strong>transferts de données hors
+        UE</strong> au sens du chapitre V du RGPD (art. 44 à 49). Voici, pour
+        chacun, ce qui est transféré et pour combien de temps&nbsp;:
+      </p>
+      <ul>
+        <li>
+          <strong>Modal Labs</strong> (société établie aux <strong>États-Unis</strong>)
+          &mdash; reçoit l&apos;image source que vous téléversez et les paramètres
+          de la tâche, pour la durée du calcul GPU.
+        </li>
+        <li>
+          <strong>Replicate</strong> (société établie aux <strong>États-Unis</strong>)
+          &mdash; même périmètre que Modal, uniquement lorsque le calcul de secours
+          est utilisé.
+        </li>
+        <li>
+          {/* Nom repris de la configuration, comme l'adresse : legal-identity.ts
+              est la source unique et interdit de recopier une identité en dur. */}
+          <strong>{id.host.name}</strong> ({id.host.address}) &mdash; exploite le
+          Worker, le stockage R2 et le CDN. Son réseau étant mondial, vos requêtes,
+          vos journaux techniques et vos fichiers générés peuvent être traités sur
+          des serveurs situés hors de l&apos;Union européenne.
+        </li>
+        <li>
+          <strong>Stripe</strong> &mdash; données de paiement et, pour les vendeurs
+          de la place de marché, données de vérification KYC.{' '}
+          [À_COMPLÉTER&nbsp;: identifier, dans le contrat Stripe effectivement
+          signé, l&apos;entité contractante et son pays d&apos;établissement, puis
+          les transferts intra-groupe qui en découlent.]
+        </li>
+        <li>
+          <strong>Supabase</strong> &mdash; votre compte et votre historique de
+          tâches sont hébergés dans la <strong>région UE</strong>, donc stockés dans
+          l&apos;Union européenne.{' '}
+          [À_COMPLÉTER&nbsp;: confirmer auprès de Supabase si des accès
+          d&apos;administration ou de support depuis un pays tiers ont lieu, et à
+          quel titre.]
+        </li>
+      </ul>
+      <p>
+        <strong>Garantie encadrant ces transferts&nbsp;:</strong>{' '}
+        [À_COMPLÉTER&nbsp;: indiquer, pour chaque destinataire hors UE, le
+        mécanisme du chapitre V effectivement invoqué &mdash; décision
+        d&apos;adéquation (art. 45, par exemple une certification EU-US Data
+        Privacy Framework), clauses contractuelles types de la Commission
+        européenne (art. 46.2.c), ou autre garantie appropriée &mdash; ainsi que
+        la date de sa mise en place.]
+      </p>
+      <p style={{ fontSize: 13, color: 'var(--text-2)' }}>
+        Tant que cette mention n&apos;est pas complétée, aucune garantie ne doit
+        être présumée acquise&nbsp;: nous préférons signaler l&apos;information
+        manquante plutôt que d&apos;annoncer une protection que nous
+        n&apos;aurions pas vérifiée. Vous pouvez nous demander à tout moment, à
+        l&apos;adresse <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a>,
+        copie des garanties applicables à ces transferts (art. 15.2 et 46.1 du
+        RGPD). Si vous ne souhaitez pas que votre image soit transmise à un
+        prestataire de calcul situé hors de l&apos;Union européenne, il ne faut
+        pas lancer de génération&nbsp;: ce transfert est indissociable du service.
+      </p>
 
       <h2>5. Durée de conservation de vos données</h2>
       <ul>

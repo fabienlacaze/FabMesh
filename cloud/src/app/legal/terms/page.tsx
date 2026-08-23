@@ -223,7 +223,61 @@ du contrat de vente portant sur la fourniture du contenu numérique suivant :
         <li>Les annonces gratuites sont téléchargeables immédiatement par tout utilisateur connecté, une fois validées.</li>
         <li>Les annonces payantes s&rsquo;achètent via Stripe Checkout. Les acheteurs reçoivent une licence non exclusive selon les conditions attachées à la création.</li>
         <li>Les acheteurs ne peuvent PAS redistribuer, revendre ni sous-licencier les créations achetées, sauf si la licence choisie (CC0, CC-BY, commerciale) l&rsquo;autorise expressément.</li>
-        <li>Les remboursements sont traités au cas par cas par le support ; contactez-nous dans les 14 jours suivant l&rsquo;achat en indiquant un motif clair.</li>
+        {/* REMBOURSEMENT DES ACHATS BOUTIQUE — ce qui n'allait pas.
+            L'ancienne redaction (« traites au cas par cas par le support ;
+            contactez-nous dans les 14 jours en indiquant un motif clair »)
+            opposait au consommateur DEUX conditions que la loi interdit
+            d'exiger pendant le delai de retractation : un MOTIF (l'art.
+            L221-18 donne le droit de se retracter « sans avoir a motiver sa
+            decision ») et une APPRECIATION discretionnaire du vendeur (« au
+            cas par cas »), alors que le remboursement est de droit et
+            automatique des lors que la retractation est valablement exercee.
+            Une clause qui subordonne ainsi un droit legal est reputee non
+            ecrite, et elle est abusive au sens de l'art. L212-1.
+            La seule limite opposable est celle de l'art. L221-28 13° : la
+            perte du droit quand l'acheteur a EXPRESSEMENT demande le
+            telechargement immediat ET reconnu cette perte — ce que la
+            boutique recueille desormais dans sa fenetre de confirmation. La
+            regle est donc reformulee autour de cette renonciation, et non
+            autour d'un motif. */}
+        <li>
+          <strong>Droit de rétractation.</strong> En tant que consommateur de
+          l&rsquo;UE, vous disposez de 14 jours à compter de l&rsquo;achat pour vous
+          rétracter, <strong>sans avoir à motiver votre décision et sans
+          frais</strong> (art. L221-18 et suivants du code de la consommation).
+          Aucun motif ne vous sera demandé et le remboursement n&rsquo;est soumis à
+          aucune appréciation de notre part.
+        </li>
+        <li>
+          <strong>Renonciation en cas de téléchargement immédiat
+          (art. L221-28, 13°).</strong> Une création achetée est un contenu
+          numérique fourni sans support matériel et téléchargeable aussitôt
+          après le paiement. Au moment de valider votre commande, il vous est
+          demandé de cocher une case par laquelle vous demandez expressément
+          que la fourniture commence immédiatement et reconnaissez perdre de ce
+          fait votre droit de rétractation. Ce n&rsquo;est qu&rsquo;<strong>après ce
+          double consentement et une fois la création téléchargée</strong> que
+          le droit de rétractation est éteint pour cet achat.
+        </li>
+        <li>
+          <strong>Ce qui reste remboursable.</strong> Tant que vous n&rsquo;avez
+          pas téléchargé la création achetée, vous êtes remboursé sur simple
+          demande pendant les 14 jours. Il en va de même si la case de
+          renonciation n&rsquo;a pas été recueillie, ainsi que dans les cas de
+          non-conformité (fichier corrompu, création ne correspondant pas à
+          l&rsquo;annonce, licence différente de celle affichée), qui relèvent de
+          la garantie légale de conformité et sont indépendants du délai de
+          14 jours.
+        </li>
+        <li>
+          <strong>Comment demander le remboursement.</strong> Écrivez-nous à{' '}
+          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> — une
+          déclaration dénuée d&rsquo;ambiguïté suffit, le formulaire type du
+          paragraphe 3a peut être utilisé sans obligation. Vous êtes remboursé
+          au plus tard <strong>14 jours après la réception de votre
+          décision</strong>, par le même moyen de paiement, sans frais
+          (art. L221-24).
+        </li>
       </ul>
 
       <h3>11.3 Commission et reversements</h3>

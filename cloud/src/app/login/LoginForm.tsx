@@ -20,7 +20,7 @@ function friendlyAuthError(raw: string): string {
     return 'Incorrect email or password.';
   }
   if (m.includes('email not confirmed')) {
-    return "Your email isn't verified yet — check your inbox (and spam) for the 6-digit code.";
+    return "Your email isn't verified yet. Enter the 6-digit code we emailed you — or ask for a new one below.";
   }
   if (m.includes('rate limit') || m.includes('too many') || m.includes('for security purposes')) {
     return 'Too many attempts — please wait a minute and try again.';
@@ -95,6 +95,32 @@ export function LoginForm() {
     window.location.href = next;
   }
 
+  /** Ask Supabase to email a fresh confirmation message (link + 6-digit
+   *  code) for an account that exists but was never confirmed.
+   *
+   *  Sets info/error itself; the caller owns `busy`. */
+  async function sendConfirmation() {
+    try {
+      const { error } = await client().auth.resend({
+        type: 'signup',
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      });
+      if (error) throw error;
+      setError(null);
+      setInfo(`We sent a new 6-digit code to ${email}. Check your inbox (and spam), then enter it below.`);
+    } catch (err: unknown) {
+      setInfo(null);
+      setError(friendlyAuthError(err instanceof Error ? err.message : String(err)));
+    }
+  }
+
+  async function handleResend() {
+    if (!email) { setInfo(null); setError('Enter your email address first.'); return; }
+    setBusy(true); setError(null); setInfo(null);
+    try { await sendConfirmation(); } finally { setBusy(false); }
+  }
+
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setError(null); setInfo(null);
@@ -114,7 +140,27 @@ export function LoginForm() {
       await persistSession(data.session);
       navigateAfterAuth();
     } catch (err: unknown) {
-      setError(friendlyAuthError(err instanceof Error ? err.message : String(err)));
+      const raw = err instanceof Error ? err.message : String(err);
+      // WHAT WAS WRONG: this branch only ever displayed "your email isn't
+      // verified yet" and left the user on the sign-in form. The 'verify'
+      // screen was reachable exclusively from handleSignUp, i.e. once, in
+      // the tab where the account was created. Anyone who closed that tab
+      // was locked out of an account that exists and holds credits.
+      //
+      // Supabase only answers "Email not confirmed" when the password was
+      // CORRECT (a wrong one yields "invalid login credentials"), so THIS
+      // automatic resend cannot be used to spam a third party's inbox.
+      // Careful though: the manual "Send a new code" button on the verify
+      // screen is NOT password-gated (someone locked out may not remember
+      // their password either). There the only brake is Supabase's own
+      // per-address email rate limit, surfaced as "Too many attempts".
+      if (raw.toLowerCase().includes('email not confirmed')) {
+        setMode('verify');
+        setCode('');
+        await sendConfirmation();
+        return;
+      }
+      setError(friendlyAuthError(raw));
     } finally { setBusy(false); }
   }
 
@@ -209,9 +255,16 @@ export function LoginForm() {
       <div style={{ textAlign: 'center', marginBottom: 18 }}>
         <div style={{ fontSize: 42, marginBottom: 6 }}>✉</div>
         <h3 style={{ marginBottom: 4 }}>Verify your email</h3>
+        {/* Wording has to stay true in the THREE ways this screen is now
+            reached: straight after signup, after a blocked sign-in (a fresh
+            code was just sent), and from the "Account not verified?" link,
+            where nothing was sent in this session. The old text asserted a
+            send that, on that third path, never happened — so it makes no
+            claim about when the email went out. Only the info banner below,
+            set by sendConfirmation(), announces an actual send. */}
         <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
-          We sent a 6-digit code to <strong>{email}</strong>.<br />
-          Paste it below to confirm your account.
+          Enter the 6-digit code sent to <strong>{email}</strong>.<br />
+          Don&apos;t have it? Request a new one below.
         </p>
       </div>
       <label>Verification code</label>
@@ -226,8 +279,12 @@ export function LoginForm() {
       <button type="submit" className="primary-btn" disabled={busy || code.length !== 6} style={{ width: '100%' }}>
         {busy ? '…' : 'Confirm account'}
       </button>
+      <button type="button" onClick={handleResend} disabled={busy}
+              style={{ background: 'transparent', border: 'none', color: 'var(--accent)', marginTop: 12, fontSize: 13, cursor: 'pointer', width: '100%' }}>
+        Didn&apos;t get it (or code expired)? Send a new code
+      </button>
       <button type="button" onClick={() => { setMode('signin'); setCode(''); setError(null); setInfo(null); }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', marginTop: 12, fontSize: 13, cursor: 'pointer', width: '100%' }}>
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', marginTop: 6, fontSize: 13, cursor: 'pointer', width: '100%' }}>
         ← Back to sign in
       </button>
       {info && <div className="banner ok" style={{ marginTop: 12 }}>{info}</div>}
@@ -350,6 +407,18 @@ export function LoginForm() {
           </>
         )}
       </div>
+
+      {!isSignUp && (
+        <button type="button"
+                onClick={() => {
+                  if (!email) { setInfo(null); setError('Enter your email address first.'); return; }
+                  setMode('verify'); setCode(''); setError(null); setInfo(null);
+                }}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-3, var(--text-2))',
+                         cursor: 'pointer', padding: 0, marginTop: 10, fontSize: 12, width: '100%', textAlign: 'center' }}>
+          Account not verified? Enter your 6-digit code
+        </button>
+      )}
 
       {info && <div className="banner ok" style={{ marginTop: 12 }}>{info}</div>}
       {error && <div className="banner error" style={{ marginTop: 12 }}>⚠ {error}</div>}

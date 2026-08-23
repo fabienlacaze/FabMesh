@@ -1484,9 +1484,36 @@ async function _getPricing(env: Env): Promise<Record<string, number>> {
   try {
     const obj = await env.MESHES.get(PRICING_KEY);
     const overrides = obj ? await obj.json() as Record<string, number> : {};
+    /* UNE SURCHARGE NE PEUT PLUS VENDRE A PERTE EN SILENCE.
+     *
+     * `_meta/pricing.json` prime sur la grille du code. C'est voulu — cela
+     * permet d'ajuster un tarif sans deployer. Mais la grille en dur a ete
+     * RELEVEE le 2026-08-04 apres mesure du cout reel (mesh_fast 1 -> 8,
+     * mesh_balanced 2 -> 10) : un fichier ecrit AVANT cette date, et laisse
+     * en place, continue d'appliquer les anciens prix. Vendre une
+     * generation a 1 credit quand elle coute ~0,37 $ de GPU, c'est vendre a
+     * 58 % de perte — et rien, nulle part, ne le signalait.
+     *
+     * On garde la surcharge, mais on refuse celles qui passent SOUS le
+     * plancher du code pour les operations de maillage, et on trace chaque
+     * refus. Une baisse deliberee reste possible : elle passe par le code,
+     * qui est relu et versionne, pas par un fichier oublie dans un seau. */
     const sanitized: Record<string, number> = {};
+    const refuses: string[] = [];
     for (const [k, v] of Object.entries(overrides)) {
-      if (typeof v === 'number' && v >= 0 && Number.isFinite(v)) sanitized[k] = Math.floor(v);
+      if (!(typeof v === 'number' && v >= 0 && Number.isFinite(v))) continue;
+      const val = Math.floor(v);
+      const plancher = (PRICING_DEFAULTS as Record<string, number>)[k];
+      if (k.startsWith('mesh_') && typeof plancher === 'number' && val < plancher) {
+        refuses.push(`${k}=${val}<${plancher}`);
+        continue;
+      }
+      sanitized[k] = val;
+    }
+    if (refuses.length) {
+      console.error('[tarif] surcharge R2 IGNOREE, sous le plancher du code : '
+                  + refuses.join(', ')
+                  + ' — _meta/pricing.json est perime, a supprimer ou mettre a jour.');
     }
     _pricingCache = { prices: { ...PRICING_DEFAULTS, ...sanitized }, ts: now };
   } catch {
@@ -4572,8 +4599,28 @@ async function _processMarketPurchase(env: Env, sess: {
       status: 'paid',
       payout_status: 'pending',
     };
-    await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
-                         { httpMetadata: { contentType: 'application/json' } });
+    /* SI L'ECRITURE DE LA VENTE ECHOUE, ON REND LA RESERVATION.
+     *
+     * La reservation (`ownerKey`) est posee juste au-dessus et n'est ecrite
+     * qu'une fois — c'est ce qui empeche une double livraison. Mais elle
+     * rend aussi tout REJEU inoperant : un rejeu voit la cle et passe son
+     * chemin. Si une exception survenait entre la reservation et
+     * l'enregistrement de la vente, on se retrouvait donc avec un acheteur
+     * marque proprietaire, AUCUNE vente enregistree, et aucun moyen que
+     * Stripe repare quoi que ce soit en rejouant : le vendeur n'etait
+     * jamais paye, definitivement, et rien ne le signalait.
+     *
+     * On libere donc la reservation en cas d'echec, pour qu'un rejeu — que
+     * Stripe fournit pendant des heures — puisse refaire le travail. */
+    try {
+      await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
+                           { httpMetadata: { contentType: 'application/json' } });
+    } catch (e) {
+      console.error(`[market] vente ${saleId} non enregistree, reservation liberee `
+                  + `pour permettre un rejeu : ${e instanceof Error ? e.message : String(e)}`);
+      try { await env.MESHES.delete(ownerKey); } catch { /* le rejeu retentera */ }
+      continue;
+    }
     // Cash payout via Stripe Connect Express, if the seller has onboarded.
     // Uses Separate Charges and Transfers — we already collected the buyer's
     // money on the platform account; here we push the seller's net to their
@@ -4865,6 +4912,26 @@ async function handleDebugAuth(req: Request, env: Env): Promise<Response> {
 // needed. No auth required: this is read-only metadata.
 async function handlePricingAvailability(_req: Request, env: Env): Promise<Response> {
   const available: Record<string, boolean> = {};
+  /* LES FONCTIONS DONT LE BACKEND PEUT MANQUER SONT DECLAREES ICI AUSSI.
+   *
+   * Rig, segmentation et animation restent visibles sur le web, PASTILLE DE
+   * COUT COMPRISE, alors que leur backend depend de secrets facultatifs
+   * (MODAL_RIG_URL, MODAL_SEGMENT_URL, MODAL_ANYTOP_ANIM_URL). Quand l'un
+   * manque, le clic repond `503 auto-rig backend unavailable` — une chaine
+   * technique, en anglais, apres qu'on a annonce un prix a l'utilisateur.
+   * Rien ne permettait a l'interface de le savoir AVANT le clic.
+   *
+   * On expose donc leur disponibilite par le meme canal que les packs, pour
+   * que le client puisse griser ce qui ne repondra pas plutot que de le
+   * vendre. */
+  const fonctions: Record<string, boolean> = {
+    rig: !!_rigBaseUrl(env),
+    segment: !!env.MODAL_SEGMENT_URL,
+    animate: !!env.MODAL_ANYTOP_ANIM_URL,
+    animate_fbx: !!env.MODAL_FBX_RETARGET_URL,
+    mesh: !!(env.MODAL_MESH_START_URL && env.MODAL_MESH_STATUS_URL),
+    image: !!env.MODAL_TEXT2IMAGE_URL,
+  };
   for (const pack of Object.values(PACKS)) {
     if (pack.mode === 'subscription') {
       const envKey = `STRIPE_PRICE_${pack.id.toUpperCase()}` as keyof Env;
@@ -4873,7 +4940,7 @@ async function handlePricingAvailability(_req: Request, env: Env): Promise<Respo
       available[pack.id] = true;
     }
   }
-  return json({ ok: true, available });
+  return json({ ok: true, available, fonctions });
 }
 
 async function handleCheckout(req: Request, env: Env): Promise<Response> {
@@ -5411,6 +5478,56 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
       console.log(`[stripe] litige gagne : ${rendus} credits rendus a ${ligne.user_id}`);
     }
     return json({ received: true, restored: rendus });
+  }
+
+  /* UN ACHAT BOUTIQUE REMBOURSE DOIT RENDRE LE FICHIER.
+   *
+   * Le gestionnaire de remboursement ci-dessous ne connait que la table
+   * `payments`, c'est-a-dire les achats de CREDITS. Un achat boutique
+   * n'y ecrit rien : il pose `_market/sales/<id>.json` et
+   * `_market/owners/<fiche>/<uid>.json`. Rembourser un tel achat rendait
+   * donc l'argent a l'acheteur en le laissant PROPRIETAIRE du fichier —
+   * et le vendeur, lui, avait deja ete vire. La plateforme payait la
+   * difference et le vendeur perdait sa vente sans le savoir.
+   *
+   * On retire donc la propriete et on marque la vente remboursee, AVANT le
+   * traitement des credits (qui, lui, ne trouvera rien pour cette session
+   * et sortira proprement). */
+  if (event.type === 'charge.refunded' && env.MESHES) {
+    const chRef = (event.data?.object ?? {}) as { payment_intent?: string; id?: string };
+    for (const ref of [chRef.payment_intent, chRef.id].filter(Boolean) as string[]) {
+      try {
+        const rs = await _stripeRest(env,
+          'https://api.stripe.com/v1/checkout/sessions?limit=3&payment_intent='
+            + encodeURIComponent(ref), null, 'GET');
+        const sessions = (rs.ok && Array.isArray((rs.data as { data?: unknown[] }).data))
+          ? (rs.data as { data: Array<{ id?: string; metadata?: Record<string, string> }> }).data : [];
+        for (const sess of sessions) {
+          if (sess?.metadata?.kind !== 'market_purchase') continue;
+          const acheteur = sess.metadata?.user_id;
+          const fiches = (sess.metadata?.listing_ids || '').split(',').filter(Boolean);
+          if (!acheteur || !fiches.length) continue;
+          for (const fiche of fiches) {
+            try { await env.MESHES.delete(`_market/owners/${fiche}/${acheteur}.json`); } catch {}
+            const cleVente = `_market/sales/${sess.id}_${fiche}`.replace(/[^A-Za-z0-9_/-]/g, '') + '.json';
+            try {
+              const t = await r2GetText(env, cleVente);
+              if (t) {
+                const v = JSON.parse(t) as Record<string, unknown>;
+                v.status = 'refunded';
+                v.refunded_at = new Date().toISOString();
+                await env.MESHES.put(cleVente, JSON.stringify(v),
+                                     { httpMetadata: { contentType: 'application/json' } });
+              }
+            } catch {}
+          }
+          console.log(`[market] remboursement ${sess.id} : propriete retiree sur `
+                    + `${fiches.length} fiche(s) pour ${acheteur}`);
+        }
+      } catch (e) {
+        console.warn('[market] retrait de propriete impossible:', (e as Error).message);
+      }
+    }
   }
 
   if (event.type === 'charge.refunded' || event.type === 'charge.dispute.created') {
@@ -14182,10 +14299,33 @@ async function handleAdminReconcilePayment(req: Request, env: Env): Promise<Resp
 
   const sb = supabaseAdmin(env);
   const { data: probe } = await sb.from('payments')
-    .select('id, user_id, pack_id, credits')
+    .select('id, user_id, pack_id, credits, created_at')
     .eq('stripe_session_id', sessionId)
     .maybeSingle();
   if (!probe) return err(404, 'payment not found');
+  /* NE PAS RECONCILIER UN PAIEMENT QUE LE WEBHOOK EST EN TRAIN DE TRAITER.
+   *
+   * La reclamation conditionnelle ci-dessous est atomique entre plusieurs
+   * administrateurs, mais PAS contre `_traiterPaiement` en vol. Cette
+   * fonction insere une ligne a `credits: 0`, appelle `addCredits`, PUIS
+   * ecrit le montant. Entre les deux derniers pas, la ligne affiche
+   * toujours zero : elle apparait donc dans « paiements non reconcilies »
+   * alors que les credits SONT DEJA arrives. Un administrateur qui clique
+   * a cet instant les accorde une seconde fois.
+   *
+   * La fenetre est courte mais elle s'ouvre precisement quand on regarde :
+   * on consulte cet ecran parce qu'un paiement vient de poser probleme.
+   * On refuse donc les lignes trop recentes, en disant pourquoi et quand
+   * reessayer. Stripe rejoue ses evenements pendant des heures ; dix
+   * minutes couvrent tres largement une reprise en cours. */
+  const AGE_MIN_MS = 10 * 60 * 1000;
+  const cree = (probe as { created_at?: string | null }).created_at;
+  const age = cree ? Date.now() - Date.parse(cree) : Infinity;
+  if (Number.isFinite(age) && age < AGE_MIN_MS) {
+    const reste = Math.ceil((AGE_MIN_MS - age) / 60000);
+    return err(409, `payment is ${Math.round(age / 60000)} min old — the Stripe webhook `
+                  + `may still be crediting it. Retry in ${reste} min to avoid a double credit.`);
+  }
   const packId = (probe as { pack_id: string | null }).pack_id;
   const payout = _packPayout(packId);
   if (!payout) return err(400, `unknown pack_id '${packId}' — cannot determine the payout`);

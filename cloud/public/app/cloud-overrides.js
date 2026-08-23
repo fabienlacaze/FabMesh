@@ -319,6 +319,10 @@
     // and read by worker.ts:getSessionUser) so JS can delete them.
     installLogoutButton();
 
+    // Grise ce dont le backend est absent, au lieu de le vendre puis de
+    // repondre 503. Voir installDisponibiliteFonctions.
+    installDisponibiliteFonctions();
+
     // Consent switch for the diagnostic log upload (console-capture.js).
     // Off by default — see the header of that file for why.
     installDiagnosticsBox();
@@ -1917,6 +1921,57 @@
         if (_inboxBadgeEl) _inboxBadgeEl.style.display = 'none';
       }).catch(() => { /* will reconcile on next refreshInbox */ });
     }
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * DISPONIBILITE DES FONCTIONS — ne pas vendre ce qui ne repondra pas.
+   *
+   * Rig, segmentation et animation restent visibles sur le web avec leur
+   * PASTILLE DE COUT, alors que leur backend depend de secrets facultatifs
+   * cote worker. Quand l'un manque, le clic rendait
+   * `503 auto-rig backend unavailable` — une chaine technique en anglais,
+   * APRES qu'on a annonce un prix. L'utilisateur croyait avoir paye pour
+   * une panne.
+   *
+   * /api/pricing/availability expose desormais un objet `fonctions` ; on
+   * s'en sert pour desactiver le bouton et dire pourquoi, AVANT le clic.
+   * Silencieux si le champ est absent (worker plus ancien) : on ne grise
+   * jamais sur une supposition.
+   * ────────────────────────────────────────────────────────────────── */
+  async function installDisponibiliteFonctions() {
+    let dispo = null;
+    try {
+      const r = await fetch('/api/pricing/availability', { credentials: 'include' });
+      if (!r.ok) return;
+      const j = await r.json();
+      dispo = j && j.fonctions;
+    } catch (_) { return; }
+    if (!dispo || typeof dispo !== 'object') return;   // worker anterieur
+
+    const BOUTONS = [
+      { fonction: 'rig',     ids: ['ws-generate-rig-ai', 'ws-use-for-rig-btn'], nom: 'Auto-rigging' },
+      { fonction: 'segment', ids: ['ws-mesh-segment-btn'],                      nom: 'Segmentation' },
+      { fonction: 'animate', ids: ['ws-use-for-anim-btn'],                      nom: 'Animation' },
+    ];
+    const appliquer = () => {
+      for (const b of BOUTONS) {
+        if (dispo[b.fonction] !== false) continue;     // disponible, ou inconnu
+        for (const id of b.ids) {
+          const el = document.getElementById(id);
+          if (!el || el.dataset.dispoAppliquee) continue;
+          el.dataset.dispoAppliquee = '1';
+          el.disabled = true;
+          el.style.opacity = '0.45';
+          el.style.cursor = 'not-allowed';
+          el.title = b.nom + " n'est pas disponible sur le service en ligne "
+                   + 'pour le moment. Aucun credit ne sera debite.';
+        }
+      }
+    };
+    appliquer();
+    // Les panneaux sont rendus a la demande : on repasse a l'ouverture d'un
+    // projet plutot que d'observer tout le DOM en permanence.
+    document.addEventListener('click', appliquer, { passive: true });
   }
 
   function installLogoutButton() {

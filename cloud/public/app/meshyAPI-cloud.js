@@ -279,6 +279,170 @@
   window.__cloudRemovePending = _removePendingJob;
 
   /* ──────────────────────────────────────────────────────────────────
+   * REPRISE DES TRAVAUX « LANCEMENT PUIS SONDAGE » (segmentation, animation)
+   *
+   * CE QUI N'ALLAIT PAS : meshSegmentAI() et autoAnimAI() ECRIVAIENT bien
+   * une entree de reprise dans localStorage (fabmesh_pending_segments et
+   * fabmesh_pending_anims), mais AUCUNE fonction ne relisait jamais ces
+   * clefs. La liste ne servait donc a rien : un utilisateur qui rechargeait
+   * la page pendant une segmentation — 15 credits deja debites — perdait
+   * toute trace de son travail, alors que le serveur le terminait et
+   * deposait bien le GLB dans R2. Seuls les maillages (PENDING_JOBS_KEY,
+   * juste au-dessus) et les squelettes (fabmesh_pending_rigs, repris par
+   * index2.js) etaient reellement couverts.
+   *
+   * On calque donc le mecanisme existant des maillages
+   * (_addPendingJob / _removePendingJob / resumePendingJobs). Seule
+   * difference : ces travaux-la ne se sondent pas via pollPrediction()
+   * mais chacun via sa propre route « …-status », d'ou la petite table de
+   * configuration ci-dessous plutot qu'un second mecanisme complet.
+   *
+   * REGLE DE RETRAIT (identique a celle d'imageTo3D) : on ne retire
+   * l'entree que sur une fin REELLE renvoyee par le serveur (done, failed,
+   * canceled). Un simple abandon de sondage — reseau coupe, plafond de
+   * 15 min, session expiree — la LAISSE en place, sinon on reproduit
+   * exactement le bogue qu'on corrige ici. Les entrees perimees sont
+   * purgees par l'age (30 min).
+   * ────────────────────────────────────────────────────────────────── */
+  const SPAWNED_KINDS = {
+    segment: {
+      key: 'fabmesh_pending_segments',
+      statusPath: '/api/mesh-segment-status',
+      label: 'Segmentation (reprise)',
+      expectedMs: 600_000,   // ~8-10 min de GPU, cf. meshSegmentAI
+    },
+    anim: {
+      key: 'fabmesh_pending_anims',
+      statusPath: '/api/animate-status',
+      label: 'Animation (reprise)',
+      expectedMs: 180_000,
+    },
+  };
+  const SPAWNED_MAX_AGE_MS = 30 * 60_000;  // meme fenetre que les maillages
+  const SPAWNED_POLL_MS = 5000;            // meme cadence que le sondage d'origine
+  const SPAWNED_MAX_POLLS = 180;           // 15 min, meme plafond
+
+  function _readSpawnedPending(key) {
+    try {
+      const list = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(list) ? list : [];
+    } catch { return []; }
+  }
+  function _writeSpawnedPending(key, list) {
+    // slice(-10) : on garde les 10 plus recentes, comme a l'ecriture d'origine.
+    try { localStorage.setItem(key, JSON.stringify(list.slice(-10))); } catch {}
+  }
+  function _addSpawnedPending(key, entry) {
+    const list = _readSpawnedPending(key).filter((e) => e && e.jobId !== entry.jobId);
+    list.push({ ...entry, createdAt: Date.now() });
+    _writeSpawnedPending(key, list);
+  }
+  function _removeSpawnedPending(key, jobId) {
+    _writeSpawnedPending(key, _readSpawnedPending(key).filter((e) => e && e.jobId !== jobId));
+  }
+
+  // Sonde UNE entree reprise et pilote sa fenetre de progression.
+  async function _resumeOneSpawned(cfg, entry, jobs) {
+    const etiquette = `${cfg.label} : ${entry.projectName || entry.jobId}`;
+    // 5e argument = date de lancement REELLE, pour que le chrono de la
+    // fenetre reparte du vrai debut et non du rechargement de la page.
+    const job = (jobs && typeof jobs.push === 'function')
+      ? jobs.push(
+          etiquette,
+          null,   // pas d'annulation cliente : le serveur reste maitre du travail
+          { Projet: entry.projectName || '—', Reprise: 'après rechargement de la page' },
+          cfg.expectedMs,
+          entry.createdAt || Date.now(),
+        )
+      : null;
+    const terminer = (ok, err) => {
+      if (job && jobs && typeof jobs.complete === 'function') {
+        try { jobs.complete(job.id, ok, err); } catch {}
+      }
+    };
+    let erreursConsecutives = 0;
+    for (let i = 0; i < SPAWNED_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, SPAWNED_POLL_MS));
+      let st;
+      try {
+        const resp = await fetch(
+          `${cfg.statusPath}?job_id=${encodeURIComponent(entry.jobId)}`,
+          { method: 'GET', credentials: 'same-origin' },
+        );
+        if (!resp.ok) {
+          erreursConsecutives++;
+          if (erreursConsecutives >= 30) {
+            // Abandon de sondage : l'entree RESTE, le prochain chargement reprendra.
+            terminer(false, `serveur injoignable (HTTP ${resp.status}) — suivi interrompu ; rouvre le projet dans les 30 min pour reprendre le suivi`);
+            return;
+          }
+          continue;
+        }
+        erreursConsecutives = 0;
+        st = await resp.json();
+      } catch (e) {
+        erreursConsecutives++;
+        if (erreursConsecutives >= 30) {
+          terminer(false, e?.message || String(e));
+          return;
+        }
+        continue;
+      }
+      if (st?.status === 'failed' || st?.status === 'canceled' || st?.status === 'cancelled') {
+        _removeSpawnedPending(cfg.key, entry.jobId);   // fin reelle cote serveur
+        terminer(false, st.error || `${cfg.label} : échec côté serveur`);
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        return;
+      }
+      if (st?.status === 'done') {
+        _removeSpawnedPending(cfg.key, entry.jobId);   // fin reelle cote serveur
+        terminer(true);
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        // C'est ce tick de sondage qui a fait transferer le GLB depuis
+        // Modal vers R2 (cf. worker : la route « …-status » ne stocke
+        // l'objet qu'au moment ou elle voit le travail termine). Il est
+        // donc desormais visible dans la liste des projets, et un
+        // rechargement du projet courant le fait apparaitre — a condition
+        // qu'un projet soit ouvert, sinon il n'apparait qu'a l'ouverture
+        // du projet concerne.
+        if (typeof window.reloadCurrentProject === 'function') {
+          try { await window.reloadCurrentProject(); } catch {}
+        }
+        return;
+      }
+      // 'pending' ou statut inconnu : on continue a sonder.
+    }
+    // Plafond atteint : abandon de suivi, PAS une fin de travail → on garde l'entree.
+    terminer(false, `${cfg.label} : suivi interrompu après 15 min — le travail continue sur le serveur ; recharge la page dans les 30 min suivant son lancement pour reprendre le suivi`);
+  }
+
+  let _resumeSpawnedRetries = 0;
+  async function resumeSpawnedJobs() {
+    const configs = Object.values(SPAWNED_KINDS);
+    if (!configs.some((cfg) => _readSpawnedPending(cfg.key).length)) return;
+    // Meme attente que resumePendingJobs : index2.js est un module, donc
+    // window.fabmeshJobs peut n'apparaitre qu'apres ce script.
+    const jobs = window.fabmeshJobs;
+    if (!jobs || typeof jobs.push !== 'function') {
+      if (_resumeSpawnedRetries++ < 10) {
+        console.warn('[cloud] fabmeshJobs not ready (spawned resume), retry', _resumeSpawnedRetries);
+        setTimeout(resumeSpawnedJobs, 1000);
+        return;
+      }
+      console.error('[cloud] fabmeshJobs never appeared — segment/anim resume polls silently');
+    }
+    for (const cfg of configs) {
+      const list = _readSpawnedPending(cfg.key);
+      const now = Date.now();
+      const fresh = list.filter((e) => e && e.jobId && now - (e.createdAt || 0) < SPAWNED_MAX_AGE_MS);
+      if (fresh.length !== list.length) _writeSpawnedPending(cfg.key, fresh);
+      // Pas d'await : toutes les reprises sondent en parallele.
+      for (const entry of fresh) _resumeOneSpawned(cfg, entry, window.fabmeshJobs);
+    }
+  }
+  window.__cloudResumeSpawned = resumeSpawnedJobs;
+
+  /* ──────────────────────────────────────────────────────────────────
    * IMPLEMENTED — these are the calls the cloud actually services.
    * ────────────────────────────────────────────────────────────────── */
   const impl = {
@@ -2160,20 +2324,18 @@
         return { success: false, ok: false, error: e?.message || String(e) };
       }
 
-      // Stash for page-reload resume (parallel to fabmesh_pending_rigs).
-      try {
-        const pending = JSON.parse(localStorage.getItem('fabmesh_pending_segments') || '[]');
-        const projectId = window.state?.currentProject?.id || null;
-        pending.push({ jobId, projectId, projectName: proj, meshUrl: url, createdAt: Date.now() });
-        localStorage.setItem('fabmesh_pending_segments', JSON.stringify(pending.slice(-10)));
-      } catch (e) { /* localStorage may be disabled */ }
-      const clearPending = () => {
-        try {
-          const pending = JSON.parse(localStorage.getItem('fabmesh_pending_segments') || '[]');
-          localStorage.setItem('fabmesh_pending_segments',
-            JSON.stringify(pending.filter(p => p.jobId !== jobId)));
-        } catch (e) { /* ignore */ }
-      };
+      // Reprise apres rechargement de page. Cette entree est desormais
+      // RELUE au demarrage par resumeSpawnedJobs() (cf. plus haut) ; avant,
+      // elle etait ecrite puis jamais consultee.
+      _addSpawnedPending(SPAWNED_KINDS.segment.key, {
+        jobId,
+        projectId: window.state?.currentProject?.id || null,
+        projectName: proj,
+        meshUrl: url,
+      });
+      // A n'appeler que sur une fin REELLE du serveur (done / failed) :
+      // un abandon de sondage doit laisser l'entree pour la reprise.
+      const clearPending = () => _removeSpawnedPending(SPAWNED_KINDS.segment.key, jobId);
 
       // ── 2. Poll ──
       const POLL_INTERVAL_MS = 5000;
@@ -2199,7 +2361,9 @@
             if (resp.status === 401 || resp.status === 403) {
               consecutiveAuthErrors++;
               if (consecutiveAuthErrors >= MAX_CONSECUTIVE_AUTH_ERRORS) {
-                clearPending();
+                // Session expiree = abandon de sondage, pas fin de travail :
+                // on GARDE l'entree pour que la reprise la rattrape apres
+                // reconnexion (les 15 credits sont deja debites).
                 return {
                   success: false, ok: false,
                   error: 'session expired during segmentation — please log in and check Projects (the parts may have completed and be visible there)',
@@ -2212,7 +2376,8 @@
                 lastWarn = `Cloud backend returned ${resp.status} for ${SOFT_WARN_SERVER_ERRORS} polls — still trying (segmentation may be running on Modal).`;
               }
               if (consecutiveServerErrors >= MAX_CONSECUTIVE_SERVER_ERRORS) {
-                clearPending();
+                // Backend injoignable : le travail tourne toujours sur Modal,
+                // on laisse l'entree de reprise en place.
                 return {
                   success: false, ok: false,
                   error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls — backend unreachable. The segmentation may still complete on the cloud backend; check Projects.`,
@@ -2264,7 +2429,8 @@
         }
       }
 
-      clearPending();
+      // Plafond de sondage atteint : ce n'est pas une fin de travail, donc
+      // l'entree reste et resumeSpawnedJobs() reprendra au rechargement.
       return {
         success: false, ok: false,
         error: `mesh-segment timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — the segmentation may have completed; refresh Projects to check.`,
@@ -2295,20 +2461,17 @@
       } catch (e) {
         return { success: false, ok: false, error: e?.message || String(e) };
       }
-      try {
-        const pending = JSON.parse(localStorage.getItem('fabmesh_pending_anims') || '[]');
-        const projectId = window.state?.currentProject?.id || null;
-        const projectName = window.state?.currentProject?.name || null;
-        pending.push({ jobId, projectId, projectName, rigUrl: url, animType, createdAt: Date.now() });
-        localStorage.setItem('fabmesh_pending_anims', JSON.stringify(pending.slice(-10)));
-      } catch (e) {}
-      const clearPending = () => {
-        try {
-          const pending = JSON.parse(localStorage.getItem('fabmesh_pending_anims') || '[]');
-          const filtered = pending.filter(p => p.jobId !== jobId);
-          localStorage.setItem('fabmesh_pending_anims', JSON.stringify(filtered));
-        } catch (e) {}
-      };
+      // Meme correctif que pour la segmentation : cette entree est
+      // maintenant relue au demarrage par resumeSpawnedJobs().
+      _addSpawnedPending(SPAWNED_KINDS.anim.key, {
+        jobId,
+        projectId: window.state?.currentProject?.id || null,
+        projectName: projectName || window.state?.currentProject?.name || null,
+        rigUrl: url,
+        animType,
+      });
+      // Reserve aux fins reelles renvoyees par le serveur (done / failed).
+      const clearPending = () => _removeSpawnedPending(SPAWNED_KINDS.anim.key, jobId);
 
       const POLL_INTERVAL_MS = 5000;
       const MAX_POLLS = 180;
@@ -2331,13 +2494,13 @@
             if (resp.status === 401 || resp.status === 403) {
               consecutiveAuthErrors++;
               if (consecutiveAuthErrors >= MAX_CONSECUTIVE_AUTH_ERRORS) {
-                clearPending();
+                // Abandon de sondage : l'entree de reprise reste en place.
                 return { success: false, ok: false, error: 'session expired during animate', authLost: true };
               }
             } else if (resp.status >= 500) {
               consecutiveServerErrors++;
               if (consecutiveServerErrors >= MAX_CONSECUTIVE_SERVER_ERRORS) {
-                clearPending();
+                // Idem : le travail tourne toujours cote serveur.
                 return { success: false, ok: false, error: `Cloud backend returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} polls` };
               }
             }
@@ -2388,7 +2551,7 @@
           return { success: true, ok: true, anim_url: animUrl, path: animUrl, type: st.anim_type || animType };
         }
       }
-      clearPending();
+      // Plafond de sondage : on garde l'entree pour la reprise au rechargement.
       return {
         success: false, ok: false,
         error: `autoAnimAI timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — refresh Projects to check.`,
@@ -2840,4 +3003,7 @@
   // renderer has time to wire pushJob / reloadCurrentProject onto
   // window before we fire pollPrediction.
   setTimeout(() => { try { resumePendingJobs(); } catch (e) { console.warn('[cloud] resume failed:', e); } }, 1500);
+  // Idem pour les segmentations et animations laissees en plan : leur liste
+  // etait ecrite mais jamais relue, donc jamais reprise (cf. SPAWNED_KINDS).
+  setTimeout(() => { try { resumeSpawnedJobs(); } catch (e) { console.warn('[cloud] resume spawned failed:', e); } }, 1500);
 })();

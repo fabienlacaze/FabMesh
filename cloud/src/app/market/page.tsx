@@ -220,6 +220,25 @@ function MarketPageInner() {
   const [cart, setCart] = useState<string[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
+  /* RENONCIATION AU DROIT DE RETRACTATION — art. L221-28 13° du code de la
+   * consommation.
+   *
+   * CE QUI N'ALLAIT PAS : le bouton « Checkout with Stripe » partait
+   * directement sur Stripe. L'acheteur payait une creation puis la
+   * telechargeait dans la foulee, sans qu'on lui ait jamais demande la
+   * demande expresse d'execution immediate NI fait reconnaitre la perte du
+   * droit de retractation. Sans ces deux consentements, le droit de
+   * retractation de 14 jours reste ENTIER meme apres telechargement : chaque
+   * acheteur pouvait exiger le remboursement d'un fichier deja en sa
+   * possession, et le vendeur avait deja ete credite. La caisse credits
+   * (buy/BuyButton.tsx) recueillait cette renonciation ; la boutique, non.
+   *
+   * Le consentement est donc demande ici, dans une fenetre qui recapitule
+   * les creations achetees et leur prix : il porte ainsi sur un contrat
+   * identifie, comme l'exige le texte, et non sur une case globale cochee
+   * avant le choix des articles. */
+  const [consentOuvert, setConsentOuvert] = useState(false);
+  const [consentAccepte, setConsentAccepte] = useState(false);
   const [paidBanner, setPaidBanner] = useState(false);
   const [editing, setEditing] = useState<EditingDraft | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -398,15 +417,29 @@ function MarketPageInner() {
     setTimeout(() => setFlashListingId((cur) => cur === l.id ? null : cur), 1000);
   }
 
+  // Ouvre la fenetre de confirmation. Le paiement ne part plus d'ici : il
+  // passe obligatoirement par checkout(), qui exige la case cochee.
+  function demanderPaiement() {
+    if (!cart.length) return;
+    setConsentAccepte(false);
+    setConsentOuvert(true);
+  }
+
   async function checkout() {
     if (!cart.length) return;
+    if (!consentAccepte) return;
     setCheckingOut(true);
     try {
       const r = await fetch('/api/market/checkout', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ listing_ids: cart }),
+        // `consent` / `consentedAt` suivent la convention deja retenue par
+        // /api/checkout (caisse credits), qui refuse la session de paiement
+        // sans eux et les horodate dans les metadonnees Stripe. Cote
+        // boutique, le worker ne les lit PAS ENCORE : la preuve du
+        // consentement doit y etre branchee (voir rapport).
+        body: JSON.stringify({ listing_ids: cart, consent: true, consentedAt: new Date().toISOString() }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -975,7 +1008,7 @@ function MarketPageInner() {
                     <span>Total</span>
                     <strong>{formatPrice(cartTotal, cartItems[0]?.currency || 'USD')}</strong>
                   </div>
-                  <button onClick={checkout} disabled={checkingOut} className="primary-btn" style={{ padding: '12px', fontSize: 14 }}>
+                  <button onClick={demanderPaiement} disabled={checkingOut} className="primary-btn" style={{ padding: '12px', fontSize: 14 }}>
                     {checkingOut ? 'Redirecting to Stripe…' : `Checkout with Stripe`}
                   </button>
                   <div style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center' }}>
@@ -984,6 +1017,104 @@ function MarketPageInner() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Fenetre de confirmation d'achat + renonciation au droit de
+          retractation (art. L221-28 13°). Calquee sur buy/BuyButton.tsx :
+          le contrat est nomme (creations, licences, total), la case est le
+          seul element a lire, et le bouton de paiement reste inerte tant
+          qu'elle n'est pas cochee. Contenu en francais : c'est une mention
+          legale opposable a un consommateur francais. */}
+      {consentOuvert && cartItems.length > 0 && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="market-consent-titre"
+          onClick={(e) => { if (e.target === e.currentTarget && !checkingOut) setConsentOuvert(false); }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 103,
+            background: 'rgba(0,0,0,.72)', backdropFilter: 'blur(3px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-1)', border: '1px solid var(--border)',
+              borderRadius: 14, maxWidth: 540, width: '100%', padding: '26px 26px 22px',
+              boxShadow: '0 20px 60px rgba(0,0,0,.6)', textAlign: 'left',
+              maxHeight: '90vh', overflowY: 'auto',
+            }}
+          >
+            <h3 id="market-consent-titre" style={{ margin: '0 0 6px', fontSize: 19 }}>
+              Confirmez votre achat
+            </h3>
+
+            <div style={{ margin: '14px 0 18px', padding: '12px 14px', background: 'var(--bg-2)', borderRadius: 10 }}>
+              {cartItems.map((l) => (
+                <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13, padding: '3px 0' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {l.title}
+                    <span style={{ color: 'var(--text-2)' }}> · {LICENCE_LABELS[l.licence] || l.licence}</span>
+                  </span>
+                  <span style={{ fontWeight: 600, flexShrink: 0 }}>{formatPrice(l.price_cents, l.currency)}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                <span style={{ fontWeight: 600 }}>Total</span>
+                <span style={{ fontWeight: 700, fontSize: 17 }}>
+                  {formatPrice(cartTotal, cartItems[0]?.currency || 'USD')} TTC
+                </span>
+              </div>
+            </div>
+
+            <label
+              style={{
+                display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer',
+                padding: '14px 16px', borderRadius: 10, lineHeight: 1.55, fontSize: 13.5,
+                border: `2px solid ${consentAccepte ? 'var(--accent, #a855f7)' : 'rgba(255,170,51,.55)'}`,
+                background: consentAccepte ? 'rgba(168,85,247,.08)' : 'rgba(255,170,51,.07)',
+                transition: 'border-color .15s, background .15s',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={consentAccepte}
+                onChange={(e) => setConsentAccepte(e.target.checked)}
+                style={{ marginTop: 3, width: 17, height: 17, flexShrink: 0, cursor: 'pointer' }}
+              />
+              <span>
+                Je demande expressément que ces créations me soient fournies
+                immédiatement après le paiement, et je reconnais que dès que je
+                les télécharge, je{' '}
+                <strong>perds mon droit de rétractation de 14 jours</strong> sur
+                ce contenu numérique (art. L. 221-28 13° du code de la
+                consommation). Voir les{' '}
+                <a href="/legal/terms" target="_blank" rel="noreferrer">conditions générales de vente</a>.
+              </span>
+            </label>
+
+            <p style={{ fontSize: 12, color: 'var(--text-2)', margin: '12px 0 0' }}>
+              Tant que vous n&apos;avez pas téléchargé une création achetée, elle
+              reste remboursable pendant 14 jours, sans motif à fournir.
+            </p>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+              <button className="ghost-btn" onClick={() => setConsentOuvert(false)} disabled={checkingOut} style={{ padding: '8px 16px' }}>
+                Annuler
+              </button>
+              <button
+                className="primary-btn"
+                onClick={checkout}
+                disabled={!consentAccepte || checkingOut}
+                title={consentAccepte ? '' : 'Cochez la case ci-dessus pour continuer'}
+                style={{ padding: '8px 20px' }}
+              >
+                {checkingOut ? '…' : `Confirmer et payer ${formatPrice(cartTotal, cartItems[0]?.currency || 'USD')}`}
+              </button>
+            </div>
           </div>
         </div>
       )}
