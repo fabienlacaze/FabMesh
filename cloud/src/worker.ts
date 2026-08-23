@@ -5954,6 +5954,21 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     return Math.min(Math.max(0, fallback), 10_000);
   };
 
+  /* Paiement differe ECHOUE — abonne cote Stripe, sans gestionnaire.
+   *
+   * Rien a rembourser (aucun credit n'a ete accorde : la session s'etait
+   * completee en `unpaid` et le garde l'avait laissee repartir). Mais un
+   * SEPA qui rebondit doit se voir : sans cette trace, un client dit avoir
+   * paye, la table `payments` est vide, et rien n'explique pourquoi. */
+  if (event.type === 'checkout.session.async_payment_failed') {
+    const sess = event.data.object;
+    console.warn(`[stripe] paiement differe ECHOUE pour la session ${sess.id} `
+               + `(client ${sess.metadata?.user_id ?? 'inconnu'}, `
+               + `pack ${sess.metadata?.pack_id ?? '?'}) — aucun credit n'avait `
+               + 'ete accorde, rien a reprendre.');
+    return json({ received: true, async_payment: 'failed' });
+  }
+
   /* Achat unitaire — credits accordes une fois.
    *
    * DEUX evenements mènent ici, pas un seul :

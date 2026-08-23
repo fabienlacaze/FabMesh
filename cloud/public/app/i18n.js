@@ -894,8 +894,39 @@
     },
   };
 
+  /* LANGUE PAR DEFAUT : CELLE DU VISITEUR, PAS L'ANGLAIS EN DUR.
+   *
+   * `localStorage.getItem(...) || 'en'` : au tout premier chargement rien
+   * n'est stocke, donc TOUT LE MONDE arrivait en anglais. La vitrine est
+   * en francais, les fiches de magasin sont en francais, et le produit
+   * lui-meme s'ouvrait en anglais — y compris pour un visiteur dont le
+   * navigateur ne demande que du francais. Les dictionnaires existaient
+   * pourtant deja et etaient complets : rien n'etait a traduire, il n'y
+   * avait qu'a les choisir.
+   *
+   * Un choix explicite de l'utilisateur reste prioritaire pour toujours :
+   * on ne regarde le navigateur que faute de preference enregistree. */
+  const LANGUES_CONNUES = ['fr', 'es', 'zh', 'hi', 'ar'];
+
+  function _langueDuNavigateur() {
+    try {
+      const brutes = (navigator.languages && navigator.languages.length)
+        ? navigator.languages : [navigator.language];
+      for (const b of brutes) {
+        if (!b) continue;
+        const court = String(b).toLowerCase().split('-')[0];
+        if (court === 'en') return 'en';
+        if (LANGUES_CONNUES.indexOf(court) !== -1) return court;
+      }
+    } catch (_) { /* pas de navigator (test, worker) */ }
+    return 'en';
+  }
+
   let _lang = 'en';
-  try { _lang = localStorage.getItem('fabmesh.lang') || 'en'; } catch (_) {}
+  try {
+    const choisi = localStorage.getItem('fabmesh.lang');
+    _lang = choisi || _langueDuNavigateur();
+  } catch (_) { _lang = _langueDuNavigateur(); }
 
   const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'CODE', 'PRE', 'MODEL-VIEWER', 'CANVAS', 'svg', 'SVG']);
 
