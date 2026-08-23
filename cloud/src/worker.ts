@@ -332,6 +332,18 @@ async function readListingDownloads(env: Env, listingId: string): Promise<number
  *  not commit atomically after retries — fail-safe (reject) so two concurrent
  *  requests can't both pass a cap off the same stale read. Mirrors the
  *  conditional-PUT pattern in bumpListingDownloads. */
+/** Attente croissante et REELLEMENT aleatoire entre deux tentatives de
+ *  comparaison-echange.
+ *
+ *  La premiere version calculait `(essai * 37 % 100)` : une constante deguisee
+ *  en bruit. Deux requetes concurrentes attendaient donc EXACTEMENT la meme
+ *  duree et se re-percutaient au tour suivant — le principe meme du recul
+ *  aleatoire est que les concurrents divergent. */
+function _attenteBruitee(essai: number): number {
+  const base = [0, 25, 60, 110, 180, 280][Math.min(essai, 5)];
+  return Math.round(base * (0.5 + Math.random()));
+}
+
 async function _casIncrementCounter(env: Env, key: string, delta: number, max: number): Promise<number | null> {
   if (!env.MESHES) return null;
   /* ATTENTE ENTRE LES TENTATIVES — sans elle, reessayer ne servait a rien.
@@ -354,12 +366,8 @@ async function _casIncrementCounter(env: Env, key: string, delta: number, max: n
    * minutes. On CONSERVE le choix de fermer en cas de doute — c'est un
    * garde-fou de depense, il doit se tromper du bon cote — mais on trace
    * la difference, sans quoi une contention passe pour un budget epuise. */
-  const ATTENTES_MS = [0, 25, 60, 110, 180, 280];
-  for (let attempt = 0; attempt < ATTENTES_MS.length; attempt++) {
-    if (ATTENTES_MS[attempt] > 0) {
-      const bruit = ATTENTES_MS[attempt] * (0.5 + (attempt * 37 % 100) / 100);
-      await new Promise((r) => setTimeout(r, bruit));
-    }
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, _attenteBruitee(attempt)));
     const existing = await env.MESHES.get(key);
     const cur = existing ? (parseFloat(await existing.text()) || 0) : 0;
     if (cur + delta > max) return null;          // vrai depassement de budget
@@ -393,6 +401,11 @@ async function _casIncrementCounter(env: Env, key: string, delta: number, max: n
 async function _incrementAtomique(env: Env, key: string, delta: number): Promise<number | null> {
   if (!env.MESHES) return null;
   for (let essai = 0; essai < 6; essai++) {
+    // MEME DEFAUT QUE _casIncrementCounter, corrige au meme endroit : sans
+    // attente, six comparaisons-echanges s'enchainent en microsecondes sur le
+    // meme etag et echouent toutes. L'increment etait alors PERDU — et ce
+    // compteur-ci alimente l'alerte de budget.
+    if (essai > 0) await new Promise((r) => setTimeout(r, _attenteBruitee(essai)));
     const existing = await env.MESHES.get(key);
     const cur = existing ? (parseFloat(await existing.text()) || 0) : 0;
     const next = cur + delta;
@@ -608,7 +621,24 @@ async function _budgetReelEpuise(env: Env): Promise<boolean> {
   if (!env.MESHES) return false;
   try {
     let budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
-    if (budget <= 0) budget = parseFloat(env.MODAL_BUDGET_USD ?? '') || 0;
+    /* UN BUDGET A ZERO DOIT FERMER LE ROBINET, PAS LE DESARMER.
+     *
+     * `parseFloat(x) || 0` puis `if (budget <= 0) return false` : poser
+     * MODAL_BUDGET_USD a "0" pour tout arreter rendait donc l'arret dur
+     * INACTIF — l'exact contraire de l'intention. Zero est une consigne :
+     * budget nul, donc budget epuise. Seule une variable ABSENTE laisse
+     * passer, faute de reference. */
+    if (budget <= 0) {
+      const brut = env.MODAL_BUDGET_USD;
+      if (brut != null && String(brut).trim() !== '' && Number.isFinite(Number(brut))) {
+        const n = Number(brut);
+        if (n <= 0) {
+          console.error('[budget] MODAL_BUDGET_USD = 0 — arret dur ACTIF, tout est refuse.');
+          return true;
+        }
+        budget = n;
+      }
+    }
     if (budget <= 0) return false;                     // aucun budget defini
     const txt = await r2GetText(env, '_meta/modal_real_usage.json');
     if (!txt) {
@@ -6619,10 +6649,13 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
         await _failAndRefundJob(env, job, status.error);
         return json({ status: 'failed', error: status.error });
       }
-      if (!status.ready || !status.glb_base64) {
+      // `glb_base64` n'est plus demande dans la reponse d'etat (voir
+      // callModalMeshStatus) : `ready` suffit, les octets viennent en flux.
+      // La chaine reste acceptee si un backend ancien la renvoie.
+      if (!status.ready) {
         return json({ status: 'processing' });
       }
-      const stableUrl = await persistModalGlb(env, id, status.glb_base64);
+      const stableUrl = await persistModalGlb(env, id, status.glb_base64 ?? '');
       /* COURSE AVEC L'ANNULATION — la garde de statut est indispensable.
        *
        * La ligne etait lue au debut de la requete, puis Modal interroge et le
@@ -8772,7 +8805,17 @@ async function callModalMeshStatus(env: Env, jobId: string): Promise<ModalMeshSt
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ _auth: secret, job_id: jobId }),
+    /* ON NE DEMANDE PLUS LE GLB DANS LA REPONSE D'ETAT.
+     *
+     * `/mesh_status` renvoyait le maillage entier en base64 : le worker
+     * decodait donc 38 a 47 Mo de JSON pour savoir si le travail etait
+     * PRET, et son isolat mourait la — avant meme d'atteindre le flux
+     * `/mesh_fetch` cense regler le probleme. On demande l'etat seul ; les
+     * octets viennent ensuite en flux, dans persistModalGlb.
+     *
+     * Un backend Modal anterieur ignore le drapeau et renvoie le base64 :
+     * le repli d'origine s'applique alors, rien ne casse. */
+    body: JSON.stringify({ _auth: secret, job_id: jobId, metadata_only: true }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!r.ok) {
@@ -8824,6 +8867,13 @@ async function persistModalGlb(env: Env, jobId: string, glbBase64: string): Prom
   const parFlux = await _persistDepuisMeshFetch(env, jobId);
   if (parFlux) return parFlux;
   // Repli : decodage base64 en memoire (voir l'avertissement ci-dessus).
+  // Depuis que l'etat est demande sans le GLB, ce repli ne sert plus qu'aux
+  // backends Modal anterieurs. S'il n'y a ni flux ni base64, on echoue
+  // clairement plutot que de produire un fichier vide.
+  if (!glbBase64) {
+    throw new Error('mesh ready but neither /mesh_fetch nor inline base64 returned bytes '
+                  + '— redeploy the Modal app (modal deploy modal_app/app.py)');
+  }
   const bin = atob(glbBase64);
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
@@ -10785,7 +10835,12 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     try {
       await _failAndRefundJob(
         env,
-        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        // `type` EST INDISPENSABLE : _failAndRefundJob ne demande l'arret du
+        // conteneur Modal que pour les familles asynchrones, en lisant ce
+        // champ. Sans lui, `TYPES_JOB_ASYNC.has('')` est faux et le GPU
+        // continuait de tourner apres remboursement — le correctif du
+        // 2026-08-20 n'agissait donc que sur les maillages.
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits, type: 'rig' },
         'rig failed',
       );
     } catch (e) {
@@ -10794,7 +10849,10 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
         e instanceof Error ? e.message : String(e));
       return;
     }
-    await refundModalSpend(env, record.modal_spend).catch((e) =>
+    // AVEC l'identifiant : le compteur PAR UTILISATEUR est incremente au
+    // debit, il doit l'etre au credit. Sans lui, cinq echecs consommaient
+    // l'enveloppe personnelle du client pour du travail jamais livre.
+    await refundModalSpend(env, record.modal_spend, record.user_id).catch((e) =>
       console.error(`[auto-rig-status] refundModalSpend failed job=${jobId}:`,
         e instanceof Error ? e.message : String(e)));
     await deleteRigJobRecord(env, jobId).catch(() => {});
@@ -11118,7 +11176,12 @@ async function handleMeshSegmentStatus(req: Request, env: Env): Promise<Response
     try {
       await _failAndRefundJob(
         env,
-        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        // `type` EST INDISPENSABLE : _failAndRefundJob ne demande l'arret du
+        // conteneur Modal que pour les familles asynchrones, en lisant ce
+        // champ. Sans lui, `TYPES_JOB_ASYNC.has('')` est faux et le GPU
+        // continuait de tourner apres remboursement — le correctif du
+        // 2026-08-20 n'agissait donc que sur les maillages.
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits, type: 'segment' },
         'segment failed',
       );
     } catch (e) {
@@ -11127,7 +11190,10 @@ async function handleMeshSegmentStatus(req: Request, env: Env): Promise<Response
         e instanceof Error ? e.message : String(e));
       return;
     }
-    await refundModalSpend(env, record.modal_spend).catch((e) =>
+    // AVEC l'identifiant : le compteur PAR UTILISATEUR est incremente au
+    // debit, il doit l'etre au credit. Sans lui, cinq echecs consommaient
+    // l'enveloppe personnelle du client pour du travail jamais livre.
+    await refundModalSpend(env, record.modal_spend, record.user_id).catch((e) =>
       console.error(`[mesh-segment-status] refundModalSpend failed job=${jobId}:`,
         e instanceof Error ? e.message : String(e)));
     await deleteSegmentJobRecord(env, jobId).catch(() => {});
@@ -12288,7 +12354,12 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
     try {
       await _failAndRefundJob(
         env,
-        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        // `type` EST INDISPENSABLE : _failAndRefundJob ne demande l'arret du
+        // conteneur Modal que pour les familles asynchrones, en lisant ce
+        // champ. Sans lui, `TYPES_JOB_ASYNC.has('')` est faux et le GPU
+        // continuait de tourner apres remboursement — le correctif du
+        // 2026-08-20 n'agissait donc que sur les maillages.
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits, type: 'animate' },
         'animation failed',
       );
     } catch (e) {
@@ -12297,7 +12368,10 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
         e instanceof Error ? e.message : String(e));
       return;
     }
-    await refundModalSpend(env, record.modal_spend).catch((e) =>
+    // AVEC l'identifiant : le compteur PAR UTILISATEUR est incremente au
+    // debit, il doit l'etre au credit. Sans lui, cinq echecs consommaient
+    // l'enveloppe personnelle du client pour du travail jamais livre.
+    await refundModalSpend(env, record.modal_spend, record.user_id).catch((e) =>
       console.error(`[anim-status] refundModalSpend failed job=${jobId}:`,
         e instanceof Error ? e.message : String(e)));
     await deleteAnimJobRecord(env, jobId).catch(() => {});
@@ -12581,7 +12655,12 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
     try {
       await _failAndRefundJob(
         env,
-        { id: jobId, user_id: record.user_id, credit_cost: record.credits },
+        // `type` EST INDISPENSABLE : _failAndRefundJob ne demande l'arret du
+        // conteneur Modal que pour les familles asynchrones, en lisant ce
+        // champ. Sans lui, `TYPES_JOB_ASYNC.has('')` est faux et le GPU
+        // continuait de tourner apres remboursement — le correctif du
+        // 2026-08-20 n'agissait donc que sur les maillages.
+        { id: jobId, user_id: record.user_id, credit_cost: record.credits, type: 'animate_fbx' },
         'fbx-retarget failed',
       );
     } catch (e) {
@@ -12590,7 +12669,10 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
         e instanceof Error ? e.message : String(e));
       return;
     }
-    await refundModalSpend(env, record.modal_spend).catch((e) =>
+    // AVEC l'identifiant : le compteur PAR UTILISATEUR est incremente au
+    // debit, il doit l'etre au credit. Sans lui, cinq echecs consommaient
+    // l'enveloppe personnelle du client pour du travail jamais livre.
+    await refundModalSpend(env, record.modal_spend, record.user_id).catch((e) =>
       console.error(`[fbx-retarget-status] refundModalSpend failed job=${jobId}:`,
         e instanceof Error ? e.message : String(e)));
     await deleteAnimJobRecord(env, jobId).catch(() => {});
@@ -16131,7 +16213,8 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
         const backend = String((job.options as Record<string, unknown> | null)?.backend
           || (pollable ? 'modal' : 'replicate'));
         if (backend === 'replicate') await refundDailySpend(env, recordedUsd).catch(() => {});
-        else await refundModalSpend(env, recordedUsd).catch(() => {});
+        // Avec l'identifiant : meme raison que les gestionnaires de statut.
+        else await refundModalSpend(env, recordedUsd, typeof job.user_id === 'string' ? job.user_id : undefined).catch(() => {});
       };
       try {
         const status = pollable
@@ -16139,7 +16222,7 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
           : { ready: false } as ModalMeshStatusResp;
         let claimed = false;
         if (status.error) claimed = await _failAndRefundJob(env, job, status.error);
-        else if (status.ready && status.glb_base64) {
+        else if (status.ready) {
           /* LE FAUCHEUR LIVRE, AU LIEU D'ATTENDRE UN SONDAGE.
            *
            * Cette branche etait vide, avec le commentaire « finished; a
@@ -16155,7 +16238,7 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
            * que le sondage client (`.in(...)`) pour ne pas ecraser une
            * annulation gagnee entre-temps. */
           try {
-            await persistModalGlb(env, id, status.glb_base64);
+            await persistModalGlb(env, id, status.glb_base64 ?? '');
             const { data: maj } = await sb.from('jobs')
               .update({ status: 'succeeded', mesh_url: `mesh/${id}.glb`,
                         finished_at: new Date().toISOString() })
@@ -16195,7 +16278,7 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
     const finalize = async (why: string) => {
       if (!(await _failAndRefundJob(env, job, why))) return;   // someone else got there first
       out.reaped++; out.credits_refunded += creditCost;
-      await refundModalSpend(env, recordedUsd || cfg.usd).catch(() => {});
+      await refundModalSpend(env, recordedUsd || cfg.usd, typeof job.user_id === 'string' ? job.user_id : undefined).catch(() => {});
       if (cfg.delRecord) await cfg.delRecord(env, id).catch(() => {});
     };
     if (!base) {

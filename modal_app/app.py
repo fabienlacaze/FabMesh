@@ -1924,12 +1924,28 @@ def mesh_router():
             with open(err_path) as f:
                 return {"ready": False, "error": f.read()[:500]}
         if os.path.isfile(out_path):
+            taille = os.path.getsize(out_path)
+            # SANS BASE64 QUAND LE WORKER LE DEMANDE.
+            #
+            # `/mesh_fetch` avait ete ajoute pour que le worker recupere les
+            # octets en flux, mais il restait INATTEIGNABLE : pour savoir si le
+            # travail etait pret, le worker appelait d'abord `/mesh_status`,
+            # qui lui renvoyait le GLB entier en base64 dans du JSON. Il
+            # decodait donc 38 a 47 Mo AVANT d'arriver au correctif, et son
+            # isolat mourait la. Le flux ne servait a rien.
+            #
+            # `metadata_only` rompt cette chaine : le worker demande l'etat,
+            # obtient `ready` et la taille, puis va chercher les octets. Un
+            # worker plus ancien qui n'envoie pas le drapeau recoit le base64
+            # comme avant.
+            if bool(payload.get("metadata_only")):
+                return {"ready": True, "bytes": taille}
             with open(out_path, "rb") as f:
                 glb = f.read()
             return {
                 "ready": True,
                 "glb_base64": base64.b64encode(glb).decode("ascii"),
-                "bytes": len(glb),
+                "bytes": taille,
             }
         return {"ready": False}
 
