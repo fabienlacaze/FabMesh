@@ -487,6 +487,40 @@
     <!-- Tab: Trafic & acquisition -->
     <div class="tab-panel" data-panel="traffic">
       <div class="grid grid-4" id="cards-traffic"></div>
+
+      <!-- AUDIENCE PAR PAYS ET PAR CANAL.
+           /api/admin/audience.json existait depuis ce matin mais AUCUN ecran
+           ne l'appelait : la donnee etait collectee et invisible. Le taux
+           d'echec est la colonne qui compte — c'est elle qui aurait montre,
+           le 20 aout, qu'un visiteur echouait 7 fois sur 8. -->
+      <div style="margin-top:20px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+          <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2);">Audience — pays &amp; canal</div>
+          <select id="audience-jours" style="padding:4px 8px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:12px;">
+            <option value="7">7 jours</option>
+            <option value="30" selected>30 jours</option>
+            <option value="90">90 jours</option>
+          </select>
+          <button class="btn" onclick="chargerAudience()">🔄 Charger</button>
+          <span id="audience-note" style="font-size:11px; color:var(--text-2);"></span>
+        </div>
+        <div class="grid grid-2">
+          <div class="chart-card">
+            <div class="label" style="font-size:11px; color:var(--text-2); margin-bottom:6px;">PAR PAYS</div>
+            <table style="width:100%; font-size:12px;"><thead><tr>
+              <th style="text-align:left;">Pays</th><th class="num">Travaux</th>
+              <th class="num">Échecs</th><th class="num">% échec</th><th class="num">Comptes</th>
+            </tr></thead><tbody id="audience-pays"><tr><td colspan="5" style="color:var(--text-2)">—</td></tr></tbody></table>
+          </div>
+          <div class="chart-card">
+            <div class="label" style="font-size:11px; color:var(--text-2); margin-bottom:6px;">PAR CANAL</div>
+            <table style="width:100%; font-size:12px;"><thead><tr>
+              <th style="text-align:left;">Canal</th><th class="num">Travaux</th>
+              <th class="num">Échecs</th><th class="num">% échec</th><th class="num">Comptes</th>
+            </tr></thead><tbody id="audience-canal"><tr><td colspan="5" style="color:var(--text-2)">—</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
       <!-- ONE TILE = ONE CURVE. Each chart is titled with the EXACT label of
            the tile above it, so a graph can never be misread as belonging to
            the neighbouring number (the old single chart said "Desktop
@@ -4088,6 +4122,41 @@
     /* ─── Debug logs tab (remote browser-console retrieval) ─── */
     let _debugLogCurrentText = '';
     let _debugLogCurrentName = '';
+
+    /* Charge /api/admin/audience.json et remplit les deux tableaux.
+     *
+     * Le taux d'echec est colore des 20 % : c'est le signal qu'un pays ou un
+     * canal rencontre un probleme que les totaux masquent. */
+    async function chargerAudience() {
+      const jours = document.getElementById('audience-jours').value || '30';
+      const note = document.getElementById('audience-note');
+      const vide = '<tr><td colspan="5" style="color:var(--text-2)">aucune donnee</td></tr>';
+      note.textContent = 'chargement…';
+      let j;
+      try {
+        const r = await fetch('/api/admin/audience.json?jours=' + encodeURIComponent(jours),
+                              { credentials: 'include' });
+        if (!r.ok) { note.textContent = 'erreur HTTP ' + r.status; return; }
+        j = await r.json();
+      } catch (e) { note.textContent = 'erreur : ' + (e && e.message); return; }
+      const ligne = (x) => {
+        const rouge = x.taux_echec_pct >= 20;
+        return '<tr>'
+          + '<td>' + escapeHtml(String(x.cle)) + '</td>'
+          + '<td class="num">' + x.travaux + '</td>'
+          + '<td class="num"' + (x.echecs > 0 ? ' style="color:var(--err)"' : '') + '>' + x.echecs + '</td>'
+          + '<td class="num"' + (rouge ? ' style="color:var(--err); font-weight:700;"' : '') + '>' + x.taux_echec_pct + '%</td>'
+          + '<td class="num">' + x.comptes + '</td></tr>';
+      };
+      document.getElementById('audience-pays').innerHTML =
+        (j.par_pays || []).length ? j.par_pays.map(ligne).join('') : vide;
+      document.getElementById('audience-canal').innerHTML =
+        (j.par_provenance || []).length ? j.par_provenance.map(ligne).join('') : vide;
+      // La note du serveur explique pourquoi d'anciennes lignes sont
+      // « inconnu » : on l'affiche plutot que de laisser croire a un marche vide.
+      note.textContent = j.note || '';
+    }
+
     async function loadDebugLogs() {
       const tbody = document.querySelector('#debuglogs-table tbody');
       const result = document.getElementById('debuglogs-result');

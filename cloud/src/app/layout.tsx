@@ -4,11 +4,12 @@ import { Nav } from '@/components/Nav';
 import { CookieBanner } from '@/components/CookieBanner';
 
 export const metadata: Metadata = {
-  title: 'MyFabmesh.AI Cloud — Image to 3D',
-  description: 'Generate game-ready 3D meshes from a single image. Cloud GPUs, no local install required.',
+  // Le document se declare lang="fr" : son titre aussi.
+  title: "MyFabmesh.AI Cloud — De l'image au modèle 3D",
+  description: "Générez des modèles 3D prêts pour le jeu à partir d'une seule image. GPU dans le cloud, aucune installation requise.",
   openGraph: {
     title: 'MyFabmesh.AI Cloud',
-    description: 'Image → 3D mesh in 90 s. Pay-as-you-go, no install.',
+    description: "De l'image au maillage 3D en 90 s. Paiement a l'usage, sans installation.",
     type: 'website',
   },
 };
@@ -27,15 +28,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             © 2026 Ayros Studio · MyFabmesh.AI <span className="pill" style={{ marginLeft: 6 }}>BETA</span>
           </div>
           <div style={{ display: 'flex', gap: 16 }}>
-            <a href="/legal/terms">Terms</a>
-            <a href="/legal/privacy">Privacy</a>
+            <a href="/legal/terms">Conditions générales</a>
+            <a href="/legal/privacy">Confidentialité</a>
             <a href="/legal/mentions">Mentions légales</a>
             {/* Un visiteur bloque a l'inscription n'avait AUCUN moyen d'ecrire :
                 le pied de page ne proposait que des pages juridiques, et le
                 formulaire de contact est derriere la session — precisement ce
                 qu'il n'arrive pas a obtenir. */}
             <a href={`mailto:${id.supportEmail}`}>Contact</a>
-            <a href="https://fabienlacaze.github.io/MyFabmesh" target="_blank">Desktop app</a>
+            <a href="https://fabienlacaze.github.io/MyFabmesh" target="_blank">Application de bureau</a>
           </div>
         </footer>
       </body>

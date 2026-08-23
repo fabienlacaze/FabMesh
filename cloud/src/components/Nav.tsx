@@ -35,9 +35,9 @@ export function Nav() {
       <div className="topbar-right">
         {user ? (
           <>
-            <a href="/app/" className="nav-link">New mesh</a>
-            <a href="/app/" className="nav-link">My projects</a>
-            <Link href="/buy" className="nav-link">Credits</Link>
+            <a href="/app/" className="nav-link">Nouveau maillage</a>
+            <a href="/app/" className="nav-link">Mes projets</a>
+            <Link href="/buy" className="nav-link">Crédits</Link>
             <Link href="/account" className="nav-link" title={user.email ?? ''}>
               {user.email?.split('@')[0]}
             </Link>
@@ -45,10 +45,10 @@ export function Nav() {
           </>
         ) : (
           <>
-            <Link href="/buy" className="nav-link">Pricing</Link>
-            <Link href="https://fabienlacaze.github.io/MyFabmesh" target="_blank" className="nav-link">Desktop</Link>
+            <Link href="/buy" className="nav-link">Tarifs</Link>
+            <Link href="https://fabienlacaze.github.io/MyFabmesh" target="_blank" className="nav-link">Application bureau</Link>
             <Link href="/login" className="primary-btn" style={{ height: 32, padding: '6px 16px', fontSize: 12 }}>
-              Sign in
+              Se connecter
             </Link>
           </>
         )}

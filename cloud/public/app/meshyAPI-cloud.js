@@ -269,11 +269,44 @@
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           if (job && jobs && jobs.complete) jobs.complete(job.id, false, msg);
-          _removePendingJob(entry.jobId);
+          // On ne retire l'entree que si le SERVEUR a tranche. Un sondage
+          // interrompu (reseau, onglet endormi) doit pouvoir etre repris au
+          // prochain chargement, pas effacer le travail.
+          if (_finDuServeur(e)) _removePendingJob(entry.jobId);
+          else console.warn('[reprise] sondage interrompu, entree conservee :', msg);
         }
       })();
     }
   }
+  /* Le serveur a-t-il REELLEMENT tranche, ou avons-nous seulement perdu le
+   * contact ?
+   *
+   * L'entree de reprise ne doit disparaitre que dans le premier cas. Elle
+   * etait supprimee dans TOUS les cas, y compris quand le travail continuait
+   * cote serveur : l'utilisateur perdait alors sa generation meme apres
+   * rechargement, alors qu'elle aboutissait quelques minutes plus tard.
+   *
+   * La liste est volontairement EXPLICITE — ces chaines sont celles que le
+   * worker et ce fichier produisent pour une fin reelle. Tout le reste
+   * (coupure reseau, onglet endormi, 5xx passager, abandon de sondage) est
+   * traite comme un contact perdu, donc conserve. En cas de doute on GARDE :
+   * une entree en trop se nettoie au chargement suivant, une entree perdue
+   * emporte le travail du client. */
+  const _FINS_SERVEUR = [
+    /Generation failed/i,
+    /cancelled by an administrator/i,
+    /maintenance mode/i,
+    /session expired/i,
+    /account banned/i,
+    /credits? refunded/i,
+    /blocked this description/i,       // filtre de contenu, 3 essais epuises
+    /not found/i,                      // le travail n'existe plus cote serveur
+  ];
+  function _finDuServeur(e) {
+    const m = String((e && e.message) || e || '');
+    return _FINS_SERVEUR.some((r) => r.test(m));
+  }
+
   // Expose so other modules (or the UI) can force a cleanup.
   window.__cloudResumePending = resumePendingJobs;
   window.__cloudRemovePending = _removePendingJob;
@@ -594,9 +627,7 @@
          * On ne la retire donc que sur une fin REELLE (succes, echec ou
          * annulation renvoyes par le serveur) ; un abandon de sondage la
          * laisse en place pour que resumePendingJobs() la reprenne. */
-        const finDuServeur = /Generation failed|cancelled by an administrator|maintenance mode|session expired/i
-          .test(String(e && e.message || ''));
-        if (finDuServeur) _removePendingJob(created.jobId);
+        if (_finDuServeur(e)) _removePendingJob(created.jobId);
         throw e;
       } finally {
         // Le succes retire toujours l'entree (voir le return ci-dessus,
