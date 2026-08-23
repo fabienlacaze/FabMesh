@@ -10,7 +10,7 @@ const MOCK = process.env.NEXT_PUBLIC_MOCK === '1';
  *
  * La case vivait en haut de /buy, au-dessus des cartes de prix : le
  * proprietaire lui-meme l'a ratee (« elle est pas assez visible »). Deux
- * defauts en decoulaient. D'abord les boutons « Buy » restaient desactives
+ * defauts en decoulaient. D'abord les boutons « Acheter » restaient desactives
  * sans que rien n'explique pourquoi. Ensuite, et c'est le plus grave, le
  * consentement etait donne AVANT le choix du pack et de facon globale : rien
  * ne rattachait le clic a un achat precis.
@@ -52,17 +52,17 @@ export function BuyButton({ packId, loggedIn }: { packId: string; loggedIn: bool
       const j = await res.json();
       if (j.url) { window.location.href = j.url; return; }
       setBusy(false);
-      setErreur(j.error || 'Checkout error.');
+      setErreur(j.error || 'Erreur lors du paiement.');
     } catch (e) {
       setBusy(false);
-      setErreur(e instanceof Error ? e.message : 'Network error.');
+      setErreur(e instanceof Error ? e.message : 'Erreur réseau.');
     }
   }
 
   return (
     <>
       <button onClick={demander} disabled={busy} className="primary-btn" style={{ width: '100%' }}>
-        {busy ? '…' : MOCK ? 'Add credits (DEV)' : 'Buy'}
+        {busy ? '…' : MOCK ? 'Ajouter des crédits (DEV)' : 'Acheter'}
       </button>
 
       {ouvert && (
@@ -85,7 +85,7 @@ export function BuyButton({ packId, loggedIn }: { packId: string; loggedIn: bool
             }}
           >
             <h3 id={`consent-titre-${packId}`} style={{ margin: '0 0 6px', fontSize: 19 }}>
-              Confirm your purchase
+              Confirmez votre achat
             </h3>
 
             {pack && (
@@ -97,7 +97,7 @@ export function BuyButton({ packId, loggedIn }: { packId: string; loggedIn: bool
                 }}
               >
                 <span style={{ fontWeight: 600 }}>{pack.name}</span>
-                <span style={{ color: 'var(--text-2)' }}>{pack.credits} credits</span>
+                <span style={{ color: 'var(--text-2)' }}>{pack.credits} crédits</span>
                 <span style={{ fontWeight: 700, fontSize: 18 }}>{pack.euros} € TTC</span>
               </div>
             )}
@@ -120,16 +120,17 @@ export function BuyButton({ packId, loggedIn }: { packId: string; loggedIn: bool
                 style={{ marginTop: 3, width: 17, height: 17, flexShrink: 0, cursor: 'pointer' }}
               />
               <span>
-                I expressly request that my credits be made available immediately,
-                and I acknowledge that once I start consuming a credit or generate
-                an asset I <strong>lose my 14-day right of withdrawal</strong> for
-                that digital content (Art. L221-28 13° of the French Consumer Code).
-                See the <a href="/legal/terms" target="_blank" rel="noreferrer">Terms of Service</a>.
+                Je demande expressément que mes crédits soient mis à ma disposition
+                immédiatement, et je reconnais que dès que je commence à consommer un
+                crédit ou que je génère un asset, je{' '}
+                <strong>perds mon droit de rétractation de 14 jours</strong> sur ce
+                contenu numérique (art. L. 221-28 13° du code de la consommation).
+                Voir les <a href="/legal/terms" target="_blank" rel="noreferrer">conditions générales de vente</a>.
               </span>
             </label>
 
             <p style={{ fontSize: 12, color: 'var(--text-2)', margin: '12px 0 0' }}>
-              Unspent credits stay refundable for 14 days.
+              Les crédits non consommés restent remboursables pendant 14 jours.
             </p>
 
             {erreur && (
@@ -138,15 +139,15 @@ export function BuyButton({ packId, loggedIn }: { packId: string; loggedIn: bool
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
               <button className="ghost-btn" onClick={() => setOuvert(false)} disabled={busy}>
-                Cancel
+                Annuler
               </button>
               <button
                 className="primary-btn"
                 onClick={payer}
                 disabled={!accepte || busy}
-                title={accepte ? '' : 'Tick the box above to continue'}
+                title={accepte ? '' : 'Cochez la case ci-dessus pour continuer'}
               >
-                {busy ? '…' : `Confirm and pay${pack ? ` ${pack.euros} €` : ''}`}
+                {busy ? '…' : `Confirmer et payer${pack ? ` ${pack.euros} €` : ''}`}
               </button>
             </div>
           </div>

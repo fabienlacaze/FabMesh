@@ -4,73 +4,76 @@
 import { legalIdentity as id } from '@/config/legal-identity';
 
 export const metadata = {
-  title: 'Terms of Service — MyFabmesh.AI',
-  description: 'The terms that govern your use of MyFabmesh.AI.',
+  title: 'Conditions générales de vente — MyFabmesh.AI',
+  description: 'Les conditions qui régissent votre utilisation de MyFabmesh.AI.',
 };
 
 export default function TermsPage() {
   return (
     <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px', lineHeight: 1.65 }}>
-      <h1>Terms of Service</h1>
-      <p style={{ color: 'var(--text-2)' }}>Last updated: 2026-06-20</p>
+      <h1>Conditions générales de vente</h1>
+      <p style={{ color: 'var(--text-2)' }}>Dernière mise à jour : 2026-06-20</p>
 
       <p>
-        By creating an account on {id.tradeName} (operated by{' '}
-        <strong>{id.operator}</strong>, {id.country}), you accept these terms.
-        If you don&apos;t accept them, don&apos;t create an account.
-        Contact: <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a>.
+        En créant un compte sur {id.tradeName} (exploité par{' '}
+        <strong>{id.operator}</strong>, {id.country}), vous acceptez les présentes
+        conditions. Si vous ne les acceptez pas, ne créez pas de compte.
+        Contact : <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a>.
       </p>
 
-      <h2>1. The service</h2>
+      <h2>1. Le service</h2>
       <p>
-        MyFabmesh.AI lets you generate images and 3D meshes via AI models
-        running on third-party GPU infrastructure (Modal Labs, Replicate).
-        You pay with prepaid credits or a monthly subscription, both
-        processed by Stripe.
+        MyFabmesh.AI vous permet de générer des images et des maillages 3D au
+        moyen de modèles d&rsquo;IA exécutés sur des infrastructures GPU de tiers
+        (Modal Labs, Replicate). Vous payez avec des crédits prépayés ou un
+        abonnement mensuel, tous deux traités par Stripe.
       </p>
 
-      <h2>2. Your account</h2>
+      <h2>2. Votre compte</h2>
       <ul>
-        <li>You must be at least 16 years old (or the legal age of digital consent in your country).</li>
-        <li>One account per person. No account sharing.</li>
-        <li>You are responsible for keeping your password secret. We&apos;ll never ask you for it.</li>
-        <li>Suspicious activity (brute-force, credential sharing, automated scraping) is grounds for immediate suspension.</li>
+        <li>Vous devez avoir au moins 16 ans (ou l&rsquo;âge légal du consentement numérique dans votre pays).</li>
+        <li>Un seul compte par personne. Pas de partage de compte.</li>
+        <li>Il vous appartient de garder votre mot de passe secret. Nous ne vous le demanderons jamais.</li>
+        <li>Toute activité suspecte (attaque par force brute, partage d&rsquo;identifiants, aspiration automatisée) justifie une suspension immédiate.</li>
       </ul>
 
-      <h2>3. Credits and subscriptions</h2>
+      <h2>3. Crédits et abonnements</h2>
       <ul>
-        <li>One-shot credit packs (Starter / Pro / Studio) never expire.</li>
-        <li>Monthly subscriptions auto-renew until you cancel them. To cancel, e-mail{' '}
-          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> — the renewal is
-          stopped within one business day and no further charge is made. Credits from a
-          subscription month do not roll over.</li>
-        <li>Refunds: prepaid credits are non-refundable once they have been spent. Unspent credits are refundable within 14 days of purchase for EU buyers (right of withdrawal — Code de la consommation Art. L221-18 et seq.), unless you have already started consuming them.</li>
-        <li>Pricing is shown on <a href="/buy">/buy</a> and can change with 30 days&apos; notice. Prior purchases keep their original credit values.</li>
-        <li>All consumer prices are shown <strong>inclusive of tax (TTC)</strong>. Any applicable VAT is included and computed according to your country of residence.</li>
+        <li>Les packs de crédits à l&rsquo;unité (Starter / Pro / Studio) n&rsquo;expirent jamais.</li>
+        <li>Les abonnements mensuels se renouvellent automatiquement jusqu&rsquo;à leur résiliation par vos soins. Pour résilier, écrivez à{' '}
+          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> — le renouvellement est
+          arrêté sous un jour ouvré et aucun autre prélèvement n&rsquo;est effectué. Les crédits
+          d&rsquo;un mois d&rsquo;abonnement ne sont pas reportés sur le mois suivant.</li>
+        <li>Remboursements : les crédits prépayés ne sont pas remboursables une fois qu&rsquo;ils ont été dépensés. Les crédits non dépensés sont remboursables dans les 14 jours suivant l&rsquo;achat pour les acheteurs de l&rsquo;UE (droit de rétractation — articles L221-18 et suivants du code de la consommation), sauf si vous avez déjà commencé à les consommer.</li>
+        <li>Les tarifs sont affichés sur <a href="/buy">/buy</a> et peuvent évoluer moyennant un préavis de 30 jours. Les achats antérieurs conservent leur valeur en crédits d&rsquo;origine.</li>
+        <li>Tous les prix consommateurs sont affichés <strong>toutes taxes comprises (TTC)</strong>. La TVA éventuellement applicable est incluse et calculée en fonction de votre pays de résidence.</li>
       </ul>
 
-      <h2>3a. Right of withdrawal &amp; digital content (EU consumers)</h2>
+      <h2>3a. Droit de rétractation et contenus numériques (consommateurs de l&rsquo;UE)</h2>
       <ul>
         <li>
-          <strong>Principle.</strong> As an EU consumer you normally have 14 days to
-          withdraw from a distance purchase without giving a reason (Code de la
-          consommation Art. L221-18 et seq.). Unspent, unused credits are refundable
-          within that period.
+          <strong>Principe.</strong> En tant que consommateur de l&rsquo;UE, vous disposez
+          normalement de 14 jours pour vous rétracter d&rsquo;un achat à distance sans avoir
+          à motiver votre décision (articles L221-18 et suivants du code de la
+          consommation). Les crédits non dépensés et non utilisés sont remboursables
+          pendant ce délai.
         </li>
         <li>
-          <strong>Waiver for immediately-supplied digital content
-          (Art. L221-28 13°).</strong> Credits are digital content usable
-          immediately, and generated assets are digital content supplied on a
-          non-tangible medium as soon as you launch a generation. By purchasing and
-          by ticking the consent box at checkout, you{' '}
-          <strong>expressly request that performance begin immediately</strong> and
-          you <strong>acknowledge that you thereby lose your right of withdrawal</strong>{' '}
-          in respect of any credit you have started to consume and of any asset
-          already generated (Art. L221-28 13° of the Code de la consommation).
+          <strong>Renonciation pour les contenus numériques fournis immédiatement
+          (art. L221-28, 13°).</strong> Les crédits sont un contenu numérique
+          utilisable immédiatement, et les créations générées sont un contenu
+          numérique non fourni sur un support matériel dès que vous lancez une
+          génération. En achetant et en cochant la case de consentement au moment
+          du paiement, vous{' '}
+          <strong>demandez expressément que l&rsquo;exécution commence immédiatement</strong> et
+          vous <strong>reconnaissez perdre de ce fait votre droit de rétractation</strong>{' '}
+          pour tout crédit dont vous avez commencé la consommation et pour toute
+          création déjà générée (art. L221-28, 13°, du code de la consommation).
         </li>
         <li>
-          <strong>What remains refundable.</strong> Credits that you have neither
-          spent nor started to consume remain refundable within the 14-day period.
+          <strong>Ce qui reste remboursable.</strong> Les crédits que vous n&rsquo;avez ni
+          dépensés ni commencé à consommer restent remboursables pendant le délai de
+          14 jours.
         </li>
         {/* COMMENT EXERCER LE DROIT — l'article L221-18 et suivants impose de
             donner les modalites, pas seulement le principe. La section
@@ -78,242 +81,259 @@ export default function TermsPage() {
             canal l'exercer, a partir de quand courent les 14 jours, ni sous
             quel delai le remboursement intervient. */}
         <li>
-          <strong>How to withdraw.</strong> Send us any unambiguous statement of
-          your decision — an e-mail to{' '}
-          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> is enough,
-          and you may also write to {id.registeredOffice}. You can use the model
-          withdrawal form below, but you are not required to.
+          <strong>Comment vous rétracter.</strong> Adressez-nous une déclaration
+          dénuée d&rsquo;ambiguïté exprimant votre décision — un courriel à{' '}
+          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> suffit,
+          et vous pouvez également écrire à {id.registeredOffice}. Vous pouvez
+          utiliser le formulaire type de rétractation ci-dessous, sans y être tenu.
         </li>
         <li>
-          <strong>When the 14 days start.</strong> For a supply of digital
-          content, the period runs from the <strong>day the contract is
-          concluded</strong> — that is, the day of your purchase — not from a
-          delivery date (Art. L221-18, 1°).
+          <strong>Point de départ des 14 jours.</strong> Pour une fourniture de
+          contenu numérique, le délai court à compter du <strong>jour de la
+          conclusion du contrat</strong> — c&rsquo;est-à-dire le jour de votre achat — et
+          non d&rsquo;une date de livraison (art. L221-18, 1°).
         </li>
         <li>
-          <strong>When you are refunded.</strong> At the latest{' '}
-          <strong>14 days after we receive your decision</strong>, using the same
-          payment method you used, at no cost to you (Art. L221-24).
+          <strong>Délai de remboursement.</strong> Au plus tard{' '}
+          <strong>14 jours après la réception de votre décision</strong>, en
+          utilisant le même moyen de paiement que celui que vous avez employé, sans
+          frais pour vous (art. L221-24).
         </li>
       </ul>
 
-      <h3>Model withdrawal form</h3>
+      <h3>Formulaire type de rétractation</h3>
       <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
-        Complete and return this form only if you wish to withdraw from the
-        contract. Copying the text into an e-mail is sufficient.
+        Ne complétez et ne renvoyez ce formulaire que si vous souhaitez vous
+        rétracter du contrat. Recopier ce texte dans un courriel suffit.
       </p>
       <pre style={{
         whiteSpace: 'pre-wrap', padding: '14px 16px', borderRadius: 8,
         border: '1px solid var(--border, #333)', fontSize: 13, lineHeight: 1.6,
-      }}>{`To ${id.operator} — ${id.registeredOffice} — ${id.supportEmail}
+      }}>{`À l'attention de ${id.operator} — ${id.registeredOffice} — ${id.supportEmail}
 
-I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract of
-sale for the supply of the following digital content:
+Je/Nous (*) vous notifie/notifions (*) par la présente ma/notre (*) rétractation
+du contrat de vente portant sur la fourniture du contenu numérique suivant :
 
-  Order reference / date of order: ......................................
-  Name of consumer(s): ..................................................
-  Address of consumer(s): ...............................................
-  Signature of consumer(s) (only if this form is notified on paper): .....
-  Date: .................................................................
+  Référence / date de la commande : ......................................
+  Nom du (des) consommateur(s) : .........................................
+  Adresse du (des) consommateur(s) : .....................................
+  Signature du (des) consommateur(s) (uniquement en cas de notification
+  du présent formulaire sur papier) : ....................................
+  Date : .................................................................
 
-(*) Delete as appropriate.`}</pre>
+(*) Rayez la mention inutile.`}</pre>
 
-      <h2>4. Acceptable use</h2>
-      <p>You agree NOT to:</p>
+      <h2>4. Usage acceptable</h2>
+      <p>Vous vous engagez à NE PAS :</p>
       <ul>
-        <li>Generate, upload or share illegal content — notably CSAM, content that infringes other people&apos;s rights, or anything else prohibited by French law.</li>
-        <li>Attempt to bypass quotas, rate-limits, NSFW filters or any other safety mechanism.</li>
-        <li>Probe the infrastructure for vulnerabilities without our written authorization (see <em>Responsible disclosure</em> below).</li>
-        <li>Resell access to your account.</li>
+        <li>Générer, téléverser ou partager de contenu illicite — notamment des contenus pédocriminels (CSAM), des contenus portant atteinte aux droits d&rsquo;autrui, ou tout autre contenu interdit par la loi française.</li>
+        <li>Tenter de contourner les quotas, les limitations de débit, les filtres NSFW ou tout autre mécanisme de sécurité.</li>
+        <li>Sonder l&rsquo;infrastructure à la recherche de vulnérabilités sans notre autorisation écrite (voir <em>Divulgation responsable</em> ci-dessous).</li>
+        <li>Revendre l&rsquo;accès à votre compte.</li>
       </ul>
 
-      <h2>5. Intellectual property</h2>
+      <h2>5. Propriété intellectuelle</h2>
       <ul>
-        <li><strong>What you upload</strong> belongs to you. You grant us a non-exclusive, royalty-free licence to store it, route it to GPU providers, and process it on your behalf — strictly to provide the service. We don&apos;t train models on your inputs.</li>
-        <li><strong>What you generate</strong> is yours under the licence the underlying models allow. The AI models we use all currently permit commercial use of their outputs. You can use the outputs commercially. We claim no rights on them.</li>
-        <li><strong>AI-generated content &amp; transparency.</strong> All images and 3D assets produced by the service are generated by artificial intelligence. In line with the EU AI Act (Art. 50), generated images are marked with machine-readable provenance metadata (IPTC <code>DigitalSourceType=trainedAlgorithmicMedia</code>). If you generate the likeness of a real, identifiable person, you are solely responsible for holding the necessary rights and for any disclosure obligations applicable to such content.</li>
-        <li><strong>Our brand, code and UI</strong> are ours. You can&apos;t copy them.</li>
+        <li><strong>Ce que vous téléversez</strong> vous appartient. Vous nous concédez une licence non exclusive et gratuite pour le stocker, l&rsquo;acheminer vers les fournisseurs GPU et le traiter pour votre compte — strictement afin de fournir le service. Nous n&rsquo;entraînons pas de modèles sur vos données d&rsquo;entrée.</li>
+        <li><strong>Ce que vous générez</strong> vous appartient, dans les limites de la licence permise par les modèles sous-jacents. Les modèles d&rsquo;IA que nous utilisons autorisent tous, à ce jour, l&rsquo;usage commercial de leurs productions. Vous pouvez exploiter ces productions commercialement. Nous ne revendiquons aucun droit sur elles.</li>
+        <li><strong>Contenus générés par IA et transparence.</strong> Toutes les images et créations 3D produites par le service sont générées par une intelligence artificielle. Conformément au règlement européen sur l&rsquo;intelligence artificielle (art. 50), les images générées portent des métadonnées de provenance lisibles par machine (IPTC <code>DigitalSourceType=trainedAlgorithmicMedia</code>). Si vous générez l&rsquo;image d&rsquo;une personne réelle et identifiable, vous êtes seul responsable de la détention des droits nécessaires et des obligations d&rsquo;information applicables à ce type de contenu.</li>
+        <li><strong>Notre marque, notre code et notre interface</strong> nous appartiennent. Vous ne pouvez pas les copier.</li>
       </ul>
 
-      <h2>6. Service availability</h2>
+      <h2>6. Disponibilité du service</h2>
       <p>
-        We aim for high availability but don&apos;t promise 24/7 uptime.
-        Generations can fail; when that happens we refund the credits
-        automatically. We may suspend the service at any time for
-        maintenance, security incidents, or to enforce these terms — see
-        the admin kill switches in our privacy / security model.
+        Nous visons une haute disponibilité mais ne promettons pas un
+        fonctionnement 24 h/24 et 7 j/7. Des générations peuvent échouer ; dans ce
+        cas, nous remboursons automatiquement les crédits. Nous pouvons suspendre
+        le service à tout moment pour maintenance, en cas d&rsquo;incident de sécurité,
+        ou pour faire appliquer les présentes conditions — voir les coupe-circuits
+        d&rsquo;administration décrits dans notre modèle de confidentialité et de
+        sécurité.
       </p>
 
-      <h2>7. Termination</h2>
+      <h2>7. Résiliation</h2>
       <ul>
-        <li>You can delete your account at any time from <a href="/account">/account</a>. All your data is wiped within seconds.</li>
-        <li>We can suspend or terminate accounts that violate these terms or pose a security/legal risk. Unused credits on a terminated account are refunded except when the termination is for fraud or abuse.</li>
+        <li>Vous pouvez supprimer votre compte à tout moment depuis <a href="/account">/account</a>. Toutes vos données sont effacées en quelques secondes.</li>
+        <li>Nous pouvons suspendre ou résilier les comptes qui enfreignent les présentes conditions ou présentent un risque de sécurité ou juridique. Les crédits inutilisés d&rsquo;un compte résilié sont remboursés, sauf lorsque la résiliation est motivée par une fraude ou un abus.</li>
       </ul>
 
-      <h2>8. Liability</h2>
+      <h2>8. Responsabilité</h2>
       <p>
-        To the maximum extent allowed by French law: the service is
-        provided &ldquo;as is&rdquo;. We&apos;re not liable for indirect
-        damages (lost profits, lost data, missed opportunities). Our total
-        liability over a 12-month period is capped at the total amount
-        you paid us during that period.
+        Dans toute la mesure permise par le droit français : le service est fourni
+        &laquo;&nbsp;en l&rsquo;état&nbsp;&raquo;. Nous ne sommes pas responsables des
+        dommages indirects (perte de bénéfices, perte de données, pertes
+        d&rsquo;opportunités). Notre responsabilité totale sur une période de 12 mois est
+        plafonnée au montant total que vous nous avez versé au cours de cette
+        période.
       </p>
 
-      <h2>9. Responsible disclosure</h2>
+      <h2>9. Divulgation responsable</h2>
       <p>
-        If you find a security vulnerability, please email{' '}
+        Si vous découvrez une faille de sécurité, merci d&rsquo;écrire à{' '}
         <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a>{' '}
-        with the details. We&apos;ll acknowledge within 48 hours, work with
-        you on a fix, and credit you on a public thank-you page if you
-        want. Don&apos;t exploit, don&apos;t exfiltrate other users&apos; data,
-        don&apos;t publish before the fix is live.
+        en détaillant le problème. Nous accusons réception sous 48 heures, nous
+        travaillons avec vous à un correctif et nous vous créditons sur une page de
+        remerciements publique si vous le souhaitez. N&rsquo;exploitez pas la faille,
+        n&rsquo;exfiltrez pas les données d&rsquo;autres utilisateurs, ne publiez rien avant la
+        mise en ligne du correctif.
       </p>
 
-      <h2>10. Governing law</h2>
+      <h2>10. Droit applicable</h2>
       <p>
-        These terms are governed by French law. Any dispute that
-        can&apos;t be resolved amicably falls under the jurisdiction of
-        the French courts.
+        Les présentes conditions sont régies par le droit français. Tout litige
+        qui ne pourrait être résolu à l&rsquo;amiable relève de la compétence des
+        juridictions françaises.
       </p>
 
-      <h2>10a. Consumer mediation (Médiateur de la consommation)</h2>
+      <h2>10a. Médiation de la consommation (Médiateur de la consommation)</h2>
       <p>
-        In accordance with Article L612-1 of the French Consumer Code, after
-        first sending us a written complaint, any consumer may refer the dispute
-        free of charge to the designated consumer mediator:
+        Conformément à l&rsquo;article L612-1 du code de la consommation, après nous
+        avoir adressé une réclamation écrite préalable, tout consommateur peut
+        saisir gratuitement le médiateur de la consommation désigné :
       </p>
       <ul>
-        <li><strong>Designated consumer mediator:</strong> {id.mediator.name} — {id.mediator.postalAddress} — <a href={id.mediator.url} target="_blank" rel="noopener">{id.mediator.url}</a></li>
+        <li><strong>Médiateur de la consommation désigné :</strong> {id.mediator.name} — {id.mediator.postalAddress} — <a href={id.mediator.url} target="_blank" rel="noopener">{id.mediator.url}</a></li>
       </ul>
       <p>
-        EU consumers may also use the European Commission&apos;s Online Dispute
-        Resolution platform at{' '}
+        Les consommateurs de l&rsquo;UE peuvent également recourir à la plateforme de
+        règlement en ligne des litiges de la Commission européenne, à l&rsquo;adresse{' '}
         <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener">ec.europa.eu/consumers/odr</a>.
-        The full mediator coordinates are also listed in the{' '}
-        <a href="/legal/mentions">Legal Notice (Mentions légales)</a>.
+        Les coordonnées complètes du médiateur figurent également dans les{' '}
+        <a href="/legal/mentions">mentions légales</a>.
       </p>
 
-      <h2>11. Marketplace</h2>
+      <h2>11. Place de marché</h2>
 
-      <h3>11.1 Publishing assets</h3>
+      <h3>11.1 Publier des créations</h3>
       <ul>
-        <li>Users may publish meshes and images they generated on the platform to the Marketplace.</li>
-        <li>Each listing is reviewed by an administrator before becoming visible to buyers.</li>
-        <li>The author retains ownership of their creation; publishing grants the platform a non-exclusive right to display the asset and process sales.</li>
-        <li>Authors guarantee that their submission does not infringe any third-party rights.</li>
-        <li>Authors can choose between five licences (Personal use, CC0, CC-BY 4.0, CC-BY-NC 4.0, Royalty-free commercial). The licence is attached to the asset on download.</li>
-        <li>An administrator may at any time reject or remove a listing that breaches these terms.</li>
+        <li>Les utilisateurs peuvent publier sur la place de marché les maillages et les images qu&rsquo;ils ont générés sur la plateforme.</li>
+        <li>Chaque annonce est examinée par un administrateur avant d&rsquo;être visible par les acheteurs.</li>
+        <li>L&rsquo;auteur conserve la propriété de sa création ; la publication confère à la plateforme un droit non exclusif d&rsquo;afficher la création et de traiter les ventes.</li>
+        <li>Les auteurs garantissent que leur dépôt ne porte atteinte à aucun droit de tiers.</li>
+        <li>Les auteurs peuvent choisir entre cinq licences (usage personnel, CC0, CC-BY 4.0, CC-BY-NC 4.0, libre de droits à usage commercial). La licence est jointe à la création lors du téléchargement.</li>
+        <li>Un administrateur peut à tout moment refuser ou retirer une annonce qui enfreint les présentes conditions.</li>
       </ul>
 
-      <h3>11.2 Buying assets</h3>
+      <h3>11.2 Acheter des créations</h3>
       <ul>
-        <li>Free listings are downloadable immediately by any signed-in user after approval.</li>
-        <li>Paid listings are bought via Stripe Checkout. Buyers receive a non-exclusive licence under the terms attached to the asset.</li>
-        <li>Buyers may NOT redistribute, resell, or sublicense purchased assets unless the chosen licence (CC0, CC-BY, commercial) explicitly allows it.</li>
-        <li>Refunds are handled case-by-case via support; contact us within 14 days of purchase with a clear reason.</li>
+        <li>Les annonces gratuites sont téléchargeables immédiatement par tout utilisateur connecté, une fois validées.</li>
+        <li>Les annonces payantes s&rsquo;achètent via Stripe Checkout. Les acheteurs reçoivent une licence non exclusive selon les conditions attachées à la création.</li>
+        <li>Les acheteurs ne peuvent PAS redistribuer, revendre ni sous-licencier les créations achetées, sauf si la licence choisie (CC0, CC-BY, commerciale) l&rsquo;autorise expressément.</li>
+        <li>Les remboursements sont traités au cas par cas par le support ; contactez-nous dans les 14 jours suivant l&rsquo;achat en indiquant un motif clair.</li>
       </ul>
 
-      <h3>11.3 Commission and payouts</h3>
+      <h3>11.3 Commission et reversements</h3>
       <ul>
-        <li>The platform takes a 30% commission on every paid sale. The seller receives 70% net.</li>
-        <li>Sellers can opt to receive their share either as platform credits (instant, +20% bonus over cash equivalent) or as cash via Stripe Connect (after KYC onboarding handled by Stripe).</li>
-        <li>Cash payouts are settled by Stripe directly to the seller&apos;s linked bank account on the Stripe payout schedule.</li>
-        <li>Sellers using Stripe Connect agree to Stripe&apos;s <a href="https://stripe.com/connect-account/legal">Connected Account Agreement</a>.</li>
-        <li>The platform is not responsible for delays caused by Stripe verification, banking holidays, or KYC issues.</li>
+        <li>La plateforme prélève une commission de 30 % sur chaque vente payante. Le vendeur perçoit 70 % net.</li>
+        <li>Les vendeurs peuvent choisir de percevoir leur part soit en crédits de la plateforme (immédiat, avec un bonus de +20 % par rapport à l&rsquo;équivalent en numéraire), soit en numéraire via Stripe Connect (après la vérification d&rsquo;identité KYC prise en charge par Stripe).</li>
+        <li>Les versements en numéraire sont effectués par Stripe directement sur le compte bancaire lié du vendeur, selon le calendrier de reversement de Stripe.</li>
+        <li>Les vendeurs qui utilisent Stripe Connect acceptent le <a href="https://stripe.com/connect-account/legal">contrat de compte connecté (Connected Account Agreement)</a> de Stripe.</li>
+        <li>La plateforme n&rsquo;est pas responsable des retards causés par les vérifications de Stripe, les jours fériés bancaires ou des problèmes de KYC.</li>
       </ul>
 
-      <h3>11.4 Taxes</h3>
+      <h3>11.4 Fiscalité</h3>
       <ul>
-        <li>Sellers are responsible for declaring and paying any taxes (VAT, income tax) due in their jurisdiction on their marketplace earnings.</li>
-        <li>The platform may report seller activity to tax authorities where required (US 1099-K reporting via Stripe above the IRS threshold; EU DAC7 above the EUR 2000 / 30-sales annual threshold).</li>
+        <li>Il appartient aux vendeurs de déclarer et d&rsquo;acquitter les impôts et taxes (TVA, impôt sur le revenu) dus dans leur juridiction au titre de leurs revenus tirés de la place de marché.</li>
+        <li>La plateforme peut déclarer l&rsquo;activité des vendeurs aux administrations fiscales lorsque la loi l&rsquo;exige (déclaration 1099-K aux États-Unis via Stripe au-delà du seuil de l&rsquo;IRS ; DAC7 dans l&rsquo;UE au-delà du seuil annuel de 2 000 EUR / 30 ventes).</li>
       </ul>
 
-      <h3>11.5 Disputes</h3>
+      <h3>11.5 Litiges</h3>
       <ul>
-        <li>Disputes between buyer and seller (asset quality, licence interpretation) should first be brought to platform support.</li>
-        <li>The platform may mediate and, if appropriate, refund the buyer or sanction the seller.</li>
-        <li>Chargebacks initiated by buyers via their bank are handled by Stripe; the platform may withhold the disputed amount from the seller&apos;s pending balance until resolution.</li>
+        <li>Les litiges entre acheteur et vendeur (qualité de la création, interprétation de la licence) doivent d&rsquo;abord être portés devant le support de la plateforme.</li>
+        <li>La plateforme peut intervenir en médiation et, le cas échéant, rembourser l&rsquo;acheteur ou sanctionner le vendeur.</li>
+        <li>Les rétrofacturations (chargebacks) engagées par les acheteurs auprès de leur banque sont traitées par Stripe ; la plateforme peut retenir le montant contesté sur le solde en attente du vendeur jusqu&rsquo;à résolution.</li>
       </ul>
 
-      <h2>12. Copyright &amp; takedown (DMCA / EU)</h2>
+      <h2>12. Droit d&rsquo;auteur et retrait de contenu (DMCA / UE)</h2>
       <p>
-        We respect intellectual property and respond to valid notices of claimed
-        infringement under the U.S. DMCA (17 U.S.C. §512) and the EU Copyright
-        Directive / French LCEN.
+        Nous respectons la propriété intellectuelle et donnons suite aux
+        notifications valables d&rsquo;atteinte alléguée au titre du DMCA américain
+        (17 U.S.C. §512) et de la directive européenne sur le droit d&rsquo;auteur / de
+        la LCEN française.
       </p>
-      <h3>12.1 Filing a notice</h3>
+      <h3>12.1 Déposer une notification</h3>
       <p>
-        If you believe content on MyFabmesh.AI (a generated asset, a marketplace
-        listing, or an uploaded image) infringes your copyright, email{' '}
-        <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> with the
-        subject &ldquo;Copyright notice&rdquo; and include: identification of the
-        copyrighted work and of the infringing material (with a URL or listing
-        ID); your contact details; a statement that you have a good-faith belief
-        the use is not authorised; a statement, under penalty of perjury, that the
-        information is accurate and that you are the rights holder or authorised to
-        act for them; and your physical or electronic signature. We will remove or
-        disable access to the reported material expeditiously and notify the
-        uploader.
+        Si vous estimez qu&rsquo;un contenu présent sur MyFabmesh.AI (une création
+        générée, une annonce de la place de marché ou une image téléversée) porte
+        atteinte à votre droit d&rsquo;auteur, écrivez à{' '}
+        <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> avec pour
+        objet &laquo;&nbsp;Notification de droit d&rsquo;auteur&nbsp;&raquo; en indiquant :
+        l&rsquo;identification de l&rsquo;œuvre protégée et du contenu litigieux (avec une URL
+        ou un identifiant d&rsquo;annonce) ; vos coordonnées ; une déclaration selon
+        laquelle vous avez la conviction de bonne foi que cet usage n&rsquo;est pas
+        autorisé ; une déclaration, sous peine de sanctions pour parjure, selon
+        laquelle les informations sont exactes et que vous êtes le titulaire des
+        droits ou habilité à agir pour son compte ; ainsi que votre signature
+        manuscrite ou électronique. Nous retirerons ou rendrons inaccessible le
+        contenu signalé dans les meilleurs délais et en informerons l&rsquo;utilisateur
+        qui l&rsquo;a mis en ligne.
       </p>
-      <h3>12.2 Counter-notice</h3>
+      <h3>12.2 Contre-notification</h3>
       <p>
-        If your content was removed and you believe this was a mistake or
-        misidentification, send a counter-notice to the same address with the
-        identification of the removed material, your contact details, a statement
-        under penalty of perjury that the removal was a mistake, and your
-        signature. We may restore the material unless the original claimant
-        initiates legal action.
+        Si votre contenu a été retiré et que vous estimez qu&rsquo;il s&rsquo;agit d&rsquo;une erreur
+        ou d&rsquo;une identification erronée, adressez une contre-notification à la même
+        adresse, comportant l&rsquo;identification du contenu retiré, vos coordonnées,
+        une déclaration sous peine de sanctions pour parjure selon laquelle le
+        retrait résulte d&rsquo;une erreur, et votre signature. Nous pourrons rétablir le
+        contenu, sauf si l&rsquo;auteur de la notification initiale engage une action en
+        justice.
       </p>
-      <h3>12.3 Repeat infringers</h3>
+      <h3>12.3 Atteintes répétées</h3>
       <p>
-        Accounts that repeatedly infringe third-party rights are suspended or
-        terminated.
+        Les comptes qui portent atteinte de manière répétée aux droits de tiers
+        sont suspendus ou résiliés.
       </p>
 
-      <h2>13. Reporting illegal content (EU Digital Services Act)</h2>
+      <h2>13. Signaler un contenu illicite (règlement européen sur les services numériques, DSA)</h2>
       <p>
-        Under the EU Digital Services Act (Regulation 2022/2065), anyone can
-        notify us of content they consider illegal.
+        En vertu du règlement européen sur les services numériques
+        (règlement 2022/2065), toute personne peut nous signaler un contenu
+        qu&rsquo;elle considère comme illicite.
       </p>
       <ul>
         <li>
-          <strong>How to report:</strong> use the &ldquo;Report&rdquo; control on a
-          marketplace listing, or email{' '}
-          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> with
-          the subject &ldquo;Illegal content&rdquo;, an explanation of why the
-          content is illegal, and its location (URL or listing ID).
+          <strong>Comment signaler :</strong> utilisez la commande
+          &laquo;&nbsp;Signaler&nbsp;&raquo; sur une annonce de la place de marché,
+          ou écrivez à{' '}
+          <a href={`mailto:${id.supportEmail}`}>{id.supportEmail}</a> avec pour
+          objet &laquo;&nbsp;Contenu illicite&nbsp;&raquo;, une explication des
+          raisons pour lesquelles le contenu est illicite, et sa localisation (URL
+          ou identifiant d&rsquo;annonce).
         </li>
         <li>
-          <strong>Point of contact:</strong> the address above is our single point
-          of contact for users and authorities (DSA Art. 11–12).
+          <strong>Point de contact :</strong> l&rsquo;adresse ci-dessus est notre point
+          de contact unique pour les utilisateurs et les autorités (art. 11 et 12
+          du DSA).
         </li>
         <li>
-          <strong>Our action:</strong> we review every notice, remove or disable
-          content that is illegal or breaches these terms, and inform the affected
-          user with a <em>statement of reasons</em> (DSA Art. 17).
+          <strong>Notre action :</strong> nous examinons chaque signalement, nous
+          retirons ou rendons inaccessible le contenu illicite ou contraire aux
+          présentes conditions, et nous informons l&rsquo;utilisateur concerné par un{' '}
+          <em>exposé des motifs</em> (art. 17 du DSA).
         </li>
         <li>
-          <strong>Appeal:</strong> if your content or account is restricted, you
-          may contest the decision by replying to the statement of reasons; a
-          human re-examines the case.
+          <strong>Recours :</strong> si votre contenu ou votre compte fait l&rsquo;objet
+          d&rsquo;une restriction, vous pouvez contester la décision en répondant à
+          l&rsquo;exposé des motifs ; un humain réexamine le dossier.
         </li>
         <li>
-          <strong>Illegal content is never allowed</strong> — in particular CSAM,
-          terrorist content, and content infringing others&apos; rights. We
-          cooperate with the competent authorities and report offences where the
-          law requires it.
+          <strong>Les contenus illicites ne sont jamais autorisés</strong> — en
+          particulier les contenus pédocriminels (CSAM), les contenus terroristes
+          et les contenus portant atteinte aux droits d&rsquo;autrui. Nous coopérons avec
+          les autorités compétentes et signalons les infractions lorsque la loi
+          l&rsquo;exige.
         </li>
       </ul>
-      <h3>13.1 Designated agents</h3>
+      <h3>13.1 Agents désignés</h3>
       <ul style={{ fontSize: 14 }}>
-        <li><strong>DSA single point of contact &amp; copyright / DMCA agent:</strong> {id.designatedAgent}, reachable at <a href={`mailto:${id.contactEmail}`}>{id.contactEmail}</a>. Before distributing to U.S. users, this agent must also be registered with the U.S. Copyright Office DMCA Designated Agent Directory.</li>
-        <li><strong>Registered business identity</strong> (operator, SIRET, registered office, host): see the <a href="/legal/mentions">Legal Notice (Mentions légales)</a>.</li>
+        <li><strong>Point de contact unique DSA et agent désigné droit d&rsquo;auteur / DMCA :</strong> {id.designatedAgent}, joignable à <a href={`mailto:${id.contactEmail}`}>{id.contactEmail}</a>. Avant toute distribution auprès d&rsquo;utilisateurs américains, cet agent doit également être enregistré auprès du DMCA Designated Agent Directory du U.S. Copyright Office.</li>
+        <li><strong>Identité de l&rsquo;entreprise immatriculée</strong> (exploitant, SIRET, siège social, hébergeur) : voir les <a href="/legal/mentions">mentions légales</a>.</li>
       </ul>
 
       <p style={{ marginTop: 32, fontSize: 13 }}>
-        <a href="/legal/privacy">Privacy Policy</a> &middot;{' '}
-        <a href="/legal/licenses">Third-Party Licenses</a> &middot;{' '}
-        <a href="/">Home</a>
+        <a href="/legal/privacy">Politique de confidentialité</a> &middot;{' '}
+        <a href="/legal/licenses">Licences tierces</a> &middot;{' '}
+        <a href="/">Accueil</a>
       </p>
     </main>
   );

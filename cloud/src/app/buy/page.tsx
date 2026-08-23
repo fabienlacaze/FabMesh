@@ -43,7 +43,7 @@ export default function BuyPage() {
   // vaut un tiret qu'un prix errone.
   const cr = (cle: string) => {
     const v = prix?.[cle];
-    return typeof v === 'number' ? `${v} credit${v > 1 ? 's' : ''}` : '—';
+    return typeof v === 'number' ? `${v} crédit${v > 1 ? 's' : ''}` : '—';
   };
 
   useEffect(() => {
@@ -71,15 +71,15 @@ export default function BuyPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2>Buy credits</h2>
-        {user && <span className="credits-pill">{user.credits} credits</span>}
+        <h2>Acheter des crédits</h2>
+        {user && <span className="credits-pill">{user.credits} crédits</span>}
       </div>
       <p style={{ color: 'var(--text-2)', marginBottom: 8 }}>
-        No subscription. Credits never expire.
+        Sans abonnement. Les crédits n&apos;expirent jamais.
       </p>
       <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 24 }}>
-        All prices shown are <strong>TTC (VAT included)</strong> — VAT is calculated
-        according to your country at checkout.
+        Tous les prix affichés sont <strong>TTC (TVA incluse)</strong> — la TVA est
+        calculée selon votre pays au moment du paiement.
       </p>
 
       {/* La case de renonciation vivait ICI, au-dessus des cartes. Le
@@ -97,26 +97,27 @@ export default function BuyPage() {
       >
         <span aria-hidden="true">&#9432;</span>
         <span>
-          Credits are digital content delivered immediately. Before paying you
-          will be asked to confirm that you{' '}
-          <strong>waive your 14-day right of withdrawal</strong> for the credits
-          you consume (Art. L221-28 13&deg; of the French Consumer Code). Unspent
-          credits stay refundable for 14 days. See the{' '}
-          <a href="/legal/terms">Terms of Service</a>.
+          Les crédits sont un contenu numérique fourni immédiatement. Avant de
+          payer, il vous sera demandé de confirmer que vous{' '}
+          <strong>renoncez à votre droit de rétractation de 14 jours</strong> pour
+          les crédits que vous consommez (art. L. 221-28 13&deg; du code de la
+          consommation). Les crédits non consommés restent remboursables pendant
+          14 jours. Voir les{' '}
+          <a href="/legal/terms">conditions générales de vente</a>.
         </span>
       </p>
 
-      <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>One-shot top-ups</h3>
+      <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>Recharges ponctuelles</h3>
       <div className="pricing-grid" style={{ padding: 0 }}>
         {Object.values(PACKS).filter(p => p.mode === 'payment' && (availability?.[p.id] ?? true)).map((p) => (
           <div key={p.id} className={`price-card ${p.id === 'pro' ? 'featured' : ''}`}>
             <div className="name">
               {p.name}
-              {p.id === 'pro' && <span className="feat-tag">popular</span>}
+              {p.id === 'pro' && <span className="feat-tag">populaire</span>}
             </div>
             <div className="amount">{p.euros} € <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-2)' }}>TTC</span></div>
-            <div className="unit">{p.credits} credits</div>
-            <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
+            <div className="unit">{p.credits} crédits</div>
+            <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / crédit</div>
             <BuyButton packId={p.id} loggedIn={!!user} />
           </div>
         ))}
@@ -132,22 +133,23 @@ export default function BuyPage() {
           fausse. */}
       {visibleSubs.length > 0 && (
         <>
-        <h3 style={{ marginTop: 36, marginBottom: 4, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>Monthly subscriptions</h3>
+        <h3 style={{ marginTop: 36, marginBottom: 4, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>Abonnements mensuels</h3>
         <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 16 }}>
-          Credits drop in automatically every month. To cancel, e-mail us at{' '}
+          Les crédits sont versés automatiquement chaque mois. Pour résilier,
+          écrivez-nous à{' '}
           <a href="mailto:myfabmesh.contact@gmail.com">myfabmesh.contact@gmail.com</a>{' '}
-          — we stop the renewal within one business day, and you keep the credits already delivered.
+          — nous arrêtons la reconduction sous un jour ouvré, et vous conservez les crédits déjà livrés.
         </p>
         <div className="pricing-grid" style={{ padding: 0 }}>
           {visibleSubs.map((p) => (
             <div key={p.id} className={`price-card ${p.id === 'sub_pro' ? 'featured' : ''}`}>
               <div className="name">
                 {p.name}
-                {p.id === 'sub_pro' && <span className="feat-tag">best value</span>}
+                {p.id === 'sub_pro' && <span className="feat-tag">le plus avantageux</span>}
               </div>
-              <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>TTC / month</span></div>
-              <div className="unit">{p.credits} credits / month</div>
-              <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
+              <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>TTC / mois</span></div>
+              <div className="unit">{p.credits} crédits / mois</div>
+              <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / crédit</div>
               <BuyButton packId={p.id} loggedIn={!!user} />
             </div>
           ))}
@@ -156,22 +158,22 @@ export default function BuyPage() {
       )}
 
       <div className="card" style={{ marginTop: 32 }}>
-        <h3 style={{ marginBottom: 12 }}>How credits convert to meshes</h3>
+        <h3 style={{ marginBottom: 12 }}>Comment les crédits se convertissent en meshes</h3>
         <table className="history">
           <thead>
-            <tr><th>Mesh option</th><th>Cost</th><th>Details</th></tr>
+            <tr><th>Option de mesh</th><th>Coût</th><th>Détails</th></tr>
           </thead>
           <tbody>
-            <tr><td><strong>Fast</strong> mesh</td><td>{cr('mesh_fast')}</td><td>~50 s · quick draft</td></tr>
-            <tr><td><strong>Balanced</strong> mesh</td><td>{cr('mesh_balanced')}</td><td>~90 s · recommended</td></tr>
-            <tr><td><strong>Quality</strong> mesh</td><td>{cr('mesh_quality')}</td><td>~180 s · high detail</td></tr>
-            <tr><td><strong>Ultra 8K</strong> mesh</td><td>{cr('mesh_ultra_8k')}</td><td>maximum detail + texture</td></tr>
-            <tr><td>Text → image (before the mesh)</td><td>{cr('text2image')}</td><td>only if you start from a text prompt, not an image</td></tr>
-            <tr><td>8K texture · Face fix · Refine</td><td>+{prix?.mesh_ultra_hd ?? '—'} / +{prix?.mesh_face_fix ?? '—'} / +{prix?.mesh_refine ?? '—'} credits</td><td>optional add-ons</td></tr>
+            <tr><td>Mesh <strong>Fast</strong></td><td>{cr('mesh_fast')}</td><td>~50 s · brouillon rapide</td></tr>
+            <tr><td>Mesh <strong>Balanced</strong></td><td>{cr('mesh_balanced')}</td><td>~90 s · recommandé</td></tr>
+            <tr><td>Mesh <strong>Quality</strong></td><td>{cr('mesh_quality')}</td><td>~180 s · haut niveau de détail</td></tr>
+            <tr><td>Mesh <strong>Ultra 8K</strong></td><td>{cr('mesh_ultra_8k')}</td><td>détail + texture maximum</td></tr>
+            <tr><td>Texte → image (avant le mesh)</td><td>{cr('text2image')}</td><td>uniquement si vous partez d&apos;une description textuelle, pas d&apos;une image</td></tr>
+            <tr><td>Texture 8K · Correction du visage · Affiner</td><td>+{prix?.mesh_ultra_hd ?? '—'} / +{prix?.mesh_face_fix ?? '—'} / +{prix?.mesh_refine ?? '—'} crédits</td><td>options facultatives</td></tr>
           </tbody>
         </table>
         <p style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 8 }}>
-          Standard rates. Your remaining balance is always shown before you generate.
+          Tarifs standard. Votre solde restant est toujours affiché avant chaque génération.
         </p>
       </div>
     </div>

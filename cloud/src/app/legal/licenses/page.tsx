@@ -7,9 +7,9 @@ import fs from 'fs';
 import path from 'path';
 
 export const metadata = {
-  title: 'Third-Party Licenses — MyFabmesh.AI',
+  title: 'Licences des composants tiers — MyFabmesh.AI',
   description:
-    'Open-source software and pretrained AI model licenses and attributions used by MyFabmesh.AI.',
+    'Licences et attributions des logiciels open source et des modèles d’IA pré-entraînés utilisés par MyFabmesh.AI.',
 };
 
 function loadLicenses(): string {
@@ -25,20 +25,23 @@ function loadLicenses(): string {
       /* try next candidate */
     }
   }
-  return 'The full third-party license file is available in the source repository at THIRD_PARTY_LICENSES.txt.';
+  return 'Le fichier complet des licences des composants tiers est disponible dans le dépôt source, sous le nom THIRD_PARTY_LICENSES.txt.';
 }
 
 export default function LicensesPage() {
   const text = loadLicenses();
   return (
     <main style={{ maxWidth: 880, margin: '0 auto', padding: '32px 24px', lineHeight: 1.6 }}>
-      <h1>Third-Party Licenses &amp; Attributions</h1>
+      <h1>Licences et attributions des composants tiers</h1>
       <p style={{ color: 'var(--text-2)' }}>
-        MyFabmesh.AI is built with open-source software and pretrained AI models.
-        The license texts and required attributions for every bundled or
-        runtime-downloaded component are reproduced below. Notably, this product
-        is <strong>Built with DINOv3</strong>, and uses the Apache-2.0 Kaolin
-        rasterizer (never the non-commercial nvdiffrast backend).
+        MyFabmesh.AI repose sur des logiciels open source et des modèles
+        d&rsquo;IA pré-entraînés. Les textes de licence et les attributions
+        requises pour chaque composant fourni avec le produit ou téléchargé à
+        l&rsquo;exécution sont reproduits ci-dessous, dans leur langue
+        d&rsquo;origine. En particulier, ce produit porte la mention{' '}
+        <strong>Built with DINOv3</strong> et utilise le rastériseur Kaolin
+        sous licence Apache-2.0 (jamais le backend nvdiffrast, dont la licence
+        est non commerciale).
       </p>
       <pre
         style={{
