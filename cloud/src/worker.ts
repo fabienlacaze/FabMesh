@@ -1252,6 +1252,22 @@ async function insertUserAsset(
                  + String(r2_path).slice(0, 80));
     return;
   }
+  /* `parent_path` EST SIGNE LUI AUSSI — il lui faut le meme garde.
+   *
+   * Le controle ci-dessus ne couvrait que `r2_path`. Or handleCloudProjects
+   * (vers la ligne 7061) fait `signedR2Url(env, a.parent_path)` pour relier
+   * une vue arriere a sa source : une valeur pointant vers le prefixe d'un
+   * AUTRE compte ressortait donc en URL signee, telechargeable. Le trou etait
+   * le meme que celui de `r2_path`, par un champ voisin — corriger l'un sans
+   * l'autre laissait la porte ouverte.
+   *
+   * On n'annule pas l'enregistrement pour autant : le lien de parente est
+   * accessoire, l'actif lui-meme est legitime. On le met a null. */
+  if (parent_path && !String(parent_path).startsWith(`${userId}/`)) {
+    console.warn(`[user_assets] parent_path hors prefixe ignore pour ${userId}: `
+                 + String(parent_path).slice(0, 80));
+    parent_path = null;
+  }
   try {
     const sb = supabaseAdmin(env);
     const { error } = await sb.from('user_assets').upsert({
@@ -5318,6 +5334,12 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
       automatic_tax: { enabled: true },
       // Let B2B customers enter a VAT/tax ID (reverse-charge handling).
       tax_id_collection: { enabled: true },
+      /* PAS DE `invoice_creation` ICI, ET C'EST NORMAL : en mode
+       * subscription Stripe emet une facture a CHAQUE cycle de lui-meme,
+       * l'option n'existe pas et serait refusee. Le `subscription_data`
+       * plus haut porte deja les metadonnees, dont la renonciation
+       * horodatee. L'obligation de confirmation sur support durable est
+       * donc tenue par la facture de cycle. */
       success_url: `${SITE}/account?paid=1&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${SITE}/buy?canceled=1`,
     });
@@ -5529,6 +5551,19 @@ async function handleCheckoutReconcile(req: Request, env: Env): Promise<Response
   // quel client pourrait faire crediter SON compte avec la session d'un
   // autre en devinant un identifiant.
   if (sess.metadata?.user_id !== user.id) return err(403, 'session rattachee a un autre compte');
+  /* LES ABONNEMENTS NE PASSENT PAS PAR ICI — SINON DOUBLE CREDIT.
+   *
+   * Le webhook credite un abonnement sur `invoice.paid`, en indexant la
+   * ligne `payments` sur l'identifiant de FACTURE (in_...). Cette route,
+   * elle, indexe sur l'identifiant de SESSION (cs_...). L'idempotence de
+   * `_traiterPaiement` repose sur cet identifiant : deux valeurs
+   * differentes pour un meme paiement, ce sont DEUX lignes et DEUX
+   * credits. Le webhook lui-meme ecarte deja les abonnements au meme
+   * endroit (`is_subscription === 'true'`) ; on fait pareil. */
+  if (sess.metadata?.is_subscription === 'true') {
+    return json({ ok: true, credited: false,
+                  reason: 'abonnement : les credits arrivent avec la facture' });
+  }
   if (sess.payment_status !== 'paid') {
     return json({ ok: true, credited: false, reason: 'paiement non abouti' });
   }
@@ -7961,7 +7996,11 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
       console.warn('[remove-bg] MESHES/R2_PUBLIC_URL unset, returning raw Replicate URL (will expire ~1h)');
     }
 
-    await logOperation(env, user.id, 'remove-bg', COST_PER, opDebut, Date.now(), 'succeeded');
+    // Le SUCCES n'avait aucune metadonnee la ou l'ECHEC en a : les deux
+    // lignes tombaient donc dans des seaux differents et le tableau
+    // d'audience affichait 100 % d'echec sur cette operation.
+    await logOperation(env, user.id, 'remove-bg', COST_PER, opDebut, Date.now(),
+                       'succeeded', { req });
     return json({ ok: true, success: true, url, path: url, newPath: url });
   } catch (e: unknown) {
     // Refund the credit + roll back the daily-spend counters on failure.
@@ -9817,7 +9856,10 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     const url = await signedR2Url(env, key, 'mesh');
     // Forward fill_holes verdict + delta-faces into telemetry so we can
     // measure the diagnostic-first rollout via Supabase SELECT later.
-    const logCtx: Record<string, unknown> = { op_type: op, mesh_url_in: finalUrl };
+    // `req` porte le pays et la provenance (voir _paysRequete /
+    // _provenance) : sans lui, mesh-op restait a « inconnu » dans les
+    // statistiques d'audience alors que son echec, lui, etait attribue.
+    const logCtx: Record<string, unknown> = { req, op_type: op, mesh_url_in: finalUrl };
     if (data.stats) {
       const s = data.stats as Record<string, unknown>;
       if (s.verdict) logCtx.verdict = s.verdict;
@@ -10763,6 +10805,11 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
       type: 'rig',
       cost_usd: ESTIMATED_USD_RIG,
       options: {
+        // Pays et provenance : ces insertions n'ont pas le meme chemin que
+        // logOperation, elles etaient donc les seules absentes des
+        // statistiques d'audience — pour les operations les plus cheres.
+        provenance: _provenance(req),
+        pays: _paysRequete(req),
         operation_type: 'rig', sourceMesh: meshUrl, backend: 'modal', skeleton,
         // Without cost_usd the admin stats fell back to 0 → 100% margin.
         cost_usd: ESTIMATED_USD_RIG,
@@ -11111,6 +11158,11 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
       type: 'segment',
       cost_usd: ESTIMATED_USD_SEGMENT,
       options: {
+        // Pays et provenance : ces insertions n'ont pas le meme chemin que
+        // logOperation, elles etaient donc les seules absentes des
+        // statistiques d'audience — pour les operations les plus cheres.
+        provenance: _provenance(req),
+        pays: _paysRequete(req),
         operation_type: 'segment', sourceMesh: meshUrl, backend: 'modal',
         // 2026-07-26 CRITICAL FIX: this used to read a bare `scale`, which
         // is NOT bound anywhere in this function (the local is
@@ -12305,6 +12357,11 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
       cost_usd: ESTIMATED_USD_ANIM,
       project_name: projectName || null,
       options: {
+        // Pays et provenance : ces insertions n'ont pas le meme chemin que
+        // logOperation, elles etaient donc les seules absentes des
+        // statistiques d'audience — pour les operations les plus cheres.
+        provenance: _provenance(req),
+        pays: _paysRequete(req),
         operation_type: 'animate', sourceRig: rigUrl, anim_type: animType,
         prompt: prompt || null, batch_id: batchId || null, backend: 'modal',
         cost_usd: ESTIMATED_USD_ANIM,
@@ -12604,6 +12661,11 @@ async function handleAnimateFromReference(req: Request, env: Env): Promise<Respo
       cost_usd: ESTIMATED_USD_ANIM,
       project_name: projectName || null,
       options: {
+        // Pays et provenance : ces insertions n'ont pas le meme chemin que
+        // logOperation, elles etaient donc les seules absentes des
+        // statistiques d'audience — pour les operations les plus cheres.
+        provenance: _provenance(req),
+        pays: _paysRequete(req),
         operation_type: 'animate_fbx', sourceRig: rigUrl,
         ref_anim: refAnimUrl,
         source_skeleton_id_hint: hint, target_family: targetFamily,
