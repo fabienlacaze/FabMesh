@@ -5820,6 +5820,10 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
       payment_intent?: string; id?: string;
       metadata?: Record<string, string>;
       amount_refunded?: number; amount?: number;
+      // Presente quand la charge vient d'un abonnement : c'est la SEULE
+      // facon fiable de retrouver la ligne `payments`, qui est indexee sur
+      // l'identifiant de facture pour les abonnements.
+      invoice?: string | null;
     };
     const sb = supabaseAdmin(env);
     const total = event.type === 'charge.dispute.created';
@@ -5879,25 +5883,22 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
        * ses credits — il gardait 100 credits et son argent.
        *
        * Stripe rattache la facture au payment_intent : on la demande. */
-      if (!paiement && ch.payment_intent) {
-        try {
-          const rf = await _stripeRest(
-            env,
-            'https://api.stripe.com/v1/invoices?limit=3&payment_intent='
-              + encodeURIComponent(String(ch.payment_intent)),
-            null, 'GET');
-          const factures = (rf.ok && Array.isArray((rf.data as { data?: unknown[] }).data))
-            ? (rf.data as { data: Array<{ id?: string }> }).data : [];
-          for (const f of factures) {
-            if (!f?.id) continue;
-            const { data } = await sb.from('payments')
-              .select(COLONNES_PAIEMENT)
-              .eq('stripe_session_id', f.id).maybeSingle();
-            if (data) { paiement = data as unknown as LignePaiement; break; }
-          }
-        } catch (e) {
-          console.warn('[stripe] resolution de la facture impossible:', (e as Error).message);
-        }
+      /* L'IDENTIFIANT DE FACTURE EST SUR LA CHARGE, PAS DANS UNE RECHERCHE.
+       *
+       * Ma premiere version interrogeait
+       * `GET /v1/invoices?payment_intent=...`. Stripe REFUSE ce filtre —
+       * mesure du 2026-08-23 : HTTP 400 `parameter_unknown`. La boucle ne
+       * s'executait donc JAMAIS et le correctif etait inerte : un abonne
+       * rembourse gardait ses credits, exactement comme avant.
+       *
+       * L'objet `charge` porte deja `invoice` quand le paiement vient d'un
+       * abonnement. Aucun appel supplementaire n'est necessaire. */
+      const idFacture = ch.invoice;
+      if (!paiement && idFacture) {
+        const { data } = await sb.from('payments')
+          .select(COLONNES_PAIEMENT)
+          .eq('stripe_session_id', String(idFacture)).maybeSingle();
+        if (data) paiement = data as unknown as LignePaiement;
       }
       if (!paiement && ch.payment_intent) {
         try {
