@@ -268,7 +268,11 @@ def fbx_retarget_router():
                     with open(call_id_path) as f:
                         cid = f.read().strip()
                     modal.FunctionCall.from_id(cid).cancel(terminate_containers=True)
-                    return {"job_id": jid, "status": "cancelled"}
+                    # `cancelled` EN PLUS de `status` : le worker teste ce champ,
+                    # comme le renvoient app.py, _puppeteer_rig.py et _partsam.py.
+                    # Sans lui, une annulation reussie etait lue comme un echec.
+                    return {"job_id": jid, "status": "cancelled",
+                            "ok": True, "cancelled": True}
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"cancel failed: {e}")
             raise HTTPException(status_code=404, detail="no call_id for job_id")

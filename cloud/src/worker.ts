@@ -4491,12 +4491,156 @@ async function _putSeller(env: Env, rec: SellerRecord): Promise<void> {
 
 /** Minimal Stripe REST helper for Connect endpoints. Uses the same
  *  form-encoding as _stripeForm so we get nested params for free. */
+/* Version d'API Stripe qui porte encore `charge.invoice`.
+ *
+ * Le compte est sur `2026-02-25.clover`, ou le champ n'existe plus, et
+ * aucun filtre de remplacement n'est interrogeable. On epingle donc cette
+ * version pour CE seul appel. Si Stripe la retire un jour, l'appel echoue
+ * proprement et le remboursement retombe sur les autres voies de
+ * resolution — il ne casse pas. */
+const STRIPE_VERSION_AVEC_INVOICE = '2024-06-20';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RETROUVER LA LIGNE `payments` DEPUIS UN EVENEMENT STRIPE.
+
+   Cette resolution etait ECRITE DEUX FOIS, et une seule des deux copies a
+   ete corrigee. Le remboursement a recu, en trois passes, la recherche par
+   session Checkout puis par facture d'abonnement ; la CLOTURE DE LITIGE,
+   quinze lignes plus haut, est restee bornee a `pi_...`/`ch_...`. Or
+   `payments.stripe_session_id` ne contient jamais ni l'un ni l'autre : il
+   contient un `cs_...` (achat unitaire) ou un `in_...` (abonnement). Le
+   gagnant d'un litige ne recuperait donc jamais ses credits.
+
+   D'ou cette fonction unique : un garde recopie est un garde qu'on
+   oubliera quelque part. Les quatre voies, dans l'ordre du moins cher au
+   plus cher en appels reseau :
+     1. `pi_...` / `ch_...` tels quels (couvre d'anciennes lignes) ;
+     2. `charge.invoice` s'il est la ;
+     3. la meme charge relue sur une version d'API qui porte encore
+        `invoice` (voir STRIPE_VERSION_AVEC_INVOICE) ;
+     4. la session Checkout rattachee au payment_intent.
+   ═══════════════════════════════════════════════════════════════════════ */
+const COLONNES_PAIEMENT = 'id, user_id, credits, credits_origine, amount_eur';
+type LignePaiement = {
+  id: number; user_id: string; credits: number;
+  credits_origine?: number | null; amount_eur?: number | null;
+};
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DETTE DE CREDITS — ce qu'un remboursement n'a pas pu reprendre.
+
+   La reprise est bornee au solde (`Math.min(aReprendre, solde)`), et c'est
+   juste : la RPC `add_credits` additionne sans plancher, un negatif brut
+   creerait un solde negatif qui bloquerait le compte apres un rachat.
+
+   Mais le reliquat etait ensuite PERDU : la ligne `payments` etait
+   reecrite comme entierement reprise. Un client qui depensait ses credits
+   puis demandait un remboursement gardait donc les maillages produits ET
+   son argent, sans qu'aucune trace ne subsiste. C'est le tour de passe-
+   passe le plus simple contre nous, et il ne laissait rien derriere lui.
+
+   On conserve donc l'ecart. Il est retenu sur le PROCHAIN achat, et il
+   apparait dans l'ecran de sante. Un marqueur R2 suffit — meme mecanique
+   que `_meta/paid/<uid>`, aucune migration a faire courir.
+   ═══════════════════════════════════════════════════════════════════════ */
+async function _lireDette(env: Env, uid: string): Promise<number> {
+  try {
+    if (!env.MESHES) return 0;
+    const o = await env.MESHES.get(`_meta/dette/${uid}`);
+    if (!o) return 0;
+    const n = parseFloat(await o.text());
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  } catch { return 0; }
+}
+
+async function _ecrireDette(env: Env, uid: string, credits: number): Promise<void> {
+  try {
+    if (!env.MESHES) return;
+    if (credits <= 0) { await env.MESHES.delete(`_meta/dette/${uid}`); return; }
+    await env.MESHES.put(`_meta/dette/${uid}`, String(Math.floor(credits)));
+  } catch (e) {
+    console.error(`[stripe] dette de ${credits} credits NON enregistree pour ${uid}:`,
+      (e as Error).message);
+  }
+}
+
+async function _retrouverPaiement(
+  env: Env,
+  sb: ReturnType<typeof supabaseAdmin>,
+  ch: { payment_intent?: string; id?: string; charge?: string; invoice?: string | null },
+): Promise<LignePaiement | null> {
+  const parRef = async (ref: string): Promise<LignePaiement | null> => {
+    const { data } = await sb.from('payments')
+      .select(COLONNES_PAIEMENT)
+      .eq('stripe_session_id', ref).maybeSingle();
+    return data ? (data as unknown as LignePaiement) : null;
+  };
+
+  const idCharge = ch.id ?? ch.charge;
+  for (const ref of [ch.payment_intent, idCharge].filter(Boolean) as string[]) {
+    const trouve = await parRef(ref);
+    if (trouve) return trouve;
+  }
+
+  let idFacture: string | undefined = ch.invoice ? String(ch.invoice) : undefined;
+  if (!idFacture && idCharge) {
+    /* `charge.invoice` N'EXISTE PLUS sous la version d'API du compte
+     * (`2026-02-25.clover`) — mesure du 2026-08-23 : `'invoice' in charge`
+     * vaut False sur les 10 charges reelles, alors que le champ est
+     * present sur LA MEME charge sous `2024-06-20`. Deux correctifs
+     * successifs ont donc lu `undefined` sans rien casser ni rien faire.
+     * Stripe n'offre aucun filtre pour retrouver une facture depuis un
+     * payment_intent : relire la charge sur une version qui porte le champ
+     * est la seule voie fiable. */
+    try {
+      const rc = await _stripeRest(
+        env, `https://api.stripe.com/v1/charges/${encodeURIComponent(String(idCharge))}`,
+        null, 'GET', undefined, STRIPE_VERSION_AVEC_INVOICE);
+      const inv = (rc.data as { invoice?: unknown }).invoice;
+      if (rc.ok && inv) idFacture = String(inv);
+      else if (!rc.ok) {
+        console.warn(`[stripe] relecture de ${idCharge} en ${STRIPE_VERSION_AVEC_INVOICE} `
+                   + `refusee (HTTP ${rc.status}) — facture non resolue`);
+      }
+    } catch (e) {
+      console.warn('[stripe] relecture de la charge impossible:', (e as Error).message);
+    }
+  }
+  if (idFacture) {
+    const trouve = await parRef(String(idFacture));
+    if (trouve) return trouve;
+  }
+
+  if (ch.payment_intent) {
+    try {
+      const r = await _stripeRest(
+        env,
+        'https://api.stripe.com/v1/checkout/sessions?limit=3&payment_intent='
+          + encodeURIComponent(String(ch.payment_intent)),
+        null, 'GET');
+      const sessions = (r.ok && Array.isArray((r.data as { data?: unknown[] }).data))
+        ? (r.data as { data: Array<{ id?: string }> }).data : [];
+      for (const sess of sessions) {
+        if (!sess?.id) continue;
+        const trouve = await parRef(sess.id);
+        if (trouve) return trouve;
+      }
+    } catch (e) {
+      console.warn('[stripe] resolution de la session impossible:', (e as Error).message);
+    }
+  }
+  return null;
+}
+
+
 async function _stripeRest(
   env: Env,
   url: string,
   body: Record<string, unknown> | null,
   method: 'POST' | 'GET' = 'POST',
   idempotencyKey?: string,
+  apiVersion?: string,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown>; raw: string }> {
   if (!env.STRIPE_SECRET_KEY) {
     return { ok: false, status: 500, data: { error: 'no_stripe_key' }, raw: '' };
@@ -4513,6 +4657,15 @@ async function _stripeRest(
   // second. La clé doit être DÉTERMINISTE — surtout pas dérivée d'un
   // Date.now()/Math.random(), qui différerait à chaque rejeu.
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  /* Version d'API epinglee pour UN appel.
+   *
+   * Stripe fige la version au niveau du compte : la reponse ne contient
+   * que les champs de CETTE version. Quand un champ disparait d'une
+   * version recente mais qu'aucun remplacant n'est interrogeable (voir
+   * `charge.invoice` dans le remboursement d'abonnement), redemander le
+   * meme objet sur une version qui le porte encore est la seule voie
+   * fiable. A n'utiliser que la, et toujours avec un repli. */
+  if (apiVersion) headers['Stripe-Version'] = apiVersion;
   const init: RequestInit = { method, headers };
   if (body && method === 'POST') {
     init.body = _stripeForm(body).toString();
@@ -5524,8 +5677,22 @@ async function _traiterPaiement(env: Env, opts: {
   try {
     if (env.MESHES) await env.MESHES.delete(`_meta/paidcheck/${opts.userId}/${todayUTC()}`);
   } catch { /* le cache expire de toute facon a minuit UTC */ }
-  const credited = await addCredits(env, opts.userId, opts.credits);
+  /* RETENUE DE LA DETTE — voir `_lireDette`.
+   *
+   * Un remboursement anterieur a pu ne pas reprendre tous les credits,
+   * faute de solde. Cet ecart est retenu ici, avant creditement : sans
+   * quoi il suffisait de depenser puis de se faire rembourser en boucle. */
+  const dette = await _lireDette(env, opts.userId);
+  const retenue = Math.min(dette, opts.credits);
+  if (retenue > 0) {
+    await _ecrireDette(env, opts.userId, dette - retenue);
+    console.log(`[stripe] ${retenue} credits retenus sur l'achat de `
+              + `${opts.userId} au titre d'un remboursement anterieur `
+              + `(reste du: ${dette - retenue})`);
+  }
+  const credited = await addCredits(env, opts.userId, opts.credits - retenue);
   if (credited === null) {
+    if (retenue > 0) await _ecrireDette(env, opts.userId, dette);  // on rend la dette : le credit n'a pas eu lieu
     // RPC failed; placeholder stays at credits=0 so the next retry
     // hits state 2 and re-attempts. Tell Stripe to retry by returning
     // retry:true → handler answers with a 500 so Stripe re-delivers.
@@ -5701,9 +5868,44 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     return Math.min(Math.max(0, fallback), 10_000);
   };
 
-  // One-shot top-up — credits added once on checkout.session.completed.
-  if (event.type === 'checkout.session.completed') {
+  /* Achat unitaire — credits accordes une fois.
+   *
+   * DEUX evenements mènent ici, pas un seul :
+   *   - `checkout.session.completed` : le cas carte, ou l'argent arrive
+   *     en meme temps que la fin du tunnel ;
+   *   - `checkout.session.async_payment_succeeded` : les moyens a
+   *     notification differee (SEPA, Bancontact, Sofort, virement). La
+   *     session s'y complete d'abord en `unpaid` — le garde ci-dessous la
+   *     laisse repartir sans rien livrer — puis Stripe emet CE second
+   *     evenement quand les fonds arrivent.
+   *
+   * Cet evenement etait ABONNE cote Stripe mais n'avait aucun
+   * gestionnaire : il n'apparaissait qu'en commentaire. Un client payant
+   * par SEPA etait donc debite et ne recevait jamais rien — le premier
+   * evenement ne livrait pas (a juste titre) et le second tombait dans le
+   * vide. La livraison est idempotente (sonde sur `payments`), donc
+   * traiter les deux ne double-credite pas. */
+  if (event.type === 'checkout.session.completed'
+      || event.type === 'checkout.session.async_payment_succeeded') {
     const sess = event.data.object;
+    /* ON NE LIVRE QUE SI C'EST PAYE.
+
+     * Ce garde etait ecrit PLUS BAS, apres la sortie `market_purchase`.
+     * Il ne protegeait donc que l'achat de credits. Un achat boutique
+     * avec `payment_status: 'unpaid'` livrait le fichier au client ET
+     * creditait le vendeur, sans qu'un euro soit arrive. Le vendeur
+     * etait paye par nous, pas par l'acheteur.
+     *
+     * Le garde est remonte au-dessus des trois branches : il protege
+     * desormais credits, boutique et abonnement d'un seul geste, au lieu
+     * d'etre recopie trois fois — un garde recopie est un garde qu'on
+     * oubliera quelque part. */
+    if (sess.payment_status && sess.payment_status !== 'paid'
+        && sess.payment_status !== 'no_payment_required') {
+      console.log(`[stripe] session ${sess.id} completee mais payment_status=`
+                + `${sess.payment_status} — rien n'est livre ni credite`);
+      return json({ received: true, deferred: sess.payment_status });
+    }
     // Marketplace purchase — different flow: no credits, instead we
     // record ownership + a sale entry. Detect via metadata.kind set
     // by handleMarketCheckout.
@@ -5714,7 +5916,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     // Subscriptions handled by invoice.paid below (covers both the
     // first cycle and every renewal). Skip here to avoid double-credit.
     if (sess.metadata?.is_subscription === 'true') return json({ received: true });
-    /* ON NE CREDITE QUE SI C'EST PAYE.
+    /* (garde deplace plus haut — conserve ici pour memoire)
      *
      * `checkout.session.completed` signifie « le client est alle au bout du
      * tunnel », PAS « l'argent est arrive ». Avec une carte, les deux
@@ -5726,12 +5928,6 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
      * `checkout.session.async_payment_succeeded` pour ces cas.
      *
      * Mine desamorcee avant activation plutot qu'apres. */
-    if (sess.payment_status && sess.payment_status !== 'paid'
-        && sess.payment_status !== 'no_payment_required') {
-      console.log(`[stripe] session ${sess.id} completee mais payment_status=`
-                + `${sess.payment_status} — aucun credit accorde`);
-      return json({ received: true, deferred: sess.payment_status });
-    }
     const userId = sess.metadata?.user_id;
     const packId = sess.metadata?.pack_id ?? 'unknown';
     const rawCredits = parseInt(sess.metadata?.credits ?? '0', 10);
@@ -5778,17 +5974,14 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     if (d.status !== 'won') return json({ received: true, dispute: d.status ?? 'unknown' });
     const sb = supabaseAdmin(env);
     const refs = [d.payment_intent, d.charge].filter(Boolean) as string[];
-    /* Type NOMME, pas `typeof ligne` : sur une variable initialisee a
-     * `null`, `typeof` se reduit a `null` et le cast efface les colonnes.
-     * C'est exactement la forme qui a produit le bug de remboursement. */
-    type LigneLitige = { id: number; user_id: string; credits: number; credits_origine?: number | null };
-    let ligne: LigneLitige | null = null;
-    for (const ref of refs) {
-      const { data } = await sb.from('payments')
-        .select('id, user_id, credits, credits_origine')
-        .eq('stripe_session_id', ref).maybeSingle();
-      if (data) { ligne = data as unknown as LigneLitige; break; }
-    }
+    /* MEME RESOLUTION QUE LE REMBOURSEMENT — voir `_retrouverPaiement`.
+     *
+     * Cette recherche etait bornee a `pi_...`/`ch_...`, alors que
+     * `stripe_session_id` contient un `cs_...` ou un `in_...` : elle ne
+     * pouvait RIEN trouver. Le gagnant d'un litige ne recuperait donc
+     * jamais ses credits, et la correction apportee trois fois au
+     * remboursement n'avait jamais traverse ces quinze lignes. */
+    const ligne = await _retrouverPaiement(env, sb, d);
     if (!ligne) {
       console.warn('[stripe] dispute.closed gagne mais paiement introuvable — a traiter a la main');
       return json({ received: true, unmatched: true });
@@ -5884,81 +6077,8 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
        *
        * Ni l'un ni l'autre ne pouvait etre vu : `tsconfig.json` excluait
        * ce fichier de toute verification (voir tsconfig.worker.json). */
-      const COLONNES_PAIEMENT = 'id, user_id, credits, credits_origine, amount_eur';
-      type LignePaiement = {
-        id: number; user_id: string; credits: number;
-        credits_origine?: number | null; amount_eur?: number | null;
-      };
-      let paiement: LignePaiement | null = null;
-      for (const ref of refs) {
-        const { data } = await sb.from('payments')
-          .select(COLONNES_PAIEMENT)
-          .eq('stripe_session_id', ref).maybeSingle();
-        if (data) { paiement = data as unknown as LignePaiement; break; }
-      }
+      const paiement = await _retrouverPaiement(env, sb, ch);
 
-      // RECHERCHE PAR LA SESSION DE PAIEMENT — sans elle, la boucle ci-dessus
-      // ne trouve JAMAIS rien.
-      //
-      // `payments.stripe_session_id` contient l'identifiant de la SESSION
-      // (`cs_...`), pose a l'encaissement. Or un evenement `charge.refunded`
-      // n'apporte que `pi_...` (payment_intent) et `ch_...` (charge) : aucun
-      // des deux ne peut egaler un `cs_...`. La recherche echouait donc a
-      // tous les coups, le repli `metadata.user_id` identifiait bien le
-      // client mais laissait `credits` a 0 — resultat : **un client
-      // rembourse gardait 100 % de ses credits**. Defaut introduit le
-      // 2026-08-03 avec ce gestionnaire, trouve par audit le 2026-08-08.
-      //
-      // On demande donc a Stripe la session rattachee au payment_intent.
-      // Aucune migration necessaire : cela fonctionne sur les lignes
-      // existantes.
-      /* ABONNEMENTS : LA LIGNE EST INDEXEE SUR UN IDENTIFIANT DE FACTURE.
-       *
-       * `_traiterPaiement` enregistre `stripe_session_id = inv.id` pour un
-       * abonnement, soit un `in_...`. La recherche ci-dessus n'essaie que
-       * le payment_intent (`pi_...`) et la charge (`ch_...`), et celle par
-       * session Checkout ne rend que des `cs_...` : AUCUN des trois ne peut
-       * egaler un `in_...`. Rembourser un abonne ne reprenait donc jamais
-       * ses credits — il gardait 100 credits et son argent.
-       *
-       * Stripe rattache la facture au payment_intent : on la demande. */
-      /* L'IDENTIFIANT DE FACTURE EST SUR LA CHARGE, PAS DANS UNE RECHERCHE.
-       *
-       * Ma premiere version interrogeait
-       * `GET /v1/invoices?payment_intent=...`. Stripe REFUSE ce filtre —
-       * mesure du 2026-08-23 : HTTP 400 `parameter_unknown`. La boucle ne
-       * s'executait donc JAMAIS et le correctif etait inerte : un abonne
-       * rembourse gardait ses credits, exactement comme avant.
-       *
-       * L'objet `charge` porte deja `invoice` quand le paiement vient d'un
-       * abonnement. Aucun appel supplementaire n'est necessaire. */
-      const idFacture = ch.invoice;
-      if (!paiement && idFacture) {
-        const { data } = await sb.from('payments')
-          .select(COLONNES_PAIEMENT)
-          .eq('stripe_session_id', String(idFacture)).maybeSingle();
-        if (data) paiement = data as unknown as LignePaiement;
-      }
-      if (!paiement && ch.payment_intent) {
-        try {
-          const r = await _stripeRest(
-            env,
-            'https://api.stripe.com/v1/checkout/sessions?limit=3&payment_intent='
-              + encodeURIComponent(String(ch.payment_intent)),
-            null, 'GET');
-          const sessions = (r.ok && Array.isArray((r.data as { data?: unknown[] }).data))
-            ? (r.data as { data: Array<{ id?: string }> }).data : [];
-          for (const sess of sessions) {
-            if (!sess?.id) continue;
-            const { data } = await sb.from('payments')
-              .select(COLONNES_PAIEMENT)
-              .eq('stripe_session_id', sess.id).maybeSingle();
-            if (data) { paiement = data as unknown as LignePaiement; break; }
-          }
-        } catch (e) {
-          console.warn('[stripe] resolution de la session impossible:', (e as Error).message);
-        }
-      }
       // Repli : metadata.user_id pose a la creation de la session.
       const uid = paiement?.user_id || ch.metadata?.user_id;
       if (!uid) {
@@ -6004,6 +6124,20 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
         const solde = Number((prof as { credits?: number } | null)?.credits ?? 0);
         const repris = Math.min(aReprendre, Math.max(0, solde));
         if (repris > 0) await addCredits(env, uid, -repris);
+        /* CE QU'ON N'A PAS PU REPRENDRE NE DOIT PAS DISPARAITRE.
+         *
+         * La ligne `payments` est reecrite juste en dessous comme si la
+         * reprise avait ete complete. Le client qui avait deja depense ses
+         * credits gardait donc les maillages ET l'argent, sans trace. On
+         * reporte l'ecart sur son prochain achat. */
+        const manque = Math.max(0, aReprendre - repris);
+        if (manque > 0) {
+          const dejaDu = await _lireDette(env, uid);
+          await _ecrireDette(env, uid, dejaDu + manque);
+          console.error(`[stripe] ${event.type}: ${manque} credits NON reprenables `
+                      + `(solde ${solde} < du ${aReprendre}) — reportes en dette `
+                      + `pour ${uid} (total du: ${dejaDu + manque})`);
+        }
         console.log(`[stripe] ${event.type}: ${repris} credits repris a ${uid} `
                   + `(du: ${aReprendre}, solde: ${solde})`);
       }
@@ -7839,20 +7973,36 @@ async function _cancelModalJob(env: Env, jobId: string, opType?: string): Promis
   // le cron : essayer les quatre apps a chaque fois multipliait par quatre
   // les sous-requetes d'un tick, qui a un plafond de 1000 chez Cloudflare.
   // L'ordre n'enleve rien a la correction — les autres restent en repli.
+  /* L'URL DOIT PORTER LA ROUTE, PAS SEULEMENT L'HOTE — mesure du 2026-08-23.
+   *
+   * `MODAL_MESH_START_URL` se termine deja par `/mesh_start`, mais les
+   * quatre autres variables sont des BASES : ailleurs dans ce fichier le
+   * worker leur ajoute `/rig-start`, `/segment-start`, `/anim-start`,
+   * `/fbx-retarget-start`. Ici il postait sur la base nue. Or ces apps
+   * sont des routeurs FastAPI sans route racine : la reponse etait
+   * **404 sur quatre familles sur cinq**, mesuree. L'annulation ne
+   * s'appliquait donc qu'aux maillages — les conteneurs GPU de rig, de
+   * segmentation et d'animation continuaient de tourner, factures, apres
+   * que l'utilisateur ait clique « Annuler » et ait ete rembourse.
+   *
+   * `MODAL_FBX_RETARGET_URL` etait en outre absente de la liste de repli :
+   * sans `opType`, cette famille n'etait jamais interrogee. */
+  const _routeAnnulation = (base: string, route: string): string => {
+    const b = base.replace(/\/+$/, '');
+    return b.endsWith(route) ? b : b + route;
+  };
   const parType: Record<string, string | undefined> = {
     mesh:        env.MODAL_MESH_START_URL,
-    rig:         _rigBaseUrl(env),
-    segment:     env.MODAL_SEGMENT_URL,
-    animate:     env.MODAL_ANYTOP_ANIM_URL,
-    animate_fbx: env.MODAL_FBX_RETARGET_URL,
+    rig:         _rigBaseUrl(env)          && _routeAnnulation(_rigBaseUrl(env)!, '/rig-start'),
+    segment:     env.MODAL_SEGMENT_URL     && _routeAnnulation(env.MODAL_SEGMENT_URL, '/segment-start'),
+    animate:     env.MODAL_ANYTOP_ANIM_URL && _routeAnnulation(env.MODAL_ANYTOP_ANIM_URL, '/anim-start'),
+    animate_fbx: env.MODAL_FBX_RETARGET_URL
+                 && _routeAnnulation(env.MODAL_FBX_RETARGET_URL, '/fbx-retarget-start'),
   };
   const prefere = opType ? parType[opType] : undefined;
   const cibles = [
     prefere,
-    env.MODAL_MESH_START_URL,
-    _rigBaseUrl(env),
-    env.MODAL_SEGMENT_URL,
-    env.MODAL_ANYTOP_ANIM_URL,
+    parType.mesh, parType.rig, parType.segment, parType.animate, parType.animate_fbx,
   ].filter((u, i, a): u is string => !!u && a.indexOf(u) === i);
   if (!cibles.length) return { cancelled: false, error: 'aucun endpoint Modal configure' };
 
@@ -7870,10 +8020,23 @@ async function _cancelModalJob(env: Env, jobId: string, opType?: string): Promis
         signal: AbortSignal.timeout(15_000),
       });
       if (!mr.ok) { derniereErreur = `HTTP ${mr.status}`; continue; }
-      const mj = await mr.json() as { cancelled?: boolean; error?: string; reason?: string };
-      // Seule une confirmation compte : les autres apps repondent
-      // « no call_id on file » pour un job qui ne leur appartient pas.
-      if (mj.cancelled) return { cancelled: true, error: null };
+      const mj = await mr.json() as {
+        cancelled?: boolean; status?: string; error?: string; reason?: string;
+      };
+      /* DEUX CONTRATS DE REPONSE, PAS UN.
+       *
+       * `app.py`, `_puppeteer_rig.py` et `_partsam.py` repondent
+       * `{ok, cancelled: true}` ; `_anytop_anim.py` et `_ref_anim.py`
+       * repondent `{job_id, status: "cancelled"}` — sans champ `cancelled`.
+       * Le worker ne testait que le premier : meme une annulation REUSSIE
+       * de l'animation etait lue comme un echec, et la boucle continuait
+       * d'interroger les autres apps. On accepte les deux formes.
+       *
+       * Seule une confirmation compte : les autres apps repondent
+       * « no call_id on file » pour un job qui ne leur appartient pas. */
+      if (mj.cancelled === true || mj.status === 'cancelled') {
+        return { cancelled: true, error: null };
+      }
       derniereErreur = mj.error || mj.reason || null;
     } catch (e) {
       derniereErreur = e instanceof Error ? e.message : String(e);
@@ -8930,12 +9093,29 @@ async function _persistDepuisMeshFetch(env: Env, jobId: string): Promise<string 
       signal: AbortSignal.timeout(120_000),
     });
     if (!r.ok || !r.body) return null;           // 404 = app pas encore redeployee
+    /* DEUX ECHECS TRES DIFFERENTS, UN SEUL `catch`.
+     *
+     * Tout ce bloc rendait `null` sur n'importe quelle exception. Or
+     * `null` signifie ici « pas de flux, replie-toi sur le base64 » — et
+     * depuis que l'etat est demande en `metadata_only`, il n'y a plus de
+     * base64. Une ecriture R2 en echec produisait donc le message
+     * « redeploy the Modal app », qui envoie chercher la panne a l'exact
+     * oppose de la ou elle est. On ne confond plus l'octet jamais recu
+     * avec l'octet recu puis non ecrit. */
     const key = `mesh/${jobId}.glb`;
-    await env.MESHES.put(key, r.body, { httpMetadata: { contentType: 'model/gltf-binary' } });
+    try {
+      await env.MESHES.put(key, r.body, { httpMetadata: { contentType: 'model/gltf-binary' } });
+    } catch (e) {
+      throw new Error('mesh recupere mais ecriture R2 impossible ('
+                    + (e instanceof Error ? e.message : String(e)) + ')');
+    }
     _writeLastWarmMs(env, '_meta/last_warm_mesh.txt').catch(() => {});
     return await signedR2Url(env, key, 'mesh');
-  } catch {
-    return null;                                 // repli silencieux sur le base64
+  } catch (e) {
+    // Une panne d'ECRITURE remonte ; seule une panne de RECUPERATION
+    // autorise le repli base64.
+    if (e instanceof Error && e.message.startsWith('mesh recupere mais')) throw e;
+    return null;
   }
 }
 
@@ -16299,6 +16479,10 @@ const TYPES_JOB_ASYNC = new Set(['mesh', 'rig', 'segment', 'animate', 'animate_f
 const _REAP_BACKENDS: Record<string, {
   envKey: 'MODAL_RIG_URL' | 'MODAL_SEGMENT_URL' | 'MODAL_ANYTOP_ANIM_URL' | 'MODAL_FBX_RETARGET_URL';
   path: string;
+  /** Route de recuperation, pour la livraison tardive du faucheur. */
+  fetchPath: string;
+  /** Dossier R2 d'arrivee, aligne sur celui du sondage client. */
+  dossier: string;
   usd: number;
   delRecord?: (env: Env, id: string) => Promise<void>;
 }> = {
@@ -16306,10 +16490,10 @@ const _REAP_BACKENDS: Record<string, {
   // `_rigBaseUrl`. Il sondait donc l'ancien moteur pendant que la production
   // riggait sur SkinTokens : jamais le meme travail, d'ou des taches jamais
   // finalisees. Corrige avec le retrait de Puppeteer (2026-08-08).
-  rig:         { envKey: 'MODAL_RIG_URL',           path: '/rig-status',          usd: ESTIMATED_USD_RIG,     delRecord: deleteRigJobRecord },
-  segment:     { envKey: 'MODAL_SEGMENT_URL',       path: '/segment-status',      usd: ESTIMATED_USD_SEGMENT, delRecord: deleteSegmentJobRecord },
-  animate:     { envKey: 'MODAL_ANYTOP_ANIM_URL',   path: '/anim-status',         usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
-  animate_fbx: { envKey: 'MODAL_FBX_RETARGET_URL',  path: '/fbx-retarget-status', usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
+  rig:         { envKey: 'MODAL_RIG_URL',           path: '/rig-status',          fetchPath: '/rig-fetch',           dossier: 'rigged',     usd: ESTIMATED_USD_RIG,     delRecord: deleteRigJobRecord },
+  segment:     { envKey: 'MODAL_SEGMENT_URL',       path: '/segment-status',      fetchPath: '/segment-fetch',       dossier: 'mesh-op',    usd: ESTIMATED_USD_SEGMENT, delRecord: deleteSegmentJobRecord },
+  animate:     { envKey: 'MODAL_ANYTOP_ANIM_URL',   path: '/anim-status',         fetchPath: '/anim-fetch',          dossier: 'animations', usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
+  animate_fbx: { envKey: 'MODAL_FBX_RETARGET_URL',  path: '/fbx-retarget-status', fetchPath: '/fbx-retarget-fetch',  dossier: 'animations', usd: ESTIMATED_USD_ANIM,    delRecord: deleteAnimJobRecord },
 };
 
 /** One generic status poll against any of the four async Modal op apps. */
@@ -16465,6 +16649,14 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
             }
           } catch (e) {
             noteErr(`${id}: livraison impossible: ${e instanceof Error ? e.message : String(e)}`);
+            /* SANS CECI LA LIGNE RESTE NON TERMINALE POUR TOUJOURS.
+             * Le travail est pret cote Modal mais nous n'arrivons pas a
+             * l'ecrire : le client le reverra en « Resumed » a chaque
+             * chargement de page, sans jamais l'obtenir ni etre rembourse.
+             * Passe le delai de grace, on tranche. */
+            if (age > GRACE_MS) {
+              claimed = await _failAndRefundJob(env, job, 'reaped: pret mais livraison impossible');
+            }
           }
         }
         else if (age > GRACE_MS) claimed = await _failAndRefundJob(env, job, `reaped: no result after ${GRACE_LABEL}`);
@@ -16509,7 +16701,60 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
       if (resp?.ready === false && resp?.error) {
         await finalize(String(resp.error).slice(0, 300));
       } else if (resp?.ready === true) {
-        /* done — the asset is on the Modal volume, a poll will fetch it */
+        /* LE TRAVAIL EST FINI ET PERSONNE NE VIENDRA LE CHERCHER.
+         *
+         * Cette branche etait VIDE, avec le commentaire « un sondage le
+         * recuperera ». C'est vrai tant que le client sonde encore — mais
+         * le faucheur ne regarde que des travaux vieux de plus de 20
+         * minutes, donc precisement ceux dont l'onglet est ferme. Aucun
+         * sondage ne venait jamais : le GPU etait paye, l'actif restait
+         * sur le volume Modal jusqu'a sa purge, la ligne restait NON
+         * TERMINALE — donc reaffichee en « Resumed » a chaque chargement
+         * de page — et les credits n'etaient ni honores ni rendus.
+         *
+         * La branche maillage, quinze lignes plus haut, faisait deja cette
+         * livraison ; les quatre autres familles ne l'avaient pas. On
+         * s'aligne : on recupere l'actif et on finalise. Si la
+         * recuperation echoue, on retombe sur remboursement — jamais sur
+         * le silence. */
+        if (age > GRACE_MS) {
+          let livre = false;
+          try {
+            const fr = await fetch(`${base.replace(/\/$/, '')}${cfg.fetchPath}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: id }),
+              signal: AbortSignal.timeout(60_000),
+            });
+            if (fr.ok && fr.body && env.MESHES) {
+              const uid = typeof job.user_id === 'string' ? job.user_id : 'inconnu';
+              const cle = cfg.dossier === 'mesh-op'
+                ? `${uid}/mesh-op/untitled/${Date.now()}_segment.glb`
+                : `${uid}/${cfg.dossier}/reaped_${id}_${Date.now()}.glb`;
+              await env.MESHES.put(cle, fr.body, {
+                httpMetadata: { contentType: 'model/gltf-binary' },
+              });
+              const { data: maj } = await sb.from('jobs')
+                .update({ status: 'succeeded', mesh_url: cle,
+                          finished_at: new Date().toISOString() })
+                .eq('id', id)
+                .in('status', NON_TERMINAL_JOB_STATUSES as unknown as string[])
+                .select('id');
+              if (maj && maj.length) {
+                livre = true;
+                out.delivered = (out.delivered ?? 0) + 1;
+                console.log(`[reaper] ${id} (${opType}) termine sans sondage client — livre en ${cle}`);
+              }
+            } else if (!fr.ok) {
+              noteErr(`${id}: ${cfg.fetchPath} HTTP ${fr.status}`);
+            }
+          } catch (e2) {
+            noteErr(`${id}: livraison tardive impossible: ${e2 instanceof Error ? e2.message : String(e2)}`);
+          }
+          /* Rien livre : la ligne ne doit pas rester non terminale pour
+           * autant, sinon le fantome « Resumed » revient a chaque page. */
+          if (!livre) await finalize(`reaped: ${opType} pret mais non recuperable`);
+        }
       } else if (age > GRACE_MS) {
         await finalize(`reaped: ${opType} produced no result after ${GRACE_LABEL}`);
       }
