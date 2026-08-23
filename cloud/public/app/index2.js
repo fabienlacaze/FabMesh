@@ -15089,7 +15089,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cancelled) return;
         if (polls++ >= MAX_POLLS) {
           if (typeof completeJob === 'function') completeJob(job.id, false, 'auto-rig timeout (>15 min) — check Projects later');
-          _dropPending(p.jobId);
+        /* ON NE SUPPRIME PAS LE MARQUEUR SUR UNE ISSUE NON AUTORITAIRE.
+         *
+         * Un plafond de sondage atteint ou un reseau injoignable ne disent
+         * RIEN de l'etat du travail cote serveur : le rig peut tres bien
+         * aboutir dix minutes plus tard. En effacant l'entree, on rendait
+         * la reprise impossible pour toujours — et le message disait
+         * pourtant « check Projects later », en detruisant justement ce
+         * qui aurait permis d'y revenir. Seuls `done` et `failed`, qui
+         * viennent du serveur, autorisent la suppression. Le filtre d'age
+         * de 30 min en tete de fonction reste le ramasse-miettes. */
           return;
         }
         try {
@@ -15100,7 +15109,8 @@ document.addEventListener('DOMContentLoaded', () => {
             consecutiveErr++;
             if (consecutiveErr >= 30) {
               if (typeof completeJob === 'function') completeJob(job.id, false, `backend unreachable (${resp.status})`);
-              _dropPending(p.jobId);
+              // Reseau injoignable : voir la note du plafond de sondage —
+              // on garde le marqueur, la reprise reste possible.
               return;
             }
             setTimeout(tick, POLL_INTERVAL_MS);
@@ -15142,7 +15152,7 @@ document.addEventListener('DOMContentLoaded', () => {
           consecutiveErr++;
           if (consecutiveErr >= 30) {
             if (typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
-            _dropPending(p.jobId);
+            // Idem : exception reseau, pas un verdict du serveur.
             return;
           }
           setTimeout(tick, POLL_INTERVAL_MS);

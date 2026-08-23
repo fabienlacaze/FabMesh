@@ -464,7 +464,9 @@ async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number, userI
   const next = await _casIncrementCounter(env, `_meta/spend/${todayUTC()}`, estimatedUsd, maxUsd);
   if (next == null) return null;
   if (userId && (await checkAndIncrementUserDailySpend(env, userId, estimatedUsd)) == null) {
-    await refundDailySpend(env, estimatedUsd);  // roll back global; account is over its personal cap
+    // GLOBAL SEULEMENT, volontairement : l'increment personnel vient
+    // d'echouer, il n'y a pas de compteur utilisateur a defaire.
+    await refundDailySpend(env, estimatedUsd);
     return null;
   }
   return maxUsd - next;
@@ -472,10 +474,27 @@ async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number, userI
 
 /** Refund the spend if the call ended up failing — keeps the budget
  *  accurate even when we abort. */
-async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
+async function refundDailySpend(env: Env, refundUsd: number, userId?: string): Promise<void> {
   const key = `_meta/spend/${todayUTC()}`;
   const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
   await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
+  /* LE COMPTEUR PERSONNEL AUSSI — le meme defaut avait ete corrige cote
+   * Modal (`refundModalSpend`) et laisse ouvert ici, alors que les deux
+   * appels se suivent a une ligne d'ecart sur DIX sites. Sans cela, une
+   * generation Replicate qui echoue rendait le budget global mais laissait
+   * le plafond QUOTIDIEN PERSONNEL de l'utilisateur entame : il perdait de
+   * la marge journaliere pour un travail qu'il n'a jamais recu.
+   *
+   * Un seul appelant doit s'en abstenir : le repli de
+   * `checkAndIncrementDailySpend`, ou l'increment personnel a justement
+   * echoue — il n'y a rien a rendre. */
+  if (userId) {
+    try {
+      const uk = `_meta/userspend/${userId}/${todayUTC()}`;
+      const u = parseFloat((await r2GetText(env, uk)) || '0') || 0;
+      await env.MESHES.put(uk, String(Math.max(0, u - refundUsd)));
+    } catch (_) { /* comptabilite seule — ne jamais faire echouer un remboursement */ }
+  }
 }
 
 /** Modal has its own budget counter (`_meta/modal_spend/<YYYY-MM-DD>`)
@@ -622,10 +641,31 @@ async function _alerteUsageReelMuet(env: Env, raison: string): Promise<void> {
   } catch (_) { /* best-effort */ }
 }
 
+
+/* Budget Modal declare, en distinguant ABSENT de ZERO.
+ *
+ * `parseFloat(txt || '0') || 0` confond les deux, et le repli sur
+ * `MODAL_BUDGET_USD` reprenait alors la main : un exploitant qui ecrivait
+ * « 0 » depuis l'ecran d'administration pour tout arreter voyait sa
+ * consigne remplacee par les 65 $ de la variable d'environnement. Le
+ * meme defaut avait deja ete corrige sur le canal ENV (voir `_plafond`)
+ * et laisse ouvert sur le canal R2 — celui que l'interface utilise.
+ *
+ * Rend `null` seulement si le fichier est absent ou illisible. */
+async function _budgetR2(env: Env): Promise<number | null> {
+  try {
+    const txt = await r2GetText(env, '_meta/modal_budget_total.txt');
+    if (txt == null || String(txt).trim() === '') return null;
+    const n = Number(String(txt).trim());
+    return Number.isFinite(n) ? Math.max(0, n) : null;
+  } catch { return null; }
+}
+
 async function _budgetReelEpuise(env: Env): Promise<boolean> {
   if (!env.MESHES) return false;
   try {
-    let budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
+    const budgetR2 = await _budgetR2(env);
+    let budget = budgetR2 ?? 0;
     /* UN BUDGET A ZERO DOIT FERMER LE ROBINET, PAS LE DESARMER.
      *
      * `parseFloat(x) || 0` puis `if (budget <= 0) return false` : poser
@@ -633,6 +673,13 @@ async function _budgetReelEpuise(env: Env): Promise<boolean> {
      * INACTIF — l'exact contraire de l'intention. Zero est une consigne :
      * budget nul, donc budget epuise. Seule une variable ABSENTE laisse
      * passer, faute de reference. */
+    // Un ZERO ECRIT dans R2 est une consigne, pas une absence : on ne
+    // retombe sur la variable d'environnement que si le fichier manque.
+    if (budgetR2 === 0) {
+      console.error('[budget] budget Modal pose a 0 depuis l ecran admin — '
+                  + 'arret dur ACTIF, tout est refuse.');
+      return true;
+    }
     if (budget <= 0) {
       const brut = env.MODAL_BUDGET_USD;
       if (brut != null && String(brut).trim() !== '' && Number.isFinite(Number(brut))) {
@@ -774,8 +821,10 @@ async function _maybeAlertModalBudget(env: Env): Promise<void> {
   // Repli sur MODAL_BUDGET_USD (wrangler.toml) pour qu'un fichier
   // manquant ne desarme plus rien, et trace explicite si les deux
   // sources sont vides.
-  let budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
-  if (budget <= 0) {
+  const budgetR2Alerte = await _budgetR2(env);
+  let budget = budgetR2Alerte ?? 0;
+  // Meme distinction que ci-dessus : zero est une consigne, pas une absence.
+  if (budgetR2Alerte == null) {
     budget = parseFloat(env.MODAL_BUDGET_USD ?? '') || 0;
   }
   if (budget <= 0) {
@@ -2770,8 +2819,45 @@ async function handleMeDelete(req: Request, env: Env): Promise<Response> {
       .update({ user_id: null, anonymise_le: new Date().toISOString() })
       .eq('user_id', user.id).select('id');
     if (anonyme.error) {
-      console.warn('[rgpd] anonymisation des paiements impossible, suppression : '
-                 + anonyme.error.message);
+      /* LE REPLI DETRUISAIT CE QU'IL FALLAIT GARDER — et il s'executait
+       * A CHAQUE FOIS.
+       *
+       * `payments.user_id` est encore NOT NULL en base : l'UPDATE echoue
+       * donc systematiquement en 23502, et ce repli supprimait la ligne.
+       * Autrement dit l'anonymisation n'a jamais eu lieu une seule fois,
+       * `anonymise_le` n'a jamais ete ecrite, et chaque suppression de
+       * compte a emporte la preuve comptable que l'art. L102 B du LPF
+       * impose de conserver six ans.
+       *
+       * La migration 20260823180000 leve la contrainte ET remplace le
+       * ON DELETE CASCADE par un SET NULL — les deux verrous devaient
+       * sauter ensemble. Tant qu'elle n'est pas appliquee, on recopie au
+       * moins l'ecriture comptable hors de la base avant de ceder : sans
+       * identifiant de compte, donc sans donnee personnelle, mais avec le
+       * montant, la date et la reference Stripe. */
+      console.error('[rgpd] anonymisation des paiements IMPOSSIBLE ('
+                  + anonyme.error.message + ') — la migration '
+                  + '20260823180000_payments_conservation_comptable.sql '
+                  + 'n’est pas appliquee. Sauvegarde comptable hors base.');
+      try {
+        const { data: lignes } = await sb.from('payments')
+          .select('id, stripe_session_id, pack_id, credits, amount_eur, created_at')
+          .eq('user_id', user.id);
+        if (env.MESHES && Array.isArray(lignes) && lignes.length) {
+          await env.MESHES.put(
+            `_meta/compta/paiements_anonymes/${Date.now()}_${lignes.length}.json`,
+            JSON.stringify({
+              motif: 'compte supprime, colonne user_id encore NOT NULL',
+              conserve_au_titre_de: 'art. L102 B LPF (six ans)',
+              anonymise_le: new Date().toISOString(),
+              lignes,      // aucun identifiant de compte : deja exclu du select
+            }, null, 2),
+            { httpMetadata: { contentType: 'application/json' } },
+          );
+        }
+      } catch (e) {
+        console.error('[rgpd] sauvegarde comptable impossible :', (e as Error).message);
+      }
       await sb.from('payments').delete().eq('user_id', user.id);
     }
   }
@@ -6450,7 +6536,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   }
   const refundMeshSpend = async () => {
     if (useModalMesh) await refundModalSpend(env, ESTIMATED_USD_MESH, user.id);
-    else await refundDailySpend(env, ESTIMATED_USD_MESH);
+    else await refundDailySpend(env, ESTIMATED_USD_MESH, user.id);
   };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -6541,7 +6627,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
             refImageUrl: frontUrl,
             mode: rectifyMode,
             seeds: 3,
-          }, 'rectify'));
+          }, 'rectify'), req, projectName ?? undefined);
         console.log(`[wave2.1] rectified front → ${rectifyMode} (asset=${input.asset_type})`);
         frontUrl = rectifiedUrl;
       } catch (e: unknown) {
@@ -6603,7 +6689,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
               frontImageUrl: frontUrl,
               promptHint: backHint,
               seed: (input.seed ?? 42) + 1000,
-            }, 'back-auto'));
+            }, 'back-auto'), req, projectName ?? undefined);
           console.log(`[wave2.3] sheet back-view for ${input.asset_type} hint=${backHint ? 'yes' : 'no'}`);
         } else if (isMVACandidate && env.MODAL_MVADAPTER_URL) {
           // Wave 2.4 — MV-Adapter dispatch (6 orthographic views) for
@@ -6615,7 +6701,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
               frontImageUrl: frontUrl,
               promptHint: backHint,
               seed: (input.seed ?? 42) + 1000,
-            }, 'mv-auto'));
+            }, 'mv-auto'), req, projectName ?? undefined);
           autoBackUrl = mv.back;
           autoMVViews = mv.views;
           console.log(`[wave2.4] mvadapter 6-view for ${input.asset_type} views=${mv.views.length}`);
@@ -6627,7 +6713,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
               frontImageUrl: frontUrl,
               promptHint: backHint,
               seed: (input.seed ?? 42) + 1000,
-            }, 'back-auto'));
+            }, 'back-auto'), req, projectName ?? undefined);
           console.log(`[wave2.2] realvis back-view for ${input.asset_type}`);
         }
         if (autoBackUrl) {
@@ -8119,15 +8205,21 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
 
   const ct = req.headers.get('content-type') ?? '';
   let imageInput: string | File | null = null;
+  /** Nom du projet — declare ICI, hors du `if`, sinon il n'est pas en portee
+   *  au moment de journaliser, et les deux voies d'entree le portent. */
+  let projectName: string | undefined;
   if (ct.includes('application/json')) {
-    const { imageUrl } = await req.json() as { imageUrl?: string };
-    if (!imageUrl) return err(400, 'imageUrl required');
-    imageInput = imageUrl;
+    const corps = await req.json() as { imageUrl?: string; projectName?: string };
+    if (!corps.imageUrl) return err(400, 'imageUrl required');
+    imageInput = corps.imageUrl;
+    projectName = corps.projectName;
   } else {
     const fd = await req.formData();
     const f = fd.get('image');
     if (f instanceof File) imageInput = f;
     else if (typeof f === 'string') imageInput = f;
+    const pn = fd.get('projectName');
+    if (typeof pn === 'string' && pn) projectName = pn;
   }
   if (!imageInput) return err(400, 'image required');
 
@@ -8149,13 +8241,13 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundDailySpend(env, ESTIMATED_USD);
+    await refundDailySpend(env, ESTIMATED_USD, user.id);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit.` }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, COST_PER);
   if (remaining == null) {
-    await refundDailySpend(env, ESTIMATED_USD);
+    await refundDailySpend(env, ESTIMATED_USD, user.id);
     return json({ ok: false, success: false, error: `insufficient credits — remove background costs ${COST_PER} credit` }, { status: 402 });
   }
 
@@ -8208,12 +8300,12 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
   } catch (e: unknown) {
     // Refund the credit + roll back the daily-spend counters on failure.
     await addCredits(env, user.id, COST_PER);
-    await refundDailySpend(env, ESTIMATED_USD);
+    await refundDailySpend(env, ESTIMATED_USD, user.id);
     // Journalise MEME rembourse : l'appel Replicate a bien eu lieu et il est
     // facture. Un echec silencieux, c'est de la depense qui n'apparait nulle
     // part. Credits a 0 puisqu'ils sont rendus, mais la ligne existe.
     await logOperation(env, user.id, 'remove-bg', 0, opDebut, Date.now(), 'failed',
-                       { req, error: e instanceof Error ? e.message : String(e) });
+                       { req, projectName, error: e instanceof Error ? e.message : String(e) });
     return err(502, 'background-remover failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 }
@@ -8535,17 +8627,21 @@ function _assertImageBytes(buf: ArrayBuffer, source: string): void {
  *  aval — replis compris — doit continuer de fonctionner à l'identique. */
 async function _journaliserAppelAux<T>(
   env: Env, userId: string, opType: string, appel: () => Promise<T>,
+  /** Requete d'origine : sans elle, `pays` et `provenance` restent nuls
+   *  pour ces quatre operations auxiliaires. Les quatre appelants l'ont
+   *  en portee — c'etait un oubli, pas une impossibilite. */
+  req?: Request, projectName?: string,
 ): Promise<T> {
   const t0 = Date.now();
   try {
     const r = await appel();
-    // Pas de `req` en portee ici (auxiliaire generique) : la provenance
-    // restera « inconnu » pour ces appels, ce qui est exact.
-    await logOperation(env, userId, opType, 0, t0, Date.now(), 'succeeded', { auto: true });
+    await logOperation(env, userId, opType, 0, t0, Date.now(), 'succeeded',
+                       { auto: true, req, projectName });
     return r;
   } catch (e) {
     await logOperation(env, userId, opType, 0, t0, Date.now(), 'failed',
-                       { auto: true, error: e instanceof Error ? e.message : String(e) });
+                       { auto: true, req, projectName,
+                         error: e instanceof Error ? e.message : String(e) });
     throw e;
   }
 }
@@ -9341,7 +9437,14 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
    * On aligne sur la mesure, avec une marge de securite de ~2x plutot que
    * de 20x : mieux vaut un garde-fou qui mord un peu tot qu'un garde-fou
    * qui ferme le service pour rien. La t-pose garde une valeur plus haute,
-   * son pipeline etant plus long (rectification + rendu). */
+   * son pipeline etant plus long (rectification + rendu).
+   *
+   * ARITHMETIQUE, pour qu'un audit ne la reprenne pas pour une erreur :
+   * la table des couts porte les valeurs MESUREES ('text2image' 0,003,
+   * 'tpose' 0,004), celle-ci porte ce qu'on IMPUTE AU PLAFOND, marge de
+   * securite comprise. 0,006 = 2 x 0,003 ; 0,02 = 2 x (0,006 + 0,004),
+   * la t-pose enchainant une generation PUIS une passe de rectification.
+   * Les deux lignes sont donc coherentes a la meme marge de 2x. */
   const ESTIMATED_USD_PER_IMAGE = useTpose ? 0.02 : (useModal ? 0.006 : 0.30);
   const estimatedTotal = ESTIMATED_USD_PER_IMAGE * n;
 
@@ -9359,7 +9462,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
     if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
-    else await refundDailySpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit. Comes back at midnight UTC.` }, { status: 429 });
   }
@@ -9367,7 +9470,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
     if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
-    else await refundDailySpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
@@ -9406,11 +9509,11 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     await addCredits(env, user.id, cost);
     if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
-    else await refundDailySpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal, user.id);
     // Log the failure so the history CSV reflects the refunded attempt.
     await logOperation(env, user.id, opType,
                        0, opStart, Date.now(), 'failed',
-                       { req, error: e instanceof Error ? e.message : String(e), n, asset_type });
+                       { req, projectName, error: e instanceof Error ? e.message : String(e), n, asset_type });
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   // Success path — record each generation as a separate row so the
@@ -9451,7 +9554,9 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
 async function handleGenerateBackView(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  const { prompt, promptHint, numImages, frontImageUrl, asset_type } = await req.json() as {
+  const { prompt, promptHint, numImages, frontImageUrl, asset_type, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     prompt?: string;
     promptHint?: string;
     numImages?: number;
@@ -9500,7 +9605,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
     if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
-    else await refundDailySpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit.` }, { status: 429 });
   }
@@ -9508,7 +9613,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
     if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
-    else await refundDailySpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false, error: `insufficient credits — back view costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
@@ -9534,9 +9639,9 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   } catch (e) {
     await addCredits(env, user.id, cost);
     if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
-    else await refundDailySpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'back-view', 0, opStart, Date.now(),
-                       'failed', { req, error: e instanceof Error ? e.message : String(e), n });
+                       'failed', { req, projectName, error: e instanceof Error ? e.message : String(e), n });
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   // Meme decoupage que la generation d'images : sans lui, les n lignes
@@ -9547,7 +9652,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     const debut = opStart + i * bvTranche;
     await logOperation(env, user.id, 'back-view',
                        COST_PER_BACK, debut, debut + bvTranche, 'succeeded',
-                       { req, asset_type, batch_index: i, batch_size: n });
+                       { req, projectName, asset_type, batch_index: i, batch_size: n });
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
@@ -9561,7 +9666,9 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   if (!env.MODAL_IMAGE_OP_URL) {
     return err(503, 'modify backend unavailable (cloud GPU not configured)');
   }
-  const { imageUrl, prompt, strength, seed, steps } = await req.json() as {
+  const { imageUrl, prompt, strength, seed, steps, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     imageUrl?: string;
     prompt?: string;
     strength?: number;
@@ -9629,11 +9736,11 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { req, error: e instanceof Error ? e.message : String(e), op: 'modify' });
+                       'failed', { req, projectName, error: e instanceof Error ? e.message : String(e), op: 'modify' });
     return err(502, `modify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
-                     'succeeded', { req, op: 'modify', strength });
+                     'succeeded', { req, projectName, op: 'modify', strength });
   return json({ ok: true, success: true, path: url, newPath: url, creditsRemaining: remaining });
 }
 
@@ -9646,7 +9753,9 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_IMAGE_OP_URL) return err(503, 'mask preview backend unavailable');
-  const { imagePath, imageUrl, targetText, dilate } = await req.json() as {
+  const { imagePath, imageUrl, targetText, dilate, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     imagePath?: string; imageUrl?: string; targetText?: string; dilate?: number;
   };
   const src = imageUrl || imagePath;
@@ -9688,12 +9797,12 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
       // le credit ET le compteur de depense — l'operation disparaissait des
       // deux surfaces comptables a la fois.
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                         'failed', { req, op: 'segment', target: targetText, raison: 'masque vide' });
+                         'failed', { req, projectName, op: 'segment', target: targetText, raison: 'masque vide' });
       return json({ ok: false, success: false,
         error: `"${targetText}" not found in the image (credit refunded)` }, { status: 422 });
     }
     await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
-                       'succeeded', { req, op: 'segment', target: targetText });
+                       'succeeded', { req, projectName, op: 'segment', target: targetText });
     return json({ ok: true, success: true, maskUrl: result.url, url: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, cost);
@@ -9702,7 +9811,7 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
     // de reprise sur 524 peut bruler plusieurs minutes de GPU avant de lever.
     // C'est precisement celui qui ne laissait aucune trace.
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { req, op: 'segment', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, projectName, op: 'segment', error: e instanceof Error ? e.message : String(e) });
     return err(502, `mask preview failed (credit refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -9716,7 +9825,9 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
   if (!env.MODAL_IMAGE_OP_URL) {
     return err(503, 'auto-inpaint backend unavailable');
   }
-  const { imagePath, imageUrl, targetText, prompt, dilate } = await req.json() as {
+  const { imagePath, imageUrl, targetText, prompt, dilate, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     imagePath?: string;
     imageUrl?: string;
     targetText?: string;
@@ -9775,18 +9886,18 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
       await addCredits(env, user.id, cost);
       await refundModalSpend(env, estimatedTotal, user.id);
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                         'failed', { req, op: 'auto_inpaint', reason: 'mask_empty', target: targetText });
+                         'failed', { req, projectName, op: 'auto_inpaint', reason: 'mask_empty', target: targetText });
       return json({ ok: false, success: false,
         error: `auto-inpaint: "${targetText}" not found in the image (credits refunded)` }, { status: 422 });
     }
     await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
-                       'succeeded', { req, op: 'auto_inpaint', target: targetText });
+                       'succeeded', { req, projectName, op: 'auto_inpaint', target: targetText });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { req, op: 'auto_inpaint', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, projectName, op: 'auto_inpaint', error: e instanceof Error ? e.message : String(e) });
     return err(502, `auto-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -9798,7 +9909,9 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_IMAGE_OP_URL) return err(503, 'mask-inpaint backend unavailable');
 
-  const { imagePath, imageUrl, maskDataUrl, prompt } = await req.json() as {
+  const { imagePath, imageUrl, maskDataUrl, prompt, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     imagePath?: string; imageUrl?: string; maskDataUrl?: string; prompt?: string;
   };
   const src = imageUrl || imagePath;
@@ -9884,13 +9997,13 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
       throw new Error('unexpected mask_empty from mask_inpaint');
     }
     await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
-                       'succeeded', { req, op: 'mask_inpaint' });
+                       'succeeded', { req, projectName, op: 'mask_inpaint' });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { req, op: 'mask_inpaint', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, projectName, op: 'mask_inpaint', error: e instanceof Error ? e.message : String(e) });
     return err(502, `mask-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -9902,7 +10015,9 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_IMAGE_OP_URL) return err(503, 'face-fix backend unavailable');
 
-  const { imagePath, imageUrl, strength } = await req.json() as {
+  const { imagePath, imageUrl, strength, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     imagePath?: string; imageUrl?: string; strength?: number;
   };
   const src = imageUrl || imagePath;
@@ -9939,18 +10054,18 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
       await addCredits(env, user.id, COST_PER);
       await refundModalSpend(env, estimatedTotal, user.id);
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                         'failed', { req, op: 'face_fix_image', reason: 'no_face' });
+                         'failed', { req, projectName, op: 'face_fix_image', reason: 'no_face' });
       return json({ ok: false, success: false,
         error: 'no face detected in image (credits refunded)' }, { status: 422 });
     }
     await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
-                       'succeeded', { req, op: 'face_fix_image' });
+                       'succeeded', { req, projectName, op: 'face_fix_image' });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { req, op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, projectName, op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
     return err(502, `face-fix failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -10102,7 +10217,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     const errMsg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'mesh-op',
                        0, opStart, Date.now(), 'failed',
-                       { req, op_type: op, error: errMsg });
+                       { req, projectName, op_type: op, error: errMsg });
     console.error('[mesh-op]', op, errMsg, e);
     // Don't leak upstream stack/URLs to the client.
     return err(502, `mesh ${op} failed (credits refunded)`);
@@ -10232,7 +10347,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
 
     await logOperation(env, user.id, 'construction3d',
                        COST_PER, opStart, Date.now(), 'succeeded',
-                       { req, op_type: 'construction3d', stages: start.count });
+                       { req, projectName, op_type: 'construction3d', stages: start.count });
     return json({
       ok: true, success: true,
       versionMeshPath: versionUrl || finalUrl,
@@ -10247,7 +10362,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
     const errMsg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'construction3d',
                        0, opStart, Date.now(), 'failed',
-                       { req, op_type: 'construction3d', error: errMsg });
+                       { req, projectName, op_type: 'construction3d', error: errMsg });
     console.error('[construction-stages-3d]', errMsg, e);
     return err(502, 'construction stages failed (credits refunded)');
   }
@@ -10299,7 +10414,9 @@ async function handleMeshConvert(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_MESH_START_URL) return err(503, 'export backend unavailable');
 
-  const { meshUrl, format } = await req.json() as {
+  const { meshUrl, format, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     meshUrl?: string; format?: string;
   };
   // Mirror of modal_app/_convert_op.FORMATS. Kept as a literal rather
@@ -10374,12 +10491,12 @@ async function handleMeshConvert(req: Request, env: Env): Promise<Response> {
 
     await logOperation(env, user.id, 'mesh-convert',
                        0, started, Date.now(), 'succeeded',
-                       { req, format: fmt, ext, bytes: bytes.length });
+                       { req, projectName, format: fmt, ext, bytes: bytes.length });
     return json({ ok: true, url, ext, format: fmt, bytes: bytes.length });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'mesh-convert',
-                       0, started, Date.now(), 'failed', { req, format: fmt, error: msg });
+                       0, started, Date.now(), 'failed', { req, projectName, format: fmt, error: msg });
     return err(502, `conversion failed: ${msg}`);
   }
 }
@@ -10388,7 +10505,9 @@ async function handleMeshOpClientResult(req: Request, env: Env): Promise<Respons
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
 
-  const { opType, glbBase64 } = await req.json() as {
+  const { opType, glbBase64, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     opType?: string; glbBase64?: string;
   };
   const CLIENT_OPS = new Set([
@@ -10431,12 +10550,12 @@ async function handleMeshOpClientResult(req: Request, env: Env): Promise<Respons
     // free client-side op at $0.060 a pop.
     await logOperation(env, user.id, 'mesh-op-client',
                        0, opStart, Date.now(), 'succeeded',
-                       { req, op_type: op, client_side: true, size_bytes: bytes.length });
+                       { req, projectName, op_type: op, client_side: true, size_bytes: bytes.length });
     return json({ ok: true, success: true, path: url, newPath: url, mesh_url: url });
   } catch (e) {
     await logOperation(env, user.id, 'mesh-op-client',
                        0, opStart, Date.now(), 'failed',
-                       { req, op_type: op, client_side: true,
+                       { req, projectName, op_type: op, client_side: true,
                          error: e instanceof Error ? e.message : String(e) });
     return err(502, `client-side mesh op upload failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -13166,7 +13285,9 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_IMAGE_OP_URL) return err(503, 'upscale backend unavailable');
 
-  const { imagePath, imageUrl, scale } = await req.json() as {
+  const { imagePath, imageUrl, scale, projectName } = await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
     imagePath?: string; imageUrl?: string; scale?: number;
   };
   const src = imageUrl || imagePath;
@@ -13202,13 +13323,13 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
     }, 'upscale');
     if ('maskEmpty' in result) throw new Error('unexpected mask_empty from upscale');
     await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
-                       'succeeded', { req, op: 'upscale', scale: factor });
+                       'succeeded', { req, projectName, op: 'upscale', scale: factor });
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
-                       'failed', { req, op: 'upscale', error: e instanceof Error ? e.message : String(e) });
+                       'failed', { req, projectName, op: 'upscale', error: e instanceof Error ? e.message : String(e) });
     return err(502, `upscale failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -13280,8 +13401,10 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   if (!env.MODAL_RECTIFY_URL) {
     return err(503, 'rectify backend unavailable (cloud GPU not configured)');
   }
-  const { prompt, refImageUrl, mode, seeds, steps, guidance, ip_scale } =
+  const { prompt, refImageUrl, mode, seeds, steps, guidance, ip_scale, projectName } =
     await req.json() as {
+    /** Nom du projet, transmis par les deux clients et jusqu’ici ignore. */
+    projectName?: string;
       prompt?: string;
       refImageUrl?: string;
       mode?: 'front' | 'iso';
@@ -13348,11 +13471,11 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'rectify', 0, opStart, Date.now(),
-                       'failed', { req, error: e instanceof Error ? e.message : String(e), mode, nSeeds });
+                       'failed', { req, projectName, error: e instanceof Error ? e.message : String(e), mode, nSeeds });
     return err(502, `rectify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   await logOperation(env, user.id, 'rectify', cost, opStart, Date.now(),
-                     'succeeded', { req, mode, nSeeds });
+                     'succeeded', { req, projectName, mode, nSeeds });
   return json({ ok: true, success: true, path, creditsRemaining: remaining });
 }
 
@@ -16610,7 +16733,8 @@ async function reapStuckJobs(env: Env): Promise<ReapResult> {
         // the row; the 'modal_' prefix is the fallback for legacy rows).
         const backend = String((job.options as Record<string, unknown> | null)?.backend
           || (pollable ? 'modal' : 'replicate'));
-        if (backend === 'replicate') await refundDailySpend(env, recordedUsd).catch(() => {});
+        if (backend === 'replicate') await refundDailySpend(env, recordedUsd,
+          typeof job.user_id === 'string' ? job.user_id : undefined).catch(() => {});
         // Avec l'identifiant : meme raison que les gestionnaires de statut.
         else await refundModalSpend(env, recordedUsd, typeof job.user_id === 'string' ? job.user_id : undefined).catch(() => {});
       };

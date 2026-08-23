@@ -50,11 +50,37 @@
   };
 
   // --- HTTP helpers --------------------------------------------------
+  /* Nom du projet courant, pour la journalisation cote serveur.
+   *
+   * `logOperation` sait ecrire `project_name` depuis le corps de la
+   * requete, mais UN SEUL appelant sur dix le transmettait : sur 327
+   * travaux, les 144 text2image, les 23 rig et les 21 back-view avaient la
+   * colonne a NULL. Impossible, dans ces conditions, de dire a quel projet
+   * appartient une image — c'est ce qui a fait repondre a tort « il a
+   * genere huit fois sans creer de projet ».
+   *
+   * On l'ajoute ICI, dans le seul point de passage commun, plutot que sur
+   * dix sites d'appel dont on en oublierait forcement un. Ce que
+   * l'appelant fournit explicitement l'emporte toujours. */
+  function _projetCourant() {
+    try {
+      const n = window.state && window.state.currentProject
+              && window.state.currentProject.name;
+      return (typeof n === 'string' && n.trim()) ? n.trim().slice(0, 128) : undefined;
+    } catch (_) { return undefined; }
+  }
+
   async function postJSON(url, body) {
+    let corps = body || {};
+    if (corps && typeof corps === 'object' && !Array.isArray(corps)
+        && corps.projectName === undefined) {
+      const pn = _projetCourant();
+      if (pn) corps = { ...corps, projectName: pn };
+    }
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
+      body: JSON.stringify(corps),
       credentials: 'include',
     });
     // Tag non-OK responses with ok:false so callers (deleteMesh,
@@ -70,6 +96,12 @@
     return body_;
   }
   async function postForm(url, formData) {
+    try {
+      const pn = _projetCourant();
+      if (pn && formData && typeof formData.has === 'function' && !formData.has('projectName')) {
+        formData.append('projectName', pn);
+      }
+    } catch (_) { /* journalisation seule — ne jamais casser l'envoi */ }
     const r = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });
     return r.json();
   }

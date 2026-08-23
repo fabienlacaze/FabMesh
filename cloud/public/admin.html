@@ -4321,6 +4321,11 @@
         if (t === 'active') { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'active'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'users'   && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
+        // Trafic : la seule facon de remplir les tableaux etait de cliquer
+        // « 🔄 Charger ». L'onglet s'ouvrait donc VIDE, ce qui se lit comme
+        // « aucune donnee » alors que la collecte fonctionne. On charge a
+        // l'ouverture, comme les autres onglets.
+        if (t === 'traffic' && !btn.dataset.loaded) { btn.dataset.loaded = '1'; chargerAudience(); }
         // Pricing et Services : on tente le deverrouillage avec le mot de
         // passe de la connexion. En cas d'echec (page rechargee, cookie encore
         // valide mais mot de passe plus en memoire) la carte reste affichee et

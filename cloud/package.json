@@ -14,7 +14,8 @@
     "setup:prod": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-prod.ps1",
     "sync-app": "node scripts/sync-app.mjs",
     "check:r2-public": "node scripts/check-r2-public.mjs",
-    "predeploy": "node scripts/check-r2-public.mjs && node scripts/check-legal-identity.mjs",
+    "predeploy": "node scripts/check-r2-public.mjs && node scripts/check-legal-identity.mjs && node scripts/check-out-frais.mjs",
+    "check:out-frais": "node scripts/check-out-frais.mjs",
     "types:worker": "wrangler types --path src/worker-env.d.ts",
     "typecheck:worker": "tsc --noEmit -p tsconfig.worker.json"
   },

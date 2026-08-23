@@ -46,7 +46,11 @@ create index if not exists jobs_user_idx on public.jobs (user_id, created_at des
 create table if not exists public.payments (
   id                 bigserial primary key,
   stripe_session_id  text unique not null,
-  user_id            uuid not null references auth.users(id) on delete cascade,
+  -- NI `not null`, NI `on delete cascade` : les deux empechaient
+  -- l'anonymisation comptable (voir `anonymise_le` plus bas). Le premier
+  -- faisait echouer l'UPDATE en 23502, le second aurait de toute facon
+  -- emporte la ligne a la suppression du compte auth.
+  user_id            uuid references auth.users(id) on delete set null,
   pack_id            text not null,
   credits            integer not null,
   -- Dotation d'ORIGINE, figee au premier remboursement partiel.
@@ -58,6 +62,15 @@ create table if not exists public.payments (
   -- remboursement n'a eu lieu.
   credits_origine    integer,
   amount_eur         numeric(8,2),
+  -- Date de deliaison du compte (droit a l'effacement, art. 17 RGPD).
+  --
+  -- La ligne n'est PAS supprimee quand un compte l'est : l'art. L102 B du
+  -- livre des procedures fiscales impose de conserver six ans les pieces
+  -- justificatives de recettes, et l'art. 17.3.b du RGPD reserve ce cas.
+  -- On retire l'identifiant utilisateur, on garde montant, date et
+  -- reference Stripe. Cette colonne manquait du schema : un environnement
+  -- reconstruit a partir d'ici etait non conforme.
+  anonymise_le       timestamptz,
   created_at         timestamptz not null default now()
 );
 
