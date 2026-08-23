@@ -14,7 +14,9 @@
     "setup:prod": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-prod.ps1",
     "sync-app": "node scripts/sync-app.mjs",
     "check:r2-public": "node scripts/check-r2-public.mjs",
-    "predeploy": "node scripts/check-r2-public.mjs"
+    "predeploy": "node scripts/check-r2-public.mjs && node scripts/check-legal-identity.mjs",
+    "types:worker": "wrangler types --path src/worker-env.d.ts",
+    "typecheck:worker": "tsc --noEmit -p tsconfig.worker.json"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.53.1",

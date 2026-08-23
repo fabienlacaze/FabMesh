@@ -1,0 +1,35 @@
+{
+  // Verification de types du WORKER — le fichier que tsconfig.json exclut.
+  //
+  // POURQUOI CE FICHIER EXISTE (2026-08-23)
+  // ---------------------------------------
+  // `tsconfig.json` porte `"exclude": ["node_modules", "src/worker.ts"]`.
+  // Autrement dit, les ~15 000 lignes qui encaissent l'argent, signent les
+  // URL R2 et appliquent les plafonds de depense n'etaient verifiees par
+  // RIEN. `npm run lint` et `tsc -p tsconfig.json` passaient au vert sans
+  // jamais les lire — y compris quand on croyait les avoir controlees.
+  //
+  // Ce n'est pas theorique : le defaut de remboursement partiel (un SELECT
+  // qui ne demande pas `credits_origine` ni `amount_eur`, puis les lit)
+  // aurait ete signale a la compilation. Il a fallu un audit pour le voir.
+  //
+  // Les types d'execution viennent de `wrangler types` (src/worker-env.d.ts,
+  // regenere avec `npm run types:worker`). A relancer apres toute
+  // modification de wrangler.toml.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["esnext"],
+    "types": [],
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": "./src",
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["src/worker.ts", "src/worker-env.d.ts"]
+}

@@ -189,15 +189,26 @@ export interface Env {
   // bucket in production. Set R2_ALLOW_UNSIGNED="1" to opt back into the old
   // public-URL fallback for local development. NEVER set this in production.
   R2_ALLOW_UNSIGNED?: string;
+  /* Identifiant du compte Cloudflare. Deploye comme secret depuis
+   * longtemps mais jamais declare ici — donc invisible du code, qui
+   * se rabattait sur un joker `*.r2.cloudflarestorage.com` acceptant
+   * le compte de n'importe qui (voir isTrustedAssetHost). */
+  R2_ACCOUNT_ID?: string;
 }
 
-/** Minimal R2Bucket type (avoid pulling @cloudflare/workers-types). */
-interface R2Bucket {
-  put(key: string, value: ReadableStream | ArrayBuffer | string, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
-  get(key: string): Promise<{ body: ReadableStream; text(): Promise<string> } | null>;
-  delete(key: string): Promise<void>;
-  list(opts?: { prefix?: string; limit?: number; cursor?: string }): Promise<{ objects: Array<{ key: string; size: number; uploaded: Date }>; truncated: boolean; cursor?: string }>;
-}
+/* `R2Bucket` vient desormais des types d'execution generes par
+ * `wrangler types` (src/worker-env.d.ts, cible `npm run types:worker`).
+ *
+ * Il y avait ici un « Minimal R2Bucket type (avoid pulling
+ * @cloudflare/workers-types) » : quatre methodes ecrites a la main, sans
+ * `head()`, sans `onlyIf`, sans `etag`, sans `json()`, et dont `put()`
+ * refusait un Uint8Array. Ce stub MASQUAIT le vrai type, donc le
+ * compilateur validait des appels qui n'existent pas et en refusait qui
+ * existent. Il tenait surtout parce que `tsconfig.json` excluait ce
+ * fichier : personne ne compilait jamais ces lignes.
+ *
+ * Le supprimer fait apparaitre la vraie surface de l'API — y compris les
+ * erreurs qu'elle aurait signalees depuis le debut. */
 
 /* ───────────────────────── budget safeguards ────────────────────────
  * Tracks spending and per-user rate-limits in R2 so a runaway loop
@@ -240,15 +251,26 @@ function isTrustedAssetHost(env: Env, u: string): boolean {
     const parsed = new URL(u);
     if (parsed.protocol !== 'https:') return false;
     const host = parsed.hostname.toLowerCase();
-    if (host.endsWith('.r2.dev')) return true;
-    if (host.endsWith('.r2.cloudflarestorage.com')) return true;
+    /* PLUS DE JOKER SUR LES DOMAINES PARTAGES (2026-08-23).
+     *
+     * Trois regles acceptaient l'infrastructure de TOUT LE MONDE :
+     *   `*.r2.dev`                  -> le seau public de n'importe quel
+     *                                  compte Cloudflare ;
+     *   `*.workers.dev` + /r2/      -> n'importe quel sous-domaine, or
+     *                                  chacun peut en enregistrer un ;
+     *   `*.r2.cloudflarestorage.com`-> n'importe quel compte R2.
+     * Un vendeur de la boutique pouvait donc faire valider une image par la
+     * moderation, puis la remplacer sur SON propre seau ; et n'importe quelle
+     * URL de cette forme etait relayee par nos transmetteurs Modal.
+     *
+     * Les trois etaient REDONDANTES : nos propres hotes sont deja reconnus
+     * plus bas par comparaison exacte avec NEXT_PUBLIC_SITE_URL (notre
+     * workers.dev) et R2_PUBLIC_URL (notre r2.dev). Le compte R2 est
+     * desormais compare a R2_ACCOUNT_ID plutot qu'accepte en bloc. */
+    if (env.R2_ACCOUNT_ID && host === `${String(env.R2_ACCOUNT_ID).toLowerCase()}.r2.cloudflarestorage.com`) return true;
     if (host === 'replicate.delivery') return true;
     if (host.endsWith('.replicate.delivery')) return true;
     if (host === 'image.pollinations.ai') return true;
-    // Nos PROPRES URLs signées (/r2/<clé>?exp&sig servies par ce worker) :
-    // le desktop uploade via /api/upload-image|mesh puis renvoie l'URL
-    // reçue aux endpoints d'op — même origine que SITE_URL/workers.dev.
-    if (host.endsWith('.workers.dev') && parsed.pathname.startsWith('/r2/')) return true;
     if (env.NEXT_PUBLIC_SITE_URL) {
       try {
         const own = new URL(env.NEXT_PUBLIC_SITE_URL).hostname.toLowerCase();
@@ -522,6 +544,10 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userI
   // budget, roll back the global increment (refundModalSpend also fixes the
   // running total) and refuse — same signal as a global over-budget.
   if (userId && (await checkAndIncrementUserDailySpend(env, userId, estimatedUsd)) == null) {
+    // SANS `userId` A DESSEIN : le compteur par utilisateur a REFUSE, donc
+    // il n'a rien incremente. Lui passer l'identifiant ici le decrementerait
+    // pour une depense qu'il n'a jamais enregistree — et offrirait de la
+    // marge a chaque refus. Seul le compteur global doit revenir en arriere.
     await refundModalSpend(env, estimatedUsd);
     return null;
   }
@@ -536,7 +562,21 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number, userI
   return maxUsd - next;
 }
 
-async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
+/* Rend une depense estimee quand le travail n'a PAS eu lieu.
+ *
+ * `userId` a ete ajoute le 2026-08-23. La fonction ne decrementait que les
+ * compteurs GLOBAUX ; le compteur PAR UTILISATEUR
+ * (`_meta/userspend/<uid>/<jour>`, incremente par
+ * checkAndIncrementUserDailySpend) n'etait rembourse nulle part. Un client
+ * dont cinq generations echouaient cote Modal voyait donc son enveloppe
+ * personnelle de 2 $/jour consommee par du travail jamais livre, puis se
+ * faisait refuser la suivante — apres avoir ete rembourse en credits, ce
+ * qui rendait le refus incomprehensible.
+ *
+ * L'argument est optionnel : les appelants sans utilisateur en portee
+ * (garde interne de checkAndIncrementModalSpend) gardent le comportement
+ * d'origine. */
+async function refundModalSpend(env: Env, refundUsd: number, userId?: string): Promise<void> {
   const key = `_meta/modal_spend/${todayUTC()}`;
   const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
   await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
@@ -545,6 +585,13 @@ async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
     const t = parseFloat((await r2GetText(env, tk)) || '0') || 0;
     await env.MESHES.put(tk, String(Math.max(0, t - refundUsd)));
   } catch (_) {}
+  if (userId) {
+    try {
+      const uk = `_meta/userspend/${userId}/${todayUTC()}`;
+      const u = parseFloat((await r2GetText(env, uk)) || '0') || 0;
+      await env.MESHES.put(uk, String(Math.max(0, u - refundUsd)));
+    } catch (_) { /* comptabilite seule — ne jamais faire echouer un remboursement */ }
+  }
 }
 
 /** Fire an admin alert (banner via _meta/modal_alert.json + email) when the Modal
@@ -1000,6 +1047,28 @@ async function insertUserAsset(
   meta: Record<string, unknown> = {},
 ): Promise<void> {
   if (!project || !r2_path) return;
+  /* UNE CLE N'APPARTIENT QU'AU PREFIXE DE SON PROPRIETAIRE (2026-08-23).
+   *
+   * Ce garde existait sur UNE SEULE des six voies d'appel
+   * (`/api/user-assets/record`). `/api/user-assets/migrate-from-jobs`
+   * lisait `options.sourceImage` d'une ligne `jobs` et l'enregistrait tel
+   * quel : une valeur pointant vers `<autre-uid>/...` devenait un actif du
+   * demandeur, que `signedR2Url` signait ensuite sans sourciller. Un compte
+   * gratuit pouvait ainsi telecharger les images sources d'un autre client.
+   *
+   * Le garde est place ICI, pas chez les appelants : six copies, c'est six
+   * occasions d'en oublier une — et c'est precisement ce qui s'est passe.
+   * Les cinq chemins legitimes ecrivent deja sous `<uid>/` (verifie :
+   * miniatures en 10682, images generees en 8087), ils ne voient donc
+   * aucune difference.
+   *
+   * On refuse en silence plutot que de lever : les lots legitimes doivent
+   * passer, seule la cle etrangere est ignoree. */
+  if (!String(r2_path).startsWith(`${userId}/`)) {
+    console.warn(`[user_assets] cle hors prefixe refusee pour ${userId}: `
+                 + String(r2_path).slice(0, 80));
+    return;
+  }
   try {
     const sb = supabaseAdmin(env);
     const { error } = await sb.from('user_assets').upsert({
@@ -1544,7 +1613,13 @@ interface GenerateInput {
   // Trellis2 advanced options — values MUST match the data-credits
   // attributes in cloud/public/app/index.html so the UI cost meter and
   // the server never disagree.
-  preset?: 'fast' | 'balanced' | 'quality';
+  // 'ultra_8k' MANQUAIT ici alors que le client l'envoie
+  // (cloud/public/app/index.html:672, <option value="ultra_8k">).
+  // Le debit etait juste — JavaScript ignore les types — mais le
+  // compilateur declarait la branche `preset === 'ultra_8k'` de
+  // creditCost() inatteignable : un nettoyage de code s'y fiant aurait
+  // supprime la seule ligne qui facture 16 credits.
+  preset?: 'fast' | 'balanced' | 'quality' | 'ultra_8k';
   multiref?: boolean;
   refine?: boolean;
   quality_plus?: boolean;
@@ -4089,6 +4164,22 @@ async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
   if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
   if (!env.MESHES) return err(500, 'storage not configured');
 
+  /* MEME GARDE QUE LE TUNNEL CREDITS (handleCheckout, plus bas).
+   *
+   * Il n'existait QUE la-bas. La caisse de la boutique laissait donc un
+   * acheteur derouler tout le paiement sur une cle sk_test_ : la carte de
+   * test 4242 passait, l'ecran de succes s'affichait, puis le webhook
+   * rejetait l'evenement `livemode:false` — aucun achat livre, aucun
+   * message, et l'acheteur croyait avoir paye. Sur une place de marche ou
+   * un VENDEUR attend son du, le meme trou permettait aussi de se
+   * fabriquer des acquisitions gratuites.
+   *
+   * STRIPE_ALLOW_TEST_MODE=1 pour eprouver la chaine deliberement. */
+  if (/^sk_test_/.test(env.STRIPE_SECRET_KEY) && env.STRIPE_ALLOW_TEST_MODE !== '1' && !isMock(env)) {
+    console.error('[market] cle Stripe de TEST — ouverture de paiement refusee.');
+    return err(503, 'Payments are temporarily unavailable. Please try again later.');
+  }
+
   let body: { listing_ids?: string[] };
   try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
   const ids = (body.listing_ids ?? []).filter((x) => typeof x === 'string').slice(0, 50);
@@ -4794,6 +4885,21 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
       }
     }
     // State 1 (just inserted) and state 2 (resuming) converge here.
+    /* LE CLIENT QUI VIENT DE PAYER N'EST PLUS « NON PAYANT ».
+     *
+     * `_isPaidAccount` met en cache une reponse NEGATIVE pour la journee
+     * entiere (`_meta/paidcheck/<uid>/<jour>`), afin de ne pas interroger
+     * Supabase a chaque appel. Ce cache n'etait efface nulle part : un
+     * client qui epuisait ses credits offerts le matin, puis achetait un
+     * pack Studio a 50 EUR l'apres-midi, restait rationne a ~5 generations
+     * par le plafond de 2 $/jour JUSQU'A MINUIT UTC — le jour meme de son
+     * achat, et sans aucune explication a l'ecran.
+     *
+     * On efface le cache negatif au moment ou les credits arrivent. Le
+     * marqueur positif, lui, sera pose paresseusement au prochain appel. */
+    try {
+      if (env.MESHES) await env.MESHES.delete(`_meta/paidcheck/${opts.userId}/${todayUTC()}`);
+    } catch { /* le cache expire de toute facon a minuit UTC */ }
     const credited = await addCredits(env, opts.userId, opts.credits);
     if (credited === null) {
       // RPC failed; placeholder stays at credits=0 so the next retry
@@ -4884,12 +4990,30 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
       // checkoutSessionId est stocke dans stripe_session_id ; selon le
       // chemin, l'identifiant utile est le payment_intent ou la charge.
       const refs = [ch.payment_intent, ch.id].filter(Boolean) as string[];
-      let paiement: { id: number; user_id: string; credits: number } | null = null;
+      /* LES DEUX COLONNES QUE LE CALCUL LIT DOIVENT ETRE DEMANDEES.
+       *
+       * Le `select` ne demandait que `id, user_id, credits`, alors que la
+       * suite lit `credits_origine` (reprise cumulative) et `amount_eur`
+       * (montant restant). Les deux valaient donc TOUJOURS `undefined` :
+       *   - `origine` retombait sur le solde courant, donc au 2e
+       *     remboursement d'un pack Studio le client perdait 210 credits
+       *     au lieu de 175 ;
+       *   - `montantRestant` valait 0, donc la vente disparaissait du
+       *     chiffre d'affaires des le premier remboursement partiel.
+       *
+       * Ni l'un ni l'autre ne pouvait etre vu : `tsconfig.json` excluait
+       * ce fichier de toute verification (voir tsconfig.worker.json). */
+      const COLONNES_PAIEMENT = 'id, user_id, credits, credits_origine, amount_eur';
+      type LignePaiement = {
+        id: number; user_id: string; credits: number;
+        credits_origine?: number | null; amount_eur?: number | null;
+      };
+      let paiement: LignePaiement | null = null;
       for (const ref of refs) {
         const { data } = await sb.from('payments')
-          .select('id, user_id, credits')
+          .select(COLONNES_PAIEMENT)
           .eq('stripe_session_id', ref).maybeSingle();
-        if (data) { paiement = data as typeof paiement; break; }
+        if (data) { paiement = data as unknown as LignePaiement; break; }
       }
 
       // RECHERCHE PAR LA SESSION DE PAIEMENT — sans elle, la boucle ci-dessus
@@ -4919,9 +5043,9 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
           for (const sess of sessions) {
             if (!sess?.id) continue;
             const { data } = await sb.from('payments')
-              .select('id, user_id, credits')
+              .select(COLONNES_PAIEMENT)
               .eq('stripe_session_id', sess.id).maybeSingle();
-            if (data) { paiement = data as typeof paiement; break; }
+            if (data) { paiement = data as unknown as LignePaiement; break; }
           }
         } catch (e) {
           console.warn('[stripe] resolution de la session impossible:', (e as Error).message);
@@ -4952,7 +5076,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
        * deja ete repris. */
       const creditsCourants = Number(paiement?.credits ?? 0);
       const origine = Number(
-        (paiement as { credits_origine?: number } | null)?.credits_origine ?? creditsCourants);
+        paiement?.credits_origine ?? creditsCourants);
       const ratio = total
         ? 1
         : (ch.amount && ch.amount_refunded && ch.amount > 0
@@ -5002,7 +5126,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
           credits: restant,
           amount_eur: Math.round(montantRestant * 100) / 100,
         };
-        if ((paiement as { credits_origine?: number }).credits_origine == null) {
+        if (paiement.credits_origine == null) {
           maj.credits_origine = origine;
         }
         const { error: errMaj } = await sb.from('payments').update(maj).eq('id', paiement.id);
@@ -5283,7 +5407,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     return err(429, await _spendRefusalMessage(env, user.id));
   }
   const refundMeshSpend = async () => {
-    if (useModalMesh) await refundModalSpend(env, ESTIMATED_USD_MESH);
+    if (useModalMesh) await refundModalSpend(env, ESTIMATED_USD_MESH, user.id);
     else await refundDailySpend(env, ESTIMATED_USD_MESH);
   };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
@@ -7972,7 +8096,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // Per-user daily call cap — refund on failure too.
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    if (useModal) await refundModalSpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
     else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit. Comes back at midnight UTC.` }, { status: 429 });
@@ -7980,7 +8104,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    if (useModal) await refundModalSpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
     else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
@@ -8019,7 +8143,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     }
   } catch (e) {
     await addCredits(env, user.id, cost);
-    if (useModal) await refundModalSpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
     else await refundDailySpend(env, estimatedTotal);
     // Log the failure so the history CSV reflects the refunded attempt.
     await logOperation(env, user.id, opType,
@@ -8113,7 +8237,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    if (useModal) await refundModalSpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
     else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit.` }, { status: 429 });
@@ -8121,7 +8245,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    if (useModal) await refundModalSpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
     else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false, error: `insufficient credits — back view costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
@@ -8147,7 +8271,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     }
   } catch (e) {
     await addCredits(env, user.id, cost);
-    if (useModal) await refundModalSpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal, user.id);
     else await refundDailySpend(env, estimatedTotal);
     await logOperation(env, user.id, 'back-view', 0, opStart, Date.now(),
                        'failed', { error: e instanceof Error ? e.message : String(e), n });
@@ -8212,14 +8336,14 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit.` }, { status: 429 });
   }
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — modify costs ${cost} credits` }, { status: 402 });
   }
@@ -8241,7 +8365,7 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
     url = result.url;
   } catch (e) {
     await addCredits(env, user.id, cost);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { error: e instanceof Error ? e.message : String(e), op: 'modify' });
     return err(502, `modify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
@@ -8277,13 +8401,13 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: 'per-user daily generation limit reached.' }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — mask preview costs ${cost} credit` }, { status: 402 });
   }
@@ -8296,7 +8420,7 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
     }, 'segment');
     if ('maskEmpty' in result) {
       await addCredits(env, user.id, cost);
-      await refundModalSpend(env, estimatedTotal);
+      await refundModalSpend(env, estimatedTotal, user.id);
       // CLIPSeg a bien tourne sur le GPU : masque vide ne veut pas dire
       // calcul gratuit. Sans cette ligne, le remboursement effacait a la fois
       // le credit ET le compteur de depense — l'operation disparaissait des
@@ -8311,7 +8435,7 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
     return json({ ok: true, success: true, maskUrl: result.url, url: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, cost);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     // Le mode d'echec le PLUS COUTEUX est celui qui passait ici : l'echelle
     // de reprise sur 524 peut bruler plusieurs minutes de GPU avant de lever.
     // C'est precisement celui qui ne laissait aucune trace.
@@ -8366,13 +8490,13 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `per-user daily generation limit reached.` }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — auto inpaint costs ${cost} credits` }, { status: 402 });
   }
@@ -8387,7 +8511,7 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
       // Refund — the GPU did NOT do any real work (just CLIPSeg, which
       // is cheap and we don't bill the user for a missed mask).
       await addCredits(env, user.id, cost);
-      await refundModalSpend(env, estimatedTotal);
+      await refundModalSpend(env, estimatedTotal, user.id);
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                          'failed', { op: 'auto_inpaint', reason: 'mask_empty', target: targetText });
       return json({ ok: false, success: false,
@@ -8398,7 +8522,7 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, cost);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { op: 'auto_inpaint', error: e instanceof Error ? e.message : String(e) });
     return err(502, `auto-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
@@ -8474,13 +8598,13 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: 'per-user daily generation limit reached.' }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, COST_PER);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — mask inpaint costs ${COST_PER} credits` }, { status: 402 });
   }
@@ -8502,7 +8626,7 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { op: 'mask_inpaint', error: e instanceof Error ? e.message : String(e) });
     return err(502, `mask-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
@@ -8532,12 +8656,12 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, COST_PER);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false, error: `insufficient credits — face-fix costs ${COST_PER}` }, { status: 402 });
   }
 
@@ -8551,7 +8675,7 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
     if ('maskEmpty' in result) {
       // No face detected — refund.
       await addCredits(env, user.id, COST_PER);
-      await refundModalSpend(env, estimatedTotal);
+      await refundModalSpend(env, estimatedTotal, user.id);
       await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                          'failed', { op: 'face_fix_image', reason: 'no_face' });
       return json({ ok: false, success: false,
@@ -8562,7 +8686,7 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
     return err(502, `face-fix failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
@@ -8653,12 +8777,12 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, COST_PER);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — ${op} costs ${COST_PER}` }, { status: 402 });
   }
@@ -8709,7 +8833,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     const errMsg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'mesh-op',
                        0, opStart, Date.now(), 'failed',
@@ -8771,12 +8895,12 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, COST_PER);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — construction stages cost ${COST_PER}` }, { status: 402 });
   }
@@ -8854,7 +8978,7 @@ async function handleConstructionStages3d(req: Request, env: Env): Promise<Respo
     });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     const errMsg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'construction3d',
                        0, opStart, Date.now(), 'failed',
@@ -9562,7 +9686,7 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
     return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
   }
   const refundRigSpend = async () => {
-    await refundModalSpend(env, ESTIMATED_USD_RIG);
+    await refundModalSpend(env, ESTIMATED_USD_RIG, user.id);
   };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -9913,7 +10037,7 @@ async function handleMeshSegment(req: Request, env: Env): Promise<Response> {
     return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
   }
   const refundSegmentSpend = async () => {
-    await refundModalSpend(env, ESTIMATED_USD_SEGMENT);
+    await refundModalSpend(env, ESTIMATED_USD_SEGMENT, user.id);
   };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -11087,7 +11211,7 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
 
   const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM, user.id);
   if (remainingBudget == null) return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
-  const refundAnimSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM); };
+  const refundAnimSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM, user.id); };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
     await refundAnimSpend();
@@ -11383,7 +11507,7 @@ async function handleAnimateFromReference(req: Request, env: Env): Promise<Respo
 
   const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM, user.id);
   if (remainingBudget == null) return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
-  const refundSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM); };
+  const refundSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM, user.id); };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
     await refundSpend();
@@ -11724,12 +11848,12 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
   }
   const remaining = await spendCredits(env, user.id, COST_PER);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — upscale x${factor} costs ${COST_PER}` }, { status: 402 });
   }
@@ -11745,7 +11869,7 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
     return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { op: 'upscale', error: e instanceof Error ? e.message : String(e) });
     return err(502, `upscale failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
@@ -11859,14 +11983,14 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit.` }, { status: 429 });
   }
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     return json({ ok: false, success: false,
       error: `insufficient credits — rectify costs ${cost} credits` }, { status: 402 });
   }
@@ -11885,7 +12009,7 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
     }, 'rectify');
   } catch (e) {
     await addCredits(env, user.id, cost);
-    await refundModalSpend(env, estimatedTotal);
+    await refundModalSpend(env, estimatedTotal, user.id);
     await logOperation(env, user.id, 'rectify', 0, opStart, Date.now(),
                        'failed', { error: e instanceof Error ? e.message : String(e), mode, nSeeds });
     return err(502, `rectify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
