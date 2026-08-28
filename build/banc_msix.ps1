@@ -114,7 +114,7 @@ public class W {
     Start-Sleep -Seconds 1
     $procs = @(Get-Process -Name 'MyFabmesh*' -ErrorAction SilentlyContinue)
     if ($procs.Count -eq 0) { continue }
-    $titres = [W]::Fenetres([uint[]]($procs | ForEach-Object { [uint32]$_.Id }))
+    $titres = [W]::Fenetres([uint32[]]($procs | ForEach-Object { [uint32]$_.Id }))
     if ($titres -and -not $premiereFenetre) {
       $premiereFenetre = ((Get-Date) - $t0).TotalMilliseconds
       Bon ("   FENETRE VISIBLE a t=" + [math]::Round($premiereFenetre) + " ms")
