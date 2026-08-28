@@ -96,7 +96,24 @@ if ($LASTEXITCODE -ne 0) { Write-Host "Echec de la signature." -ForegroundColor 
 Write-Host "== Package signe" -ForegroundColor Green
 
 # --- 5. installation ---------------------------------------------------------
-Get-AppxPackage -Name "*MyFabmesh*" | ForEach-Object { Remove-AppxPackage $_.PackageFullName -ErrorAction SilentlyContinue }
+# L'ANCIEN PAQUET DOIT VRAIMENT PARTIR, ET EN CAS D'ECHEC ON DOIT LE VOIR.
+# Le 2026-08-28, un 1.0.33 sideloade le 20/08 etait reste installe :
+# Remove-AppxPackage echouait (l'app tournait encore) mais SilentlyContinue
+# avalait l'erreur, et Add-AppxPackage sortait en 0x80073CFB « meme identite,
+# contenu different ». On arrete d'abord les processus, on retire, et on
+# VERIFIE que la desinstallation a bien eu lieu avant d'installer.
+Get-Process -Name 'MyFabmesh*' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Get-AppxPackage -Name "*MyFabmesh*" | ForEach-Object {
+  Write-Host "  desinstallation de $($_.PackageFullName)"
+  Remove-AppxPackage $_.PackageFullName
+}
+$restant = Get-AppxPackage -Name "*MyFabmesh*"
+if ($restant) {
+  Write-Host "Un paquet MyFabmesh est TOUJOURS installe : $($restant.PackageFullName)" -ForegroundColor Red
+  Write-Host "Installer par-dessus echouerait en 0x80073CFB. Abandon." -ForegroundColor Red
+  exit 1
+}
 Add-AppxPackage -Path $signed
 Remove-Item $pfx -Force -ErrorAction SilentlyContinue
 
