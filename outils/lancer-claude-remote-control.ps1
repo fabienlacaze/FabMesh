@@ -12,6 +12,9 @@ $claude = 'C:\Users\Utilisateur\AppData\Roaming\npm\claude.cmd'   # chemin absol
 $log = Join-Path $repo 'logs\claude-remote-control.log'
 
 Set-Location $repo
+# VS Code ouvert sur le depot, pour retrouver l'atelier a l'ecran en arrivant.
+$code = 'C:\Users\Utilisateur\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd'
+if (Test-Path $code) { Start-Process -FilePath $code -ArgumentList ('"' + $repo + '"') -WindowStyle Hidden }
 $env:ELECTRON_RUN_AS_NODE = $null
 "[$(Get-Date -Format s)] demarrage remote-control" | Out-File -Append -Encoding utf8 $log
 
