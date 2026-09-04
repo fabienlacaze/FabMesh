@@ -88,9 +88,11 @@ Write-Host "   Peripheriques armes pour le reveil :"
 powercfg /devicequery wake_armed | Where-Object { $_ -match 'Realtek' } | ForEach-Object { Write-Host "     $_" }
 
 Write-Host ""
-Write-Host "RESTE A FAIRE UNE FOIS, DANS LE BIOS (touche Suppr au demarrage) :" -ForegroundColor Yellow
-Write-Host "   Advanced > APM Configuration > Power On By PCI-E = Enabled"
-Write-Host "   Advanced > APM Configuration > ErP Ready         = Disabled"
+Write-Host "RESTE A FAIRE UNE FOIS, DANS LE BIOS :" -ForegroundColor Yellow
+Write-Host "   Advanced > APM Configuration > Restore AC Power Loss = Power On"
+Write-Host "   (allumage par prise connectee Kasa : le PC demarre quand le courant revient.)"
+Write-Host "   Power On By PCI-E / ErP ne servent QUE si tu reveilles par paquet magique"
+Write-Host "   depuis le reseau local (outils\wake-pc.ps1) -- inutile a distance."
 Write-Host ""
-Write-Host "TEST : eteins le PC (pas veille), puis depuis une autre machine du reseau :"
-Write-Host "   powershell -ExecutionPolicy Bypass -File outils\wake-pc.ps1"
+Write-Host "TEST : Windows > Arreter, puis interrupteur de l alim O / 5 s / I :"
+Write-Host "   le PC doit demarrer seul. Si oui, la prise Kasa fera pareil."
