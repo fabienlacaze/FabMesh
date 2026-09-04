@@ -781,7 +781,12 @@ async function refreshProjectsPage() {
     // Known suffixes: cntile, retexture, decimate, smooth, fill_holes,
     // fix_normals, center, upscale, refine, augment, vc (vertex color).
     // Optionally followed by a timestamp OR a short tag (_v2, _test, etc.).
-    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc|segment)(?:_[A-Za-z0-9]{1,16})*$/i;
+    // `explode`, `paint3d`, `unwrappaint`, `invuv`, `vcolor`, `axisfix`,
+    // `chantier3d` manquaient : chaque nouvel outil ajoutait un suffixe que
+    // personne ne pensait a declarer ici, et sa sortie formait un projet
+    // fantome. La liste ne peut pas etre exhaustive — d'ou la remontee de
+    // filiation ci-dessous, qui n'en depend pas.
+    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc|segment|explode|paint3d|unwrappaint|unwrap|invuv|vcolor|axisfix|chantier3d|seam|edited|explode_fill|nobg|rectified)(?:_[A-Za-z0-9]{1,16})*$/i;
     let prev;
     do {
       prev = base;
@@ -802,8 +807,52 @@ async function refreshProjectsPage() {
     base = base.replace(/_\d+$/, '');
     return base || 'untitled';
   }
+  /* LA FILIATION EST ECRITE MAIS PERSONNE NE LA LISAIT.
+   *
+   * `writeMeta` pose `parent: <chemin du maillage source>` a chaque
+   * operation (main.js), avec pour intention explicite que la sortie
+   * « rejoigne le projet de ce maillage au lieu de devenir un projet
+   * orphelin ». Mais `meshProject()` ne travaille que sur le NOM DE
+   * FICHIER : la filiation n'etait jamais consultee.
+   *
+   * Cas reel : `stage_4_explode_<ts>.glb`, dont la meta porte
+   * `parent: .../tank_..._stages3d/stage_4.glb`. Aucune regle sur les noms
+   * ne peut retrouver « tank » — l'indice est le nom du DOSSIER du parent,
+   * pas celui de son fichier.
+   *
+   * On ne remonte la chaine QUE si le nom deduit ne correspond a aucun
+   * projet deja connu (les dossiers d'images ont ete traites plus haut) :
+   * un maillage correctement nomme n'est jamais deplace. */
+  const _projetDepuisFiliation = (m) => {
+    let chemin = m.meta && m.meta.parent;
+    for (let saut = 0; chemin && saut < 8; saut++) {
+      // Separateur construit par code : un \\ ecrit en clair ici a deja
+      // ete mange une fois par un outil d edition, et la classe se reduisait
+      // alors a [/] — qui ne coupe PAS un chemin Windows.
+      // AUCUN REGEX ICI : la classe [/\\] a echoue deux fois de suite,
+      // une premiere par un backslash mange a l ecriture, une seconde parce
+      // qu un backslash seul echappe le ] fermant. Deux decoupes simples
+      // font le meme travail sans piege d echappement.
+      const morceaux = String(chemin).split('/')
+        .flatMap(x => x.split(String.fromCharCode(92))).filter(Boolean);
+      const fichier = morceaux[morceaux.length - 1] || '';
+      const dossier = morceaux[morceaux.length - 2] || '';
+      // Un parent range dans `<projet>_stages3d/` : c'est le DOSSIER qui
+      // porte le projet, son fichier s'appelle juste `stage_4.glb`.
+      const candidat = /_stages3d$|_stages$/i.test(dossier)
+        ? meshProject(dossier.replace(/_stages3d$|_stages$/i, ''))
+        : meshProject(fichier);
+      if (candidat && candidat !== 'untitled' && projectsMap.has(candidat)) return candidat;
+      // Sinon on remonte d'un cran, si ce parent est lui-meme dans la liste.
+      const suivant = meshes.find(x => x.filename === fichier);
+      chemin = suivant && suivant.meta && suivant.meta.parent;
+    }
+    return null;
+  };
+
   for (const m of meshes) {
-    const project = meshProject(m.filename);
+    let project = meshProject(m.filename);
+    if (!projectsMap.has(project)) project = _projetDepuisFiliation(m) || project;
     const p = ensure(project);
     if (/_rigged_/i.test(m.filename)) p.rigs.push(m);
     else p.meshes.push(m);
