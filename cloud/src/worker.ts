@@ -2331,7 +2331,16 @@ async function logOperation(
  *  en cache ou trafique pourrait encore les envoyer : on les neutralise
  *  ici, a la source, AVANT le calcul du prix ET avant l'appel a Modal.
  *  Le jour ou le backend saura les faire, retirer la cle de cette liste. */
-const OPTIONS_SANS_EFFET_CLOUD = ['refine', 'face_fix', 'smooth'] as const;
+/* `face_fix` RETIRE de cette liste le 2026-08-28. L audit du 2026-08-02
+ * (13fff32) l y avait range en cherchant dans generate_to_volume, _mesh.py
+ * et cog/predict.py — mais le lecteur est dans app.py:1665, sur le chemin
+ * du maillage : `if payload.get("face_fix")` -> `_face_fix.apply_face_fix`,
+ * 221 lignes, pipe SDXL inpaint charge a la demande. Le worker l envoyait
+ * bien (ligne ~6709). Resultat : une fonctionnalite complete eteinte a la
+ * source, et une interface qui affichait l inverse de la verite.
+ * `refine` et `smooth`, eux, restent sans lecteur (verifie : 0 occurrence
+ * dans modal_app/*.py). */
+const OPTIONS_SANS_EFFET_CLOUD = ['refine', 'smooth'] as const;
 
 function _neutraliserOptionsSansEffet(i: GenerateInput): GenerateInput {
   const rec = i as unknown as Record<string, unknown>;

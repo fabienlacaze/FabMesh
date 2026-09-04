@@ -3138,6 +3138,15 @@ ipcMain.handle('cancel-job', (event, jobId) => {
   if (proc) {
     killProcTree(proc);
     activeProcs.delete(jobId);
+    /* ANNULER UNE TACHE NE DOIT TUER QUE CETTE TACHE — 2026-08-28.
+     * Le balayage ci-dessous s'executait TOUJOURS, meme quand le
+     * processus nomme venait d'etre trouve et tue : annuler un rig de
+     * 30 s detruisait la generation 3D de 10 min lancee a cote. Le
+     * balayage reste le comportement du bouton « Kill processes » des
+     * Parametres (jobId = 0) et le filet quand aucun processus n'est
+     * enregistre sous cet identifiant. */
+    log.info('main', `cancel-job: processus ${jobId} tue, les autres taches continuent`);
+    return true;
   }
   // Snapshot procs before iterating (the proc.on('exit') handler removes
   // entries from allActiveProcs, which would mutate the set during iteration).

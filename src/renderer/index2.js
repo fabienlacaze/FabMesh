@@ -10046,7 +10046,10 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   gatedRun('mesh', `Generate 3D: ${p.name}`, async () => {
     const job = pushJob(`Generate 3D: ${p.name}`, null, jobParams, expectedMs, { sourceImageUrl: p.selectedImagePath, projectName: p.name });
     try {
-      const r = await API.imageTo3D(params);
+      // `jobId` : sans lui le processus n'est pas enregistre sous son nom
+      // (main.js : `if (jobId) activeProcs.set(jobId, proc)`), et Annuler
+      // retombe sur le balayage qui tue TOUS les Python en cours.
+      const r = await API.imageTo3D({ ...params, jobId: job.id });
       if (r?.success) {
         // Show mesh stats in the job details before completing
         if (r.meshVerts || r.meshFaces) {
@@ -20879,39 +20882,15 @@ if (skinSlider && skinSliderVal) {
 // ============================================================
 // RE-SKIN ONLY (post-rig)
 // ============================================================
-document.getElementById('ws-rig-reskin-btn')?.addEventListener('click', async () => {
-  const r = getCurrentRigObj();
-  if (!r) { showToast('No rig yet.', 'error'); return; }
-  const ok = await customConfirm('Re-skin this rig with current skinning options? The rig structure stays unchanged.', 'Re-skin', 'Re-skin');
-  if (!ok) return;
-  const skinMethod = document.getElementById('ws-rig-skin-method')?.value || 'auto';
-  const skinSmoothing = parseInt(document.getElementById('ws-rig-skin-smooth')?.value) || 3;
-  const mirrorX = document.getElementById('ws-rig-mirror-x')?.checked;
-  const job = pushJob(`Re-skin: ${r.filename}`, null, {
-    'Skinning': skinMethod,
-    'Smoothing': skinSmoothing,
-    'Mirror X': mirrorX ? 'yes' : 'no',
-  }, undefined, { sourceImageUrl: r.path, projectName: state.currentProject?.name });
-  try {
-    if (!API.autoRig) {
-      completeJob(job.id, false);
-      customError('Auto-rig API not available', 'Re-skin');
-      return;
-    }
-    // Call auto-rig with the same template but reskin-only flag
-    const result = await API.autoRig({ meshPath: r.path, templateName: '', skinMethod, skinSmoothing, mirrorX, reskinOnly: true });
-    if (result?.success) {
-      completeJob(job.id, true);
-      await reloadCurrentProject();
-    } else {
-      completeJob(job.id, false);
-      if (!job.cancelled) customError(result?.error || 'unknown', 'Re-skin failed');
-    }
-  } catch (e) {
-    completeJob(job.id, false);
-    if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Re-skin error');
-  }
-});
+/* « Re-skin only » RETIRE le 2026-08-28.
+ * Le bouton envoyait `reskinOnly: true` avec `templateName: ''` a un handler
+ * qui ne connait ni l'un ni l'autre : la garde « Invalid template name »
+ * le faisait ECHOUER A 100 %, apres une confirmation et l'ouverture d'une
+ * tache. Aucun mode re-skin n'existe nulle part (0 occurrence dans
+ * scripts/*.py et src/main/). Les libelles « Skinning / Smoothing /
+ * Mirror X » qu'il affichait lisaient des controles absents du HTML.
+ * Le bouton est masque dans index2.html ; a reactiver seulement quand
+ * un vrai chemin de re-skin existera. */
 
 // ============================================================
 // DRAG & DROP (image / mesh files)

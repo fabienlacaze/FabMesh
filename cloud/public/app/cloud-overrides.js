@@ -1017,6 +1017,9 @@
     mesh_quality_plus:'ws-trellis2-quality-plus',
     mesh_ultra_q:     'ws-trellis2-ultra-q',
     mesh_ultra_hd:    'ws-trellis2-ultra-hd',
+    // face_fix : de nouveau ACTIF cote cloud (2026-08-28). Il etait masque
+    // et force a false depuis le 02/08 comme « sans effet » ; le lecteur
+    // existe pourtant dans modal_app/app.py:1665 (_face_fix.py). Voir worker.ts.
     mesh_face_fix:    'ws-trellis2-face-fix',
   };
   // Tool-button badges (ACTION_COSTS keys) -> pricing keys.
@@ -1293,7 +1296,6 @@
     (function removeUnimplementedPaidOptions() {
       const morts = [
         ['ws-trellis2-refine',   'Detail refine (2 cr) — aucun code serveur ne lit ce drapeau'],
-        ['ws-trellis2-face-fix', 'Face fix — non porte cote cloud'],
         ['ws-trellis2-smooth',   'Texture smooth — non porte cote cloud'],
       ];
       for (const [id, pourquoi] of morts) {
