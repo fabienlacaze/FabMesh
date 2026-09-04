@@ -149,3 +149,6 @@ cloud/tsconfig.worker.check.tsbuildinfo
 
 # Scratch/verification stderr dumps written to the repo root during debugging
 scratch_*.err
+
+# Sysinternals (Microsoft, redistribution interdite) : jamais dans le depot PUBLIC
+outils/sysinternals/
