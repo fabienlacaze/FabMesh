@@ -10,9 +10,10 @@ CE QUE FAIT LE SCRIPT, ET POURQUOI
   des cartes sur les bords. Il complete les marges pour atteindre 16:9 avec
   la couleur de fond de l'application, echantillonnee sur les bords de
   l'image -- invisible a l'oeil, puisque c'est la meme couleur.
-- Il n'AGRANDIT jamais : agrandir floute. Une capture de 2560 de large sort
-  en 2560x1440 ; une capture plus petite sort en 1920x1080 ; en dessous de
-  1366x768 il refuse, la capture est a reprendre.
+- Il n'AGRANDIT jamais : agrandir floute. La sortie garde la taille native,
+  marges comprises (2560x1369 -> 2560x1440, 1294x860 -> 1529x860). Il ne
+  reechantillonne que si la capture depasse 3840x2160. Si meme avec ses
+  marges elle reste sous 1366x768, il refuse : la capture est a reprendre.
 - Il numerote dans l'ordre des noms de fichiers : nomme tes captures
   01_..., 02_... pour fixer l'ordre, sinon c'est l'ordre alphabetique.
 """
@@ -42,13 +43,20 @@ def couleur_de_fond(im: Image.Image) -> tuple:
 def formater(src: Path, dst: Path, verifier_seulement: bool) -> str:
     im = Image.open(src)
     l, h = im.size
-    if l < MIN_L or h < MIN_H:
-        return f"REFUSE  {src.name} : {l}x{h}, en dessous du minimum {MIN_L}x{MIN_H} -- a reprendre"
 
-    # Cible : la plus grande taille 16:9 qui n'agrandit pas la capture.
-    cible = (2560, 1440) if l >= 2560 and h >= 1300 else (1920, 1080)
-    if l > MAX_L or h > MAX_H:
-        cible = (MAX_L, MAX_H)
+    # Taille 16:9 NATIVE : on ajoute des marges, jamais de pixels inventes.
+    # Une capture de 1294x860 devient 1529x860 -- au-dessus du minimum du
+    # Store sans avoir ete agrandie d'un seul pixel. C'est pour ca qu'on
+    # regarde la taille APRES marges, pas avant.
+    if l / h >= RATIO:
+        natif = (l, round(l / RATIO))
+    else:
+        natif = (round(h * RATIO), h)
+    if natif[0] < MIN_L or natif[1] < MIN_H:
+        return (f"REFUSE  {src.name} : {l}x{h} -> {natif[0]}x{natif[1]} apres marges, "
+                f"encore sous le minimum {MIN_L}x{MIN_H} -- a reprendre plus grande")
+    # Seul cas de reechantillonnage : une capture plus grande que le maximum.
+    cible = natif if natif[0] <= MAX_L and natif[1] <= MAX_H else (MAX_L, MAX_H)
 
     # Reduction homothetique pour tenir dans la cible, puis marges de fond.
     echelle = min(cible[0] / l, cible[1] / h, 1.0)
