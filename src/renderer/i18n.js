@@ -1033,7 +1033,9 @@
    *
    * Un choix explicite de l'utilisateur reste prioritaire pour toujours :
    * on ne regarde le navigateur que faute de preference enregistree. */
-  const LANGUES_CONNUES = ['fr', 'es', 'zh', 'hi', 'ar'];
+  // PAS d'arabe ici : le selecteur desktop n'en propose pas (le cloud, si).
+  // Avec 'ar', un Windows en arabe obtenait un selecteur vide et l'anglais.
+  const LANGUES_CONNUES = ['fr', 'es', 'zh', 'hi'];
 
   function _langueDuNavigateur() {
     try {
